@@ -605,3 +605,28 @@ export type HabitDeleteRequest = Schemas['HabitDeleteRequest'];
 /** HabitDeleteResponse — {ok, deleted_id, checkins_removed}; 422
  * `habit_delete_confirm_mismatch` on a mismatched confirm_title. */
 export type HabitDeleteResponse = Schemas['HabitDeleteResponse'];
+
+// ---------------------------------------------------------------------------
+// Habit phase plans (习惯阶段计划; contract landed with the habit-plans API).
+
+/** HabitPlanModel — one stored phase plan plus computed progress
+ * (current_week / days_done / completion_rate / weekly breakdown). */
+export type HabitPlan = Schemas['HabitPlanModel'];
+
+/** HabitPlanWeeklyTasksModel — task list for one plan week (1-based week). */
+export type HabitPlanWeeklyTasks = Schemas['HabitPlanWeeklyTasksModel'];
+
+/** HabitPlanListResponse — GET .../habit-plans payload. */
+export type HabitPlanListResponse = Schemas['HabitPlanListResponse'];
+
+/** HabitPlanCreateRequest — POST .../habit-plans body
+ * (generate_weekly_cards defaults true server-side). */
+export type HabitPlanCreateRequest = Schemas['HabitPlanCreateRequest'];
+
+/** HabitPlanPatchRequest — PATCH .../habit-plans/{id} body
+ * (status moves forward only: active → completed/archived). */
+export type HabitPlanPatchRequest = Schemas['HabitPlanPatchRequest'];
+
+/** HabitPlanMutationResponse — create/patch result; `kanban_card_ids` lists
+ * the weekly Queue cards generated on create. */
+export type HabitPlanMutationResponse = Schemas['HabitPlanMutationResponse'];

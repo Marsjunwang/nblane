@@ -125,6 +125,14 @@ def _parse_nonnegative_float(value: object, default: float = 0.0) -> float:
     return max(number, 0.0)
 
 
+def _parse_int(value: object, default: int = 0) -> int:
+    """Parse a value as an int, falling back to *default*."""
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
 def _normalize_metrics(value: object) -> dict[str, object]:
     """Keep scalar metric values with non-empty keys."""
     if not isinstance(value, Mapping):
@@ -432,6 +440,8 @@ class Checkin:
     links: list[str] = field(default_factory=list)
     related_learning: list[str] = field(default_factory=list)
     related_kanban: list[str] = field(default_factory=list)
+    plan_id: str = ""
+    week_number: int = 0
 
     @classmethod
     def from_dict(cls, raw: object) -> "Checkin":
@@ -485,6 +495,8 @@ class Checkin:
             related_kanban=_normalize_text_list(
                 raw.get("related_kanban")
             ),
+            plan_id=_clean_text(raw.get("plan_id")),
+            week_number=max(_parse_int(raw.get("week_number")), 0),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -522,10 +534,155 @@ class Checkin:
             out["related_learning"] = list(self.related_learning)
         if self.related_kanban:
             out["related_kanban"] = list(self.related_kanban)
+        if self.plan_id:
+            out["plan_id"] = self.plan_id
+        if self.week_number:
+            out["week_number"] = self.week_number
         return out
 
 
 ActivityCheckin = Checkin
+
+
+HABIT_PLAN_STATUSES = ("active", "completed", "archived")
+# Forward-only lifecycle: a plan leaves ``active`` exactly once.
+HABIT_PLAN_TRANSITIONS = {"active": ("completed", "archived")}
+
+
+@dataclass
+class WeeklyTasks:
+    """Task list for one week of a habit plan (1-based ``week``)."""
+
+    week: int
+    tasks: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, raw: object) -> "WeeklyTasks":
+        """Build one week entry from YAML data."""
+        if not isinstance(raw, dict):
+            return cls(week=0)
+        try:
+            week = int(raw.get("week") or 0)
+        except (TypeError, ValueError):
+            week = 0
+        return cls(
+            week=max(week, 0),
+            tasks=_normalize_text_list(raw.get("tasks") or raw.get("task")),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize the week entry for YAML output."""
+        return {"week": self.week, "tasks": list(self.tasks)}
+
+
+@dataclass
+class HabitPlan:
+    """One short-range phase plan (阶段计划) hanging under a habit.
+
+    The plan stores only ``habit_id`` as its parent link; the enclosing
+    project/goal are derived through ``case.habit_id`` on the project
+    board, never duplicated here.
+    """
+
+    id: str
+    title: str = ""
+    habit_id: str = ""
+    start_date: str = ""
+    end_date: str = ""
+    status: str = "active"
+    weekly_tasks: list[WeeklyTasks] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, raw: object) -> "HabitPlan":
+        """Build a habit plan from YAML data."""
+        if not isinstance(raw, dict):
+            return cls(id="")
+        plan_id = _clean_text(raw.get("id") or raw.get("plan_id"))
+        title = _clean_text(raw.get("title") or raw.get("label"))
+        if not plan_id:
+            plan_id = "hp_" + (_slugify(title) or "plan")
+        status = _clean_text(raw.get("status")) or "active"
+        weekly_tasks: list[WeeklyTasks] = []
+        raw_weeks = raw.get("weekly_tasks")
+        if isinstance(raw_weeks, list):
+            for item in raw_weeks:
+                entry = WeeklyTasks.from_dict(item)
+                if entry.week:
+                    weekly_tasks.append(entry)
+        weekly_tasks.sort(key=lambda item: item.week)
+        return cls(
+            id=plan_id,
+            title=title,
+            habit_id=_clean_text(raw.get("habit_id")),
+            start_date=_coerce_date_text(raw.get("start_date")),
+            end_date=_coerce_date_text(raw.get("end_date")),
+            status=status,
+            weekly_tasks=weekly_tasks,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize a habit plan for YAML output."""
+        out: dict[str, object] = {
+            "id": self.id,
+            "status": self.status or "active",
+        }
+        if self.title:
+            out["title"] = self.title
+        if self.habit_id:
+            out["habit_id"] = self.habit_id
+        if self.start_date:
+            out["start_date"] = self.start_date
+        if self.end_date:
+            out["end_date"] = self.end_date
+        if self.weekly_tasks:
+            out["weekly_tasks"] = [
+                entry.to_dict() for entry in self.weekly_tasks
+            ]
+        return out
+
+
+@dataclass
+class HabitPlanWeekProgress:
+    """Check-in coverage for one week of a habit plan."""
+
+    week: int
+    start: str = ""
+    end: str = ""
+    days_done: int = 0
+    days_total: int = 0
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize for API responses and tests."""
+        return {
+            "week": self.week,
+            "start": self.start,
+            "end": self.end,
+            "days_done": self.days_done,
+            "days_total": self.days_total,
+        }
+
+
+@dataclass
+class HabitPlanProgress:
+    """Computed progress for one habit plan."""
+
+    plan_id: str
+    current_week: int = 0
+    days_done: int = 0
+    days_total: int = 0
+    completion_rate: float = 0.0
+    weeks: list[HabitPlanWeekProgress] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize for API responses and tests."""
+        return {
+            "plan_id": self.plan_id,
+            "current_week": self.current_week,
+            "days_done": self.days_done,
+            "days_total": self.days_total,
+            "completion_rate": self.completion_rate,
+            "weeks": [week.to_dict() for week in self.weeks],
+        }
 
 
 @dataclass
@@ -612,6 +769,7 @@ class ActivityLog:
     profile: str = ""
     updated: str = ""
     habits: list[Habit] = field(default_factory=list)
+    habit_plans: list[HabitPlan] = field(default_factory=list)
     checkins: list[Checkin] = field(default_factory=list)
     weekly_summaries: list[WeeklySummary] = field(
         default_factory=list
@@ -654,6 +812,25 @@ class ActivityLog:
                 habit_index[key] = habit_index[key].merged(habit)
                 continue
             habit_index[key] = habit
+
+        raw_plans = raw.get("habit_plans") or []
+        habit_plans: list[HabitPlan] = []
+        if isinstance(raw_plans, list):
+            seen_plan_ids: set[str] = set()
+            for item in raw_plans:
+                plan = HabitPlan.from_dict(item)
+                if not plan.id or plan.id in seen_plan_ids:
+                    continue
+                seen_plan_ids.add(plan.id)
+                if (
+                    plan.habit_id
+                    and plan.habit_id.casefold() not in habit_index
+                ):
+                    warnings.append(
+                        "Habit plan references unknown habit: "
+                        f"{plan.habit_id}"
+                    )
+                habit_plans.append(plan)
 
         raw_checkins = raw.get("checkins") or raw.get("entries") or []
         checkins: list[Checkin] = []
@@ -705,6 +882,7 @@ class ActivityLog:
             profile=_clean_text(raw.get("profile")),
             updated=_coerce_date_text(raw.get("updated")),
             habits=list(habit_index.values()),
+            habit_plans=habit_plans,
             checkins=checkins,
             weekly_summaries=sorted(
                 week_index.values(),
@@ -719,6 +897,7 @@ class ActivityLog:
             "profile": self.profile,
             "updated": self.updated,
             "habits": [habit.to_dict() for habit in self.habits],
+            "habit_plans": [plan.to_dict() for plan in self.habit_plans],
             "checkins": [checkin.to_dict() for checkin in self.checkins],
             "weekly_summaries": [
                 summary.to_dict()
@@ -733,6 +912,10 @@ class ActivityLog:
     def habit_by_id(self) -> dict[str, Habit]:
         """Compatibility alias for older callers."""
         return self.habit_index()
+
+    def habit_plan_index(self) -> dict[str, HabitPlan]:
+        """Return a stable habit-plan lookup by plan id."""
+        return {plan.id: plan for plan in self.habit_plans if plan.id}
 
 
 @dataclass
@@ -1174,6 +1357,200 @@ def delete_habit(
     return habit, removed
 
 
+def _next_habit_plan_id(log: ActivityLog, title: str) -> str:
+    """Return a stable unique ``hp_<slug>`` id for a new habit plan."""
+    base = "hp_" + (_slugify(title) or "plan")
+    used = {plan.id for plan in log.habit_plans if plan.id}
+    if base not in used:
+        return base
+    suffix = 2
+    while f"{base}_{suffix}" in used:
+        suffix += 1
+    return f"{base}_{suffix}"
+
+
+def add_habit_plan(
+    name_or_dir: str | Path,
+    plan: HabitPlan,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> HabitPlan:
+    """Append one habit plan and persist the activity log.
+
+    Callers validate the plan fields up front (habit existence, date
+    range, weekly-task count); this helper only assigns a missing id and
+    writes. The save honors *expected_snapshot* with the same in-lock
+    re-check as ``save``.
+    """
+    log = load(name_or_dir)
+    if not plan.id:
+        plan.id = _next_habit_plan_id(log, plan.title)
+    log.habit_plans.append(plan)
+    save(name_or_dir, log, expected_snapshot=expected_snapshot)
+    return plan
+
+
+def update_habit_plan(
+    name_or_dir: str | Path,
+    plan_id: str,
+    *,
+    status: str | None = None,
+    title: str | None = None,
+    weekly_tasks: list[WeeklyTasks] | None = None,
+    expected_snapshot: FileSnapshot | None = None,
+) -> HabitPlan | None:
+    """Edit one habit plan; returns the updated plan, None if unknown.
+
+    Only the fields passed as non-None are changed. The save honors
+    *expected_snapshot* with the same in-lock re-check as ``save``.
+    """
+    target = _clean_text(plan_id)
+    if not target:
+        return None
+    log = load(name_or_dir)
+    plan = log.habit_plan_index().get(target)
+    if plan is None:
+        return None
+    if status is not None:
+        plan.status = _clean_text(status) or plan.status
+    if title is not None:
+        plan.title = _clean_text(title) or plan.title
+    if weekly_tasks is not None:
+        plan.weekly_tasks = sorted(
+            weekly_tasks, key=lambda item: item.week
+        )
+    save(name_or_dir, log, expected_snapshot=expected_snapshot)
+    return plan
+
+
+def plan_week_count(plan: HabitPlan) -> int:
+    """Return the number of plan weeks: ceil(inclusive days / 7)."""
+    start = _parse_date(plan.start_date)
+    end = _parse_date(plan.end_date)
+    if start is None or end is None or end < start:
+        return 0
+    return math.ceil(((end - start).days + 1) / 7)
+
+
+def plan_week_bounds(plan: HabitPlan, week: int) -> tuple[str, str]:
+    """Return the inclusive (start, end) ISO dates of plan week *week*.
+
+    Week 1 starts on the plan's ``start_date``; the last week is clamped
+    to ``end_date`` so a partial tail week is allowed. Empty strings are
+    returned for out-of-range weeks or undated plans.
+    """
+    start = _parse_date(plan.start_date)
+    end = _parse_date(plan.end_date)
+    if start is None or end is None or end < start:
+        return "", ""
+    if week < 1 or week > plan_week_count(plan):
+        return "", ""
+    week_start = start + timedelta(days=7 * (week - 1))
+    week_end = min(week_start + timedelta(days=6), end)
+    return week_start.isoformat(), week_end.isoformat()
+
+
+def plan_week_number(plan: HabitPlan, when: str | date) -> int | None:
+    """Return the 1-based plan week containing *when*, None outside."""
+    day = _parse_date(when)
+    start = _parse_date(plan.start_date)
+    end = _parse_date(plan.end_date)
+    if day is None or start is None or end is None:
+        return None
+    if not (start <= day <= end):
+        return None
+    return (day - start).days // 7 + 1
+
+
+def _plan_checkin_dates(plan: HabitPlan, checkins: list[Checkin]) -> set[str]:
+    """Collect distinct dates of check-ins belonging to one plan.
+
+    A check-in counts when it carries the plan's id and the plan's habit
+    (``habit_id`` or ``habits``) and its date lands inside the plan
+    window.
+    """
+    start = _parse_date(plan.start_date)
+    end = _parse_date(plan.end_date)
+    if start is None or end is None:
+        return set()
+    dates: set[str] = set()
+    for checkin in checkins:
+        if checkin.plan_id != plan.id:
+            continue
+        if (
+            checkin.habit_id != plan.habit_id
+            and plan.habit_id not in checkin.habits
+        ):
+            continue
+        when = _parse_date(checkin.date)
+        if when is None or not (start <= when <= end):
+            continue
+        dates.add(when.isoformat())
+    return dates
+
+
+def habit_plan_progress(
+    plan: HabitPlan,
+    checkins: list[Checkin],
+    *,
+    today: str | date | None = None,
+) -> HabitPlanProgress:
+    """Compute week-by-week check-in progress for one habit plan.
+
+    ``current_week`` is the week containing *today* (default: the real
+    today): 0 before the plan starts, clamped to the final week after it
+    ends. ``days_done`` counts distinct days with a matching check-in;
+    ``completion_rate`` is ``days_done / days_total`` over the whole
+    inclusive plan window.
+    """
+    start = _parse_date(plan.start_date)
+    end = _parse_date(plan.end_date)
+    if start is None or end is None or end < start:
+        return HabitPlanProgress(plan_id=plan.id)
+    total_weeks = plan_week_count(plan)
+    days_total = (end - start).days + 1
+    today_date = _parse_date(today) if today is not None else date.today()
+    if today_date is None or today_date < start:
+        current_week = 0
+    elif today_date > end:
+        current_week = total_weeks
+    else:
+        current_week = (today_date - start).days // 7 + 1
+    done_dates = _plan_checkin_dates(plan, checkins)
+    weeks: list[HabitPlanWeekProgress] = []
+    days_done = 0
+    for week in range(1, total_weeks + 1):
+        week_start_text, week_end_text = plan_week_bounds(plan, week)
+        week_start = date.fromisoformat(week_start_text)
+        week_end = date.fromisoformat(week_end_text)
+        week_days = (week_end - week_start).days + 1
+        week_done = sum(
+            1
+            for day_text in done_dates
+            if week_start_text <= day_text <= week_end_text
+        )
+        days_done += week_done
+        weeks.append(
+            HabitPlanWeekProgress(
+                week=week,
+                start=week_start_text,
+                end=week_end_text,
+                days_done=week_done,
+                days_total=week_days,
+            )
+        )
+    return HabitPlanProgress(
+        plan_id=plan.id,
+        current_week=current_week,
+        days_done=days_done,
+        days_total=days_total,
+        completion_rate=(
+            days_done / days_total if days_total else 0.0
+        ),
+        weeks=weeks,
+    )
+
+
 def add_activity_checkin(
     name_or_dir: str | Path,
     habit_id: str,
@@ -1191,6 +1568,8 @@ def add_activity_checkin(
     duration_min: float = 0.0,
     intensity: str = "",
     metrics: Mapping[str, object] | None = None,
+    plan_id: str = "",
+    week_number: int = 0,
     expected_snapshot: FileSnapshot | None = None,
 ) -> Checkin:
     """Compatibility wrapper for a one-habit check-in.
@@ -1198,6 +1577,10 @@ def add_activity_checkin(
     When *expected_snapshot* is given, ``save`` re-checks it inside the
     activity-log write lock and raises ``file_state.FileConflictError`` on
     mismatch instead of silently overwriting a concurrent edit.
+
+    *plan_id* links the row to a habit plan; *week_number* is the
+    plan-relative week the caller already computed from the check-in date
+    (see ``plan_week_number``).
     """
     log = load(name_or_dir)
     resolved_id = resolve_habit_id(log, habit_id)
@@ -1236,6 +1619,8 @@ def add_activity_checkin(
         related_kanban=_normalize_text_list(
             related_kanban or []
         ),
+        plan_id=_clean_text(plan_id),
+        week_number=max(_parse_int(week_number), 0),
     )
     if entry.count <= 0.0:
         raise ValueError("count must be greater than zero")
@@ -1245,6 +1630,7 @@ def add_activity_checkin(
             profile=log.profile,
             updated=log.updated,
             habits=log.habits,
+            habit_plans=log.habit_plans,
             checkins=log.checkins + [entry],
             weekly_summaries=log.weekly_summaries,
             warnings=log.warnings,
@@ -1680,29 +2066,41 @@ def monthly_summary(
 __all__ = [
     "ACTIVITY_LOG_FILENAME",
     "ACTIVITY_HABIT_KINDS",
+    "HABIT_PLAN_STATUSES",
+    "HABIT_PLAN_TRANSITIONS",
     "ActivityCheckin",
     "ActivityLogParseError",
     "ActivityLog",
     "ActivitySummary",
     "Checkin",
     "Habit",
+    "HabitPlan",
+    "HabitPlanProgress",
+    "HabitPlanWeekProgress",
     "HabitSummary",
     "HabitTarget",
     "WeekActivitySummary",
     "WeeklySummary",
+    "WeeklyTasks",
     "activity_summary",
     "add_activity_checkin",
     "add_checkin",
     "add_habit",
+    "add_habit_plan",
     "delete_checkin",
+    "habit_plan_progress",
     "habit_progress_for_window",
     "habit_daily_counts",
     "load",
     "load_activity_log",
     "monthly_summary",
+    "plan_week_bounds",
+    "plan_week_count",
+    "plan_week_number",
     "resolve_habit_id",
     "save",
     "save_activity_log",
     "summarize_activity_log",
+    "update_habit_plan",
     "weekly_summary",
 ]

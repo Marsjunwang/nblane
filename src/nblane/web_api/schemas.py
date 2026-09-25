@@ -1673,11 +1673,14 @@ class CheckinCreateRequest(BaseModel):
     ``habit`` accepts a habit id or title (resolved like the core helpers);
     ``project_id`` is an alternative entry point that resolves through the
     habit<->project link. ``date`` defaults to today; ``count`` must be
-    greater than zero.
+    greater than zero. ``plan_id`` optionally binds the check-in to an
+    active habit plan of the same habit; the backend then derives and
+    stores the plan-relative ``week_number`` (clients never send it).
     """
 
     habit: str = ""
     project_id: str = ""
+    plan_id: str = ""
     date: str = ""
     summary: str = ""
     note: str = ""
@@ -1697,6 +1700,8 @@ class CheckinModel(BaseModel):
     date: str = ""
     habit_id: str = ""
     habits: list[str] = Field(default_factory=list)
+    plan_id: str = ""
+    week_number: int = 0
     summary: str = ""
     notes: str = ""
     count: float = 1.0
@@ -1767,6 +1772,95 @@ class HabitDeleteResponse(BaseModel):
     ok: bool = True
     deleted_id: str
     checkins_removed: int = 0
+
+
+# --- Habit plans (阶段计划: short-range phase plans under one habit) --------
+
+
+class HabitPlanWeeklyTasksModel(BaseModel):
+    """Task list for one plan week (1-based ``week``)."""
+
+    week: int
+    tasks: list[str] = Field(default_factory=list)
+
+
+class HabitPlanCreateRequest(BaseModel):
+    """Body for POST .../habit-plans (create one phase plan).
+
+    ``habit_id`` must resolve to an existing habit; ``start_date`` /
+    ``end_date`` are inclusive ISO dates. ``weekly_tasks`` must cover
+    exactly ``ceil(days / 7)`` weeks, numbered 1..N in order (a partial
+    tail week is fine). ``generate_weekly_cards`` (default on) also
+    writes one Queue kanban card per week.
+    """
+
+    title: str
+    habit_id: str
+    start_date: str
+    end_date: str
+    weekly_tasks: list[HabitPlanWeeklyTasksModel]
+    generate_weekly_cards: bool = True
+
+
+class HabitPlanPatchRequest(BaseModel):
+    """Body for PATCH .../habit-plans/{plan_id} (partial edit).
+
+    ``status`` moves the plan forward (active -> completed/archived);
+    ``title`` / ``weekly_tasks`` replace the stored values. All fields
+    are optional; omitted fields stay unchanged.
+    """
+
+    status: str | None = None
+    title: str | None = None
+    weekly_tasks: list[HabitPlanWeeklyTasksModel] | None = None
+
+
+class HabitPlanWeekProgressModel(BaseModel):
+    """Check-in coverage for one week of a habit plan."""
+
+    week: int
+    start: str = ""
+    end: str = ""
+    days_done: int = 0
+    days_total: int = 0
+
+
+class HabitPlanModel(BaseModel):
+    """One stored habit plan plus its computed progress."""
+
+    id: str
+    title: str = ""
+    habit_id: str = ""
+    start_date: str = ""
+    end_date: str = ""
+    status: str = "active"
+    weekly_tasks: list[HabitPlanWeeklyTasksModel] = Field(
+        default_factory=list
+    )
+    current_week: int = 0
+    days_done: int = 0
+    days_total: int = 0
+    completion_rate: float = 0.0
+    weeks: list[HabitPlanWeekProgressModel] = Field(default_factory=list)
+
+
+class HabitPlanListResponse(BaseModel):
+    """List of one profile's habit plans with computed progress."""
+
+    ok: bool = True
+    profile: str = ""
+    plans: list[HabitPlanModel] = Field(default_factory=list)
+
+
+class HabitPlanMutationResponse(BaseModel):
+    """Result of the habit-plan create/patch mutations.
+
+    ``kanban_card_ids`` lists the weekly Queue cards generated on create
+    (empty when ``generate_weekly_cards`` was false)."""
+
+    ok: bool
+    plan: HabitPlanModel
+    kanban_card_ids: list[str] = Field(default_factory=list)
 
 
 # --- Habit-plan templates (Phase 2 click-to-instantiate plans) -------------

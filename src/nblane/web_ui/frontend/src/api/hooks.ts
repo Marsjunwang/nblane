@@ -41,6 +41,11 @@ import type {
   HabitArchiveResponse,
   HabitDeleteRequest,
   HabitDeleteResponse,
+  HabitPlan,
+  HabitPlanCreateRequest,
+  HabitPlanListResponse,
+  HabitPlanMutationResponse,
+  HabitPlanPatchRequest,
   HomeResponse,
   InboxCaptureRequest,
   InboxClarifyAction,
@@ -526,6 +531,8 @@ export function useAddCheckin(profile: string) {
       }
       invalidateBoard();
       queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'activity'] });
+      // A plan-bound check-in moves the plan's progress counters.
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'habit-plans'] });
     },
   });
 }
@@ -562,6 +569,8 @@ export function useDeleteCheckin(profile: string) {
       }
       invalidateBoard();
       queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'activity'] });
+      // 销印 of a plan-bound check-in moves the plan's progress counters.
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'habit-plans'] });
     },
   });
 }
@@ -609,9 +618,87 @@ export function useDeleteHabit(profile: string) {
   });
 }
 
+// --- Habit phase plans (习惯阶段计划) -----------------------------------------
+
+function habitPlansBase(profile: string): string {
+  return `/profiles/${encodeURIComponent(profile)}/habit-plans`;
+}
+
+export interface HabitPlanFilters {
+  habitId?: string;
+  status?: string;
+}
+
+/** Habit-plan list (each item carries computed progress: current_week,
+ * days_done/days_total, completion_rate, weekly breakdown). */
+export function useHabitPlans(profile: string, filters: HabitPlanFilters = {}) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'habit-plans', filters],
+    queryFn: async (): Promise<HabitPlan[]> => {
+      const params = new URLSearchParams();
+      if (filters.habitId) {
+        params.set('habit_id', filters.habitId);
+      }
+      if (filters.status) {
+        params.set('status', filters.status);
+      }
+      const query = params.toString();
+      const data = await apiGet<HabitPlanListResponse>(
+        `${habitPlansBase(profile)}${query ? `?${query}` : ''}`,
+      );
+      return data.plans ?? [];
+    },
+    enabled: profile.length > 0,
+  });
+}
+
+/** Active plans only — the 日课栏 badge / check-in binding / lane section all
+ * read this one cached list (same query key, one fetch). */
+export function useActiveHabitPlans(profile: string) {
+  return useHabitPlans(profile, { status: 'active' });
+}
+
+function useInvalidateHabitPlans(profile: string) {
+  const queryClient = useQueryClient();
+  return () => {
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'habit-plans'] });
+    // Create generates weekly Queue kanban cards; plan progress feeds the
+    // projects-board habit strip, and check-ins touch the activity log.
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'projects-board'] });
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'project-board'] });
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'kanban'] });
+  };
+}
+
+/** Create one phase plan (201; response carries kanban_card_ids). */
+export function useCreateHabitPlan(profile: string) {
+  const invalidate = useInvalidateHabitPlans(profile);
+  return useMutation({
+    mutationFn: (body: HabitPlanCreateRequest) =>
+      apiPost<HabitPlanMutationResponse>(habitPlansBase(profile), body),
+    onSuccess: invalidate,
+  });
+}
+
+/** Partial edit: title/weekly_tasks, or status forward (active →
+ * completed/archived). */
+export function usePatchHabitPlan(profile: string) {
+  const invalidate = useInvalidateHabitPlans(profile);
+  return useMutation({
+    mutationFn: ({ planId, body }: { planId: string; body: HabitPlanPatchRequest }) =>
+      apiPatch<HabitPlanMutationResponse>(
+        `${habitPlansBase(profile)}/${encodeURIComponent(planId)}`,
+        body,
+      ),
+    onSuccess: invalidate,
+  });
+}
+
 function planTemplatesBase(profile: string): string {
   return `/profiles/${encodeURIComponent(profile)}/plan-templates`;
-}/** Plan-template list fetch that captures the plan-source ETag. */
+}
+
+/** Plan-template list fetch that captures the plan-source ETag. */
 export function usePlanTemplates(profile: string) {
   return useQuery({
     queryKey: ['profiles', profile, 'plan-templates'],

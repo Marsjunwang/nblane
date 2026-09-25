@@ -27,14 +27,25 @@ import type {
   UniqueIdentifier,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { ActionIcon, Badge, Box, Group, ScrollArea, Stack, Text } from '@mantine/core';
+import { ActionIcon, Badge, Box, Group, Progress, ScrollArea, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconEdit } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError } from '../../api/client';
-import { useAddKanbanCard, useAddProjectTask, useMoveKanbanCard } from '../../api/hooks';
-import type { KanbanSection, ProjectsBoardProject, ProjectsBoardTask } from '../../api/types';
+import {
+  useActiveHabitPlans,
+  useAddKanbanCard,
+  useAddProjectTask,
+  useMoveKanbanCard,
+} from '../../api/hooks';
+import type {
+  HabitPlan,
+  KanbanSection,
+  ProjectsBoardProject,
+  ProjectsBoardTask,
+} from '../../api/types';
+import { activePlansForHabit, planTotalWeeks } from './habitPlans';
 import { LaneColumn, laneColumnDroppableId } from './LaneColumn';
 import { QuickAddInput } from './QuickAddInput';
 import { SortableTaskCard, TaskCardBody } from './TaskCard';
@@ -443,6 +454,78 @@ export function TaskLaneDnd({
   );
 }
 
+/**
+ * 阶段计划 readout for lanes whose case links a habit with an active phase
+ * plan: plan title + 起止 + completion bar + the current week's task list
+ * (read-only — the actionable checkboxes live on the generated weekly
+ * kanban cards). Shares the cached active-plans query with the 日课栏.
+ */
+export function HabitPlanSection({ plans }: { plans: HabitPlan[] }) {
+  if (plans.length === 0) {
+    return null;
+  }
+  return (
+    <Stack
+      gap="sm"
+      data-testid="habit-plan-section"
+      style={{
+        border: `1px solid ${boardPalette.border}`,
+        borderRadius: 8,
+        padding: '8px 10px',
+        background: boardPalette.groundSoft,
+      }}
+    >
+      {plans.map((plan) => {
+        const totalWeeks = planTotalWeeks(plan);
+        const currentWeek = Math.max(plan.current_week ?? 0, 1);
+        const weekTasks =
+          (plan.weekly_tasks ?? []).find((week) => week.week === plan.current_week)?.tasks ?? [];
+        const rate = Math.round((plan.completion_rate ?? 0) * 100);
+        return (
+          <Stack key={plan.id} gap={4} data-testid={`habit-plan-card-${plan.id}`}>
+            <Group gap="xs" wrap="wrap">
+              <Text size="xs" fw={700} style={{ color: boardPalette.goldText, letterSpacing: 2 }}>
+                阶段计划
+              </Text>
+              <Text size="sm" fw={600} style={{ color: boardPalette.titleText }}>
+                {plan.title}
+              </Text>
+              <Text size="xs" style={{ color: boardPalette.dim }}>
+                {plan.start_date} ~ {plan.end_date}
+              </Text>
+              <Text size="xs" style={{ color: boardPalette.goldText }}>
+                {totalWeeks > 0 ? `W${currentWeek}/${totalWeeks} · ` : ''}打卡 {plan.days_done ?? 0}
+                /{plan.days_total ?? 0} 天 · {rate}%
+              </Text>
+            </Group>
+            <Progress
+              value={rate}
+              size="sm"
+              color="brand"
+              data-testid={`habit-plan-progress-${plan.id}`}
+            />
+            {weekTasks.length > 0 && (
+              <Stack gap={2} data-testid={`habit-plan-week-tasks-${plan.id}`}>
+                <Text size="xs" style={{ color: boardPalette.dim }}>
+                  本周任务(W{currentWeek}):
+                </Text>
+                {weekTasks.map((task, index) => (
+                  <Text key={index} size="xs" style={{ color: boardPalette.text }} pl="sm">
+                    · {task}
+                  </Text>
+                ))}
+              </Stack>
+            )}
+            <Text size="xs" style={{ color: boardPalette.dim }}>
+              每周任务已生成周卡进入看板 Queue 列,勾选态以周卡为准。
+            </Text>
+          </Stack>
+        );
+      })}
+    </Stack>
+  );
+}
+
 /** One project swimlane: header + Queue/Doing DnD + someday badge cards. */
 export function ProjectLane({
   profile,
@@ -470,6 +553,14 @@ export function ProjectLane({
   const milestoneDone = milestones.reduce((sum, m) => sum + (m.done_count ?? 0), 0);
   const milestoneTotal = milestones.reduce((sum, m) => sum + (m.total_count ?? 0), 0);
   const addTask = useAddProjectTask(profile);
+  // 阶段计划: active habit plans bound to this case's habit (shared cache
+  // with the 日课栏 — one fetch serves both).
+  const plansQuery = useActiveHabitPlans(profile);
+  const lanePlans = useMemo(
+    () =>
+      project.habit_id ? activePlansForHabit(plansQuery.data ?? [], project.habit_id) : [],
+    [plansQuery.data, project.habit_id],
+  );
   const quickAdd = {
     pending: addTask.isPending,
     onSubmit: (title: string) =>
@@ -551,6 +642,7 @@ export function ProjectLane({
           </ActionIcon>
         </Group>
       </Group>
+      <HabitPlanSection plans={lanePlans} />
       <TaskLaneDnd
         profile={profile}
         laneId={project.id}

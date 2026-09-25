@@ -182,6 +182,9 @@ function stubFetch(handler?: FetchHandler) {
         headers: { 'Content-Type': 'application/json', ETag: PLAN_ETAG },
       });
     }
+    if (url.includes('/profiles/alice/habit-plans')) {
+      return jsonResponse(200, { ok: true, profile: 'alice', plans: [] });
+    }
     if (url.endsWith('/profiles/alice/project-board')) {
       return new Response(JSON.stringify(PROJECT_BOARD), {
         status: 200,
@@ -1238,5 +1241,203 @@ describe('ProjectsPage mutations', () => {
       title: '秋季减脂',
     });
     expect((call?.[1]?.headers as Record<string, string>)['If-Match']).toBe(PLAN_ETAG);
+  });
+});
+
+// --- 习惯阶段计划 (habit phase plans) -----------------------------------------
+
+/** Active plan bound to habit `exercise`; board today is 2026-09-23 → W2/4. */
+const ACTIVE_PLAN = {
+  id: 'hp1',
+  title: '28天减脂',
+  habit_id: 'exercise',
+  start_date: '2026-09-14',
+  end_date: '2026-10-11',
+  status: 'active',
+  weekly_tasks: [
+    { week: 1, tasks: ['控制饮食', '每天 8k 步'] },
+    { week: 2, tasks: ['晨跑 3 次', '记录体重'] },
+    { week: 3, tasks: ['力量训练'] },
+    { week: 4, tasks: ['复盘'] },
+  ],
+  current_week: 2,
+  days_done: 9,
+  days_total: 28,
+  completion_rate: 0.32,
+  weeks: [],
+};
+
+function stubPlans(plans: unknown[]) {
+  return (url: string, init?: RequestInit) => {
+    if (url.includes('/profiles/alice/habit-plans') && !init?.method) {
+      return jsonResponse(200, { ok: true, profile: 'alice', plans });
+    }
+    if (init?.method === 'POST' && url.endsWith('/checkins')) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          checkin: { id: 'c1', date: '2026-09-23', habit_id: 'exercise' },
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json', ETag: 'W/"log-1"' } },
+      );
+    }
+    return undefined as unknown as Response;
+  };
+}
+
+function lastCheckinCall(fetchMock: ReturnType<typeof stubFetch>) {
+  return fetchMock.mock.calls.find(
+    ([input, init]) => String(input).endsWith('/checkins') && init?.method === 'POST',
+  );
+}
+
+describe('ProjectsPage habit phase plans', () => {
+  it('日课栏 shows the active-plan badge (title · W2/4), hides non-active plans', async () => {
+    stubFetch(
+      stubPlans([
+        ACTIVE_PLAN,
+        { ...ACTIVE_PLAN, id: 'hp2', title: '已完成计划', status: 'completed' },
+        { ...ACTIVE_PLAN, id: 'hp3', title: '别人的计划', habit_id: 'reading' },
+      ]),
+    );
+    renderPage();
+
+    const badge = await screen.findByTestId('habit-plan-badge-exercise-hp1');
+    expect(badge).toHaveTextContent('28天减脂 · W2/4');
+    expect(screen.queryByTestId('habit-plan-badge-exercise-hp2')).toBeNull();
+    expect(screen.queryByTestId('habit-plan-badge-exercise-hp3')).toBeNull();
+  });
+
+  it('打卡 with one in-window active plan asks first, then posts plan_id', async () => {
+    const fetchMock = stubFetch(stubPlans([ACTIVE_PLAN]));
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('checkin-button-exercise'));
+    // No request yet — the inline 计入计划 confirm opens first.
+    expect(lastCheckinCall(fetchMock)).toBeUndefined();
+    const panel = await screen.findByTestId('checkin-plan-panel-exercise');
+    expect(panel).toHaveTextContent('计入「28天减脂」计划(W2/4)');
+    // Default on: the checkbox starts checked.
+    expect(within(panel).getByTestId('checkin-plan-toggle-hp1')).toBeChecked();
+
+    fireEvent.click(within(panel).getByTestId('checkin-plan-confirm-exercise'));
+    expect(await screen.findByText('已打卡')).toBeInTheDocument();
+    const call = lastCheckinCall(fetchMock);
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+      habit: 'exercise',
+      plan_id: 'hp1',
+    });
+    // Panel folds away after the mutation settles.
+    await waitFor(() =>
+      expect(screen.queryByTestId('checkin-plan-panel-exercise')).toBeNull(),
+    );
+  });
+
+  it('unchecking 计入计划 posts a plain check-in without plan_id', async () => {
+    const fetchMock = stubFetch(stubPlans([ACTIVE_PLAN]));
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('checkin-button-exercise'));
+    const panel = await screen.findByTestId('checkin-plan-panel-exercise');
+    fireEvent.click(within(panel).getByTestId('checkin-plan-toggle-hp1'));
+    fireEvent.click(within(panel).getByTestId('checkin-plan-confirm-exercise'));
+
+    expect(await screen.findByText('已打卡')).toBeInTheDocument();
+    const body = JSON.parse(String(lastCheckinCall(fetchMock)?.[1]?.body));
+    expect(body.habit).toBe('exercise');
+    expect(body.plan_id).toBeUndefined();
+  });
+
+  it('取消 closes the confirm without posting', async () => {
+    const fetchMock = stubFetch(stubPlans([ACTIVE_PLAN]));
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('checkin-button-exercise'));
+    const panel = await screen.findByTestId('checkin-plan-panel-exercise');
+    fireEvent.click(within(panel).getByTestId('checkin-plan-cancel-exercise'));
+
+    expect(screen.queryByTestId('checkin-plan-panel-exercise')).toBeNull();
+    expect(lastCheckinCall(fetchMock)).toBeUndefined();
+  });
+
+  it('multiple in-window active plans open a picker; the chosen plan lands in plan_id', async () => {
+    const second = {
+      ...ACTIVE_PLAN,
+      id: 'hp2',
+      title: '晨跑专项',
+      start_date: '2026-09-21',
+      end_date: '2026-10-04',
+    };
+    const fetchMock = stubFetch(stubPlans([ACTIVE_PLAN, second]));
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('checkin-button-exercise'));
+    const picker = await screen.findByTestId('checkin-plan-picker-exercise');
+    fireEvent.click(within(picker).getByTestId('checkin-plan-option-hp2'));
+    fireEvent.click(screen.getByTestId('checkin-plan-confirm-exercise'));
+
+    expect(await screen.findByText('已打卡')).toBeInTheDocument();
+    expect(JSON.parse(String(lastCheckinCall(fetchMock)?.[1]?.body))).toMatchObject({
+      plan_id: 'hp2',
+    });
+  });
+
+  it('out-of-window or no active plan → 打卡 posts immediately without plan_id', async () => {
+    const stale = { ...ACTIVE_PLAN, start_date: '2026-08-01', end_date: '2026-08-28' };
+    const fetchMock = stubFetch(stubPlans([stale]));
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('checkin-button-exercise'));
+
+    expect(await screen.findByText('已打卡')).toBeInTheDocument();
+    expect(screen.queryByTestId('checkin-plan-panel-exercise')).toBeNull();
+    const body = JSON.parse(String(lastCheckinCall(fetchMock)?.[1]?.body));
+    expect(body.habit).toBe('exercise');
+    expect(body.plan_id).toBeUndefined();
+  });
+
+  it('lane 阶段计划 section renders title/range/rate and the current week tasks', async () => {
+    const board = {
+      ...BOARD,
+      goals: [
+        {
+          ...BOARD.goals[0],
+          projects: [{ ...BOARD.goals[0].projects[0], habit_id: 'exercise' }],
+        },
+      ],
+    };
+    stubFetch((url, init) => {
+      if (url.includes('/profiles/alice/projects-board') && !init?.method) {
+        return new Response(JSON.stringify(board), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG },
+        });
+      }
+      return stubPlans([ACTIVE_PLAN])(url, init);
+    });
+    renderPage();
+
+    const lane = await screen.findByTestId('project-lane-p1');
+    const section = within(lane).getByTestId('habit-plan-section');
+    const card = within(section).getByTestId('habit-plan-card-hp1');
+    expect(card).toHaveTextContent('阶段计划');
+    expect(card).toHaveTextContent('28天减脂');
+    expect(card).toHaveTextContent('2026-09-14 ~ 2026-10-11');
+    expect(card).toHaveTextContent('W2/4 · 打卡 9/28 天 · 32%');
+    const weekTasks = within(card).getByTestId('habit-plan-week-tasks-hp1');
+    expect(weekTasks).toHaveTextContent('本周任务(W2)');
+    expect(weekTasks).toHaveTextContent('晨跑 3 次');
+    expect(weekTasks).toHaveTextContent('记录体重');
+    // Only the current week's tasks — week 1 stays out.
+    expect(weekTasks).not.toHaveTextContent('控制饮食');
+    expect(card).toHaveTextContent('每周任务已生成周卡进入看板 Queue 列');
+  });
+
+  it('lane without an active habit plan renders no 阶段计划 section', async () => {
+    stubFetch(stubPlans([]));
+    renderPage();
+
+    const lane = await screen.findByTestId('project-lane-p1');
+    expect(within(lane).queryByTestId('habit-plan-section')).toBeNull();
   });
 });

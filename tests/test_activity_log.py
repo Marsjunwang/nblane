@@ -9,21 +9,31 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 from nblane.core.activity_log import (
     ACTIVITY_LOG_FILENAME,
     ActivityLog,
     ActivityLogParseError,
     Checkin,
+    HabitPlan,
+    WeeklyTasks,
     add_activity_checkin,
     activity_summary,
     add_habit,
+    add_habit_plan,
     add_checkin,
     delete_checkin,
     habit_daily_counts,
+    habit_plan_progress,
     load,
     monthly_summary,
+    plan_week_bounds,
+    plan_week_count,
+    plan_week_number,
     resolve_habit_id,
     save,
+    update_habit_plan,
     weekly_summary,
 )
 
@@ -708,6 +718,259 @@ weekly_summaries:
                 "2026-04-03": {"learning": 0, "exercise": 0},
             },
         )
+
+
+class TestHabitPlans(unittest.TestCase):
+    """Habit plans (阶段计划): parsing, round-trip, week math, progress."""
+
+    PLAN_FIXTURE = {
+        "id": "hp_cut",
+        "title": "28天减脂计划",
+        "habit_id": "exercise",
+        "start_date": "2026-09-25",
+        "end_date": "2026-10-22",
+        "status": "active",
+        "weekly_tasks": [
+            {"week": 1, "tasks": ["每日晨跑30min", "晚餐碳水减半"]},
+            {"week": 2, "tasks": ["每日晨跑30min"]},
+            {"week": 3, "tasks": ["每日晨跑30min"]},
+            {"week": 4, "tasks": ["每日晨跑30min"]},
+        ],
+    }
+
+    def _write_log(self, tmp: str, extra: dict | None = None) -> Path:
+        path = Path(tmp) / ACTIVITY_LOG_FILENAME
+        payload = {
+            "profile": "demo",
+            "habits": [{"id": "exercise", "title": "Exercise"}],
+            "habit_plans": [dict(self.PLAN_FIXTURE)],
+            "checkins": [],
+        }
+        payload.update(extra or {})
+        path.write_text(
+            yaml.safe_dump(payload, allow_unicode=True),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_habit_plan_round_trip_preserves_fields(self) -> None:
+        """from_dict/to_dict keeps id, dates, status, and weekly tasks."""
+        plan = HabitPlan.from_dict(dict(self.PLAN_FIXTURE))
+        self.assertEqual(plan.id, "hp_cut")
+        self.assertEqual(plan.habit_id, "exercise")
+        self.assertEqual(plan.start_date, "2026-09-25")
+        self.assertEqual(plan.end_date, "2026-10-22")
+        self.assertEqual(plan.status, "active")
+        self.assertEqual(
+            [(w.week, w.tasks) for w in plan.weekly_tasks],
+            [
+                (1, ["每日晨跑30min", "晚餐碳水减半"]),
+                (2, ["每日晨跑30min"]),
+                (3, ["每日晨跑30min"]),
+                (4, ["每日晨跑30min"]),
+            ],
+        )
+        reloaded = HabitPlan.from_dict(plan.to_dict())
+        self.assertEqual(reloaded.to_dict(), plan.to_dict())
+
+    def test_legacy_file_without_habit_plans_loads_empty(self) -> None:
+        """Old activity logs without habit_plans stay readable."""
+        log = ActivityLog.from_dict(
+            {"profile": "demo", "habits": [{"id": "exercise"}], "checkins": []}
+        )
+        self.assertEqual(log.habit_plans, [])
+        self.assertEqual(log.to_dict()["habit_plans"], [])
+
+    def test_plan_with_unknown_habit_warns_but_loads(self) -> None:
+        """A dangling habit reference surfaces as a warning, not an error."""
+        log = ActivityLog.from_dict(
+            {
+                "profile": "demo",
+                "habits": [{"id": "exercise"}],
+                "habit_plans": [dict(self.PLAN_FIXTURE, habit_id="ghost")],
+            }
+        )
+        self.assertEqual(len(log.habit_plans), 1)
+        self.assertTrue(
+            any("ghost" in warning for warning in log.warnings)
+        )
+
+    def test_save_and_reload_preserves_habit_plans(self) -> None:
+        """A full save round-trip keeps plans and checkin plan fields."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_log(tmp)
+            log = load(path)
+            log.checkins.append(
+                Checkin(
+                    date="2026-09-26",
+                    habit_id="exercise",
+                    habits=["exercise"],
+                    plan_id="hp_cut",
+                    week_number=1,
+                )
+            )
+            with patch("nblane.core.git_backup.record_change"):
+                save(path, log)
+            reloaded = load(path)
+
+        self.assertEqual(
+            reloaded.habit_plans[0].to_dict(),
+            HabitPlan.from_dict(self.PLAN_FIXTURE).to_dict(),
+        )
+        entry = reloaded.checkins[0]
+        self.assertEqual(entry.plan_id, "hp_cut")
+        self.assertEqual(entry.week_number, 1)
+        self.assertEqual(
+            entry.to_dict().get("plan_id"), "hp_cut"
+        )
+        self.assertEqual(entry.to_dict().get("week_number"), 1)
+
+    def test_checkin_plan_fields_default_off(self) -> None:
+        """Check-ins without a plan omit plan_id/week_number in YAML."""
+        entry = Checkin(date="2026-09-26", habit_id="exercise")
+        self.assertNotIn("plan_id", entry.to_dict())
+        self.assertNotIn("week_number", entry.to_dict())
+
+    def test_week_math_ceil_and_bounds(self) -> None:
+        """Week count is ceil(days/7); the tail week clamps to end_date."""
+        plan = HabitPlan.from_dict(self.PLAN_FIXTURE)
+        self.assertEqual(plan_week_count(plan), 4)
+        self.assertEqual(
+            plan_week_bounds(plan, 1), ("2026-09-25", "2026-10-01")
+        )
+        self.assertEqual(
+            plan_week_bounds(plan, 4), ("2026-10-16", "2026-10-22")
+        )
+        self.assertEqual(plan_week_bounds(plan, 5), ("", ""))
+        short = HabitPlan(
+            id="hp_x", start_date="2026-09-25", end_date="2026-09-28"
+        )
+        self.assertEqual(plan_week_count(short), 1)
+        self.assertEqual(
+            plan_week_bounds(short, 1), ("2026-09-25", "2026-09-28")
+        )
+
+    def test_plan_week_number_inside_and_outside(self) -> None:
+        """Week numbers are 1-based inside the window, None outside."""
+        plan = HabitPlan.from_dict(self.PLAN_FIXTURE)
+        self.assertEqual(plan_week_number(plan, "2026-09-25"), 1)
+        self.assertEqual(plan_week_number(plan, "2026-10-01"), 1)
+        self.assertEqual(plan_week_number(plan, "2026-10-02"), 2)
+        self.assertEqual(plan_week_number(plan, "2026-10-22"), 4)
+        self.assertIsNone(plan_week_number(plan, "2026-09-24"))
+        self.assertIsNone(plan_week_number(plan, "2026-10-23"))
+
+    def test_habit_plan_progress_counts_distinct_days(self) -> None:
+        """Progress counts distinct checked days per week window."""
+        plan = HabitPlan.from_dict(self.PLAN_FIXTURE)
+        checkins = [
+            Checkin(
+                date="2026-09-25",
+                habit_id="exercise",
+                habits=["exercise"],
+                plan_id="hp_cut",
+                week_number=1,
+            ),
+            # Same-day duplicate still counts as one day.
+            Checkin(
+                date="2026-09-25",
+                habit_id="exercise",
+                habits=["exercise"],
+                plan_id="hp_cut",
+                week_number=1,
+            ),
+            Checkin(
+                date="2026-10-03",
+                habit_id="exercise",
+                habits=["exercise"],
+                plan_id="hp_cut",
+                week_number=2,
+            ),
+            # Wrong plan / wrong habit rows never count.
+            Checkin(
+                date="2026-09-26",
+                habit_id="exercise",
+                habits=["exercise"],
+                plan_id="hp_other",
+            ),
+            Checkin(
+                date="2026-09-26",
+                habit_id="reading",
+                habits=["reading"],
+                plan_id="hp_cut",
+            ),
+        ]
+        progress = habit_plan_progress(
+            plan, checkins, today="2026-10-03"
+        )
+        self.assertEqual(progress.current_week, 2)
+        self.assertEqual(progress.days_done, 2)
+        self.assertEqual(progress.days_total, 28)
+        self.assertAlmostEqual(progress.completion_rate, 2 / 28)
+        self.assertEqual(
+            [(w.week, w.days_done, w.days_total) for w in progress.weeks],
+            [(1, 1, 7), (2, 1, 7), (3, 0, 7), (4, 0, 7)],
+        )
+
+    def test_habit_plan_progress_current_week_clamps(self) -> None:
+        """current_week is 0 before start and the last week after end."""
+        plan = HabitPlan.from_dict(self.PLAN_FIXTURE)
+        self.assertEqual(
+            habit_plan_progress(plan, [], today="2026-09-01").current_week,
+            0,
+        )
+        self.assertEqual(
+            habit_plan_progress(plan, [], today="2026-12-01").current_week,
+            4,
+        )
+
+    def test_add_and_update_habit_plan_persist(self) -> None:
+        """add_habit_plan assigns an hp_ id; update edits selected fields."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_log(tmp)
+            plan = HabitPlan(
+                id="",
+                title="晨跑冲刺",
+                habit_id="exercise",
+                start_date="2026-10-01",
+                end_date="2026-10-07",
+                weekly_tasks=[WeeklyTasks(week=1, tasks=["run"])],
+            )
+            with patch("nblane.core.git_backup.record_change"):
+                stored = add_habit_plan(path, plan)
+                updated = update_habit_plan(
+                    path,
+                    stored.id,
+                    status="completed",
+                    weekly_tasks=[WeeklyTasks(week=1, tasks=["run", "stretch"])],
+                )
+            reloaded = load(path)
+
+        self.assertEqual(stored.id, "hp_晨跑冲刺")
+        self.assertIsNotNone(updated)
+        plans = {item.id: item for item in reloaded.habit_plans}
+        self.assertEqual(set(plans), {"hp_cut", stored.id})
+        self.assertEqual(plans[stored.id].status, "completed")
+        self.assertEqual(
+            plans[stored.id].weekly_tasks[0].tasks, ["run", "stretch"]
+        )
+        # Untouched fields survive the partial update.
+        self.assertEqual(plans[stored.id].title, "晨跑冲刺")
+
+    def test_add_habit_plan_ids_dedupe(self) -> None:
+        """Repeated titles get suffixed ids like other id helpers."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ACTIVITY_LOG_FILENAME
+            path.write_text(
+                "profile: demo\nhabits: []\n", encoding="utf-8"
+            )
+            plan = HabitPlan(id="", title="冲刺")
+            with patch("nblane.core.git_backup.record_change"):
+                first = add_habit_plan(path, HabitPlan(id="", title="冲刺"))
+                second = add_habit_plan(path, plan)
+
+        self.assertEqual(first.id, "hp_冲刺")
+        self.assertEqual(second.id, "hp_冲刺_2")
 
 
 if __name__ == "__main__":

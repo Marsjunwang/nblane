@@ -70,6 +70,7 @@ from nblane.core.kanban_io import (
     KANBAN_ARCHIVE_FILENAME,
     KANBAN_DOING,
     KANBAN_DONE,
+    KANBAN_QUEUE,
     KANBAN_SECTIONS,
     apply_kanban_reorder,
     ensure_kanban_task_ids,
@@ -237,6 +238,13 @@ from nblane.web_api.schemas import (
     HabitArchiveResponse,
     HabitDeleteRequest,
     HabitDeleteResponse,
+    HabitPlanCreateRequest,
+    HabitPlanListResponse,
+    HabitPlanModel,
+    HabitPlanMutationResponse,
+    HabitPlanPatchRequest,
+    HabitPlanWeekProgressModel,
+    HabitPlanWeeklyTasksModel,
     HealthIssueModel,
     HealthReportModel,
     HealthResponse,
@@ -5891,8 +5899,10 @@ CHECKIN_MUTATION_RESPONSES = {
     422: {
         "model": ErrorResponse,
         "description": (
-            "Missing/unknown habit, unlinked project, invalid date, or "
-            "non-positive count."
+            "Missing/unknown habit, unlinked project, invalid date, "
+            "non-positive count, or an invalid habit-plan binding "
+            "(unknown plan, habit mismatch, inactive plan, or a date "
+            "outside the plan window)."
         ),
     },
 }
@@ -5952,7 +5962,11 @@ def add_profile_checkin(
 
     ``habit`` accepts a habit id or title (core resolution); ``project_id``
     is an alternative that resolves through the habit<->project name link.
-    ``date`` defaults to today and must be an ISO date when given. The write
+    ``date`` defaults to today and must be an ISO date when given.
+    ``plan_id`` optionally binds the check-in to an active habit plan of the
+    same habit (422 when the plan is unknown, belongs to another habit, is
+    not active, or the date falls outside the plan window); the backend
+    derives and stores the plan-relative ``week_number``. The write
     goes through ``core.activity_log.add_activity_checkin`` under the
     activity-log write lock. Honors ``If-Match`` (412 on mismatch, fresh
     ETag in the header).
@@ -5978,6 +5992,10 @@ def add_profile_checkin(
                 "invalid_checkin_date",
                 f"date must be an ISO date (YYYY-MM-DD), got {body.date!r}.",
             ) from None
+    plan_id = body.plan_id.strip()
+    week_number = 0
+    if plan_id:
+        week_number = _validate_checkin_plan(pdir, habit_ref, plan_id, when)
     try:
         entry = activity_log.add_activity_checkin(
             pdir,
@@ -5992,6 +6010,8 @@ def add_profile_checkin(
             workout_type=body.workout_type.strip(),
             duration_min=body.duration_min,
             intensity=body.intensity.strip(),
+            plan_id=plan_id,
+            week_number=week_number,
             expected_snapshot=file_state.snapshot_file(
                 pdir / activity_log.ACTIVITY_LOG_FILENAME
             ),
@@ -6299,6 +6319,498 @@ def delete_profile_habit(
         ok=True,
         deleted_id=habit.id,
         checkins_removed=checkins_removed,
+    )
+
+
+# --- Habit plans (阶段计划): short-range phase plans under one habit ---------
+
+
+HABIT_PLAN_RESPONSES = {
+    **ERROR_RESPONSES,
+    404: {
+        "model": ErrorResponse,
+        "description": "Profile or habit plan not found.",
+    },
+    412: {
+        "model": ErrorResponse,
+        "description": "If-Match ETag does not match the activity log file.",
+    },
+    422: {
+        "model": ErrorResponse,
+        "description": (
+            "Unknown habit, invalid date range, weekly_tasks not matching "
+            "the plan's week count, or an illegal status transition."
+        ),
+    },
+}
+
+
+def _resolve_habit_plan_or_404(
+    log: activity_log.ActivityLog,
+    plan_id: str,
+) -> activity_log.HabitPlan:
+    """Look up a habit plan by id or raise ApiError(404)."""
+    plan = log.habit_plan_index().get(plan_id.strip())
+    if plan is None:
+        raise ApiError(
+            404,
+            "habit_plan_not_found",
+            f"Unknown habit plan for profile {log.profile}: "
+            f"{plan_id.strip()}",
+        )
+    return plan
+
+
+def _habit_plan_model(
+    plan: activity_log.HabitPlan,
+    log: activity_log.ActivityLog,
+) -> HabitPlanModel:
+    """Build the API model: stored fields plus computed progress."""
+    progress = activity_log.habit_plan_progress(plan, log.checkins)
+    return HabitPlanModel(
+        id=plan.id,
+        title=plan.title,
+        habit_id=plan.habit_id,
+        start_date=plan.start_date,
+        end_date=plan.end_date,
+        status=plan.status,
+        weekly_tasks=[
+            HabitPlanWeeklyTasksModel(week=entry.week, tasks=entry.tasks)
+            for entry in plan.weekly_tasks
+        ],
+        current_week=progress.current_week,
+        days_done=progress.days_done,
+        days_total=progress.days_total,
+        completion_rate=progress.completion_rate,
+        weeks=[
+            HabitPlanWeekProgressModel(**week.to_dict())
+            for week in progress.weeks
+        ],
+    )
+
+
+def _validate_plan_dates(start_raw: str, end_raw: str) -> tuple[str, str]:
+    """Return clean inclusive ISO dates or raise ApiError(422)."""
+    try:
+        start = date.fromisoformat(start_raw.strip()).isoformat()
+        end = date.fromisoformat(end_raw.strip()).isoformat()
+    except ValueError:
+        raise ApiError(
+            422,
+            "invalid_plan_dates",
+            "start_date/end_date must be ISO dates (YYYY-MM-DD), got "
+            f"{start_raw!r} / {end_raw!r}.",
+        ) from None
+    if end < start:
+        raise ApiError(
+            422,
+            "invalid_plan_range",
+            f"end_date {end} is before start_date {start}.",
+        )
+    return start, end
+
+
+def _validate_plan_weekly_tasks(
+    weekly_tasks: list[HabitPlanWeeklyTasksModel],
+    start: str,
+    end: str,
+) -> list[activity_log.WeeklyTasks]:
+    """Validate week coverage against the plan range (422 on mismatch).
+
+    The plan range spans exactly ``ceil(days / 7)`` weeks; the request
+    must carry those weeks numbered 1..N in order (tasks may be empty).
+    """
+    expected = activity_log.plan_week_count(
+        activity_log.HabitPlan(id="", start_date=start, end_date=end)
+    )
+    numbers = [entry.week for entry in weekly_tasks]
+    if numbers != list(range(1, expected + 1)):
+        raise ApiError(
+            422,
+            "invalid_weekly_tasks",
+            f"weekly_tasks must cover weeks 1..{expected} in order for "
+            f"the range {start}..{end}; got weeks {numbers}.",
+        )
+    return [
+        activity_log.WeeklyTasks(
+            week=entry.week,
+            tasks=[task.strip() for task in entry.tasks if task.strip()],
+        )
+        for entry in weekly_tasks
+    ]
+
+
+def _generate_plan_weekly_cards(
+    pdir: Path,
+    plan: activity_log.HabitPlan,
+) -> list[str]:
+    """Create one Queue kanban card per plan week; return the card ids.
+
+    Each card is titled ``"<plan title> W<n>"`` with ``planned_start`` /
+    ``planned_end`` set to the week window and the week's tasks as todos.
+    ``project_id`` links to the first active project-board case whose
+    ``habit_id`` matches the plan's habit; when no case qualifies the
+    cards stay project-less. The write goes through
+    ``save_kanban_with_merge`` so a concurrent kanban.md edit is merged,
+    never overwritten.
+    """
+    board = load_project_board(pdir)
+    project_id = ""
+    for case in board.project_cases:
+        if case.habit_id == plan.habit_id and case.status == "active":
+            project_id = case.id
+            break
+    snapshot = file_state.snapshot_file(kanban_path(pdir))
+    sections = parse_kanban(pdir)
+    base = copy_kanban_sections(sections)
+    added = 0
+    for entry in plan.weekly_tasks:
+        week_start, week_end = activity_log.plan_week_bounds(
+            plan, entry.week
+        )
+        if not week_start:
+            continue
+        sections.setdefault(KANBAN_QUEUE, []).append(
+            KanbanTask(
+                title=f"{plan.title} W{entry.week}",
+                planned_start=week_start,
+                planned_end=week_end,
+                todos=[
+                    KanbanTodo(text=task)
+                    for task in entry.tasks
+                    if task.strip()
+                ],
+                project_id=project_id,
+            )
+        )
+        added += 1
+    if not added:
+        return []
+    ensured = ensure_kanban_task_ids(sections, pdir.name)
+    result = save_kanban_with_merge(
+        pdir,
+        ensured,
+        base,
+        expected_snapshot=snapshot,
+    )
+    queue = result.sections.get(KANBAN_QUEUE) or []
+    return [task.id for task in queue[-added:] if task.id]
+
+
+def _validate_checkin_plan(
+    pdir: Path,
+    habit_ref: str,
+    plan_id: str,
+    when: str,
+) -> int:
+    """Validate a check-in's plan binding; return the plan week number.
+
+    422 when the plan is unknown, belongs to another habit, is not
+    ``active``, or the check-in date (default today) falls outside the
+    plan window. On success the returned 1-based week number is stored on
+    the check-in row.
+    """
+    log = activity_log.load(pdir)
+    plan = log.habit_plan_index().get(plan_id)
+    if plan is None:
+        raise ApiError(
+            422,
+            "habit_plan_not_found",
+            f"Unknown habit plan for profile {pdir.name}: {plan_id}",
+        )
+    canonical_habit = activity_log.resolve_habit_id(log, habit_ref)
+    if canonical_habit is None or plan.habit_id != canonical_habit:
+        raise ApiError(
+            422,
+            "habit_plan_habit_mismatch",
+            f"Habit plan {plan_id} belongs to habit {plan.habit_id!r}, "
+            f"not {habit_ref.strip()!r}.",
+        )
+    if plan.status != "active":
+        raise ApiError(
+            422,
+            "habit_plan_not_active",
+            f"Habit plan {plan_id} is {plan.status}; "
+            "check-ins require an active plan.",
+        )
+    week_number = activity_log.plan_week_number(
+        plan, when or date.today().isoformat()
+    )
+    if week_number is None:
+        raise ApiError(
+            422,
+            "checkin_outside_plan_range",
+            f"Check-in date {when or date.today().isoformat()} falls "
+            f"outside habit plan {plan_id} "
+            f"({plan.start_date}..{plan.end_date}).",
+        )
+    return week_number
+
+
+@router.get(
+    "/profiles/{name}/habit-plans",
+    response_model=HabitPlanListResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def list_profile_habit_plans(
+    name: str,
+    response: Response,
+    habit_id: str = "",
+    status: str = "",
+) -> HabitPlanListResponse:
+    """List the profile's habit plans with computed progress.
+
+    Each entry carries ``current_week``, ``days_done`` / ``days_total``
+    and a per-week breakdown (check-ins matching the plan id + habit
+    within each week window). ``habit_id`` / ``status`` query params
+    filter the list. The activity-log ETag rides the response header so
+    clients can chain an If-Match mutation.
+    """
+    pdir = _resolve_profile(name)
+    log = activity_log.load(pdir)
+    plans = log.habit_plans
+    habit_filter = habit_id.strip()
+    if habit_filter:
+        resolved = activity_log.resolve_habit_id(log, habit_filter)
+        plans = [
+            plan
+            for plan in plans
+            if plan.habit_id in {habit_filter, resolved or ""}
+        ]
+    status_filter = status.strip()
+    if status_filter:
+        plans = [plan for plan in plans if plan.status == status_filter]
+    response.headers["ETag"] = _activity_log_etag(pdir)
+    return HabitPlanListResponse(
+        ok=True,
+        profile=log.profile or pdir.name,
+        plans=[_habit_plan_model(plan, log) for plan in plans],
+    )
+
+
+@router.post(
+    "/profiles/{name}/habit-plans",
+    response_model=HabitPlanMutationResponse,
+    status_code=201,
+    responses=HABIT_PLAN_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def create_profile_habit_plan(
+    name: str,
+    body: HabitPlanCreateRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
+) -> HabitPlanMutationResponse | JSONResponse:
+    """Create one habit plan (阶段计划) under an existing habit.
+
+    The plan stores only ``habit_id`` — project/goal context is derived
+    through ``case.habit_id``. ``weekly_tasks`` must cover exactly
+    ``ceil(days / 7)`` weeks numbered 1..N (the tail week may be
+    partial). With ``generate_weekly_cards`` (default) each week also
+    gets a Queue kanban card (``"<title> W<n>"``, week window as
+    planned dates, tasks as todos, linked to the habit's first active
+    project case when one exists). Honors ``If-Match`` against the
+    activity-log.yaml ETag (412 on mismatch, fresh ETag in the header).
+    """
+    pdir = _resolve_profile(name)
+    etag = _activity_log_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed since it was loaded; "
+            "reload before creating the habit plan.",
+            etag,
+        )
+    title = body.title.strip()
+    if not title:
+        raise ApiError(
+            422, "invalid_habit_plan", "Habit plan title must not be blank."
+        )
+    log = activity_log.load(pdir)
+    habit_id = activity_log.resolve_habit_id(log, body.habit_id)
+    if habit_id is None:
+        raise ApiError(
+            422,
+            "habit_plan_habit_not_found",
+            f"Unknown habit for profile {pdir.name}: "
+            f"{body.habit_id.strip()!r}.",
+        )
+    start, end = _validate_plan_dates(body.start_date, body.end_date)
+    weekly_tasks = _validate_plan_weekly_tasks(
+        body.weekly_tasks, start, end
+    )
+    plan = activity_log.HabitPlan(
+        id="",
+        title=title,
+        habit_id=habit_id,
+        start_date=start,
+        end_date=end,
+        status="active",
+        weekly_tasks=weekly_tasks,
+    )
+    try:
+        stored = activity_log.add_habit_plan(
+            pdir,
+            plan,
+            expected_snapshot=file_state.snapshot_file(
+                pdir / activity_log.ACTIVITY_LOG_FILENAME
+            ),
+        )
+    except file_state.FileConflictError:
+        # TOCTOU closure: a concurrent write landed between the If-Match
+        # check and the in-lock snapshot re-check.
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed while creating the habit plan; "
+            "reload before retrying.",
+            _activity_log_etag(pdir),
+        )
+    card_ids: list[str] = []
+    if body.generate_weekly_cards:
+        card_ids = _generate_plan_weekly_cards(pdir, stored)
+    changed_paths = [pdir / activity_log.ACTIVITY_LOG_FILENAME]
+    if card_ids:
+        changed_paths.append(kanban_path(pdir))
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="habit_plan.add",
+        target_owner="work",
+        note=f"habit plan add: {stored.title!r} ({habit_id})",
+        refs={"plan_id": stored.id, "habit_id": habit_id},
+        changed_paths=changed_paths,
+    )
+    response.headers["ETag"] = _activity_log_etag(pdir)
+    fresh = activity_log.load(pdir)
+    return HabitPlanMutationResponse(
+        ok=True,
+        plan=_habit_plan_model(stored, fresh),
+        kanban_card_ids=card_ids,
+    )
+
+
+@router.patch(
+    "/profiles/{name}/habit-plans/{plan_id}",
+    response_model=HabitPlanMutationResponse,
+    responses=HABIT_PLAN_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def patch_profile_habit_plan(
+    name: str,
+    plan_id: str,
+    body: HabitPlanPatchRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
+) -> HabitPlanMutationResponse | JSONResponse:
+    """Edit one habit plan: forward status flow plus title/weekly_tasks.
+
+    ``status`` only moves forward: active -> completed/archived (a
+    request naming the current status is a no-op; anything else is 422
+    ``invalid_plan_status_transition``). ``weekly_tasks`` edits are
+    re-validated against the plan's date range. Honors ``If-Match``
+    against the activity-log.yaml ETag (412 on mismatch, fresh ETag in
+    the header).
+    """
+    pdir = _resolve_profile(name)
+    etag = _activity_log_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed since it was loaded; "
+            "reload before updating the habit plan.",
+            etag,
+        )
+    log = activity_log.load(pdir)
+    plan = _resolve_habit_plan_or_404(log, plan_id)
+    new_status: str | None = None
+    if body.status is not None:
+        candidate = body.status.strip()
+        if candidate not in activity_log.HABIT_PLAN_STATUSES:
+            raise ApiError(
+                422,
+                "invalid_plan_status",
+                f"status must be one of "
+                f"{', '.join(activity_log.HABIT_PLAN_STATUSES)}; "
+                f"got {body.status!r}.",
+            )
+        if candidate != plan.status:
+            allowed = activity_log.HABIT_PLAN_TRANSITIONS.get(
+                plan.status, ()
+            )
+            if candidate not in allowed:
+                raise ApiError(
+                    422,
+                    "invalid_plan_status_transition",
+                    f"Cannot move habit plan {plan.id} from "
+                    f"{plan.status} to {candidate}.",
+                )
+            new_status = candidate
+    new_title: str | None = None
+    if body.title is not None:
+        if not body.title.strip():
+            raise ApiError(
+                422,
+                "invalid_habit_plan",
+                "Habit plan title must not be blank.",
+            )
+        new_title = body.title.strip()
+    new_weekly: list[activity_log.WeeklyTasks] | None = None
+    if body.weekly_tasks is not None:
+        new_weekly = _validate_plan_weekly_tasks(
+            body.weekly_tasks, plan.start_date, plan.end_date
+        )
+    if new_status is None and new_title is None and new_weekly is None:
+        response.headers["ETag"] = _activity_log_etag(pdir)
+        return HabitPlanMutationResponse(
+            ok=True, plan=_habit_plan_model(plan, log)
+        )
+    try:
+        updated = activity_log.update_habit_plan(
+            pdir,
+            plan.id,
+            status=new_status,
+            title=new_title,
+            weekly_tasks=new_weekly,
+            expected_snapshot=file_state.snapshot_file(
+                pdir / activity_log.ACTIVITY_LOG_FILENAME
+            ),
+        )
+    except file_state.FileConflictError:
+        # TOCTOU closure: a concurrent write landed between the If-Match
+        # check and the in-lock snapshot re-check.
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed while updating the habit plan; "
+            "reload before retrying.",
+            _activity_log_etag(pdir),
+        )
+    if updated is None:
+        # Vanished between the resolve and the locked update.
+        raise ApiError(
+            404,
+            "habit_plan_not_found",
+            f"Unknown habit plan for profile {pdir.name}: {plan_id.strip()}",
+        )
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="habit_plan.update",
+        target_owner="work",
+        note=f"habit plan update: {updated.title!r} ({updated.status})",
+        refs={"plan_id": updated.id, "status": updated.status},
+        changed_paths=[pdir / activity_log.ACTIVITY_LOG_FILENAME],
+    )
+    response.headers["ETag"] = _activity_log_etag(pdir)
+    fresh = activity_log.load(pdir)
+    return HabitPlanMutationResponse(
+        ok=True, plan=_habit_plan_model(updated, fresh)
     )
 
 

@@ -7,6 +7,12 @@
 // a 第N/总天 progress arc (N from the plan's time_range vs board.today) and a
 // hover-revealed 设置 affordance that opens the ProjectEditDrawer for the
 // linked case (basics/milestones/delete live there — 日课项目可删除).
+// Phase plans (GET .../habit-plans, status=active) add a gold-outlined badge
+// per plan (「28天减脂 · W2/4」) and turn 打卡 into a two-step bind: with
+// exactly one in-window plan an inline 计入「…」计划 checkbox confirm opens
+// (uncheck = plain check-in), with several a plan picker (含 不计入计划),
+// with none the check-in posts directly without plan_id. The ETag discipline
+// is unchanged — plan_id rides the same useAddCheckin mutation.
 // Pure-habit rows get the same hover-reveal gear, opening a lifecycle menu:
 // 归档 (one click, the row folds away; 显示已归档 toggle brings it back
 // dimmed with a 恢复 item) and 删除 (type-the-name confirm modal with the
@@ -24,11 +30,13 @@
 import {
   ActionIcon,
   Alert,
+  Badge,
   Button,
   Checkbox,
   Group,
   Menu,
   Modal,
+  Radio,
   Stack,
   Text,
   TextInput,
@@ -47,14 +55,16 @@ import { useMemo, useState } from 'react';
 
 import { ApiError } from '../../api/client';
 import {
+  useActiveHabitPlans,
   useAddCheckin,
   useArchivedBoardHabits,
   useArchiveHabit,
   useDeleteCheckin,
   useDeleteHabit,
 } from '../../api/hooks';
-import type { ProjectsBoardHabit } from '../../api/types';
+import type { HabitPlan, ProjectsBoardHabit } from '../../api/types';
 import { buildHeatmapWeeks, heatmapCellColor } from './habitHeatmap';
+import { activePlansForHabit, checkinPlansForHabit, planBadgeLabel } from './habitPlans';
 import type { HabitRow } from './lanes';
 import { HABIT_PLAN_KINDS } from './lanes';
 import { boardPalette } from './palette';
@@ -555,6 +565,7 @@ function HabitBandRow({
   row,
   today,
   archived,
+  plans,
   onEditProject,
   onArchived,
   onDeleted,
@@ -564,6 +575,8 @@ function HabitBandRow({
   today: string;
   /** Locally archived (folded away unless 显示已归档 is on). */
   archived: boolean;
+  /** Active habit plans bound to this habit (for the badge + 打卡 binding). */
+  plans: HabitPlan[];
   /** Opens the ProjectEditDrawer for a habit-plan case (日课项目可删除). */
   onEditProject?: (projectId: string) => void;
   onArchived: (habitId: string, archived: boolean) => void;
@@ -574,22 +587,30 @@ function HabitBandRow({
   // Hover (or keyboard focus on the button) reveals the 设置 affordance.
   const [settingsVisible, setSettingsVisible] = useState(false);
   const checkin = useAddCheckin(profile);
+  // 打卡关联: when in-window active plans exist, the 打卡 button opens an
+  // inline confirm instead of firing immediately; planPick '' = 不计入计划.
+  const [planPickOpen, setPlanPickOpen] = useState(false);
+  const [planPick, setPlanPick] = useState('');
   const todayDone = (habit.week ?? []).some(
     (day) => day.done && !day.future && isTodayDate(day.date, today),
   );
   const isPlan = project ? HABIT_PLAN_KINDS.has(project.kind ?? '') : false;
   const progress = isPlan ? planDayProgress(project?.time_range ?? '', today) : null;
   const planArchived = project?.status === 'archived';
+  const eligiblePlans = checkinPlansForHabit(plans, habit.id, today);
 
-  const runCheckin = () => {
+  const submitCheckin = (planId: string) => {
+    const boundPlan = planId ? plans.find((plan) => plan.id === planId) : undefined;
     checkin.mutate(
-      { habit: habit.id, date: '', summary: '', note: '' },
+      { habit: habit.id, date: '', summary: '', note: '', ...(planId ? { plan_id: planId } : {}) },
       {
         onSuccess: () => {
           notifications.show({
             color: 'green',
             title: '已打卡',
-            message: `${habit.title || habit.id} 今日打卡成功。`,
+            message: boundPlan
+              ? `${habit.title || habit.id} 今日打卡成功,已计入「${boundPlan.title}」计划。`
+              : `${habit.title || habit.id} 今日打卡成功。`,
           });
         },
         onError: (error) => {
@@ -599,8 +620,21 @@ function HabitBandRow({
             message: error instanceof Error ? error.message : String(error),
           });
         },
+        onSettled: () => {
+          setPlanPickOpen(false);
+          setPlanPick('');
+        },
       },
     );
+  };
+
+  const runCheckin = () => {
+    if (eligiblePlans.length === 0) {
+      submitCheckin('');
+      return;
+    }
+    setPlanPick(eligiblePlans[0].id);
+    setPlanPickOpen(true);
   };
 
   return (
@@ -628,6 +662,17 @@ function HabitBandRow({
           <Text fw={600} style={{ color: boardPalette.titleText }}>
             {habit.title || habit.id}
           </Text>
+          {plans.map((plan) => (
+            <Badge
+              key={plan.id}
+              size="sm"
+              variant="outline"
+              style={{ borderColor: boardPalette.gold, color: boardPalette.goldText }}
+              data-testid={`habit-plan-badge-${habit.id}-${plan.id}`}
+            >
+              {planBadgeLabel(plan)}
+            </Badge>
+          ))}
           {isPlan && (
             <Text size="xs" style={{ color: boardPalette.goldText }}>
               {planArchived
@@ -693,6 +738,72 @@ function HabitBandRow({
           </Button>
         </Group>
       </Group>
+      {planPickOpen && eligiblePlans.length > 0 && (
+        <Group
+          gap="sm"
+          wrap="wrap"
+          pl="sm"
+          data-testid={`checkin-plan-panel-${habit.id}`}
+          style={{
+            border: `1px solid ${boardPalette.border}`,
+            borderRadius: 8,
+            padding: '6px 10px',
+            background: boardPalette.groundSoft,
+          }}
+        >
+          {eligiblePlans.length === 1 ? (
+            <Checkbox
+              size="xs"
+              label={`计入「${eligiblePlans[0].title}」计划(${planBadgeLabel(eligiblePlans[0]).split('·')[1]?.trim() ?? ''})`}
+              checked={planPick === eligiblePlans[0].id}
+              onChange={(event) =>
+                setPlanPick(event.currentTarget.checked ? eligiblePlans[0].id : '')
+              }
+              data-testid={`checkin-plan-toggle-${eligiblePlans[0].id}`}
+            />
+          ) : (
+            <Radio.Group
+              size="xs"
+              value={planPick}
+              onChange={setPlanPick}
+              data-testid={`checkin-plan-picker-${habit.id}`}
+            >
+              <Group gap="sm" wrap="wrap">
+                {eligiblePlans.map((plan) => (
+                  <Radio
+                    key={plan.id}
+                    value={plan.id}
+                    label={`计入「${plan.title}」`}
+                    data-testid={`checkin-plan-option-${plan.id}`}
+                  />
+                ))}
+                <Radio value="" label="不计入计划" data-testid={`checkin-plan-none-${habit.id}`} />
+              </Group>
+            </Radio.Group>
+          )}
+          <Button
+            size="compact-xs"
+            variant="light"
+            color="brand"
+            loading={checkin.isPending}
+            onClick={() => submitCheckin(planPick)}
+            data-testid={`checkin-plan-confirm-${habit.id}`}
+          >
+            确认打卡
+          </Button>
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            onClick={() => {
+              setPlanPickOpen(false);
+              setPlanPick('');
+            }}
+            data-testid={`checkin-plan-cancel-${habit.id}`}
+          >
+            取消
+          </Button>
+        </Group>
+      )}
       {expanded && <HabitHeatmap profile={profile} habit={habit} today={today} />}
     </Stack>
   );
@@ -724,6 +835,17 @@ export function HabitBand({
   // Server-side archived habits, fetched lazily once the toggle is on
   // (archived habits exit the default board payload per the contract).
   const archivedQuery = useArchivedBoardHabits(profile, showArchived);
+  // Active phase plans drive the per-row badge and the 打卡 plan binding.
+  const plansQuery = useActiveHabitPlans(profile);
+  const plansByHabit = useMemo(() => {
+    const map = new Map<string, HabitPlan[]>();
+    for (const plan of plansQuery.data ?? []) {
+      const list = map.get(plan.habit_id) ?? [];
+      list.push(plan);
+      map.set(plan.habit_id, list);
+    }
+    return map;
+  }, [plansQuery.data]);
 
   const setHabitArchived = (habitId: string, archived: boolean) => {
     setArchivedIds((prev) => {
@@ -806,6 +928,7 @@ export function HabitBand({
           row={row}
           today={today}
           archived={archivedIds.has(row.habit.id) || row.habit.archived === true}
+          plans={activePlansForHabit(plansByHabit.get(row.habit.id) ?? [], row.habit.id)}
           onEditProject={onEditProject}
           onArchived={setHabitArchived}
           onDeleted={removeHabit}

@@ -241,7 +241,11 @@ export interface paths {
          *
          *     ``habit`` accepts a habit id or title (core resolution); ``project_id``
          *     is an alternative that resolves through the habit<->project name link.
-         *     ``date`` defaults to today and must be an ISO date when given. The write
+         *     ``date`` defaults to today and must be an ISO date when given.
+         *     ``plan_id`` optionally binds the check-in to an active habit plan of the
+         *     same habit (422 when the plan is unknown, belongs to another habit, is
+         *     not active, or the date falls outside the plan window); the backend
+         *     derives and stores the plan-relative ``week_number``. The write
          *     goes through ``core.activity_log.add_activity_checkin`` under the
          *     activity-log write lock. Honors ``If-Match`` (412 on mismatch, fresh
          *     ETag in the header).
@@ -761,6 +765,72 @@ export interface paths {
          *     ``If-Match`` against the goals.yaml ETag (412 on mismatch).
          */
         patch: operations["patch_profile_goal_api_v1_profiles__name__goals__goal_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/habit-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Profile Habit Plans
+         * @description List the profile's habit plans with computed progress.
+         *
+         *     Each entry carries ``current_week``, ``days_done`` / ``days_total``
+         *     and a per-week breakdown (check-ins matching the plan id + habit
+         *     within each week window). ``habit_id`` / ``status`` query params
+         *     filter the list. The activity-log ETag rides the response header so
+         *     clients can chain an If-Match mutation.
+         */
+        get: operations["list_profile_habit_plans_api_v1_profiles__name__habit_plans_get"];
+        put?: never;
+        /**
+         * Create Profile Habit Plan
+         * @description Create one habit plan (阶段计划) under an existing habit.
+         *
+         *     The plan stores only ``habit_id`` — project/goal context is derived
+         *     through ``case.habit_id``. ``weekly_tasks`` must cover exactly
+         *     ``ceil(days / 7)`` weeks numbered 1..N (the tail week may be
+         *     partial). With ``generate_weekly_cards`` (default) each week also
+         *     gets a Queue kanban card (``"<title> W<n>"``, week window as
+         *     planned dates, tasks as todos, linked to the habit's first active
+         *     project case when one exists). Honors ``If-Match`` against the
+         *     activity-log.yaml ETag (412 on mismatch, fresh ETag in the header).
+         */
+        post: operations["create_profile_habit_plan_api_v1_profiles__name__habit_plans_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/habit-plans/{plan_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Profile Habit Plan
+         * @description Edit one habit plan: forward status flow plus title/weekly_tasks.
+         *
+         *     ``status`` only moves forward: active -> completed/archived (a
+         *     request naming the current status is a no-op; anything else is 422
+         *     ``invalid_plan_status_transition``). ``weekly_tasks`` edits are
+         *     re-validated against the plan's date range. Honors ``If-Match``
+         *     against the activity-log.yaml ETag (412 on mismatch, fresh ETag in
+         *     the header).
+         */
+        patch: operations["patch_profile_habit_plan_api_v1_profiles__name__habit_plans__plan_id__patch"];
         trace?: never;
     };
     "/api/v1/profiles/{name}/habits/{habit_id}": {
@@ -2638,7 +2708,9 @@ export interface components {
          *     ``habit`` accepts a habit id or title (resolved like the core helpers);
          *     ``project_id`` is an alternative entry point that resolves through the
          *     habit<->project link. ``date`` defaults to today; ``count`` must be
-         *     greater than zero.
+         *     greater than zero. ``plan_id`` optionally binds the check-in to an
+         *     active habit plan of the same habit; the backend then derives and
+         *     stores the plan-relative ``week_number`` (clients never send it).
          */
         CheckinCreateRequest: {
             /**
@@ -2671,6 +2743,11 @@ export interface components {
              * @default
              */
             note: string;
+            /**
+             * Plan Id
+             * @default
+             */
+            plan_id: string;
             /**
              * Project Id
              * @default
@@ -2754,6 +2831,11 @@ export interface components {
              * @default
              */
             notes: string;
+            /**
+             * Plan Id
+             * @default
+             */
+            plan_id: string;
             /** Related Kanban */
             related_kanban?: string[];
             /** Related Learning */
@@ -2770,6 +2852,11 @@ export interface components {
              * @default
              */
             unit: string;
+            /**
+             * Week Number
+             * @default 0
+             */
+            week_number: number;
             /**
              * Workout Type
              * @default
@@ -4206,6 +4293,176 @@ export interface components {
              * @default true
              */
             ok: boolean;
+        };
+        /**
+         * HabitPlanCreateRequest
+         * @description Body for POST .../habit-plans (create one phase plan).
+         *
+         *     ``habit_id`` must resolve to an existing habit; ``start_date`` /
+         *     ``end_date`` are inclusive ISO dates. ``weekly_tasks`` must cover
+         *     exactly ``ceil(days / 7)`` weeks, numbered 1..N in order (a partial
+         *     tail week is fine). ``generate_weekly_cards`` (default on) also
+         *     writes one Queue kanban card per week.
+         */
+        HabitPlanCreateRequest: {
+            /** End Date */
+            end_date: string;
+            /**
+             * Generate Weekly Cards
+             * @default true
+             */
+            generate_weekly_cards: boolean;
+            /** Habit Id */
+            habit_id: string;
+            /** Start Date */
+            start_date: string;
+            /** Title */
+            title: string;
+            /** Weekly Tasks */
+            weekly_tasks: components["schemas"]["HabitPlanWeeklyTasksModel"][];
+        };
+        /**
+         * HabitPlanListResponse
+         * @description List of one profile's habit plans with computed progress.
+         */
+        HabitPlanListResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Plans */
+            plans?: components["schemas"]["HabitPlanModel"][];
+            /**
+             * Profile
+             * @default
+             */
+            profile: string;
+        };
+        /**
+         * HabitPlanModel
+         * @description One stored habit plan plus its computed progress.
+         */
+        HabitPlanModel: {
+            /**
+             * Completion Rate
+             * @default 0
+             */
+            completion_rate: number;
+            /**
+             * Current Week
+             * @default 0
+             */
+            current_week: number;
+            /**
+             * Days Done
+             * @default 0
+             */
+            days_done: number;
+            /**
+             * Days Total
+             * @default 0
+             */
+            days_total: number;
+            /**
+             * End Date
+             * @default
+             */
+            end_date: string;
+            /**
+             * Habit Id
+             * @default
+             */
+            habit_id: string;
+            /** Id */
+            id: string;
+            /**
+             * Start Date
+             * @default
+             */
+            start_date: string;
+            /**
+             * Status
+             * @default active
+             */
+            status: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /** Weekly Tasks */
+            weekly_tasks?: components["schemas"]["HabitPlanWeeklyTasksModel"][];
+            /** Weeks */
+            weeks?: components["schemas"]["HabitPlanWeekProgressModel"][];
+        };
+        /**
+         * HabitPlanMutationResponse
+         * @description Result of the habit-plan create/patch mutations.
+         *
+         *     ``kanban_card_ids`` lists the weekly Queue cards generated on create
+         *     (empty when ``generate_weekly_cards`` was false).
+         */
+        HabitPlanMutationResponse: {
+            /** Kanban Card Ids */
+            kanban_card_ids?: string[];
+            /** Ok */
+            ok: boolean;
+            plan: components["schemas"]["HabitPlanModel"];
+        };
+        /**
+         * HabitPlanPatchRequest
+         * @description Body for PATCH .../habit-plans/{plan_id} (partial edit).
+         *
+         *     ``status`` moves the plan forward (active -> completed/archived);
+         *     ``title`` / ``weekly_tasks`` replace the stored values. All fields
+         *     are optional; omitted fields stay unchanged.
+         */
+        HabitPlanPatchRequest: {
+            /** Status */
+            status?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Weekly Tasks */
+            weekly_tasks?: components["schemas"]["HabitPlanWeeklyTasksModel"][] | null;
+        };
+        /**
+         * HabitPlanWeekProgressModel
+         * @description Check-in coverage for one week of a habit plan.
+         */
+        HabitPlanWeekProgressModel: {
+            /**
+             * Days Done
+             * @default 0
+             */
+            days_done: number;
+            /**
+             * Days Total
+             * @default 0
+             */
+            days_total: number;
+            /**
+             * End
+             * @default
+             */
+            end: string;
+            /**
+             * Start
+             * @default
+             */
+            start: string;
+            /** Week */
+            week: number;
+        };
+        /**
+         * HabitPlanWeeklyTasksModel
+         * @description Task list for one plan week (1-based ``week``).
+         */
+        HabitPlanWeeklyTasksModel: {
+            /** Tasks */
+            tasks?: string[];
+            /** Week */
+            week: number;
         };
         /**
          * HealthIssueModel
@@ -8261,7 +8518,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Missing/unknown habit, unlinked project, invalid date, or non-positive count. */
+            /** @description Missing/unknown habit, unlinked project, invalid date, non-positive count, or an invalid habit-plan binding (unknown plan, habit mismatch, inactive plan, or a date outside the plan window). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8331,7 +8588,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Missing/unknown habit, unlinked project, invalid date, or non-positive count. */
+            /** @description Missing/unknown habit, unlinked project, invalid date, non-positive count, or an invalid habit-plan binding (unknown plan, habit mismatch, inactive plan, or a date outside the plan window). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9678,6 +9935,214 @@ export interface operations {
             };
         };
     };
+    list_profile_habit_plans_api_v1_profiles__name__habit_plans_get: {
+        parameters: {
+            query?: {
+                habit_id?: string;
+                status?: string;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HabitPlanListResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_profile_habit_plan_api_v1_profiles__name__habit_plans_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HabitPlanCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HabitPlanMutationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile or habit plan not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the activity log file. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown habit, invalid date range, weekly_tasks not matching the plan's week count, or an illegal status transition. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    patch_profile_habit_plan_api_v1_profiles__name__habit_plans__plan_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HabitPlanPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HabitPlanMutationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile or habit plan not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the activity log file. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown habit, invalid date range, weekly_tasks not matching the plan's week count, or an illegal status transition. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     delete_profile_habit_api_v1_profiles__name__habits__habit_id__delete: {
         parameters: {
             query?: never;
@@ -9815,7 +10280,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Missing/unknown habit, unlinked project, invalid date, or non-positive count. */
+            /** @description Missing/unknown habit, unlinked project, invalid date, non-positive count, or an invalid habit-plan binding (unknown plan, habit mismatch, inactive plan, or a date outside the plan window). */
             422: {
                 headers: {
                     [name: string]: unknown;
