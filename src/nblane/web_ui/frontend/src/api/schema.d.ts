@@ -245,7 +245,8 @@ export interface paths {
          *     ``plan_id`` optionally binds the check-in to an active habit plan of the
          *     same habit (422 when the plan is unknown, belongs to another habit, is
          *     not active, or the date falls outside the plan window); the backend
-         *     derives and stores the plan-relative ``week_number``. The write
+         *     derives and stores the plan-relative ``week_number`` and
+         *     ``day_number``. The write
          *     goes through ``core.activity_log.add_activity_checkin`` under the
          *     activity-log write lock. Honors ``If-Match`` (412 on mismatch, fresh
          *     ETag in the header).
@@ -791,12 +792,18 @@ export interface paths {
          * @description Create one habit plan (阶段计划) under an existing habit.
          *
          *     The plan stores only ``habit_id`` — project/goal context is derived
-         *     through ``case.habit_id``. ``weekly_tasks`` must cover exactly
+         *     through ``case.habit_id``. Tasks come in two granularities that may
+         *     coexist (at least one non-empty): ``weekly_tasks`` must cover exactly
          *     ``ceil(days / 7)`` weeks numbered 1..N (the tail week may be
-         *     partial). With ``generate_weekly_cards`` (default) each week also
-         *     gets a Queue kanban card (``"<title> W<n>"``, week window as
-         *     planned dates, tasks as todos, linked to the habit's first active
-         *     project case when one exists). Honors ``If-Match`` against the
+         *     partial); ``daily_tasks`` carries sparse 1-based day entries bounded
+         *     by the plan length (a day without an entry is a rest day). With
+         *     ``generate_weekly_cards`` (default) each week also gets a Queue
+         *     kanban card (``"<title> W<n>"``, week window as planned dates, tasks
+         *     as todos — per-day ``D<day> <task>`` lines when ``daily_tasks`` is
+         *     set). ``project_id`` is tri-state: an explicit id mounts the cards on
+         *     that case (422 ``project_not_found`` when unknown), an empty string
+         *     keeps them project-less, and omitted links the habit's first active
+         *     project case when one exists. Honors ``If-Match`` against the
          *     activity-log.yaml ETag (412 on mismatch, fresh ETag in the header).
          */
         post: operations["create_profile_habit_plan_api_v1_profiles__name__habit_plans_post"];
@@ -816,7 +823,23 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Profile Habit Plan
+         * @description Delete one habit plan (confirmed destructive delete).
+         *
+         *     ``confirm_title`` must equal the plan's title exactly, else 422
+         *     ``habit_plan_delete_confirm_mismatch`` and nothing is written. Plans
+         *     in any status (active/completed/archived) are deletable. With
+         *     ``delete_open_cards`` (default on) the plan's generated week cards
+         *     still in Queue/Doing are removed from kanban.md (Done cards stay as
+         *     history); check-in rows are never touched — their ``plan_id`` remains
+         *     for traceability. ``record_chronicle=true`` appends a
+         *     ``habit_plan.deleted`` chronicle entry (default off). Honors
+         *     ``If-Match`` against the activity-log.yaml ETag (412 on mismatch,
+         *     fresh ETag in the header); the kanban prune merges concurrent edits
+         *     instead of failing.
+         */
+        delete: operations["delete_profile_habit_plan_api_v1_profiles__name__habit_plans__plan_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -2799,6 +2822,11 @@ export interface components {
              */
             date: string;
             /**
+             * Day Number
+             * @default 0
+             */
+            day_number: number;
+            /**
              * Duration Min
              * @default 0
              */
@@ -4299,12 +4327,21 @@ export interface components {
          * @description Body for POST .../habit-plans (create one phase plan).
          *
          *     ``habit_id`` must resolve to an existing habit; ``start_date`` /
-         *     ``end_date`` are inclusive ISO dates. ``weekly_tasks`` must cover
-         *     exactly ``ceil(days / 7)`` weeks, numbered 1..N in order (a partial
-         *     tail week is fine). ``generate_weekly_cards`` (default on) also
-         *     writes one Queue kanban card per week.
+         *     ``end_date`` are inclusive ISO dates. ``weekly_tasks`` (when given)
+         *     must cover exactly ``ceil(days / 7)`` weeks, numbered 1..N in order
+         *     (a partial tail week is fine); ``daily_tasks`` (when given) carries
+         *     sparse 1-based day entries bounded by the inclusive plan length — a
+         *     day without an entry is a rest day. At least one of the two must be
+         *     non-empty. ``generate_weekly_cards`` (default on) also writes one
+         *     Queue kanban card per week; with ``daily_tasks`` the card todos are
+         *     per-day lines (``D<day> <task>``). ``project_id`` is tri-state: a
+         *     value mounts the cards on that case (422 ``project_not_found`` when
+         *     unknown), an empty string keeps them project-less, and omitted falls
+         *     back to the habit's first active case.
          */
         HabitPlanCreateRequest: {
+            /** Daily Tasks */
+            daily_tasks?: components["schemas"]["HabitPlanDailyTasksModel"][];
             /** End Date */
             end_date: string;
             /**
@@ -4314,12 +4351,73 @@ export interface components {
             generate_weekly_cards: boolean;
             /** Habit Id */
             habit_id: string;
+            /** Project Id */
+            project_id?: string | null;
             /** Start Date */
             start_date: string;
             /** Title */
             title: string;
             /** Weekly Tasks */
-            weekly_tasks: components["schemas"]["HabitPlanWeeklyTasksModel"][];
+            weekly_tasks?: components["schemas"]["HabitPlanWeeklyTasksModel"][];
+        };
+        /**
+         * HabitPlanDailyTasksModel
+         * @description Task list for one plan day (1-based ``day``; sparse coverage).
+         */
+        HabitPlanDailyTasksModel: {
+            /** Day */
+            day: number;
+            /** Tasks */
+            tasks?: string[];
+        };
+        /**
+         * HabitPlanDeleteRequest
+         * @description Body for DELETE .../habit-plans/{plan_id} (confirmed delete).
+         *
+         *     ``confirm_title`` must equal the plan's title exactly, else 422
+         *     ``habit_plan_delete_confirm_mismatch`` — the typed-name guard against
+         *     fat-finger deletes. ``delete_open_cards`` (default on) also removes
+         *     the plan's generated week cards still sitting in Queue/Doing (Done
+         *     cards are kept as history); check-in rows are never touched. Opt into
+         *     a ``habit_plan.deleted`` chronicle entry with ``record_chronicle``.
+         */
+        HabitPlanDeleteRequest: {
+            /**
+             * Confirm Title
+             * @default
+             */
+            confirm_title: string;
+            /**
+             * Delete Open Cards
+             * @default true
+             */
+            delete_open_cards: boolean;
+            /**
+             * Record Chronicle
+             * @default false
+             */
+            record_chronicle: boolean;
+        };
+        /**
+         * HabitPlanDeleteResponse
+         * @description Result of the habit-plan delete mutation.
+         *
+         *     ``cards_removed`` counts the generated week cards pruned from
+         *     Queue/Doing (0 when ``delete_open_cards`` was false).
+         */
+        HabitPlanDeleteResponse: {
+            /**
+             * Cards Removed
+             * @default 0
+             */
+            cards_removed: number;
+            /** Deleted Id */
+            deleted_id: string;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
         };
         /**
          * HabitPlanListResponse
@@ -4350,10 +4448,17 @@ export interface components {
              */
             completion_rate: number;
             /**
+             * Current Day
+             * @default 0
+             */
+            current_day: number;
+            /**
              * Current Week
              * @default 0
              */
             current_week: number;
+            /** Daily Tasks */
+            daily_tasks?: components["schemas"]["HabitPlanDailyTasksModel"][];
             /**
              * Days Done
              * @default 0
@@ -4391,6 +4496,8 @@ export interface components {
              * @default
              */
             title: string;
+            /** Today Tasks */
+            today_tasks?: string[];
             /** Weekly Tasks */
             weekly_tasks?: components["schemas"]["HabitPlanWeeklyTasksModel"][];
             /** Weeks */
@@ -10058,7 +10165,81 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Unknown habit, invalid date range, weekly_tasks not matching the plan's week count, or an illegal status transition. */
+            /** @description Unknown habit, invalid date range, weekly_tasks not matching the plan's week count, daily_tasks out of the plan's day range, both task lists empty, an unknown project_id, an illegal status transition, or a confirm_title mismatch on delete. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_profile_habit_plan_api_v1_profiles__name__habit_plans__plan_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["HabitPlanDeleteRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HabitPlanDeleteResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile or habit plan not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the activity log file. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown habit, invalid date range, weekly_tasks not matching the plan's week count, daily_tasks out of the plan's day range, both task lists empty, an unknown project_id, an illegal status transition, or a confirm_title mismatch on delete. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10132,7 +10313,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Unknown habit, invalid date range, weekly_tasks not matching the plan's week count, or an illegal status transition. */
+            /** @description Unknown habit, invalid date range, weekly_tasks not matching the plan's week count, daily_tasks out of the plan's day range, both task lists empty, an unknown project_id, an illegal status transition, or a confirm_title mismatch on delete. */
             422: {
                 headers: {
                     [name: string]: unknown;

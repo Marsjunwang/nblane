@@ -14,7 +14,12 @@ page-confirmation tier and are hard-refused here. There is deliberately no
 ``delete`` subcommand, and the generic get/post escape hatches reject any
 path carrying a delete/discard segment (e.g. inbox discard is a POST, so
 method filtering alone is not enough). Deletions stay in the SPA where a
-human confirms them.
+human confirms them — habit-plan deletion included (DELETE habit-plans is
+never issued from this client).
+
+Habit-plan creation has no dedicated subcommand either (the body shape is
+too complex for flags); use the escape hatch instead:
+``post /profiles/<p>/habit-plans '<json>'``.
 """
 from __future__ import annotations
 
@@ -23,6 +28,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from urllib.parse import quote
 
 import httpx
 
@@ -233,8 +239,6 @@ class Session:
 
 
 def profile_path(args: argparse.Namespace, suffix: str) -> str:
-    from urllib.parse import quote
-
     return f"/profiles/{quote(args.profile, safe='')}{suffix}"
 
 
@@ -268,13 +272,31 @@ def run(args: argparse.Namespace, session: Session) -> object:
         return session.mutation(normalize_path(args.path), body)
     if command == "checkin":
         body: dict = {"habit": args.habit}
-        for field in ("date", "summary", "note", "unit", "project_id"):
+        for field in ("date", "summary", "note", "unit", "project_id", "plan_id"):
             value = getattr(args, field)
             if value:
                 body[field] = value
         if args.count is not None:
             body["count"] = args.count
         return session.mutation(profile_path(args, "/checkins"), body)
+    if command == "plans":
+        query = "/habit-plans"
+        params = []
+        if args.habit:
+            params.append(f"habit_id={quote(args.habit, safe='')}")
+        if args.status:
+            params.append(f"status={quote(args.status, safe='')}")
+        if params:
+            query += "?" + "&".join(params)
+        return session.get(profile_path(args, query))
+    if command == "plan-show":
+        listing = session.get(profile_path(args, "/habit-plans")).json()
+        for plan in listing.get("plans", []):
+            if plan.get("id") == args.plan_id:
+                return plan
+        raise ApiFailure(
+            f"unknown habit plan for profile {args.profile}: {args.plan_id}"
+        )
     if command == "starmap":
         return session.get(profile_path(args, "/starmap"))
     if command == "board":
@@ -325,6 +347,24 @@ def build_parser() -> argparse.ArgumentParser:
     checkin.add_argument("--summary", default="")
     checkin.add_argument("--note", default="")
     checkin.add_argument("--project-id", dest="project_id", default="")
+    checkin.add_argument(
+        "--plan",
+        dest="plan_id",
+        default="",
+        help="bind the check-in to an active habit plan id",
+    )
+    plans = commands.add_parser(
+        "plans", help="GET habit plans (阶段计划) with computed progress"
+    )
+    plans.add_argument("--habit", default="", help="filter by habit id or title")
+    plans.add_argument(
+        "--status", default="", help="filter by status (active/completed/archived)"
+    )
+    plan_show = commands.add_parser(
+        "plan-show",
+        help="show one habit plan by id (incl. current_day/today_tasks)",
+    )
+    plan_show.add_argument("plan_id")
     commands.add_parser("starmap", help="GET the growth-starmap snapshot")
     board = commands.add_parser("board", help="GET the aggregated projects board")
     board.add_argument("--archived", action="store_true", help="include archived habits")

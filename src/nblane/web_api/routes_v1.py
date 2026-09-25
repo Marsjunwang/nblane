@@ -239,6 +239,9 @@ from nblane.web_api.schemas import (
     HabitDeleteRequest,
     HabitDeleteResponse,
     HabitPlanCreateRequest,
+    HabitPlanDailyTasksModel,
+    HabitPlanDeleteRequest,
+    HabitPlanDeleteResponse,
     HabitPlanListResponse,
     HabitPlanModel,
     HabitPlanMutationResponse,
@@ -5966,7 +5969,8 @@ def add_profile_checkin(
     ``plan_id`` optionally binds the check-in to an active habit plan of the
     same habit (422 when the plan is unknown, belongs to another habit, is
     not active, or the date falls outside the plan window); the backend
-    derives and stores the plan-relative ``week_number``. The write
+    derives and stores the plan-relative ``week_number`` and
+    ``day_number``. The write
     goes through ``core.activity_log.add_activity_checkin`` under the
     activity-log write lock. Honors ``If-Match`` (412 on mismatch, fresh
     ETag in the header).
@@ -5994,8 +5998,11 @@ def add_profile_checkin(
             ) from None
     plan_id = body.plan_id.strip()
     week_number = 0
+    day_number = 0
     if plan_id:
-        week_number = _validate_checkin_plan(pdir, habit_ref, plan_id, when)
+        week_number, day_number = _validate_checkin_plan(
+            pdir, habit_ref, plan_id, when
+        )
     try:
         entry = activity_log.add_activity_checkin(
             pdir,
@@ -6012,6 +6019,7 @@ def add_profile_checkin(
             intensity=body.intensity.strip(),
             plan_id=plan_id,
             week_number=week_number,
+            day_number=day_number,
             expected_snapshot=file_state.snapshot_file(
                 pdir / activity_log.ACTIVITY_LOG_FILENAME
             ),
@@ -6339,7 +6347,10 @@ HABIT_PLAN_RESPONSES = {
         "model": ErrorResponse,
         "description": (
             "Unknown habit, invalid date range, weekly_tasks not matching "
-            "the plan's week count, or an illegal status transition."
+            "the plan's week count, daily_tasks out of the plan's day "
+            "range, both task lists empty, an unknown project_id, an "
+            "illegal status transition, or a confirm_title mismatch on "
+            "delete."
         ),
     },
 }
@@ -6378,7 +6389,13 @@ def _habit_plan_model(
             HabitPlanWeeklyTasksModel(week=entry.week, tasks=entry.tasks)
             for entry in plan.weekly_tasks
         ],
+        daily_tasks=[
+            HabitPlanDailyTasksModel(day=entry.day, tasks=entry.tasks)
+            for entry in plan.daily_tasks
+        ],
         current_week=progress.current_week,
+        current_day=progress.current_day,
+        today_tasks=progress.today_tasks,
         days_done=progress.days_done,
         days_total=progress.days_total,
         completion_rate=progress.completion_rate,
@@ -6440,45 +6457,117 @@ def _validate_plan_weekly_tasks(
     ]
 
 
+def _validate_plan_daily_tasks(
+    daily_tasks: list[HabitPlanDailyTasksModel],
+    start: str,
+    end: str,
+) -> list[activity_log.DailyTasks]:
+    """Validate day coverage against the plan range (422 on mismatch).
+
+    Days are 1-based, bounded by the plan's inclusive day count, and must
+    be unique and ascending. Sparse coverage is legal — a day without an
+    entry is a rest day.
+    """
+    total_days = (
+        date.fromisoformat(end) - date.fromisoformat(start)
+    ).days + 1
+    numbers = [entry.day for entry in daily_tasks]
+    if (
+        any(day < 1 or day > total_days for day in numbers)
+        or len(set(numbers)) != len(numbers)
+        or numbers != sorted(numbers)
+    ):
+        raise ApiError(
+            422,
+            "invalid_daily_tasks",
+            f"daily_tasks days must be unique, ascending, and within "
+            f"1..{total_days} for the range {start}..{end}; "
+            f"got days {numbers}.",
+        )
+    return [
+        activity_log.DailyTasks(
+            day=entry.day,
+            tasks=[task.strip() for task in entry.tasks if task.strip()],
+        )
+        for entry in daily_tasks
+    ]
+
+
+def _plan_week_card_specs(
+    plan: activity_log.HabitPlan,
+) -> list[tuple[int, list[str]]]:
+    """Return ``(week, todo_texts)`` pairs for the generated week cards.
+
+    With ``daily_tasks`` the todos are per-day lines (``D<day> <task>``,
+    one line per task) covering the days inside each week, and every plan
+    week gets a card (rest-only weeks carry an empty checklist). Without
+    daily tasks the stored ``weekly_tasks`` drive the cards as before.
+    """
+    if not plan.daily_tasks:
+        return [
+            (entry.week, list(entry.tasks)) for entry in plan.weekly_tasks
+        ]
+    total_weeks = activity_log.plan_week_count(plan)
+    start = date.fromisoformat(plan.start_date)
+    end = date.fromisoformat(plan.end_date)
+    total_days = (end - start).days + 1
+    tasks_by_day = {entry.day: entry.tasks for entry in plan.daily_tasks}
+    specs: list[tuple[int, list[str]]] = []
+    for week in range(1, total_weeks + 1):
+        todos: list[str] = []
+        first_day = 7 * (week - 1) + 1
+        last_day = min(7 * week, total_days)
+        for day in range(first_day, last_day + 1):
+            for task in tasks_by_day.get(day, []):
+                text = task.strip()
+                if text:
+                    todos.append(f"D{day} {text}")
+        specs.append((week, todos))
+    return specs
+
+
 def _generate_plan_weekly_cards(
     pdir: Path,
     plan: activity_log.HabitPlan,
+    project_id: str | None = None,
 ) -> list[str]:
     """Create one Queue kanban card per plan week; return the card ids.
 
     Each card is titled ``"<plan title> W<n>"`` with ``planned_start`` /
-    ``planned_end`` set to the week window and the week's tasks as todos.
-    ``project_id`` links to the first active project-board case whose
-    ``habit_id`` matches the plan's habit; when no case qualifies the
-    cards stay project-less. The write goes through
-    ``save_kanban_with_merge`` so a concurrent kanban.md edit is merged,
-    never overwritten.
+    ``planned_end`` set to the week window and the week's todos from
+    ``_plan_week_card_specs`` (per-day ``D<day> <task>`` lines when the
+    plan carries ``daily_tasks``). *project_id* is tri-state: an explicit
+    id mounts the cards on that case (validated by the caller), an empty
+    string keeps them project-less, and None (default) links to the first
+    active project-board case whose ``habit_id`` matches the plan's
+    habit. The write goes through ``save_kanban_with_merge`` so a
+    concurrent kanban.md edit is merged, never overwritten.
     """
-    board = load_project_board(pdir)
-    project_id = ""
-    for case in board.project_cases:
-        if case.habit_id == plan.habit_id and case.status == "active":
-            project_id = case.id
-            break
+    if project_id is None:
+        board = load_project_board(pdir)
+        project_id = ""
+        for case in board.project_cases:
+            if case.habit_id == plan.habit_id and case.status == "active":
+                project_id = case.id
+                break
+    else:
+        project_id = project_id.strip()
     snapshot = file_state.snapshot_file(kanban_path(pdir))
     sections = parse_kanban(pdir)
     base = copy_kanban_sections(sections)
     added = 0
-    for entry in plan.weekly_tasks:
-        week_start, week_end = activity_log.plan_week_bounds(
-            plan, entry.week
-        )
+    for week, todos in _plan_week_card_specs(plan):
+        week_start, week_end = activity_log.plan_week_bounds(plan, week)
         if not week_start:
             continue
         sections.setdefault(KANBAN_QUEUE, []).append(
             KanbanTask(
-                title=f"{plan.title} W{entry.week}",
+                title=f"{plan.title} W{week}",
                 planned_start=week_start,
                 planned_end=week_end,
                 todos=[
-                    KanbanTodo(text=task)
-                    for task in entry.tasks
-                    if task.strip()
+                    KanbanTodo(text=todo)
+                    for todo in todos
                 ],
                 project_id=project_id,
             )
@@ -6502,13 +6591,13 @@ def _validate_checkin_plan(
     habit_ref: str,
     plan_id: str,
     when: str,
-) -> int:
-    """Validate a check-in's plan binding; return the plan week number.
+) -> tuple[int, int]:
+    """Validate a check-in's plan binding; return (week, day) numbers.
 
     422 when the plan is unknown, belongs to another habit, is not
     ``active``, or the check-in date (default today) falls outside the
-    plan window. On success the returned 1-based week number is stored on
-    the check-in row.
+    plan window. On success the returned 1-based week/day numbers are
+    stored on the check-in row.
     """
     log = activity_log.load(pdir)
     plan = log.habit_plan_index().get(plan_id)
@@ -6533,18 +6622,18 @@ def _validate_checkin_plan(
             f"Habit plan {plan_id} is {plan.status}; "
             "check-ins require an active plan.",
         )
-    week_number = activity_log.plan_week_number(
-        plan, when or date.today().isoformat()
-    )
+    when_text = when or date.today().isoformat()
+    week_number = activity_log.plan_week_number(plan, when_text)
     if week_number is None:
         raise ApiError(
             422,
             "checkin_outside_plan_range",
-            f"Check-in date {when or date.today().isoformat()} falls "
+            f"Check-in date {when_text} falls "
             f"outside habit plan {plan_id} "
             f"({plan.start_date}..{plan.end_date}).",
         )
-    return week_number
+    day_number = activity_log.plan_day_number(plan, when_text) or 0
+    return week_number, day_number
 
 
 @router.get(
@@ -6606,12 +6695,18 @@ def create_profile_habit_plan(
     """Create one habit plan (阶段计划) under an existing habit.
 
     The plan stores only ``habit_id`` — project/goal context is derived
-    through ``case.habit_id``. ``weekly_tasks`` must cover exactly
+    through ``case.habit_id``. Tasks come in two granularities that may
+    coexist (at least one non-empty): ``weekly_tasks`` must cover exactly
     ``ceil(days / 7)`` weeks numbered 1..N (the tail week may be
-    partial). With ``generate_weekly_cards`` (default) each week also
-    gets a Queue kanban card (``"<title> W<n>"``, week window as
-    planned dates, tasks as todos, linked to the habit's first active
-    project case when one exists). Honors ``If-Match`` against the
+    partial); ``daily_tasks`` carries sparse 1-based day entries bounded
+    by the plan length (a day without an entry is a rest day). With
+    ``generate_weekly_cards`` (default) each week also gets a Queue
+    kanban card (``"<title> W<n>"``, week window as planned dates, tasks
+    as todos — per-day ``D<day> <task>`` lines when ``daily_tasks`` is
+    set). ``project_id`` is tri-state: an explicit id mounts the cards on
+    that case (422 ``project_not_found`` when unknown), an empty string
+    keeps them project-less, and omitted links the habit's first active
+    project case when one exists. Honors ``If-Match`` against the
     activity-log.yaml ETag (412 on mismatch, fresh ETag in the header).
     """
     pdir = _resolve_profile(name)
@@ -6639,9 +6734,32 @@ def create_profile_habit_plan(
             f"{body.habit_id.strip()!r}.",
         )
     start, end = _validate_plan_dates(body.start_date, body.end_date)
-    weekly_tasks = _validate_plan_weekly_tasks(
-        body.weekly_tasks, start, end
+    if not body.weekly_tasks and not body.daily_tasks:
+        raise ApiError(
+            422,
+            "habit_plan_tasks_required",
+            "Provide weekly_tasks and/or daily_tasks; at least one must "
+            "be non-empty.",
+        )
+    weekly_tasks = (
+        _validate_plan_weekly_tasks(body.weekly_tasks, start, end)
+        if body.weekly_tasks
+        else []
     )
+    daily_tasks = (
+        _validate_plan_daily_tasks(body.daily_tasks, start, end)
+        if body.daily_tasks
+        else []
+    )
+    if body.project_id is not None and body.project_id.strip():
+        board = load_project_board(pdir)
+        if board.by_id().get(body.project_id.strip()) is None:
+            raise ApiError(
+                422,
+                "project_not_found",
+                f"Unknown project case for profile {pdir.name}: "
+                f"{body.project_id.strip()}",
+            )
     plan = activity_log.HabitPlan(
         id="",
         title=title,
@@ -6650,6 +6768,7 @@ def create_profile_habit_plan(
         end_date=end,
         status="active",
         weekly_tasks=weekly_tasks,
+        daily_tasks=daily_tasks,
     )
     try:
         stored = activity_log.add_habit_plan(
@@ -6671,7 +6790,9 @@ def create_profile_habit_plan(
         )
     card_ids: list[str] = []
     if body.generate_weekly_cards:
-        card_ids = _generate_plan_weekly_cards(pdir, stored)
+        card_ids = _generate_plan_weekly_cards(
+            pdir, stored, project_id=body.project_id
+        )
     changed_paths = [pdir / activity_log.ACTIVITY_LOG_FILENAME]
     if card_ids:
         changed_paths.append(kanban_path(pdir))
@@ -6811,6 +6932,171 @@ def patch_profile_habit_plan(
     fresh = activity_log.load(pdir)
     return HabitPlanMutationResponse(
         ok=True, plan=_habit_plan_model(updated, fresh)
+    )
+
+
+def _delete_plan_week_cards(
+    pdir: Path,
+    plan: activity_log.HabitPlan,
+) -> list[str]:
+    """Remove the plan's generated week cards still in Queue/Doing.
+
+    A card counts as plan-generated when its title is exactly
+    ``"<plan title> W<n>"`` and its planned window equals the plan's week
+    bounds — lookalike cards and Done cards (kept as history) survive.
+    Returns the removed card ids. The write goes through
+    ``save_kanban_with_merge`` so a concurrent kanban.md edit is merged,
+    never overwritten.
+    """
+    total_weeks = activity_log.plan_week_count(plan)
+    if not total_weeks:
+        return []
+    expected: dict[str, tuple[str, str]] = {}
+    for week in range(1, total_weeks + 1):
+        week_start, week_end = activity_log.plan_week_bounds(plan, week)
+        if week_start:
+            expected[f"{plan.title} W{week}"] = (week_start, week_end)
+    if not expected or not kanban_path(pdir).exists():
+        return []
+    snapshot = file_state.snapshot_file(kanban_path(pdir))
+    sections = parse_kanban(pdir)
+    base = copy_kanban_sections(sections)
+    removed: list[str] = []
+    for section in (KANBAN_QUEUE, KANBAN_DOING):
+        tasks = sections.get(section)
+        if not tasks:
+            continue
+        kept: list[KanbanTask] = []
+        for task in tasks:
+            bounds = expected.get(task.title.strip())
+            if bounds is not None and (
+                (task.planned_start or "", task.planned_end or "") == bounds
+            ):
+                removed.append(task.id)
+                continue
+            kept.append(task)
+        if len(kept) != len(tasks):
+            sections[section] = kept
+    if not removed:
+        return []
+    save_kanban_with_merge(
+        pdir,
+        sections,
+        base,
+        expected_snapshot=snapshot,
+    )
+    return removed
+
+
+@router.delete(
+    "/profiles/{name}/habit-plans/{plan_id}",
+    response_model=HabitPlanDeleteResponse,
+    responses=HABIT_PLAN_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def delete_profile_habit_plan(
+    name: str,
+    plan_id: str,
+    response: Response,
+    body: HabitPlanDeleteRequest | None = None,
+    if_match: str | None = Header(default=None),
+    user: CurrentUser = Depends(require_user),
+) -> HabitPlanDeleteResponse | JSONResponse:
+    """Delete one habit plan (confirmed destructive delete).
+
+    ``confirm_title`` must equal the plan's title exactly, else 422
+    ``habit_plan_delete_confirm_mismatch`` and nothing is written. Plans
+    in any status (active/completed/archived) are deletable. With
+    ``delete_open_cards`` (default on) the plan's generated week cards
+    still in Queue/Doing are removed from kanban.md (Done cards stay as
+    history); check-in rows are never touched — their ``plan_id`` remains
+    for traceability. ``record_chronicle=true`` appends a
+    ``habit_plan.deleted`` chronicle entry (default off). Honors
+    ``If-Match`` against the activity-log.yaml ETag (412 on mismatch,
+    fresh ETag in the header); the kanban prune merges concurrent edits
+    instead of failing.
+    """
+    pdir = _resolve_profile(name)
+    etag = _activity_log_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed since it was loaded; "
+            "reload before deleting the habit plan.",
+            etag,
+        )
+    log = activity_log.load(pdir)
+    plan = _resolve_habit_plan_or_404(log, plan_id)
+    confirm = (body.confirm_title if body else "") or ""
+    if confirm != plan.title:
+        raise ApiError(
+            422,
+            "habit_plan_delete_confirm_mismatch",
+            "confirm_title must match the habit plan title exactly "
+            f"({plan.title!r}).",
+        )
+    try:
+        deleted = activity_log.delete_habit_plan(
+            pdir,
+            plan.id,
+            expected_snapshot=file_state.snapshot_file(
+                pdir / activity_log.ACTIVITY_LOG_FILENAME
+            ),
+        )
+    except file_state.FileConflictError:
+        # TOCTOU closure: a concurrent write landed between the If-Match
+        # check and the in-lock snapshot re-check.
+        return _kanban_error(
+            412,
+            "etag_mismatch",
+            "activity-log.yaml changed while deleting the habit plan; "
+            "reload before retrying.",
+            _activity_log_etag(pdir),
+        )
+    if deleted is None:
+        # Vanished between the resolve and the locked delete.
+        raise ApiError(
+            404,
+            "habit_plan_not_found",
+            f"Unknown habit plan for profile {pdir.name}: "
+            f"{plan_id.strip()}",
+        )
+    cards_removed: list[str] = []
+    if body is None or body.delete_open_cards:
+        cards_removed = _delete_plan_week_cards(pdir, plan)
+    if body is not None and body.record_chronicle:
+        _append_chronicle_entry(
+            pdir,
+            "habit_plan.deleted",
+            ref=plan.id,
+            note=plan.title,
+            snapshot=file_state.snapshot_file(
+                pdir / chronicle_core.CHRONICLE_FILENAME
+            ),
+        )
+    trace_paths = [pdir / activity_log.ACTIVITY_LOG_FILENAME]
+    if cards_removed:
+        trace_paths.append(kanban_path(pdir))
+    if body is not None and body.record_chronicle:
+        trace_paths.append(pdir / chronicle_core.CHRONICLE_FILENAME)
+    _record_agent_writeback(
+        user,
+        pdir.name,
+        action="habit_plan.delete",
+        target_owner="work",
+        note=(
+            f"habit plan delete: {plan.title!r} "
+            f"({len(cards_removed)} cards removed)"
+        ),
+        refs={"plan_id": plan.id, "cards_removed": len(cards_removed)},
+        changed_paths=trace_paths,
+    )
+    response.headers["ETag"] = _activity_log_etag(pdir)
+    return HabitPlanDeleteResponse(
+        ok=True,
+        deleted_id=plan.id,
+        cards_removed=len(cards_removed),
     )
 
 

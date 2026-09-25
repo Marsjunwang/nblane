@@ -43,6 +43,8 @@ import type {
   HabitDeleteResponse,
   HabitPlan,
   HabitPlanCreateRequest,
+  HabitPlanDeleteRequest,
+  HabitPlanDeleteResponse,
   HabitPlanListResponse,
   HabitPlanMutationResponse,
   HabitPlanPatchRequest,
@@ -691,6 +693,30 @@ export function usePatchHabitPlan(profile: string) {
         body,
       ),
     onSuccess: invalidate,
+  });
+}
+
+/**
+ * Delete one phase plan for good (type-the-name confirm): DELETE
+ * .../habit-plans/{id} with {confirm_title, delete_open_cards,
+ * record_chronicle} → {ok, deleted_id, cards_removed}. 422
+ * `habit_plan_delete_confirm_mismatch` means the typed title differs;
+ * check-in rows are never touched server-side.
+ */
+export function useDeleteHabitPlan(profile: string) {
+  const invalidate = useInvalidateHabitPlans(profile);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ planId, body }: { planId: string; body: HabitPlanDeleteRequest }) =>
+      apiDelete<HabitPlanDeleteResponse>(
+        `${habitPlansBase(profile)}/${encodeURIComponent(planId)}`,
+        body,
+      ),
+    onSuccess: () => {
+      invalidate();
+      // record_chronicle=true appends a habit_plan.deleted entry.
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'chronicle'] });
+    },
   });
 }
 

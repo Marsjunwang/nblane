@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-09-24
+last_verified: 2026-09-25
 source_of_truth: true
 ---
 
@@ -75,6 +75,8 @@ append-only;每条 `{date, kind, ref, note}`。`core/chronicle.py` 的
 `project.deleted`(2026-09-23 起,仅在删除项目时显式勾选「记入大事记」
 才落笔,默认不记)、`habit.deleted`(2026-09-24,习惯删除同样默认不记,
 `record_chronicle=true` 才落笔,ref = habit id,note = 习惯标题)、
+`habit_plan.deleted`(2026-09-25,阶段计划删除同样默认不记,
+`record_chronicle=true` 才落笔,ref = plan id,note = 计划标题)、
 `task.deleted`(2026-09-24,看板任务删除同样默认不记,
 `record_chronicle=true` 才落笔,ref = 任务 id,note = 任务标题)、
 `skill.lit`(2026-09-24,技能节点状态沿 locked→learning→solid→expert
@@ -422,6 +424,34 @@ project-board.yaml
     其他 habit 的行不动;`record_chronicle=true` 时追加 `habit.deleted`
     (默认不记)。核心实现 `core/activity_log.py` 的
     `set_habit_archived` / `delete_habit`,均走写锁 + 锁内快照复核。
+- 习惯阶段计划 habit_plans(2026-09-24 落地,2026-09-25 扩展,activity-log.yaml):
+  - 模型:`HabitPlan {id, title, habit_id, start_date, end_date, status,
+    weekly_tasks, daily_tasks}`;`status` 只前进(active → completed/archived)。
+    计划只存 `habit_id`,项目/目标上下文经 `case.habit_id` 派生。
+  - 任务粒度双轨并存:`weekly_tasks`(周 1..N 顺序全覆盖)与
+    `daily_tasks`(天粒度,day 从 1 起、不超过总天数,稀疏覆盖——没安排的天
+    = 合法休息日)至少一种非空;旧计划只有 weekly 不受影响。
+  - 端点:`GET/POST .../habit-plans`、`PATCH .../habit-plans/{plan_id}`;
+    POST 的 `project_id` 三态——显式传则周卡挂它(case 不存在 422
+    `project_not_found`),空串不挂,不传则自动找 habit 对应 active case。
+    `generate_weekly_cards`(默认开)每周一张 Queue 卡(`"<title> W<n>"`,
+    planned 日期 = 周窗口);daily 非空时 todos = 该周覆盖天的逐日行
+    (`D<day> <task>`,一天多任务多行),否则沿用 weekly_tasks。
+  - 进度:GET 响应带 `current_week` / `current_day`(今日落在区间内的第几天,
+    区间外为 0)/ `today_tasks`(今日任务,无安排 = 空列表)/ 逐周打卡覆盖。
+  - 打卡绑定:`POST .../checkins` 的 `plan_id` 通过校验(未知/异 habit/非
+    active/超出窗口均 422)后,后端派生并落盘 `week_number` 与 `day_number`
+    (打卡日期 - start_date + 1);Checkin 模型两字段 round-trip,零值不落盘。
+  - `DELETE .../habit-plans/{plan_id}`(body `{confirm_title,
+    delete_open_cards=true, record_chronicle=false}`):裁决同习惯删除——
+    `confirm_title` 逐字匹配否则 422 `habit_plan_delete_confirm_mismatch`;
+    任意状态(active/completed/archived)可删;删除 plan 实体 +
+    (默认)把该计划生成、仍在 Queue/Doing 的周卡从 kanban.md 移除(精确匹配
+    `"<title> W<n>"` + planned 窗口,Done 卡保留作历史);checkins 不动
+    (`plan_id` 留作溯源);`record_chronicle=true` 时追加 `habit_plan.deleted`。
+    ETag/412 走 activity-log.yaml 指纹,kanban 修剪走 `save_kanban_with_merge`
+    三方合并;核心实现 `core/activity_log.py` 的 `delete_habit_plan`。
+    openclaw 客户端硬拒 delete 纪律不变——计划删除只走 SPA/人工确认。
 - 证据 `breakthrough` 字段(2026-09-24,evidence-pool.yaml):可选 bool,
   默认 false(为 true 时才落盘),标记里程碑级证据;`EvidenceRecord`
   解析模型与 raw 路径(`load_evidence_pool_raw` / `update_evidence_pool`)

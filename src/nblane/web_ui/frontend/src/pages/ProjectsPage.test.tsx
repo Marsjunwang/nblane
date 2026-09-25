@@ -1521,7 +1521,7 @@ describe('ProjectsPage habit phase plans', () => {
     expect(within(lane).queryByTestId('habit-plan-section')).toBeNull();
   });
 
-  it('习惯行菜单 新建计划 opens the modal with 28-day defaults and 4 week blocks', async () => {
+  it('习惯行菜单 新建计划 opens the modal with 28-day defaults; 按周 shows 4 week blocks', async () => {
     stubFetch(stubPlans([ACTIVE_PLAN]));
     renderPage();
     await screen.findByTestId('habit-band-row-exercise');
@@ -1536,6 +1536,9 @@ describe('ProjectsPage habit phase plans', () => {
     // Board today 2026-09-23 → +27 days = 2026-10-20, inclusive 28 days.
     expect(screen.getByTestId('habit-plan-start-exercise')).toHaveValue('2026-09-23');
     expect(screen.getByTestId('habit-plan-end-exercise')).toHaveValue('2026-10-20');
+    // Default 录入方式 is 按天: 28 day rows; switch to 按周 for the week blocks.
+    expect(within(modal).getByTestId('habit-plan-day-exercise-28')).toBeInTheDocument();
+    fireEvent.click(within(modal).getByText('按周'));
     for (const week of [1, 2, 3, 4]) {
       expect(within(modal).getByTestId(`habit-plan-week-exercise-${week}`)).toBeInTheDocument();
     }
@@ -1551,7 +1554,8 @@ describe('ProjectsPage habit phase plans', () => {
 
     fireEvent.click(screen.getByTestId('habit-menu-exercise'));
     fireEvent.click(await screen.findByTestId('habit-new-plan-exercise'));
-    await screen.findByTestId('new-habit-plan-modal-exercise');
+    const modal = await screen.findByTestId('new-habit-plan-modal-exercise');
+    fireEvent.click(within(modal).getByText('按周'));
 
     // 7 days → exactly 1 week; typed text survives later resizes.
     fireEvent.change(screen.getByTestId('habit-plan-end-exercise'), {
@@ -1595,7 +1599,8 @@ describe('ProjectsPage habit phase plans', () => {
 
     fireEvent.click(screen.getByTestId('habit-menu-exercise'));
     fireEvent.click(await screen.findByTestId('habit-new-plan-exercise'));
-    await screen.findByTestId('new-habit-plan-modal-exercise');
+    const modal = await screen.findByTestId('new-habit-plan-modal-exercise');
+    fireEvent.click(within(modal).getByText('按周'));
 
     fireEvent.change(screen.getByTestId('habit-plan-title-exercise'), {
       target: { value: '秋季冲刺' },
@@ -1627,6 +1632,8 @@ describe('ProjectsPage habit phase plans', () => {
       start_date: '2026-09-23',
       end_date: '2026-10-20',
       generate_weekly_cards: true,
+      // The habit has no active case on the board → default pick is 不挂项目.
+      project_id: '',
       weekly_tasks: [
         { week: 1, tasks: ['控制饮食', '每天 8k 步'] },
         { week: 2, tasks: ['晨跑 3 次'] },
@@ -1655,7 +1662,8 @@ describe('ProjectsPage habit phase plans', () => {
 
     fireEvent.click(screen.getByTestId('habit-menu-exercise'));
     fireEvent.click(await screen.findByTestId('habit-new-plan-exercise'));
-    await screen.findByTestId('new-habit-plan-modal-exercise');
+    const modal = await screen.findByTestId('new-habit-plan-modal-exercise');
+    fireEvent.click(within(modal).getByText('按周'));
 
     for (const week of [1, 2, 3, 4]) {
       fireEvent.change(screen.getByTestId(`habit-plan-week-exercise-${week}`), {

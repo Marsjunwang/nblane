@@ -12,14 +12,19 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 import yaml
 from fastapi.testclient import TestClient
 
-from nblane.core.kanban_io import KANBAN_QUEUE, parse_kanban
+from nblane.core.kanban_io import (
+    KANBAN_DOING,
+    KANBAN_DONE,
+    KANBAN_QUEUE,
+    parse_kanban,
+)
 from nblane.web_api import app
 
 ACTIVITY_LOG_FIXTURE = {
@@ -81,6 +86,14 @@ def _read_activity_log(pdir: Path) -> dict:
     return yaml.safe_load(
         (pdir / "activity-log.yaml").read_text(encoding="utf-8")
     )
+
+
+def _read_chronicle(pdir: Path) -> list[dict]:
+    path = pdir / "chronicle.yaml"
+    if not path.exists():
+        return []
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return list(raw.get("entries") or [])
 
 
 class HabitPlanTestBase(unittest.TestCase):
@@ -627,6 +640,513 @@ class TestHabitPlanEtagDiscipline(HabitPlanTestBase):
         self.assertEqual(created.status_code, 201)
         self.assertEqual(patched.status_code, 200)
         self.assertEqual(patched.json()["plan"]["status"], "archived")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+DAILY_PLAN_BODY = {
+    "title": "14天口语冲刺",
+    "habit_id": "reading",
+    "start_date": "2026-09-25",
+    "end_date": "2026-10-08",
+    "daily_tasks": [
+        {"day": 1, "tasks": ["跟读10min", "录音复盘"]},
+        {"day": 2, "tasks": ["跟读10min"]},
+        # day 3 intentionally absent: rest day.
+        {"day": 8, "tasks": ["阶段测评"]},
+        {"day": 14, "tasks": ["总结"]},
+    ],
+}
+
+
+class TestHabitPlanDailyTasks(HabitPlanTestBase):
+    """Daily-granularity plans: round-trip, validation, week-card todos."""
+
+    def test_create_daily_only_plan_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            payload = self._create_plan(
+                client,
+                **DAILY_PLAN_BODY,
+                weekly_tasks=[],
+                generate_weekly_cards=False,
+            )
+            disk = _read_activity_log(pdir)
+            listing = client.get("/api/v1/profiles/alice/habit-plans")
+
+        plan = payload["plan"]
+        self.assertEqual(plan["weekly_tasks"], [])
+        self.assertEqual(
+            [(d["day"], d["tasks"]) for d in plan["daily_tasks"]],
+            [
+                (1, ["跟读10min", "录音复盘"]),
+                (2, ["跟读10min"]),
+                (8, ["阶段测评"]),
+                (14, ["总结"]),
+            ],
+        )
+        self.assertEqual(plan["days_total"], 14)
+        stored = disk["habit_plans"][0]
+        self.assertNotIn("weekly_tasks", stored)
+        self.assertEqual(
+            stored["daily_tasks"],
+            [
+                {"day": 1, "tasks": ["跟读10min", "录音复盘"]},
+                {"day": 2, "tasks": ["跟读10min"]},
+                {"day": 8, "tasks": ["阶段测评"]},
+                {"day": 14, "tasks": ["总结"]},
+            ],
+        )
+        listed = listing.json()["plans"][0]
+        self.assertEqual(listed["daily_tasks"], plan["daily_tasks"])
+
+    def test_create_with_both_weekly_and_daily_keeps_both(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            _write_profile(root)
+            client = self._client(root)
+            payload = self._create_plan(
+                client,
+                **DAILY_PLAN_BODY,
+                weekly_tasks=[
+                    {"week": 1, "tasks": ["周目标1"]},
+                    {"week": 2, "tasks": ["周目标2"]},
+                ],
+                generate_weekly_cards=False,
+            )
+
+        plan = payload["plan"]
+        self.assertEqual(len(plan["weekly_tasks"]), 2)
+        self.assertEqual(len(plan["daily_tasks"]), 4)
+
+    def test_create_rejects_plan_without_any_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            _write_profile(root)
+            client = self._client(root)
+            response = client.post(
+                "/api/v1/profiles/alice/habit-plans",
+                json={
+                    "title": "空计划",
+                    "habit_id": "exercise",
+                    "start_date": "2026-09-25",
+                    "end_date": "2026-10-01",
+                },
+            )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["code"], "habit_plan_tasks_required")
+
+    def test_create_rejects_daily_tasks_out_of_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            _write_profile(root)
+            client = self._client(root)
+            for daily in (
+                [{"day": 0, "tasks": ["x"]}],
+                [{"day": 15, "tasks": ["x"]}],  # plan has 14 days
+                [{"day": 2, "tasks": ["x"]}, {"day": 1, "tasks": ["y"]}],
+                [{"day": 1, "tasks": ["x"]}, {"day": 1, "tasks": ["y"]}],
+            ):
+                response = client.post(
+                    "/api/v1/profiles/alice/habit-plans",
+                    json=dict(DAILY_PLAN_BODY, weekly_tasks=[], daily_tasks=daily),
+                )
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertEqual(response.json()["code"], "invalid_daily_tasks")
+
+    def test_daily_plan_generates_per_day_todo_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            payload = self._create_plan(
+                client, **DAILY_PLAN_BODY, weekly_tasks=[]
+            )
+            queue = parse_kanban(pdir).get(KANBAN_QUEUE) or []
+
+        self.assertEqual(len(payload["kanban_card_ids"]), 2)
+        self.assertEqual([task.title for task in queue],
+                         ["14天口语冲刺 W1", "14天口语冲刺 W2"])
+        self.assertEqual(
+            [todo.text for todo in queue[0].todos],
+            ["D1 跟读10min", "D1 录音复盘", "D2 跟读10min"],
+        )
+        self.assertEqual(
+            [todo.text for todo in queue[1].todos],
+            ["D8 阶段测评", "D14 总结"],
+        )
+
+    def test_weekly_only_plan_keeps_plain_todos(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            self._create_plan(client)
+            queue = parse_kanban(pdir).get(KANBAN_QUEUE) or []
+
+        self.assertEqual(
+            [todo.text for todo in queue[0].todos],
+            ["每日晨跑30min", "晚餐碳水减半"],
+        )
+
+    def test_current_day_and_today_tasks_track_today(self) -> None:
+        today = date.today()
+        start = (today - timedelta(days=1)).isoformat()
+        end = (today + timedelta(days=5)).isoformat()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            _write_profile(root)
+            client = self._client(root)
+            created = self._create_plan(
+                client,
+                title="本周冲刺",
+                habit_id="exercise",
+                start_date=start,
+                end_date=end,
+                weekly_tasks=[],
+                daily_tasks=[
+                    {"day": 2, "tasks": ["今日任务A", "今日任务B"]},
+                ],
+                generate_weekly_cards=False,
+            )
+            rest = self._create_plan(
+                client,
+                title="休息日计划",
+                habit_id="exercise",
+                start_date=start,
+                end_date=end,
+                weekly_tasks=[],
+                daily_tasks=[{"day": 5, "tasks": ["未来任务"]}],
+                generate_weekly_cards=False,
+            )
+            past = self._create_plan(
+                client,
+                title="已结束",
+                habit_id="exercise",
+                start_date="2026-01-01",
+                end_date="2026-01-07",
+                weekly_tasks=[],
+                daily_tasks=[{"day": 1, "tasks": ["旧任务"]}],
+                generate_weekly_cards=False,
+            )
+
+        current = created["plan"]
+        self.assertEqual(current["current_day"], 2)
+        self.assertEqual(current["today_tasks"], ["今日任务A", "今日任务B"])
+        # A day without a daily entry is a legal rest day: empty list.
+        self.assertEqual(rest["plan"]["current_day"], 2)
+        self.assertEqual(rest["plan"]["today_tasks"], [])
+        # Outside the window there is no current day.
+        self.assertEqual(past["plan"]["current_day"], 0)
+        self.assertEqual(past["plan"]["today_tasks"], [])
+
+
+class TestHabitPlanCheckinDayNumber(HabitPlanTestBase):
+    """POST /checkins stores the plan-relative day_number too."""
+
+    def test_checkin_with_plan_writes_day_number(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            created = self._create_plan(client, generate_weekly_cards=False)
+            plan_id = created["plan"]["id"]
+            response = client.post(
+                "/api/v1/profiles/alice/checkins",
+                json={
+                    "habit": "exercise",
+                    "plan_id": plan_id,
+                    "date": "2026-10-03",
+                },
+            )
+            disk = _read_activity_log(pdir)
+
+        self.assertEqual(response.status_code, 201, response.text)
+        checkin = response.json()["checkin"]
+        # 2026-10-03 is plan day 9 (start 2026-09-25), week 2.
+        self.assertEqual(checkin["week_number"], 2)
+        self.assertEqual(checkin["day_number"], 9)
+        stored = disk["checkins"][-1]
+        self.assertEqual(stored["week_number"], 2)
+        self.assertEqual(stored["day_number"], 9)
+
+    def test_checkin_without_plan_omits_day_number(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            response = client.post(
+                "/api/v1/profiles/alice/checkins",
+                json={"habit": "exercise", "date": "2026-09-26"},
+            )
+            disk = _read_activity_log(pdir)
+
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()["checkin"]["day_number"], 0)
+        self.assertNotIn("day_number", disk["checkins"][-1])
+
+
+class TestHabitPlanProjectMount(HabitPlanTestBase):
+    """POST /habit-plans project_id tri-state: explicit/empty/omitted."""
+
+    def test_explicit_project_id_mounts_cards_on_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            payload = self._create_plan(client, project_id="pc_old")
+            queue = parse_kanban(pdir).get(KANBAN_QUEUE) or []
+
+        self.assertEqual(len(payload["kanban_card_ids"]), 4)
+        self.assertTrue(all(task.project_id == "pc_old" for task in queue))
+
+    def test_unknown_project_id_is_422(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            _write_profile(root)
+            client = self._client(root)
+            response = client.post(
+                "/api/v1/profiles/alice/habit-plans",
+                json=dict(PLAN_BODY, project_id="pc_ghost"),
+            )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["code"], "project_not_found")
+
+    def test_empty_project_id_keeps_cards_unlinked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            payload = self._create_plan(client, project_id="")
+            queue = parse_kanban(pdir).get(KANBAN_QUEUE) or []
+
+        self.assertEqual(len(payload["kanban_card_ids"]), 4)
+        self.assertTrue(all(task.project_id == "" for task in queue))
+
+    def test_omitted_project_id_keeps_auto_link(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            payload = self._create_plan(client)
+            queue = parse_kanban(pdir).get(KANBAN_QUEUE) or []
+
+        self.assertTrue(all(task.project_id == "pc_fitness" for task in queue))
+
+
+class TestHabitPlanDelete(HabitPlanTestBase):
+    """DELETE /habit-plans/{plan_id} — confirmed delete with card prune."""
+
+    def _delete(
+        self,
+        client: TestClient,
+        plan_id: str,
+        body: dict | None = None,
+        **kwargs: object,
+    ):
+        return client.request(
+            "DELETE",
+            f"/api/v1/profiles/alice/habit-plans/{plan_id}",
+            json=body,
+            **kwargs,
+        )
+
+    def test_delete_removes_plan_and_open_cards_keeps_done(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            created = self._create_plan(client)
+            plan_id = created["plan"]["id"]
+            card_ids = created["kanban_card_ids"]
+            # W2 -> Doing, W4 -> Done; W1/W3 stay in Queue.
+            moved = client.post(
+                f"/api/v1/profiles/alice/kanban/cards/{card_ids[1]}/move",
+                json={"target_section": "Doing"},
+            )
+            self.assertEqual(moved.status_code, 200, moved.text)
+            done = client.post(
+                f"/api/v1/profiles/alice/kanban/cards/{card_ids[3]}/done"
+            )
+            self.assertEqual(done.status_code, 200, done.text)
+            deleted = self._delete(
+                client, plan_id, {"confirm_title": "28天减脂计划"}
+            )
+            sections = parse_kanban(pdir)
+            disk = _read_activity_log(pdir)
+
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["deleted_id"], plan_id)
+        self.assertEqual(deleted.json()["cards_removed"], 3)
+        self.assertEqual(disk.get("habit_plans"), [])
+        queue = sections.get(KANBAN_QUEUE) or []
+        doing = sections.get(KANBAN_DOING) or []
+        done_cards = sections.get(KANBAN_DONE) or []
+        self.assertEqual(queue, [])
+        self.assertEqual(doing, [])
+        self.assertEqual([task.title for task in done_cards], ["28天减脂计划 W4"])
+
+    def test_delete_requires_exact_confirm_title(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            created = self._create_plan(client, generate_weekly_cards=False)
+            plan_id = created["plan"]["id"]
+            mismatch = self._delete(
+                client, plan_id, {"confirm_title": "减脂计划"}
+            )
+            missing = self._delete(client, plan_id, {})
+            disk = _read_activity_log(pdir)
+
+        for response in (mismatch, missing):
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(
+                response.json()["code"], "habit_plan_delete_confirm_mismatch"
+            )
+        self.assertEqual(len(disk["habit_plans"]), 1)
+
+    def test_delete_without_card_prune_keeps_open_cards(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            created = self._create_plan(client)
+            plan_id = created["plan"]["id"]
+            deleted = self._delete(
+                client,
+                plan_id,
+                {"confirm_title": "28天减脂计划", "delete_open_cards": False},
+            )
+            queue = parse_kanban(pdir).get(KANBAN_QUEUE) or []
+
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["cards_removed"], 0)
+        self.assertEqual(len(queue), 4)
+
+    def test_delete_keeps_checkin_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            created = self._create_plan(client, generate_weekly_cards=False)
+            plan_id = created["plan"]["id"]
+            checkin = client.post(
+                "/api/v1/profiles/alice/checkins",
+                json={
+                    "habit": "exercise",
+                    "plan_id": plan_id,
+                    "date": "2026-09-26",
+                },
+            )
+            self.assertEqual(checkin.status_code, 201, checkin.text)
+            deleted = self._delete(
+                client, plan_id, {"confirm_title": "28天减脂计划"}
+            )
+            disk = _read_activity_log(pdir)
+
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(disk.get("habit_plans"), [])
+        self.assertEqual(len(disk["checkins"]), 1)
+        self.assertEqual(disk["checkins"][0]["plan_id"], plan_id)
+        self.assertEqual(disk["checkins"][0]["day_number"], 2)
+
+    def test_delete_with_record_chronicle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            created = self._create_plan(client, generate_weekly_cards=False)
+            plan_id = created["plan"]["id"]
+            deleted = self._delete(
+                client,
+                plan_id,
+                {"confirm_title": "28天减脂计划", "record_chronicle": True},
+            )
+            entries = _read_chronicle(pdir)
+
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["kind"], "habit_plan.deleted")
+        self.assertEqual(entries[0]["ref"], plan_id)
+        self.assertEqual(entries[0]["note"], "28天减脂计划")
+
+    def test_delete_default_writes_no_chronicle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            pdir = _write_profile(root)
+            client = self._client(root)
+            created = self._create_plan(client, generate_weekly_cards=False)
+            deleted = self._delete(
+                client,
+                created["plan"]["id"],
+                {"confirm_title": "28天减脂计划"},
+            )
+
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertFalse((pdir / "chronicle.yaml").exists())
+
+    def test_delete_completed_plan_allowed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            _write_profile(root)
+            client = self._client(root)
+            created = self._create_plan(client, generate_weekly_cards=False)
+            plan_id = created["plan"]["id"]
+            patched = client.patch(
+                f"/api/v1/profiles/alice/habit-plans/{plan_id}",
+                json={"status": "completed"},
+            )
+            self.assertEqual(patched.status_code, 200, patched.text)
+            deleted = self._delete(
+                client, plan_id, {"confirm_title": "28天减脂计划"}
+            )
+
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["deleted_id"], plan_id)
+
+    def test_delete_unknown_plan_is_404(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            _write_profile(root)
+            client = self._client(root)
+            response = self._delete(
+                client, "hp_ghost", {"confirm_title": "x"}
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["code"], "habit_plan_not_found")
+
+    def test_delete_etag_discipline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            _write_profile(root)
+            client = self._client(root)
+            created = self._create_plan(client, generate_weekly_cards=False)
+            plan_id = created["plan"]["id"]
+            listing = client.get("/api/v1/profiles/alice/habit-plans")
+            stale = self._delete(
+                client,
+                plan_id,
+                {"confirm_title": "28天减脂计划"},
+                headers={"If-Match": 'W/"bogus"'},
+            )
+            fresh = self._delete(
+                client,
+                plan_id,
+                {"confirm_title": "28天减脂计划"},
+                headers={"If-Match": listing.headers["etag"]},
+            )
+
+        self.assertEqual(stale.status_code, 412)
+        self.assertEqual(stale.json()["code"], "etag_mismatch")
+        self.assertTrue(stale.headers.get("etag"))
+        self.assertEqual(fresh.status_code, 200, fresh.text)
 
 
 if __name__ == "__main__":

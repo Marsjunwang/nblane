@@ -8,7 +8,8 @@
 // hover-revealed 设置 affordance that opens the ProjectEditDrawer for the
 // linked case (basics/milestones/delete live there — 日课项目可删除).
 // Phase plans (GET .../habit-plans, status=active) add a gold-outlined badge
-// per plan (「28天减脂 · W2/4」) and turn 打卡 into a two-step bind: with
+// per plan (「28天减脂 · W2/4」, daily plans add the day: 「… · 第3天 · W1/4」)
+// and turn 打卡 into a two-step bind: with
 // exactly one in-window plan an inline 计入「…」计划 checkbox confirm opens
 // (uncheck = plain check-in), with several a plan picker (含 不计入计划),
 // with none the check-in posts directly without plan_id. The ETag discipline

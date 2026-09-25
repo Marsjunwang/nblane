@@ -28,9 +28,23 @@ import type {
   UniqueIdentifier,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { ActionIcon, Badge, Box, Group, Progress, ScrollArea, Stack, Text } from '@mantine/core';
+import {
+  ActionIcon,
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Checkbox,
+  Group,
+  Modal,
+  Progress,
+  ScrollArea,
+  Stack,
+  Text,
+  TextInput,
+} from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconEdit } from '@tabler/icons-react';
+import { IconEdit, IconTrash } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError } from '../../api/client';
@@ -38,6 +52,7 @@ import {
   useActiveHabitPlans,
   useAddKanbanCard,
   useAddProjectTask,
+  useDeleteHabitPlan,
   useDoneKanbanCard,
   useMoveKanbanCard,
 } from '../../api/hooks';
@@ -47,7 +62,12 @@ import type {
   ProjectsBoardProject,
   ProjectsBoardTask,
 } from '../../api/types';
-import { activePlansForHabit, planTotalWeeks } from './habitPlans';
+import {
+  activePlansForHabit,
+  planHasDaily,
+  planProgressLabel,
+  planTodayTasks,
+} from './habitPlans';
 import { LaneColumn, laneColumnDroppableId } from './LaneColumn';
 import { QuickAddInput } from './QuickAddInput';
 import { SortableTaskCard, TaskCardBody } from './TaskCard';
@@ -500,12 +520,137 @@ export function TaskLaneDnd({
 }
 
 /**
- * 阶段计划 readout for lanes whose case links a habit with an active phase
- * plan: plan title + 起止 + completion bar + the current week's task list
- * (read-only — the actionable checkboxes live on the generated weekly
- * kanban cards). Shares the cached active-plans query with the 日课栏.
+ * 删除计划 confirm modal: type-the-name guard (逐字) + 「同时删除未完成的周卡」
+ * (default on) + 「记入大事记」 (default off), with a consequence preview
+ * (打卡历史保留,plan_id 仍可追溯;Done 周卡留作历史). 422
+ * `habit_plan_delete_confirm_mismatch` lands as an inline field error.
  */
-export function HabitPlanSection({ plans }: { plans: HabitPlan[] }) {
+export function DeleteHabitPlanModal({
+  profile,
+  plan,
+  opened,
+  onClose,
+}: {
+  profile: string;
+  plan: HabitPlan;
+  opened: boolean;
+  onClose: () => void;
+}) {
+  const remove = useDeleteHabitPlan(profile);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [deleteOpenCards, setDeleteOpenCards] = useState(true);
+  const [recordChronicle, setRecordChronicle] = useState(false);
+  const confirmed = confirmTitle === plan.title;
+
+  const close = () => {
+    setConfirmTitle('');
+    setDeleteOpenCards(true);
+    setRecordChronicle(false);
+    remove.reset();
+    onClose();
+  };
+
+  const runDelete = () => {
+    remove.mutate(
+      {
+        planId: plan.id,
+        body: {
+          confirm_title: confirmTitle,
+          delete_open_cards: deleteOpenCards,
+          record_chronicle: recordChronicle,
+        },
+      },
+      {
+        onSuccess: (result) => {
+          notifications.show({
+            color: 'green',
+            title: '计划已删除',
+            message:
+              `「${plan.title}」已删除` +
+              (result.cards_removed
+                ? `,同时移除 ${result.cards_removed} 张未完成的周卡;打卡历史保留。`
+                : ';打卡历史保留。'),
+          });
+          close();
+        },
+      },
+    );
+  };
+
+  const mismatch =
+    remove.error instanceof ApiError &&
+    remove.error.status === 422 &&
+    remove.error.code === 'habit_plan_delete_confirm_mismatch';
+
+  return (
+    <Modal
+      opened={opened}
+      onClose={close}
+      title={`删除计划 · ${plan.title}`}
+      data-testid={`delete-habit-plan-modal-${plan.id}`}
+    >
+      <Stack gap="sm">
+        <Alert color="red" title="后果预告" data-testid={`delete-habit-plan-preview-${plan.id}`}>
+          打卡历史保留(plan_id 仍可追溯);已完成的周卡保留为历史。
+          {deleteOpenCards ? '仍在 Queue/Doing 的周卡将一并移除。' : '未完成的周卡将保留在看板中。'}
+          此操作不可撤销。
+        </Alert>
+        <TextInput
+          label={`输入计划名「${plan.title}」以确认`}
+          placeholder={plan.title}
+          value={confirmTitle}
+          onChange={(event) => setConfirmTitle(event.currentTarget.value)}
+          error={mismatch ? '计划名不匹配,请逐字输入。' : undefined}
+          data-testid={`delete-habit-plan-confirm-title-${plan.id}`}
+        />
+        <Checkbox
+          label="同时删除未完成的周卡(Queue/Doing 中的计划周卡一并移除)"
+          checked={deleteOpenCards}
+          onChange={(event) => setDeleteOpenCards(event.currentTarget.checked)}
+          data-testid={`delete-habit-plan-delete-cards-${plan.id}`}
+        />
+        <Checkbox
+          label="记入大事记(chronicle 追加 habit_plan.deleted 条目)"
+          checked={recordChronicle}
+          onChange={(event) => setRecordChronicle(event.currentTarget.checked)}
+          data-testid={`delete-habit-plan-record-chronicle-${plan.id}`}
+        />
+        {remove.error && !mismatch && (
+          <Alert color="red" title="删除失败">
+            {remove.error.message}
+          </Alert>
+        )}
+        <Group justify="flex-end">
+          <Button variant="subtle" onClick={close}>
+            取消
+          </Button>
+          <Button
+            color="red"
+            disabled={!confirmed}
+            loading={remove.isPending}
+            onClick={runDelete}
+            data-testid={`delete-habit-plan-confirm-${plan.id}`}
+          >
+            永久删除
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+/**
+ * 阶段计划 readout for lanes whose case links a habit with an active phase
+ * plan: plan title + 起止 + progress line (W 周进度 + 第 N/M 天 for daily
+ * plans + 打卡天数 + 完成率) + completion bar + the task list — daily plans
+ * show 今日任务(第 N 天)(空 = 「今日休息/自由安排」), weekly-only plans the
+ * current week's tasks (read-only — the actionable checkboxes live on the
+ * generated weekly kanban cards). Each card carries a 删除计划 affordance
+ * opening the type-the-name confirm modal. Shares the cached active-plans
+ * query with the 日课栏.
+ */
+export function HabitPlanSection({ profile, plans }: { profile: string; plans: HabitPlan[] }) {
+  const [deletePlan, setDeletePlan] = useState<HabitPlan | null>(null);
   if (plans.length === 0) {
     return null;
   }
@@ -521,27 +666,41 @@ export function HabitPlanSection({ plans }: { plans: HabitPlan[] }) {
       }}
     >
       {plans.map((plan) => {
-        const totalWeeks = planTotalWeeks(plan);
+        const daily = planHasDaily(plan);
+        const todayReadout = daily ? planTodayTasks(plan) : null;
         const currentWeek = Math.max(plan.current_week ?? 0, 1);
-        const weekTasks =
-          (plan.weekly_tasks ?? []).find((week) => week.week === plan.current_week)?.tasks ?? [];
+        const weekTasks = daily
+          ? []
+          : ((plan.weekly_tasks ?? []).find((week) => week.week === plan.current_week)?.tasks ??
+            []);
         const rate = Math.round((plan.completion_rate ?? 0) * 100);
         return (
           <Stack key={plan.id} gap={4} data-testid={`habit-plan-card-${plan.id}`}>
-            <Group gap="xs" wrap="wrap">
-              <Text size="xs" fw={700} style={{ color: boardPalette.goldText, letterSpacing: 2 }}>
-                阶段计划
-              </Text>
-              <Text size="sm" fw={600} style={{ color: boardPalette.titleText }}>
-                {plan.title}
-              </Text>
-              <Text size="xs" style={{ color: boardPalette.dim }}>
-                {plan.start_date} ~ {plan.end_date}
-              </Text>
-              <Text size="xs" style={{ color: boardPalette.goldText }}>
-                {totalWeeks > 0 ? `W${currentWeek}/${totalWeeks} · ` : ''}打卡 {plan.days_done ?? 0}
-                /{plan.days_total ?? 0} 天 · {rate}%
-              </Text>
+            <Group gap="xs" wrap="nowrap" justify="space-between">
+              <Group gap="xs" wrap="wrap" style={{ minWidth: 0 }}>
+                <Text size="xs" fw={700} style={{ color: boardPalette.goldText, letterSpacing: 2 }}>
+                  阶段计划
+                </Text>
+                <Text size="sm" fw={600} style={{ color: boardPalette.titleText }}>
+                  {plan.title}
+                </Text>
+                <Text size="xs" style={{ color: boardPalette.dim }}>
+                  {plan.start_date} ~ {plan.end_date}
+                </Text>
+                <Text size="xs" style={{ color: boardPalette.goldText }}>
+                  {planProgressLabel(plan)}
+                </Text>
+              </Group>
+              <ActionIcon
+                variant="subtle"
+                size="sm"
+                color="red"
+                aria-label={`删除计划 ${plan.title}`}
+                onClick={() => setDeletePlan(plan)}
+                data-testid={`habit-plan-delete-open-${plan.id}`}
+              >
+                <IconTrash size={13} />
+              </ActionIcon>
             </Group>
             <Progress
               value={rate}
@@ -549,6 +708,29 @@ export function HabitPlanSection({ plans }: { plans: HabitPlan[] }) {
               color="brand"
               data-testid={`habit-plan-progress-${plan.id}`}
             />
+            {todayReadout && (
+              <Stack gap={2} data-testid={`habit-plan-today-tasks-${plan.id}`}>
+                <Text size="xs" style={{ color: boardPalette.dim }}>
+                  {todayReadout.label}
+                </Text>
+                {todayReadout.restDay ? (
+                  <Text
+                    size="xs"
+                    style={{ color: boardPalette.dim }}
+                    pl="sm"
+                    data-testid={`habit-plan-rest-day-${plan.id}`}
+                  >
+                    今日休息/自由安排
+                  </Text>
+                ) : (
+                  todayReadout.tasks.map((task, index) => (
+                    <Text key={index} size="xs" style={{ color: boardPalette.text }} pl="sm">
+                      · {task}
+                    </Text>
+                  ))
+                )}
+              </Stack>
+            )}
             {weekTasks.length > 0 && (
               <Stack gap={2} data-testid={`habit-plan-week-tasks-${plan.id}`}>
                 <Text size="xs" style={{ color: boardPalette.dim }}>
@@ -567,6 +749,14 @@ export function HabitPlanSection({ plans }: { plans: HabitPlan[] }) {
           </Stack>
         );
       })}
+      {deletePlan && (
+        <DeleteHabitPlanModal
+          profile={profile}
+          plan={deletePlan}
+          opened={deletePlan !== null}
+          onClose={() => setDeletePlan(null)}
+        />
+      )}
     </Stack>
   );
 }
@@ -690,7 +880,7 @@ export function ProjectLane({
           </ActionIcon>
         </Group>
       </Group>
-      <HabitPlanSection plans={lanePlans} />
+      <HabitPlanSection profile={profile} plans={lanePlans} />
       <TaskLaneDnd
         profile={profile}
         laneId={project.id}

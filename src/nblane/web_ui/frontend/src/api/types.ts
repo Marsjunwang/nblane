@@ -616,6 +616,10 @@ export type HabitPlan = Schemas['HabitPlanModel'];
 /** HabitPlanWeeklyTasksModel — task list for one plan week (1-based week). */
 export type HabitPlanWeeklyTasks = Schemas['HabitPlanWeeklyTasksModel'];
 
+/** HabitPlanDailyTasksModel — task list for one plan day (1-based, sparse;
+ * a day without an entry is a rest day). */
+export type HabitPlanDailyTasks = Schemas['HabitPlanDailyTasksModel'];
+
 /** HabitPlanListResponse — GET .../habit-plans payload. */
 export type HabitPlanListResponse = Schemas['HabitPlanListResponse'];
 
@@ -630,3 +634,10 @@ export type HabitPlanPatchRequest = Schemas['HabitPlanPatchRequest'];
 /** HabitPlanMutationResponse — create/patch result; `kanban_card_ids` lists
  * the weekly Queue cards generated on create. */
 export type HabitPlanMutationResponse = Schemas['HabitPlanMutationResponse'];
+
+/** HabitPlanDeleteRequest — DELETE .../habit-plans/{id} body: type-the-name
+ * confirm plus the open-cards prune / chronicle toggles. */
+export type HabitPlanDeleteRequest = Schemas['HabitPlanDeleteRequest'];
+
+/** HabitPlanDeleteResponse — {ok, deleted_id, cards_removed}. */
+export type HabitPlanDeleteResponse = Schemas['HabitPlanDeleteResponse'];

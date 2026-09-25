@@ -442,6 +442,7 @@ class Checkin:
     related_kanban: list[str] = field(default_factory=list)
     plan_id: str = ""
     week_number: int = 0
+    day_number: int = 0
 
     @classmethod
     def from_dict(cls, raw: object) -> "Checkin":
@@ -497,6 +498,7 @@ class Checkin:
             ),
             plan_id=_clean_text(raw.get("plan_id")),
             week_number=max(_parse_int(raw.get("week_number")), 0),
+            day_number=max(_parse_int(raw.get("day_number")), 0),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -538,6 +540,8 @@ class Checkin:
             out["plan_id"] = self.plan_id
         if self.week_number:
             out["week_number"] = self.week_number
+        if self.day_number:
+            out["day_number"] = self.day_number
         return out
 
 
@@ -576,6 +580,37 @@ class WeeklyTasks:
 
 
 @dataclass
+class DailyTasks:
+    """Task list for one day of a habit plan (1-based ``day``).
+
+    Days are plan-relative: day 1 is the plan's ``start_date`` and the
+    last legal day is the plan's inclusive day count. Coverage is sparse
+    by design — a day without an entry is a rest/free day.
+    """
+
+    day: int
+    tasks: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, raw: object) -> "DailyTasks":
+        """Build one day entry from YAML data."""
+        if not isinstance(raw, dict):
+            return cls(day=0)
+        try:
+            day = int(raw.get("day") or 0)
+        except (TypeError, ValueError):
+            day = 0
+        return cls(
+            day=max(day, 0),
+            tasks=_normalize_text_list(raw.get("tasks") or raw.get("task")),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize the day entry for YAML output."""
+        return {"day": self.day, "tasks": list(self.tasks)}
+
+
+@dataclass
 class HabitPlan:
     """One short-range phase plan (阶段计划) hanging under a habit.
 
@@ -591,6 +626,7 @@ class HabitPlan:
     end_date: str = ""
     status: str = "active"
     weekly_tasks: list[WeeklyTasks] = field(default_factory=list)
+    daily_tasks: list[DailyTasks] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, raw: object) -> "HabitPlan":
@@ -610,6 +646,14 @@ class HabitPlan:
                 if entry.week:
                     weekly_tasks.append(entry)
         weekly_tasks.sort(key=lambda item: item.week)
+        daily_tasks: list[DailyTasks] = []
+        raw_days = raw.get("daily_tasks")
+        if isinstance(raw_days, list):
+            for item in raw_days:
+                entry = DailyTasks.from_dict(item)
+                if entry.day:
+                    daily_tasks.append(entry)
+        daily_tasks.sort(key=lambda item: item.day)
         return cls(
             id=plan_id,
             title=title,
@@ -618,6 +662,7 @@ class HabitPlan:
             end_date=_coerce_date_text(raw.get("end_date")),
             status=status,
             weekly_tasks=weekly_tasks,
+            daily_tasks=daily_tasks,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -637,6 +682,10 @@ class HabitPlan:
         if self.weekly_tasks:
             out["weekly_tasks"] = [
                 entry.to_dict() for entry in self.weekly_tasks
+            ]
+        if self.daily_tasks:
+            out["daily_tasks"] = [
+                entry.to_dict() for entry in self.daily_tasks
             ]
         return out
 
@@ -672,6 +721,8 @@ class HabitPlanProgress:
     days_total: int = 0
     completion_rate: float = 0.0
     weeks: list[HabitPlanWeekProgress] = field(default_factory=list)
+    current_day: int = 0
+    today_tasks: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         """Serialize for API responses and tests."""
@@ -682,6 +733,8 @@ class HabitPlanProgress:
             "days_total": self.days_total,
             "completion_rate": self.completion_rate,
             "weeks": [week.to_dict() for week in self.weeks],
+            "current_day": self.current_day,
+            "today_tasks": list(self.today_tasks),
         }
 
 
@@ -1423,6 +1476,32 @@ def update_habit_plan(
     return plan
 
 
+def delete_habit_plan(
+    name_or_dir: str | Path,
+    plan_id: str,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> HabitPlan | None:
+    """Remove one habit plan by id; returns the plan, None if unknown.
+
+    Only the plan entity is removed: check-in rows keep their ``plan_id``
+    for historical traceability, and generated kanban cards are the
+    caller's concern (the route layer prunes open ones on request). The
+    save honors *expected_snapshot* with the same in-lock re-check as
+    ``save``.
+    """
+    target = _clean_text(plan_id)
+    if not target:
+        return None
+    log = load(name_or_dir)
+    plan = log.habit_plan_index().get(target)
+    if plan is None:
+        return None
+    log.habit_plans = [item for item in log.habit_plans if item.id != target]
+    save(name_or_dir, log, expected_snapshot=expected_snapshot)
+    return plan
+
+
 def plan_week_count(plan: HabitPlan) -> int:
     """Return the number of plan weeks: ceil(inclusive days / 7)."""
     start = _parse_date(plan.start_date)
@@ -1460,6 +1539,30 @@ def plan_week_number(plan: HabitPlan, when: str | date) -> int | None:
     if not (start <= day <= end):
         return None
     return (day - start).days // 7 + 1
+
+
+def plan_day_number(plan: HabitPlan, when: str | date) -> int | None:
+    """Return the 1-based plan day containing *when*, None outside."""
+    day = _parse_date(when)
+    start = _parse_date(plan.start_date)
+    end = _parse_date(plan.end_date)
+    if day is None or start is None or end is None:
+        return None
+    if not (start <= day <= end):
+        return None
+    return (day - start).days + 1
+
+
+def plan_day_tasks(plan: HabitPlan, day: int) -> list[str]:
+    """Return the stored daily tasks for plan day *day* (1-based).
+
+    A day without an entry answers an empty list — that is a legal
+    rest/free day, not a data error.
+    """
+    for entry in plan.daily_tasks:
+        if entry.day == day:
+            return list(entry.tasks)
+    return []
 
 
 def _plan_checkin_dates(plan: HabitPlan, checkins: list[Checkin]) -> set[str]:
@@ -1501,7 +1604,10 @@ def habit_plan_progress(
     today): 0 before the plan starts, clamped to the final week after it
     ends. ``days_done`` counts distinct days with a matching check-in;
     ``completion_rate`` is ``days_done / days_total`` over the whole
-    inclusive plan window.
+    inclusive plan window. When today lands inside the window,
+    ``current_day`` is the 1-based plan day and ``today_tasks`` the day's
+    tasks from ``daily_tasks`` (empty for a rest day or a plan without
+    daily tasks); both stay 0/empty outside the window.
     """
     start = _parse_date(plan.start_date)
     end = _parse_date(plan.end_date)
@@ -1510,12 +1616,16 @@ def habit_plan_progress(
     total_weeks = plan_week_count(plan)
     days_total = (end - start).days + 1
     today_date = _parse_date(today) if today is not None else date.today()
+    current_day = 0
+    today_tasks: list[str] = []
     if today_date is None or today_date < start:
         current_week = 0
     elif today_date > end:
         current_week = total_weeks
     else:
         current_week = (today_date - start).days // 7 + 1
+        current_day = (today_date - start).days + 1
+        today_tasks = plan_day_tasks(plan, current_day)
     done_dates = _plan_checkin_dates(plan, checkins)
     weeks: list[HabitPlanWeekProgress] = []
     days_done = 0
@@ -1548,6 +1658,8 @@ def habit_plan_progress(
             days_done / days_total if days_total else 0.0
         ),
         weeks=weeks,
+        current_day=current_day,
+        today_tasks=today_tasks,
     )
 
 
@@ -1570,6 +1682,7 @@ def add_activity_checkin(
     metrics: Mapping[str, object] | None = None,
     plan_id: str = "",
     week_number: int = 0,
+    day_number: int = 0,
     expected_snapshot: FileSnapshot | None = None,
 ) -> Checkin:
     """Compatibility wrapper for a one-habit check-in.
@@ -1578,9 +1691,10 @@ def add_activity_checkin(
     activity-log write lock and raises ``file_state.FileConflictError`` on
     mismatch instead of silently overwriting a concurrent edit.
 
-    *plan_id* links the row to a habit plan; *week_number* is the
-    plan-relative week the caller already computed from the check-in date
-    (see ``plan_week_number``).
+    *plan_id* links the row to a habit plan; *week_number* and
+    *day_number* are the plan-relative week/day the caller already
+    computed from the check-in date (see ``plan_week_number`` /
+    ``plan_day_number``).
     """
     log = load(name_or_dir)
     resolved_id = resolve_habit_id(log, habit_id)
@@ -1621,6 +1735,7 @@ def add_activity_checkin(
         ),
         plan_id=_clean_text(plan_id),
         week_number=max(_parse_int(week_number), 0),
+        day_number=max(_parse_int(day_number), 0),
     )
     if entry.count <= 0.0:
         raise ValueError("count must be greater than zero")

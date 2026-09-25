@@ -1702,6 +1702,7 @@ class CheckinModel(BaseModel):
     habits: list[str] = Field(default_factory=list)
     plan_id: str = ""
     week_number: int = 0
+    day_number: int = 0
     summary: str = ""
     notes: str = ""
     count: float = 1.0
@@ -1784,21 +1785,41 @@ class HabitPlanWeeklyTasksModel(BaseModel):
     tasks: list[str] = Field(default_factory=list)
 
 
+class HabitPlanDailyTasksModel(BaseModel):
+    """Task list for one plan day (1-based ``day``; sparse coverage)."""
+
+    day: int
+    tasks: list[str] = Field(default_factory=list)
+
+
 class HabitPlanCreateRequest(BaseModel):
     """Body for POST .../habit-plans (create one phase plan).
 
     ``habit_id`` must resolve to an existing habit; ``start_date`` /
-    ``end_date`` are inclusive ISO dates. ``weekly_tasks`` must cover
-    exactly ``ceil(days / 7)`` weeks, numbered 1..N in order (a partial
-    tail week is fine). ``generate_weekly_cards`` (default on) also
-    writes one Queue kanban card per week.
+    ``end_date`` are inclusive ISO dates. ``weekly_tasks`` (when given)
+    must cover exactly ``ceil(days / 7)`` weeks, numbered 1..N in order
+    (a partial tail week is fine); ``daily_tasks`` (when given) carries
+    sparse 1-based day entries bounded by the inclusive plan length — a
+    day without an entry is a rest day. At least one of the two must be
+    non-empty. ``generate_weekly_cards`` (default on) also writes one
+    Queue kanban card per week; with ``daily_tasks`` the card todos are
+    per-day lines (``D<day> <task>``). ``project_id`` is tri-state: a
+    value mounts the cards on that case (422 ``project_not_found`` when
+    unknown), an empty string keeps them project-less, and omitted falls
+    back to the habit's first active case.
     """
 
     title: str
     habit_id: str
     start_date: str
     end_date: str
-    weekly_tasks: list[HabitPlanWeeklyTasksModel]
+    weekly_tasks: list[HabitPlanWeeklyTasksModel] = Field(
+        default_factory=list
+    )
+    daily_tasks: list[HabitPlanDailyTasksModel] = Field(
+        default_factory=list
+    )
+    project_id: str | None = None
     generate_weekly_cards: bool = True
 
 
@@ -1837,7 +1858,12 @@ class HabitPlanModel(BaseModel):
     weekly_tasks: list[HabitPlanWeeklyTasksModel] = Field(
         default_factory=list
     )
+    daily_tasks: list[HabitPlanDailyTasksModel] = Field(
+        default_factory=list
+    )
     current_week: int = 0
+    current_day: int = 0
+    today_tasks: list[str] = Field(default_factory=list)
     days_done: int = 0
     days_total: int = 0
     completion_rate: float = 0.0
@@ -1861,6 +1887,33 @@ class HabitPlanMutationResponse(BaseModel):
     ok: bool
     plan: HabitPlanModel
     kanban_card_ids: list[str] = Field(default_factory=list)
+
+
+class HabitPlanDeleteRequest(BaseModel):
+    """Body for DELETE .../habit-plans/{plan_id} (confirmed delete).
+
+    ``confirm_title`` must equal the plan's title exactly, else 422
+    ``habit_plan_delete_confirm_mismatch`` — the typed-name guard against
+    fat-finger deletes. ``delete_open_cards`` (default on) also removes
+    the plan's generated week cards still sitting in Queue/Doing (Done
+    cards are kept as history); check-in rows are never touched. Opt into
+    a ``habit_plan.deleted`` chronicle entry with ``record_chronicle``.
+    """
+
+    confirm_title: str = ""
+    delete_open_cards: bool = True
+    record_chronicle: bool = False
+
+
+class HabitPlanDeleteResponse(BaseModel):
+    """Result of the habit-plan delete mutation.
+
+    ``cards_removed`` counts the generated week cards pruned from
+    Queue/Doing (0 when ``delete_open_cards`` was false)."""
+
+    ok: bool = True
+    deleted_id: str
+    cards_removed: int = 0
 
 
 # --- Habit-plan templates (Phase 2 click-to-instantiate plans) -------------

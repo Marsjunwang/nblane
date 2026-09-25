@@ -24,10 +24,13 @@ from nblane.core.activity_log import (
     add_habit_plan,
     add_checkin,
     delete_checkin,
+    delete_habit_plan,
     habit_daily_counts,
     habit_plan_progress,
     load,
     monthly_summary,
+    plan_day_number,
+    plan_day_tasks,
     plan_week_bounds,
     plan_week_count,
     plan_week_number,
@@ -971,6 +974,129 @@ class TestHabitPlans(unittest.TestCase):
 
         self.assertEqual(first.id, "hp_冲刺")
         self.assertEqual(second.id, "hp_冲刺_2")
+
+    def test_daily_tasks_round_trip(self) -> None:
+        """daily_tasks parse, sort by day, and survive a full round-trip."""
+        plan = HabitPlan.from_dict(
+            dict(
+                self.PLAN_FIXTURE,
+                daily_tasks=[
+                    {"day": 3, "tasks": ["复盘"]},
+                    {"day": 1, "tasks": ["晨跑", "拉伸"]},
+                    {"day": 0, "tasks": ["ignored"]},
+                ],
+            )
+        )
+        self.assertEqual(
+            [(d.day, d.tasks) for d in plan.daily_tasks],
+            [(1, ["晨跑", "拉伸"]), (3, ["复盘"])],
+        )
+        reloaded = HabitPlan.from_dict(plan.to_dict())
+        self.assertEqual(reloaded.to_dict(), plan.to_dict())
+
+    def test_plan_without_daily_tasks_omits_key(self) -> None:
+        """Weekly-only plans never write a daily_tasks key (legacy shape)."""
+        plan = HabitPlan.from_dict(dict(self.PLAN_FIXTURE))
+        self.assertEqual(plan.daily_tasks, [])
+        self.assertNotIn("daily_tasks", plan.to_dict())
+
+    def test_plan_day_number_and_day_tasks(self) -> None:
+        """Day numbers are 1-based inside the window; rest days are empty."""
+        plan = HabitPlan.from_dict(
+            dict(
+                self.PLAN_FIXTURE,
+                daily_tasks=[{"day": 1, "tasks": ["晨跑"]}],
+            )
+        )
+        self.assertEqual(plan_day_number(plan, "2026-09-25"), 1)
+        self.assertEqual(plan_day_number(plan, "2026-10-22"), 28)
+        self.assertIsNone(plan_day_number(plan, "2026-09-24"))
+        self.assertIsNone(plan_day_number(plan, "2026-10-23"))
+        self.assertEqual(plan_day_tasks(plan, 1), ["晨跑"])
+        self.assertEqual(plan_day_tasks(plan, 2), [])
+
+    def test_progress_reports_current_day_and_today_tasks(self) -> None:
+        """current_day/today_tasks track *today* inside the window only."""
+        plan = HabitPlan.from_dict(
+            dict(
+                self.PLAN_FIXTURE,
+                daily_tasks=[{"day": 9, "tasks": ["晨跑", "复盘"]}],
+            )
+        )
+        inside = habit_plan_progress(plan, [], today="2026-10-03")
+        self.assertEqual(inside.current_day, 9)
+        self.assertEqual(inside.today_tasks, ["晨跑", "复盘"])
+        # A day without a daily entry is a legal rest day.
+        rest = habit_plan_progress(plan, [], today="2026-10-04")
+        self.assertEqual(rest.current_day, 10)
+        self.assertEqual(rest.today_tasks, [])
+        outside = habit_plan_progress(plan, [], today="2026-12-01")
+        self.assertEqual(outside.current_day, 0)
+        self.assertEqual(outside.today_tasks, [])
+
+    def test_checkin_day_number_round_trip(self) -> None:
+        """day_number persists like week_number and is omitted when zero."""
+        entry = Checkin.from_dict(
+            {
+                "date": "2026-09-26",
+                "habit_id": "exercise",
+                "plan_id": "hp_cut",
+                "week_number": 1,
+                "day_number": 2,
+            }
+        )
+        self.assertEqual(entry.day_number, 2)
+        self.assertEqual(entry.to_dict()["day_number"], 2)
+        plain = Checkin(date="2026-09-26", habit_id="exercise")
+        self.assertNotIn("day_number", plain.to_dict())
+
+    def test_add_activity_checkin_stores_day_number(self) -> None:
+        """The compat wrapper persists the caller-computed day number."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_log(tmp)
+            with patch("nblane.core.git_backup.record_change"):
+                entry = add_activity_checkin(
+                    path,
+                    "exercise",
+                    when="2026-09-26",
+                    plan_id="hp_cut",
+                    week_number=1,
+                    day_number=2,
+                )
+            reloaded = load(path)
+
+        self.assertEqual(entry.day_number, 2)
+        stored = reloaded.checkins[-1]
+        self.assertEqual(stored.day_number, 2)
+        self.assertEqual(stored.plan_id, "hp_cut")
+
+    def test_delete_habit_plan_keeps_checkins(self) -> None:
+        """delete_habit_plan removes only the plan; check-ins keep plan_id."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_log(tmp)
+            log = load(path)
+            log.checkins.append(
+                Checkin(
+                    date="2026-09-26",
+                    habit_id="exercise",
+                    habits=["exercise"],
+                    plan_id="hp_cut",
+                    week_number=1,
+                    day_number=2,
+                )
+            )
+            with patch("nblane.core.git_backup.record_change"):
+                save(path, log)
+                deleted = delete_habit_plan(path, "hp_cut")
+                missing = delete_habit_plan(path, "hp_ghost")
+            reloaded = load(path)
+
+        self.assertIsNotNone(deleted)
+        self.assertEqual(deleted.id, "hp_cut")
+        self.assertIsNone(missing)
+        self.assertEqual(reloaded.habit_plans, [])
+        self.assertEqual(len(reloaded.checkins), 1)
+        self.assertEqual(reloaded.checkins[0].plan_id, "hp_cut")
 
 
 if __name__ == "__main__":

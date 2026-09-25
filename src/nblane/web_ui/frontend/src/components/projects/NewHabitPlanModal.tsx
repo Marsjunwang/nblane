@@ -1,22 +1,48 @@
 // 新建阶段计划 — per-habit phase-plan creation (POST .../habit-plans), opened
 // from the habit row's lifecycle menu (新建计划…). Fields: 计划名 (default
-// 「<习惯> · 28天计划」), 起止日期 (default board today → +27 days), and one
+// 「<习惯> · 28天计划」), 起止日期 (default board today → +27 days), 项目挂载
+// (active board cases; default = the habit's auto-mount case → project_id
+// omitted, 不挂项目 → '', any other case → its id), and the task editor with
+// a 按天/按周 SegmentedControl (default 按天): 按天 = one single-line input per
+// plan day (blank = rest day, assembled into sparse daily_tasks), 按周 = one
 // multiline block per week (N = ceil(days/7), one task per line, blank lines
-// dropped). Every week needs ≥1 task before submit unlocks. The create hook
+// dropped). At least one non-empty task before submit unlocks. The create hook
 // owns invalidation (habit-plans / projects-board / kanban); on success the
 // toast names the generated weekly Queue cards, on 422 the server message
 // (e.g. invalid_weekly_tasks) lands in the inline error alert.
 
-import { Button, Group, Modal, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import {
+  Button,
+  Group,
+  Modal,
+  ScrollArea,
+  SegmentedControl,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+  Textarea,
+} from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-import { useCreateHabitPlan } from '../../api/hooks';
-import type { ProjectsBoardHabit } from '../../api/types';
+import { useCreateHabitPlan, useProjectsBoard } from '../../api/hooks';
+import type { HabitPlanCreateRequest, ProjectsBoardHabit } from '../../api/types';
 import { MutationErrorAlert } from '../ConflictAlert';
+import {
+  NO_PROJECT_PICK,
+  activeCaseOptions,
+  assembleDailyTasks,
+  autoMountCaseId,
+  resizeRowTexts,
+  resolvePlanProjectId,
+} from './habitPlans';
+import { collectProjects } from './lanes';
 import { daysBetween, shiftDate } from './timelineMath';
 
 const DEFAULT_DAYS = 28;
+
+type EntryMode = 'daily' | 'weekly';
 
 /** One task per line: trim, drop blank lines. */
 function splitTasks(raw: string): string[] {
@@ -47,11 +73,17 @@ export function NewHabitPlanModal({
   onClose: () => void;
 }) {
   const create = useCreateHabitPlan(profile);
+  const board = useProjectsBoard(profile);
   const [title, setTitle] = useState('');
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
+  const [entryMode, setEntryMode] = useState<EntryMode>('daily');
   /** Raw textarea content per week (resized as the date range moves). */
   const [weekTexts, setWeekTexts] = useState<string[]>([]);
+  /** Raw single-line content per day (blank = rest day). */
+  const [dayTexts, setDayTexts] = useState<string[]>([]);
+  /** Mount pick; null = untouched → falls back to the auto-mount case. */
+  const [projectPick, setProjectPick] = useState<string | null>(null);
   const habitTitle = habit.title || habit.id;
 
   // Reset the form each time the modal opens.
@@ -62,49 +94,72 @@ export function NewHabitPlanModal({
     setTitle(`${habitTitle} · ${DEFAULT_DAYS}天计划`);
     setStart(today);
     setEnd(shiftDate(today, DEFAULT_DAYS - 1));
+    setEntryMode('daily');
     setWeekTexts([]);
+    setDayTexts([]);
+    setProjectPick(null);
     create.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, today, habit.id]);
 
+  const cases = useMemo(
+    () => (board.data ? collectProjects(board.data.board) : []),
+    [board.data],
+  );
+  const caseOptions = useMemo(() => activeCaseOptions(cases), [cases]);
+  const autoCaseId = useMemo(() => autoMountCaseId(cases, habit.id), [cases, habit.id]);
+  const mountValue = projectPick ?? (autoCaseId || NO_PROJECT_PICK);
+
   const weekCount = planWeekCount(start, end);
-  // Resize the week blocks as the date range moves, preserving typed text.
+  const dayCount = weekCount === 0 ? 0 : daysBetween(start, end) + 1;
+  const invalidRange = weekCount === 0;
+  // Resize the week/day rows as the date range moves, preserving typed text.
   useEffect(() => {
-    setWeekTexts((prev) => Array.from({ length: weekCount }, (_, index) => prev[index] ?? ''));
+    setWeekTexts((prev) => resizeRowTexts(prev, weekCount));
   }, [weekCount]);
+  useEffect(() => {
+    setDayTexts((prev) => resizeRowTexts(prev, dayCount));
+  }, [dayCount]);
 
   const weeklyTasks = weekTexts.map(splitTasks);
-  const invalidRange = weekCount === 0;
+  const dailyTasks = assembleDailyTasks(dayTexts);
   const weeksReady = weeklyTasks.length > 0 && weeklyTasks.every((tasks) => tasks.length > 0);
-  const valid = !invalidRange && title.trim().length > 0 && weeksReady;
+  const tasksReady = entryMode === 'daily' ? dailyTasks.length > 0 : weeksReady;
+  const valid = !invalidRange && title.trim().length > 0 && tasksReady;
 
   const submit = () => {
     if (!valid) {
       return;
     }
-    create.mutate(
-      {
-        title: title.trim(),
-        habit_id: habit.id,
-        start_date: start,
-        end_date: end,
-        generate_weekly_cards: true,
-        weekly_tasks: weeklyTasks.map((tasks, index) => ({ week: index + 1, tasks })),
+    const body: HabitPlanCreateRequest = {
+      title: title.trim(),
+      habit_id: habit.id,
+      start_date: start,
+      end_date: end,
+      generate_weekly_cards: true,
+    };
+    if (entryMode === 'daily') {
+      body.daily_tasks = dailyTasks;
+    } else {
+      body.weekly_tasks = weeklyTasks.map((tasks, index) => ({ week: index + 1, tasks }));
+    }
+    const projectId = resolvePlanProjectId(mountValue, autoCaseId);
+    if (projectId !== undefined) {
+      body.project_id = projectId;
+    }
+    create.mutate(body, {
+      onSuccess: (result) => {
+        const cards = result.kanban_card_ids?.length ?? 0;
+        notifications.show({
+          color: 'green',
+          title: '阶段计划已创建',
+          message:
+            `「${title.trim()}」已创建` +
+            (cards > 0 ? `,周卡已生成到看板 Queue(${cards} 张)。` : '。'),
+        });
+        onClose();
       },
-      {
-        onSuccess: (result) => {
-          const cards = result.kanban_card_ids?.length ?? 0;
-          notifications.show({
-            color: 'green',
-            title: '阶段计划已创建',
-            message:
-              `「${title.trim()}」已创建` +
-              (cards > 0 ? `,周卡已生成到看板 Queue(${cards} 张)。` : '。'),
-          });
-          onClose();
-        },
-      },
-    );
+    });
   };
 
   return (
@@ -117,7 +172,7 @@ export function NewHabitPlanModal({
     >
       <Stack gap="sm" data-testid={`new-habit-plan-modal-${habit.id}`}>
         <Text size="sm" c="dimmed">
-          按周拆解任务;创建后每周生成一张周卡进入看板 Queue 列,打卡可计入该计划。
+          按天或按周拆解任务;创建后每周生成一张周卡进入看板 Queue 列,打卡可计入该计划。
         </Text>
         <TextInput
           label="计划名"
@@ -142,7 +197,31 @@ export function NewHabitPlanModal({
             data-testid={`habit-plan-end-${habit.id}`}
           />
         </Group>
-        {!invalidRange && (
+        <Select
+          label="挂载项目"
+          description="默认挂到该习惯的进行中项目;不挂项目则周卡只进入看板、不归属任何项目。"
+          data={[
+            ...caseOptions.map((option) =>
+              option.value === autoCaseId
+                ? { ...option, label: `${option.label}(自动)` }
+                : option,
+            ),
+            { value: NO_PROJECT_PICK, label: '不挂项目' },
+          ]}
+          value={mountValue}
+          onChange={(value) => setProjectPick(value ?? NO_PROJECT_PICK)}
+          data-testid={`habit-plan-project-${habit.id}`}
+        />
+        <SegmentedControl
+          value={entryMode}
+          onChange={(value) => setEntryMode(value as EntryMode)}
+          data={[
+            { value: 'daily', label: '按天' },
+            { value: 'weekly', label: '按周' },
+          ]}
+          data-testid={`habit-plan-entry-mode-${habit.id}`}
+        />
+        {!invalidRange && entryMode === 'weekly' && (
           <Stack gap="xs">
             <Text size="xs" c="dimmed">
               每周任务(共 {weekCount} 周,一行一个任务,每周至少一条)
@@ -164,6 +243,32 @@ export function NewHabitPlanModal({
                 data-testid={`habit-plan-week-${habit.id}-${index + 1}`}
               />
             ))}
+          </Stack>
+        )}
+        {!invalidRange && entryMode === 'daily' && (
+          <Stack gap="xs">
+            <Text size="xs" c="dimmed">
+              每天任务(共 {dayCount} 天,一行一个任务,留空 = 休息日)
+            </Text>
+            <ScrollArea.Autosize mah={320} data-testid={`habit-plan-days-${habit.id}`}>
+              <Stack gap={6}>
+                {dayTexts.map((text, index) => (
+                  <TextInput
+                    key={index}
+                    label={`第 ${index + 1} 天`}
+                    placeholder="留空为休息日"
+                    value={text}
+                    onChange={(event) => {
+                      const next = event.currentTarget.value;
+                      setDayTexts((prev) =>
+                        prev.map((value, at) => (at === index ? next : value)),
+                      );
+                    }}
+                    data-testid={`habit-plan-day-${habit.id}-${index + 1}`}
+                  />
+                ))}
+              </Stack>
+            </ScrollArea.Autosize>
           </Stack>
         )}
         <MutationErrorAlert error={create.error} title="创建计划失败" />

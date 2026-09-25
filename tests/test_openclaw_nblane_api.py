@@ -67,6 +67,31 @@ class FakeServer:
                 headers={"ETag": self.etag} if self.send_etag_on_412 else {},
             )
         if request.method == "GET":
+            if path.endswith("/habit-plans"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "ok": True,
+                        "profile": "王军",
+                        "plans": [
+                            {
+                                "id": "hp_cut",
+                                "title": "28天减脂计划",
+                                "status": "active",
+                                "current_day": 3,
+                                "today_tasks": ["晨跑"],
+                            },
+                            {
+                                "id": "hp_read",
+                                "title": "读书月",
+                                "status": "completed",
+                                "current_day": 0,
+                                "today_tasks": [],
+                            },
+                        ],
+                    },
+                    headers={"ETag": self.etag},
+                )
             return httpx.Response(
                 200, json={"ok": True, "path": path}, headers={"ETag": self.etag}
             )
@@ -235,3 +260,43 @@ def test_path_normalization():
         nblane_api.normalize_path("http://evil.example/health")
     with pytest.raises(nblane_api.ApiFailure):
         nblane_api.normalize_path("health")
+
+
+def test_plans_lists_with_filters(authed, server):
+    run = nblane_api.run
+    ns = nblane_api.build_parser().parse_args
+    data = run(ns(["plans", "--habit", "exercise", "--status", "active"]), authed)
+    plans = data.json()["plans"]
+    assert [p["id"] for p in plans] == ["hp_cut", "hp_read"]
+    url = str(server.requests[-1].url)
+    assert url.endswith(
+        "/api/v1/profiles/%E7%8E%8B%E5%86%9B/habit-plans"
+        "?habit_id=exercise&status=active"
+    )
+    # No filters: bare path.
+    run(ns(["plans"]), authed)
+    assert str(server.requests[-1].url).endswith("/habit-plans")
+
+
+def test_plan_show_filters_one_plan(authed, server):
+    run = nblane_api.run
+    ns = nblane_api.build_parser().parse_args
+    plan = run(ns(["plan-show", "hp_cut"]), authed)
+    assert plan["id"] == "hp_cut"
+    assert plan["current_day"] == 3
+    assert plan["today_tasks"] == ["晨跑"]
+    with pytest.raises(nblane_api.ApiFailure, match="unknown habit plan"):
+        run(ns(["plan-show", "hp_ghost"]), authed)
+
+
+def test_checkin_plan_flag_sends_plan_id(authed, server):
+    run = nblane_api.run
+    ns = nblane_api.build_parser().parse_args
+    response = run(ns(["checkin", "锻炼", "--plan", "hp_cut"]), authed)
+    assert response.status_code == 201
+    checkin = [r for r in server.requests if r.url.path.endswith("/checkins")][-1]
+    assert json.loads(checkin.content) == {"habit": "锻炼", "plan_id": "hp_cut"}
+    # Without --plan the body carries no plan_id.
+    run(ns(["checkin", "锻炼"]), authed)
+    checkin = [r for r in server.requests if r.url.path.endswith("/checkins")][-1]
+    assert json.loads(checkin.content) == {"habit": "锻炼"}
