@@ -207,6 +207,7 @@ class ReconcileAction:
     key: str
     reason: str
     spec: AutomationSpec | None = None
+    live_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -557,6 +558,7 @@ def _normalize_live_job(job: Mapping[str, Any]) -> dict[str, Any]:
         timeout_raw = payload.get("timeoutSeconds")
     return {
         "key": str(job.get("declarationKey") or job.get("name") or ""),
+        "id": str(job.get("id") or ""),
         "cron": cron,
         "tz": tz,
         "session": str(job.get("session") or job.get("sessionTarget") or ""),
@@ -660,6 +662,7 @@ def plan_reconcile(
                     spec.key,
                     "字段漂移: " + ", ".join(drifted),
                     spec,
+                    live_id=live.get("id", ""),
                 )
             )
         else:
@@ -747,13 +750,24 @@ def build_action_argv(action: ReconcileAction) -> list[str] | None:
 
     if action.kind in (ACTION_ADD, ACTION_UPDATE):
         assert action.spec is not None
-        verb = "add" if action.kind == ACTION_ADD else "edit"
+        if action.kind == ACTION_ADD:
+            return [
+                "openclaw",
+                "automations",
+                "add",
+                "--declaration-key",
+                action.key,
+                *_spec_field_argv(action.spec),
+            ]
+        # 2026.9: `edit` targets the live job id positionally and does not
+        # accept --declaration-key.
+        if not action.live_id:
+            return None
         return [
             "openclaw",
             "automations",
-            verb,
-            "--declaration-key",
-            action.key,
+            "edit",
+            action.live_id,
             *_spec_field_argv(action.spec),
         ]
     if action.kind == ACTION_PRUNE_CANDIDATE:

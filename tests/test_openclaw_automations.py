@@ -101,6 +101,7 @@ def _live_job(key: str = "nblane:daily-plan", **overrides) -> dict:
     """A recorded-shaped ``automations list --all --json`` entry."""
 
     job = {
+        "id": f"job-{key}",
         "name": "每日计划",
         "declarationKey": key,
         "schedule": {"cron": "30 8 * * *", "tz": "Asia/Shanghai"},
