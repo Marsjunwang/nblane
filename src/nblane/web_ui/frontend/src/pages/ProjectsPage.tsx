@@ -1,7 +1,9 @@
-// /projects — the unified Phase 2 page: one board, two views (泳道看板 +
-// 时间轴) over the projects-board aggregation, sharing the `?task=` selection.
+// /projects — the unified Phase 2 page: one board, three views (泳道看板 +
+// 时间轴 + 大事记) over the projects-board aggregation, sharing the `?task=`
+// selection. 大事记 (view=story) is the read-only S-fold replay of the same
+// data; its 铭文卡「去编辑」jumps back to ?view=kanban&task=<id>.
 //
-// URL state: `view=kanban|timeline` (default kanban), `group=goal|activity`
+// URL state: `view=kanban|timeline|story` (default kanban), `group=goal|activity`
 // (default goal), `task=<task.id>` (cross-view selection; mutations address
 // cards by TITLE, selection is by id). View/group switches use
 // `replace: true` and preserve `task`; closing the detail card drops only
@@ -26,6 +28,7 @@ import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { useKanbanBoard, useProjectBoard, useProjectsBoard } from '../api/hooks';
 import { BoardView } from '../components/projects/BoardView';
+import { ChronicleView } from '../components/projects/ChronicleView';
 import { NewPlanModal } from '../components/projects/NewPlanModal';
 import { NewProjectModal } from '../components/projects/NewProjectModal';
 import { ProjectEditDrawer } from '../components/projects/ProjectEditDrawer';
@@ -42,7 +45,7 @@ import {
 import type { ProjectsGroupBy } from '../components/projects/lanes';
 import { boardPalette } from '../components/projects/palette';
 
-export type ProjectsView = 'kanban' | 'timeline';
+export type ProjectsView = 'kanban' | 'timeline' | 'story';
 
 const STATS_LABELS: Record<string, string> = {
   tasks_total: '任务',
@@ -53,7 +56,10 @@ const STATS_LABELS: Record<string, string> = {
 };
 
 function parseView(raw: string | null): ProjectsView {
-  return raw === 'timeline' ? 'timeline' : 'kanban';
+  if (raw === 'timeline' || raw === 'story') {
+    return raw;
+  }
+  return 'kanban';
 }
 
 function parseGroup(raw: string | null): ProjectsGroupBy {
@@ -214,6 +220,7 @@ export function ProjectsPage() {
               data={[
                 { label: '泳道看板', value: 'kanban' },
                 { label: '时间轴', value: 'timeline' },
+                { label: '大事记', value: 'story' },
               ]}
               data-testid="view-switch"
             />
@@ -303,6 +310,16 @@ export function ProjectsPage() {
           onSelectTask={(id) => updateParams({ task: id })}
           onEditProject={setEditProjectId}
           onRefresh={onRefresh}
+        />
+      ) : view === 'story' ? (
+        <ChronicleView
+          board={data}
+          groups={groups}
+          archivedProjects={archived}
+          unassigned={data.unassigned_tasks ?? []}
+          kanbanSections={kanban.data?.board.sections}
+          kanbanArchive={kanban.data?.board.archive}
+          onEditTask={(id) => updateParams({ view: 'kanban', task: id })}
         />
       ) : (
         <TimelineView
