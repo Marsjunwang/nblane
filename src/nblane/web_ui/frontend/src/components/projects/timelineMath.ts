@@ -88,7 +88,7 @@ export interface BarRange {
   end: string;
 }
 
-/** Done/archived task from kanban.md sections — the timeline history layer. */
+/** Done/archived task from kanban.md sections or kanban-archive.md — the timeline history layer. */
 export interface TimelineHistoryTask {
   id: string;
   title: string;

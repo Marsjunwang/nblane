@@ -77,6 +77,7 @@ from nblane.core.kanban_io import (
     find_kanban_card_by_id,
     kanban_path,
     parse_kanban,
+    parse_kanban_archive,
     resolve_kanban_section,
     update_kanban,
 )
@@ -1248,7 +1249,10 @@ def get_profile_kanban(name: str, response: Response) -> KanbanBoardResponse:
     """Parsed kanban board (sections + card fields; no markdown body).
 
     The response carries the kanban.md ETag (see module docstring) for use
-    as ``If-Match`` on the card mutations.
+    as ``If-Match`` on the card mutations. The ``archive`` field lists Done
+    tasks archived to kanban-archive.md; the archive file is intentionally
+    outside the ETag fingerprint (it is append-only and never mutated via
+    If-Match), so archiving does not invalidate a client's kanban.md ETag.
     """
     pdir = _resolve_profile(name)
     sections = parse_kanban(pdir)
@@ -1262,8 +1266,16 @@ def get_profile_kanban(name: str, response: Response) -> KanbanBoardResponse:
         ]
         total += len(tasks)
         out.append(KanbanSectionModel(name=section, tasks=tasks))
+    archive = [
+        _kanban_task_model(task) for task in parse_kanban_archive(pdir)
+    ]
     response.headers["ETag"] = _kanban_etag(pdir)
-    return KanbanBoardResponse(profile=pdir.name, sections=out, total=total)
+    return KanbanBoardResponse(
+        profile=pdir.name,
+        sections=out,
+        total=total,
+        archive=archive,
+    )
 
 
 KANBAN_MUTATION_RESPONSES = {

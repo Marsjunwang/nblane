@@ -3541,6 +3541,13 @@
    "KanbanBoardResponse": {
     "description": "Parsed kanban board structure (no markdown body).",
     "properties": {
+     "archive": {
+      "items": {
+       "$ref": "#/components/schemas/KanbanTaskModel"
+      },
+      "title": "Archive",
+      "type": "array"
+     },
      "profile": {
       "title": "Profile",
       "type": "string"
@@ -11947,7 +11954,7 @@
   },
   "/api/v1/profiles/{name}/kanban": {
    "get": {
-    "description": "Parsed kanban board (sections + card fields; no markdown body).\n\nThe response carries the kanban.md ETag (see module docstring) for use\nas ``If-Match`` on the card mutations.",
+    "description": "Parsed kanban board (sections + card fields; no markdown body).\n\nThe response carries the kanban.md ETag (see module docstring) for use\nas ``If-Match`` on the card mutations. The ``archive`` field lists Done\ntasks archived to kanban-archive.md; the archive file is intentionally\noutside the ETag fingerprint (it is append-only and never mutated via\nIf-Match), so archiving does not invalidate a client's kanban.md ETag.",
     "operationId": "get_profile_kanban_api_v1_profiles__name__kanban_get",
     "parameters": [
      {

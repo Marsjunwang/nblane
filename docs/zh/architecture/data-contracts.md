@@ -221,6 +221,11 @@ kanban Done task
   `PATCH /api/v1/profiles/{name}/kanban/cards/{card_ref}` 的 `todos` 字段（**全量替换**，
   `[]` 清空，空文本项丢弃）；3-way merge 按 list 字段整体 diff/replay，随 kanban.md
   正常 round-trip，projects-board 聚合的 `todos` 供卡片进度（d/t）与详情卡清单使用。
+- `kanban-archive.md` 读取（2026-09-25 新增）：`core/kanban_io.parse_kanban_archive`
+  按 `## Archived · <date>` 分组解析归档任务（任务块语法与 kanban.md 同构，
+  缺 `completed_on` 时以该组归档日期兜底），经 `GET /api/v1/profiles/{name}/kanban`
+  响应的 `archive` 字段供给 /projects 时间轴「历史」层；归档任务不计入 `total`，
+  归档文件也不在该端点的 ETag 指纹范围内（ETag 仅覆盖 kanban.md）。
 
 任务删除（2026-09-24，`DELETE /api/v1/profiles/{name}/kanban/cards/{card_ref}`）：
 

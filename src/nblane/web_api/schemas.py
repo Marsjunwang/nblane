@@ -312,6 +312,9 @@ class KanbanBoardResponse(BaseModel):
     profile: str
     sections: list[KanbanSectionModel] = Field(default_factory=list)
     total: int = 0
+    # Done tasks archived to kanban-archive.md (not part of `total`; the
+    # response ETag covers kanban.md only, not the archive file).
+    archive: list[KanbanTaskModel] = Field(default_factory=list)
 
 
 class KanbanCardCreateRequest(BaseModel):

@@ -313,6 +313,7 @@ export function ProjectsPage() {
           unassigned={data.unassigned_tasks ?? []}
           kanbanEtag={kanban.data?.etag ?? ''}
           kanbanSections={kanban.data?.board.sections}
+          kanbanArchive={kanban.data?.board.archive}
           selectedTaskId={taskId}
           onSelectTask={(id) => updateParams({ task: id })}
           onDragError={(error) => handleLaneMutationError(error, '排期失败', onRefresh)}

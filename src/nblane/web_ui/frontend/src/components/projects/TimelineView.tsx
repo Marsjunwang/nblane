@@ -4,8 +4,9 @@
 // (queue/doing dotted thin blocks, done faded, selected gold-framed),
 // milestone diamonds (planned & overdue = hollow).
 //
-// 裁决5 contract: the history layer (Done/archived kanban tasks from the
-// kanban.md sections) renders as 月白 thin 刻痕 bars — half height, no fill,
+// 裁决5 contract: the history layer (Done kanban tasks from the kanban.md
+// sections + archived tasks from kanban-archive.md) renders as 月白 thin
+// 刻痕 bars — half height, no fill,
 // brighten on select, never draggable; the「历史」toggle defaults ON. The
 // default window is the trailing 6 months (「最近半年/全部」 zoom toggle);
 // older history is reachable via the horizontal scroll / 全部 zoom, and
@@ -20,6 +21,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
   KanbanSection,
+  KanbanTask,
   ProjectsBoardMilestone,
   ProjectsBoardProject,
   ProjectsBoardResponse,
@@ -54,6 +56,8 @@ export interface TimelineViewProps {
   kanbanEtag: string;
   /** kanban.md sections — the Done section feeds the history layer. */
   kanbanSections: KanbanSection[] | undefined;
+  /** kanban-archive.md tasks — the bulk of the history layer (Done 刻痕 style). */
+  kanbanArchive: KanbanTask[] | undefined;
   selectedTaskId: string;
   onSelectTask: (taskId: string) => void;
   onDragError: (error: unknown) => void;
@@ -420,7 +424,10 @@ function HabitRow({
 }
 
 /** Done/archived kanban tasks as timeline history items. */
-export function collectHistoryTasks(kanbanSections: KanbanSection[] | undefined): TimelineHistoryTask[] {
+export function collectHistoryTasks(
+  kanbanSections: KanbanSection[] | undefined,
+  kanbanArchive: KanbanTask[] | undefined,
+): TimelineHistoryTask[] {
   const items: TimelineHistoryTask[] = [];
   for (const section of kanbanSections ?? []) {
     for (const task of section.tasks ?? []) {
@@ -428,6 +435,10 @@ export function collectHistoryTasks(kanbanSections: KanbanSection[] | undefined)
         items.push(task);
       }
     }
+  }
+  // Archived tasks are Done by definition and render with the same 刻痕 style.
+  for (const task of kanbanArchive ?? []) {
+    items.push(task);
   }
   return items;
 }
@@ -440,6 +451,7 @@ export function TimelineView({
   unassigned,
   kanbanEtag,
   kanbanSections,
+  kanbanArchive,
   selectedTaskId,
   onSelectTask,
   onDragError,
@@ -448,7 +460,10 @@ export function TimelineView({
   const [showHistory, setShowHistory] = useState(true);
   const [zoom, setZoom] = useState<TimelineZoom>('recent');
 
-  const historyTasks = useMemo(() => collectHistoryTasks(kanbanSections), [kanbanSections]);
+  const historyTasks = useMemo(
+    () => collectHistoryTasks(kanbanSections, kanbanArchive),
+    [kanbanSections, kanbanArchive],
+  );
   const scale = useMemo(
     () => computeScale(board, { history: showHistory ? historyTasks : [], zoom }),
     [board, historyTasks, showHistory, zoom],

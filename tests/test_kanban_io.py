@@ -20,6 +20,7 @@ from nblane.core.kanban_io import (
     find_kanban_card_by_id,
     kanban_snapshot_to_moves,
     materialize_kanban_task_ids,
+    parse_kanban_archive,
     parse_kanban_text,
 )
 from nblane.core.io import (
@@ -939,6 +940,102 @@ class TestKanbanParseRender(unittest.TestCase):
         self.assertIn("Archive linked", archive)
         self.assertIn("  - project_id: project:demo", archive)
         self.assertIn("  - milestone_id: milestone:first", archive)
+
+
+class TestParseKanbanArchive(unittest.TestCase):
+    """parse_kanban_archive reads kanban-archive.md group blocks."""
+
+    def _write_archive(self, prof: Path, body: str) -> None:
+        prof.mkdir(parents=True, exist_ok=True)
+        (prof / "kanban-archive.md").write_text(body, encoding="utf-8")
+
+    def test_missing_file_returns_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prof = Path(tmp) / "pa"
+            prof.mkdir()
+            self.assertEqual(parse_kanban_archive(prof), [])
+
+    def test_empty_file_returns_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prof = Path(tmp) / "pb"
+            self._write_archive(prof, "")
+            self.assertEqual(parse_kanban_archive(prof), [])
+
+    def test_parses_grouped_tasks_with_metadata(self) -> None:
+        body = (
+            "# p · Kanban archive\n\n"
+            "> Tasks moved here from kanban.md (Done column).\n\n"
+            "---\n"
+            "\n## Archived · 2026-04-15\n\n"
+            "- [x] Ship benchmark\n"
+            "  - id: kb_aaa111\n"
+            "  - context: 在项目初期定研发计划\n"
+            "  - started_on: 2026-03-31\n"
+            "  - completed_on: 2026-03-31\n"
+            "  - project_id: project:demo\n"
+            "\n## Archived · 2026-05-01\n\n"
+            "- [x] Second task\n"
+            "  - id: kb_bbb222\n"
+            "  - completed_on: 2026-04-30\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            prof = Path(tmp) / "pc"
+            self._write_archive(prof, body)
+            tasks = parse_kanban_archive(prof)
+
+        self.assertEqual([t.title for t in tasks], ["Ship benchmark", "Second task"])
+        self.assertTrue(all(t.done for t in tasks))
+        first = tasks[0]
+        self.assertEqual(first.id, "kb_aaa111")
+        self.assertEqual(first.context, "在项目初期定研发计划")
+        self.assertEqual(first.started_on, "2026-03-31")
+        self.assertEqual(first.completed_on, "2026-03-31")
+        self.assertEqual(first.project_id, "project:demo")
+        self.assertEqual(tasks[1].completed_on, "2026-04-30")
+
+    def test_missing_completed_on_falls_back_to_group_date(self) -> None:
+        body = (
+            "## Archived · 2026-04-15\n\n"
+            "- [x] No completion date\n"
+            "  - id: kb_ccc333\n"
+            "  - started_on: 2026-04-01\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            prof = Path(tmp) / "pd"
+            self._write_archive(prof, body)
+            tasks = parse_kanban_archive(prof)
+
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0].completed_on, "2026-04-15")
+
+    def test_tasks_without_id_get_generated_ids(self) -> None:
+        body = "## Archived · 2026-04-15\n\n- [x] Legacy task\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            prof = Path(tmp) / "pe"
+            self._write_archive(prof, body)
+            tasks = parse_kanban_archive(prof)
+
+        self.assertEqual(len(tasks), 1)
+        self.assertTrue(tasks[0].id.startswith("kb_"))
+
+    def test_malformed_lines_are_skipped(self) -> None:
+        body = (
+            "## Archived ·\n\n"
+            "stray text line\n"
+            "- [ ] not-done stray bullet outside a task\n"
+            "\n## Archived · 2026-06-01\n\n"
+            "- [x] Real task\n"
+            "  - bogus meta line without colon shape but leading dash is detail\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            prof = Path(tmp) / "pf"
+            self._write_archive(prof, body)
+            tasks = parse_kanban_archive(prof)
+
+        # The dateless ``## Archived ·`` header does not match the group
+        # regex, so the stray bullet stays outside any task block.
+        self.assertEqual([t.title for t in tasks], ["Real task"])
+        self.assertEqual(tasks[0].completed_on, "2026-06-01")
 
 
 class TestFindKanbanCardById(unittest.TestCase):

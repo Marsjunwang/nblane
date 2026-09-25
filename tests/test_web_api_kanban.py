@@ -772,6 +772,81 @@ class TestKanbanCardDelete(unittest.TestCase):
         self.assertIn(f"kanban:{card['id']}", after)
 
 
+class TestKanbanBoardArchive(unittest.TestCase):
+    """GET /kanban archive field (kanban-archive.md projection)."""
+
+    def _client(self, root: Path) -> TestClient:
+        for target in (
+            "nblane.core.profile_io.PROFILES_DIR",
+            "nblane.core.io.PROFILES_DIR",
+        ):
+            patcher = patch(target, root)
+            self.addCleanup(patcher.stop)
+            patcher.start()
+        patcher = patch("nblane.core.kanban_io.git_backup.record_change")
+        self.addCleanup(patcher.stop)
+        patcher.start()
+        return TestClient(app)
+
+    def test_get_kanban_includes_archive_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            _add_card(client, "看板任务")
+            (profile / "kanban-archive.md").write_text(
+                "# alice · Kanban archive\n\n"
+                "> Tasks moved here from kanban.md (Done column).\n\n"
+                "---\n"
+                "\n## Archived · 2026-04-15\n\n"
+                "- [x] 归档任务\n"
+                "  - id: kb_arc111\n"
+                "  - project_id: project:demo\n",
+                encoding="utf-8",
+            )
+
+            board = client.get("/api/v1/profiles/alice/kanban")
+
+        self.assertEqual(board.status_code, 200)
+        payload = board.json()
+        archive = payload["archive"]
+        self.assertEqual(len(archive), 1)
+        self.assertEqual(archive[0]["title"], "归档任务")
+        self.assertEqual(archive[0]["id"], "kb_arc111")
+        self.assertTrue(archive[0]["done"])
+        # No completed_on in the file: falls back to the group date.
+        self.assertEqual(archive[0]["completed_on"], "2026-04-15")
+        self.assertEqual(archive[0]["project_id"], "project:demo")
+        # Archive tasks are not counted in the board total.
+        self.assertEqual(payload["total"], 1)
+
+    def test_get_kanban_without_archive_file_returns_empty_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            client = self._client(root)
+            board = client.get("/api/v1/profiles/alice/kanban")
+
+        self.assertEqual(board.status_code, 200)
+        self.assertEqual(board.json()["archive"], [])
+
+    def test_archive_file_does_not_change_etag(self) -> None:
+        """The ETag fingerprints kanban.md only; archive edits keep it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            before = client.get("/api/v1/profiles/alice/kanban")
+            (profile / "kanban-archive.md").write_text(
+                "## Archived · 2026-04-15\n\n- [x] 归档任务\n",
+                encoding="utf-8",
+            )
+            after = client.get("/api/v1/profiles/alice/kanban")
+
+        self.assertEqual(before.headers["ETag"], after.headers["ETag"])
+        self.assertEqual(len(after.json()["archive"]), 1)
+
+
 class TestKanbanMutationAuth(unittest.TestCase):
     """401/403 rules for the kanban mutations under auth-on."""
 

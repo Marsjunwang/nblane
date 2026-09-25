@@ -1062,7 +1062,10 @@ export interface paths {
          * @description Parsed kanban board (sections + card fields; no markdown body).
          *
          *     The response carries the kanban.md ETag (see module docstring) for use
-         *     as ``If-Match`` on the card mutations.
+         *     as ``If-Match`` on the card mutations. The ``archive`` field lists Done
+         *     tasks archived to kanban-archive.md; the archive file is intentionally
+         *     outside the ETag fingerprint (it is append-only and never mutated via
+         *     If-Match), so archiving does not invalidate a client's kanban.md ETag.
          */
         get: operations["get_profile_kanban_api_v1_profiles__name__kanban_get"];
         put?: never;
@@ -4839,6 +4842,8 @@ export interface components {
          * @description Parsed kanban board structure (no markdown body).
          */
         KanbanBoardResponse: {
+            /** Archive */
+            archive?: components["schemas"]["KanbanTaskModel"][];
             /** Profile */
             profile: string;
             /** Sections */

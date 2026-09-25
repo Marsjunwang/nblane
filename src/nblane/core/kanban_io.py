@@ -50,6 +50,9 @@ _KANBAN_DETAIL_PREFIX_RE = re.compile(
 # A ``todo:`` bullet whose value is not checkbox-shaped is a legacy free
 # detail and stays one (parse falls through to details).
 _KANBAN_TODO_VALUE_RE = re.compile(r"^\[([ xX])\]\s*(.*)$")
+# Archive group header written by _render_kanban_archive_append:
+# ``## Archived · <date>``; the captured text is the group's archive date.
+_KANBAN_ARCHIVE_GROUP_RE = re.compile(r"^##\s+Archived\s*·\s*(\S.*)$")
 
 
 def _normalize_kanban_meta_key(raw_key: str) -> str | None:
@@ -767,6 +770,56 @@ def parse_kanban(name: str | Path) -> dict[str, list[KanbanTask]]:
     content = path.read_text(encoding="utf-8")
     profile_name = path.parent.name if isinstance(name, Path) else name
     return parse_kanban_text(content, profile_name)
+
+
+def parse_kanban_archive(profile: str | Path) -> list[KanbanTask]:
+    """Parse kanban-archive.md into a flat list of archived Done tasks.
+
+    The archive file groups tasks under ``## Archived · <date>`` headers
+    using the same task-block grammar as kanban.md's Done column, so each
+    group body is parsed by ``_parse_kanban_sections`` under a synthesized
+    Done header. A task without ``completed_on`` falls back to its group's
+    archive date; tasks without an id bullet receive a freshly generated
+    random id (same contract as ``parse_kanban``). A missing archive file
+    returns ``[]``.
+    """
+    path = (
+        profile / KANBAN_ARCHIVE_FILENAME
+        if isinstance(profile, Path)
+        else profile_dir(profile) / KANBAN_ARCHIVE_FILENAME
+    )
+    if not path.exists():
+        return []
+    content = path.read_text(encoding="utf-8")
+
+    tasks: list[KanbanTask] = []
+
+    def _flush(buffer: list[str], fallback_date: str) -> None:
+        if not buffer:
+            return
+        parsed = _parse_kanban_sections(
+            f"## {KANBAN_DONE}\n" + "\n".join(buffer)
+        )
+        for task in parsed[KANBAN_DONE]:
+            if not task.completed_on and fallback_date:
+                task.completed_on = fallback_date
+            tasks.append(task)
+
+    group_date = ""
+    buffer: list[str] = []
+    for line in content.splitlines():
+        match = _KANBAN_ARCHIVE_GROUP_RE.match(line.strip())
+        if match:
+            _flush(buffer, group_date)
+            buffer = []
+            group_date = match.group(1).strip()
+            continue
+        buffer.append(line)
+    _flush(buffer, group_date)
+
+    return ensure_kanban_task_ids({KANBAN_DONE: tasks}, path.parent.name)[
+        KANBAN_DONE
+    ]
 
 
 def materialize_kanban_task_ids(profile: str | Path) -> bool:
