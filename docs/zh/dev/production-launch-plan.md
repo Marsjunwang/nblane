@@ -73,7 +73,10 @@ source_of_truth: 生产上线与 openclaw 第一环集成计划;事实依据 src
 > + automations 探测兼容 2026.9 jobs 包裹形态(`web_api/assistant.py`)。
 > **已知事项**:微信 outbound 在 2026-09-24 起 `sendMessage ret=-2 prepare
 > failed`(ilink contextToken 缺失,新旧任务同样失败),需 owner 先发一条
->  inbound 消息重建上下文;重建后手动 `openclaw cron run` 补发晨报。
+> inbound 消息重建上下文;已于 2026-09-25 08:43 重建并补发晨报成功。
+> CW-4 追加修正:Caddy 需同时精确匹配 `/openclaw`(无尾斜杠,否则 WS 落到
+> 8501);gateway 需 `controlUi.allowedOrigins=[https://www.nblane.cloud,
+> https://spa.nblane.cloud]`(否则 WS 握手后拒来源,"浏览器来源不被允许")。
 > A.2 的 Git 备份闭环验收已在 B 冒烟中达成(8504 mutation → 数据仓 commit)。
 
 ### A. 数据安全(先于一切,低峰窗口)
