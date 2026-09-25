@@ -5,7 +5,8 @@
 // cross-column Queue↔Doing and in-column reorder persist via the move
 // endpoint's to_index; cross-lane assignment goes through the detail card's
 // PATCH (归属变更). Someday cards are a dashed badge list inside the Queue
-// column and never join the drag sort.
+// column and never join the drag sort; their own buttons move them into
+// Queue or Done through the same card endpoints.
 
 import {
   closestCenter,
@@ -37,6 +38,7 @@ import {
   useActiveHabitPlans,
   useAddKanbanCard,
   useAddProjectTask,
+  useDoneKanbanCard,
   useMoveKanbanCard,
 } from '../../api/hooks';
 import type {
@@ -208,6 +210,7 @@ export function TaskLaneDnd({
   quickAdd?: { pending: boolean; onSubmit: (title: string) => void };
 }) {
   const moveCard = useMoveKanbanCard(profile);
+  const doneCard = useDoneKanbanCard(profile);
   const serverColumns = useMemo<LaneColumns>(() => ({ queue, doing }), [queue, doing]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [preview, setPreview] = useState<LaneColumns | null>(null);
@@ -221,8 +224,39 @@ export function TaskLaneDnd({
       activeColumns.doing.find((task) => task.id === activeId) ??
       null)
     : null;
-  // A stale etag 412s; block new drags while a mutation/refetch is in flight.
-  const dragDisabled = moveCard.isPending;
+  // A stale etag 412s; block new drags and someday exits while a mutation is in flight.
+  const dragDisabled = moveCard.isPending || doneCard.isPending;
+
+  const promoteSomeday = (task: ProjectsBoardTask, target: 'queue' | 'done') => {
+    const cardRef = task.id || task.title;
+    if (target === 'queue') {
+      moveCard.mutate(
+        { cardRef, targetSection: 'Queue', etag: kanbanEtag },
+        {
+          onSuccess: () =>
+            notifications.show({
+              color: 'green',
+              title: '已列入 Queue',
+              message: `「${task.title}」已进入日常队列,可拖到 Doing 或在详情卡标记完成。`,
+            }),
+          onError: (error) => handleLaneMutationError(error, '列入失败', onRefresh),
+        },
+      );
+      return;
+    }
+    doneCard.mutate(
+      { cardRef, etag: kanbanEtag },
+      {
+        onSuccess: () =>
+          notifications.show({
+            color: 'green',
+            title: '已标记完成',
+            message: `「${task.title}」已入 Done。`,
+          }),
+        onError: (error) => handleLaneMutationError(error, '操作失败', onRefresh),
+      },
+    );
+  };
 
   useEffect(() => {
     setPreview(null);
@@ -436,7 +470,14 @@ export function TaskLaneDnd({
               {column === 'queue' &&
                 someday.map((task) => (
                   <Box key={task.id} onClick={() => onSelectTask(task.id)} style={{ cursor: 'pointer' }}>
-                    <TaskCardBody task={task} someday selected={selectedTaskId === task.id} />
+                    <TaskCardBody
+                      task={task}
+                      someday
+                      selected={selectedTaskId === task.id}
+                      actionPending={dragDisabled}
+                      onPromoteQueue={() => promoteSomeday(task, 'queue')}
+                      onMarkDone={() => promoteSomeday(task, 'done')}
+                    />
                   </Box>
                 ))}
             </LaneColumn>

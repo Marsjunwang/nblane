@@ -1,4 +1,4 @@
-import { Badge, Box, Card, Group, Text } from '@mantine/core';
+import { Badge, Box, Button, Card, Group, Text } from '@mantine/core';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
@@ -15,16 +15,25 @@ export function splitTags(tags: string): string[] {
 /**
  * One task card on a project lane. Someday tasks render as a dashed,
  * half-transparent card with a gold badge (badge, not a column — locked
- * Phase 2 design decision) and never join the drag sort.
+ * Phase 2 design decision) and never join the drag sort. The badge carries
+ * the two exits into the daily loop: list into Queue, or mark Done.
  */
 export function TaskCardBody({
   task,
   someday = false,
   selected = false,
+  onPromoteQueue,
+  onMarkDone,
+  actionPending = false,
 }: {
   task: ProjectsBoardTask;
   someday?: boolean;
   selected?: boolean;
+  /** L1: move this someday card into the Queue section. */
+  onPromoteQueue?: () => void;
+  /** L1: mark this someday card Done without passing through Queue. */
+  onMarkDone?: () => void;
+  actionPending?: boolean;
 }) {
   const tags = splitTags(task.tags ?? '');
   const todos = task.todos ?? [];
@@ -91,6 +100,45 @@ export function TaskCardBody({
         <Text size="xs" mt={6} style={{ color: boardPalette.dim }} data-testid={`todo-progress-${task.id}`}>
           清单 {todoDone}/{todoTotal}
         </Text>
+      )}
+      {someday && (onPromoteQueue || onMarkDone) && (
+        <Group gap={6} mt={8} wrap="wrap">
+          {onPromoteQueue && (
+            <Button
+              size="compact-xs"
+              variant="light"
+              disabled={actionPending}
+              data-testid={`someday-queue-${task.id}`}
+              styles={{
+                root: {
+                  color: boardPalette.goldText,
+                  background: 'rgba(220, 174, 85, 0.12)',
+                },
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                onPromoteQueue();
+              }}
+            >
+              列入 Queue
+            </Button>
+          )}
+          {onMarkDone && (
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              disabled={actionPending}
+              data-testid={`someday-done-${task.id}`}
+              styles={{ root: { color: boardPalette.dim } }}
+              onClick={(event) => {
+                event.stopPropagation();
+                onMarkDone();
+              }}
+            >
+              标记 Done
+            </Button>
+          )}
+        </Group>
       )}
     </Card>
   );

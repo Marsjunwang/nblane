@@ -200,3 +200,14 @@ source_of_truth: /projects 页人机交互设计;实现见 src/nblane/web_ui/fro
   同步扩展)全量 1781;vitest 新增 4(确认条显隐/取消、DELETE body+If-Match+
   关卡、记入大事记 on、412 重试)全量 264;tsc 绿;openapi.json +
   schema.d.ts 已重生成。无新增依赖(packaging-manifest 已登记)。
+
+## 实施状态(2026-09-25:someday 进入日常流程)
+
+- **痛点**:Someday 停在 Queue 列里当虚线徽章,不能拖。移入日常只藏在铭文详情卡,
+  看板上没有出口,卡片看起来像死胡同。
+- **板上直操作**:徽章卡底部「列入 Queue」(走既有 `POST .../cards/{ref}/move`
+  `{target_section: Queue}`,落到 Queue 列尾)与「标记 Done」(走既有
+  `POST .../done`)。点击不打开详情卡;点卡片其余区域仍开详情(那里还有
+  移至 Doing)。徽章仍不是列,仍不进拖拽排序。
+- 测试:vitest ProjectsPage 新增 1 例(Queue/Done 请求体 + If-Match + 不改
+  `?task=`)。无新增依赖。

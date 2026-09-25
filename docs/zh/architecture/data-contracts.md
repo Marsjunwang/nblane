@@ -376,7 +376,8 @@ project-board.yaml
   展示层推导，不回写状态。
 - /projects 聚合(`GET /api/v1/profiles/{name}/projects-board`，逻辑在
   `core/projects_board.py`)的泳道 Done 计数 = kanban.md Done + `kanban-archive.md`
-  归档任务（按 `project_id`/`task_refs` 归属，任务侧为准）；`someday` 是徽章不是列；
+  归档任务（按 `project_id`/`task_refs` 归属，任务侧为准）；`someday` 是徽章不是列
+  （板上「列入 Queue」「标记 Done」走既有 move/done，不另开列、不进拖拽排序）；
   无 `project_id` 的任务进「未归属」泳道。
 - 习惯打卡聚合(activity-log.yaml checkins)的 streak 口径：以今日结尾的连续打卡天数，
   今日未打卡则 streak = 0（与 Phase 2 概念稿 build_data.py 一致）。
