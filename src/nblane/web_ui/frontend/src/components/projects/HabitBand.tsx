@@ -14,9 +14,11 @@
 // with none the check-in posts directly without plan_id. The ETag discipline
 // is unchanged — plan_id rides the same useAddCheckin mutation.
 // Pure-habit rows get the same hover-reveal gear, opening a lifecycle menu:
-// 归档 (one click, the row folds away; 显示已归档 toggle brings it back
-// dimmed with a 恢复 item) and 删除 (type-the-name confirm modal with the
-// 打卡记录 consequence preview + optional 记入大事记). The week dots are
+// 新建计划 (NewHabitPlanModal → POST .../habit-plans; allowed regardless of
+// existing active plans — 打卡 then offers the picker), 归档 (one click, the
+// row folds away; 显示已归档 toggle brings it back dimmed with a 恢复 item)
+// and 删除 (type-the-name confirm modal with the 打卡记录 consequence preview
+// + optional 记入大事记). The week dots are
 // 石刻化: unchecked = thin 月白-35% hollow ring, checked = 泥金 filled dot,
 // today carries a thin gold outer ring (no Mantine green).
 // A row expands into the month heatmap
@@ -45,6 +47,7 @@ import {
 import { notifications } from '@mantine/notifications';
 import {
   IconArchive,
+  IconCalendarPlus,
   IconCheck,
   IconChevronDown,
   IconChevronRight,
@@ -67,6 +70,7 @@ import { buildHeatmapWeeks, heatmapCellColor } from './habitHeatmap';
 import { activePlansForHabit, checkinPlansForHabit, planBadgeLabel } from './habitPlans';
 import type { HabitRow } from './lanes';
 import { HABIT_PLAN_KINDS } from './lanes';
+import { NewHabitPlanModal } from './NewHabitPlanModal';
 import { boardPalette } from './palette';
 import { daysBetween, projectRange } from './timelineMath';
 
@@ -454,10 +458,11 @@ function DeleteHabitModal({
   );
 }
 
-/** Pure-habit lifecycle gear: hover-revealed, opens the 归档/删除 menu. */
+/** Pure-habit lifecycle gear: hover-revealed, opens the 新建计划/归档/删除 menu. */
 function HabitLifecycleMenu({
   profile,
   habit,
+  today,
   archived,
   visible,
   onVisibility,
@@ -466,6 +471,8 @@ function HabitLifecycleMenu({
 }: {
   profile: string;
   habit: ProjectsBoardHabit;
+  /** Board today — anchors the new-plan modal's default dates. */
+  today: string;
   archived: boolean;
   visible: boolean;
   onVisibility: (visible: boolean) => void;
@@ -473,6 +480,7 @@ function HabitLifecycleMenu({
   onDeleted: (habitId: string) => void;
 }) {
   const archiveHabit = useArchiveHabit(profile);
+  const [planOpen, setPlanOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const title = habit.title || habit.id;
 
@@ -522,6 +530,13 @@ function HabitLifecycleMenu({
           </ActionIcon>
         </Menu.Target>
         <Menu.Dropdown>
+          <Menu.Item
+            leftSection={<IconCalendarPlus size={14} />}
+            onClick={() => setPlanOpen(true)}
+            data-testid={`habit-new-plan-${habit.id}`}
+          >
+            新建计划…
+          </Menu.Item>
           {archived ? (
             <Menu.Item
               leftSection={<IconArchive size={14} />}
@@ -549,6 +564,13 @@ function HabitLifecycleMenu({
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>
+      <NewHabitPlanModal
+        profile={profile}
+        habit={habit}
+        today={today}
+        opened={planOpen}
+        onClose={() => setPlanOpen(false)}
+      />
       <DeleteHabitModal
         profile={profile}
         habit={habit}
@@ -704,6 +726,7 @@ function HabitBandRow({
             <HabitLifecycleMenu
               profile={profile}
               habit={habit}
+              today={today}
               archived={archived}
               visible={settingsVisible}
               onVisibility={setSettingsVisible}

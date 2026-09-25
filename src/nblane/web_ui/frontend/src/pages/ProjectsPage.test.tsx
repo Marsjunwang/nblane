@@ -1440,4 +1440,153 @@ describe('ProjectsPage habit phase plans', () => {
     const lane = await screen.findByTestId('project-lane-p1');
     expect(within(lane).queryByTestId('habit-plan-section')).toBeNull();
   });
+
+  it('习惯行菜单 新建计划 opens the modal with 28-day defaults and 4 week blocks', async () => {
+    stubFetch(stubPlans([ACTIVE_PLAN]));
+    renderPage();
+    await screen.findByTestId('habit-band-row-exercise');
+
+    // The entry lives in the same lifecycle menu as 归档/删除 — also present
+    // for a habit that already has an active plan (并存, picker on check-in).
+    fireEvent.click(screen.getByTestId('habit-menu-exercise'));
+    fireEvent.click(await screen.findByTestId('habit-new-plan-exercise'));
+
+    const modal = await screen.findByTestId('new-habit-plan-modal-exercise');
+    expect(screen.getByTestId('habit-plan-title-exercise')).toHaveValue('保持锻炼 · 28天计划');
+    // Board today 2026-09-23 → +27 days = 2026-10-20, inclusive 28 days.
+    expect(screen.getByTestId('habit-plan-start-exercise')).toHaveValue('2026-09-23');
+    expect(screen.getByTestId('habit-plan-end-exercise')).toHaveValue('2026-10-20');
+    for (const week of [1, 2, 3, 4]) {
+      expect(within(modal).getByTestId(`habit-plan-week-exercise-${week}`)).toBeInTheDocument();
+    }
+    expect(within(modal).queryByTestId('habit-plan-week-exercise-5')).toBeNull();
+    // Every week needs ≥1 task before submit unlocks.
+    expect(screen.getByTestId('habit-plan-submit-exercise')).toBeDisabled();
+  });
+
+  it('week blocks follow the date range (ceil(days/7)), preserving typed text', async () => {
+    stubFetch(stubPlans([]));
+    renderPage();
+    await screen.findByTestId('habit-band-row-exercise');
+
+    fireEvent.click(screen.getByTestId('habit-menu-exercise'));
+    fireEvent.click(await screen.findByTestId('habit-new-plan-exercise'));
+    await screen.findByTestId('new-habit-plan-modal-exercise');
+
+    // 7 days → exactly 1 week; typed text survives later resizes.
+    fireEvent.change(screen.getByTestId('habit-plan-end-exercise'), {
+      target: { value: '2026-09-29' },
+    });
+    expect(screen.getByTestId('habit-plan-week-exercise-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('habit-plan-week-exercise-2')).toBeNull();
+    fireEvent.change(screen.getByTestId('habit-plan-week-exercise-1'), {
+      target: { value: '每天 8k 步' },
+    });
+
+    // 8 days → 2 weeks (partial tail week).
+    fireEvent.change(screen.getByTestId('habit-plan-end-exercise'), {
+      target: { value: '2026-09-30' },
+    });
+    expect(screen.getByTestId('habit-plan-week-exercise-1')).toHaveValue('每天 8k 步');
+    expect(screen.getByTestId('habit-plan-week-exercise-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('habit-plan-week-exercise-3')).toBeNull();
+
+    // End before start → no week blocks, submit stays locked.
+    fireEvent.change(screen.getByTestId('habit-plan-end-exercise'), {
+      target: { value: '2026-09-22' },
+    });
+    expect(screen.queryByTestId('habit-plan-week-exercise-1')).toBeNull();
+    expect(screen.getByTestId('habit-plan-submit-exercise')).toBeDisabled();
+  });
+
+  it('submit assembles weekly_tasks per week and toasts the generated Queue cards', async () => {
+    const fetchMock = stubFetch((url, init) => {
+      if (init?.method === 'POST' && url.endsWith('/habit-plans')) {
+        return jsonResponse(201, {
+          ok: true,
+          plan: { ...ACTIVE_PLAN, id: 'hp-new', title: '秋季冲刺' },
+          kanban_card_ids: ['kb_w1', 'kb_w2', 'kb_w3', 'kb_w4'],
+        });
+      }
+      return stubPlans([])(url, init);
+    });
+    renderPage();
+    await screen.findByTestId('habit-band-row-exercise');
+
+    fireEvent.click(screen.getByTestId('habit-menu-exercise'));
+    fireEvent.click(await screen.findByTestId('habit-new-plan-exercise'));
+    await screen.findByTestId('new-habit-plan-modal-exercise');
+
+    fireEvent.change(screen.getByTestId('habit-plan-title-exercise'), {
+      target: { value: '秋季冲刺' },
+    });
+    const weeks = [
+      '控制饮食\n\n每天 8k 步\n', // blank lines drop
+      '晨跑 3 次',
+      '力量训练',
+      '复盘',
+    ];
+    weeks.forEach((text, index) => {
+      fireEvent.change(screen.getByTestId(`habit-plan-week-exercise-${index + 1}`), {
+        target: { value: text },
+      });
+    });
+    const submit = screen.getByTestId('habit-plan-submit-exercise');
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+
+    expect(await screen.findByText('阶段计划已创建')).toBeInTheDocument();
+    expect(await screen.findByText(/周卡已生成到看板 Queue/)).toBeInTheDocument();
+    const call = fetchMock.mock.calls.find(
+      ([input, init]) => init?.method === 'POST' && String(input).endsWith('/habit-plans'),
+    );
+    expect(call).toBeDefined();
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      title: '秋季冲刺',
+      habit_id: 'exercise',
+      start_date: '2026-09-23',
+      end_date: '2026-10-20',
+      generate_weekly_cards: true,
+      weekly_tasks: [
+        { week: 1, tasks: ['控制饮食', '每天 8k 步'] },
+        { week: 2, tasks: ['晨跑 3 次'] },
+        { week: 3, tasks: ['力量训练'] },
+        { week: 4, tasks: ['复盘'] },
+      ],
+    });
+    // Modal closes on success.
+    await waitFor(() =>
+      expect(screen.queryByTestId('new-habit-plan-modal-exercise')).toBeNull(),
+    );
+  });
+
+  it('422 invalid_weekly_tasks surfaces the server message inline', async () => {
+    stubFetch((url, init) => {
+      if (init?.method === 'POST' && url.endsWith('/habit-plans')) {
+        return jsonResponse(422, {
+          code: 'invalid_weekly_tasks',
+          message: 'weekly_tasks must cover exactly 4 weeks',
+        });
+      }
+      return stubPlans([])(url, init);
+    });
+    renderPage();
+    await screen.findByTestId('habit-band-row-exercise');
+
+    fireEvent.click(screen.getByTestId('habit-menu-exercise'));
+    fireEvent.click(await screen.findByTestId('habit-new-plan-exercise'));
+    await screen.findByTestId('new-habit-plan-modal-exercise');
+
+    for (const week of [1, 2, 3, 4]) {
+      fireEvent.change(screen.getByTestId(`habit-plan-week-exercise-${week}`), {
+        target: { value: '任务' },
+      });
+    }
+    fireEvent.click(screen.getByTestId('habit-plan-submit-exercise'));
+
+    const alert = await screen.findByTestId('mutation-error');
+    expect(alert).toHaveTextContent('weekly_tasks must cover exactly 4 weeks');
+    // The modal stays open so the user can fix and retry.
+    expect(screen.getByTestId('new-habit-plan-modal-exercise')).toBeInTheDocument();
+  });
 });
