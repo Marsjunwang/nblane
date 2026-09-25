@@ -151,8 +151,18 @@ class TestAssistantProbes(unittest.TestCase):
         self.assertTrue(payload["mcp_nblane_registered"])
         self.assertEqual(payload["automations"], {"total": 2, "enabled": 1})
 
-    def test_probe_timeouts_yield_null_fields(self) -> None:
-        client = make_client(runner=make_runner(fail=True))
+    def test_automations_jobs_wrapped_shape(self) -> None:
+        # OpenClaw 2026.9 wraps the list in a "jobs" key.
+        client = make_client(
+            runner=make_runner(
+                automations='{"jobs": [{"key": "a", "enabled": true}], "total": 1}'
+            )
+        )
+        with patch.dict(os.environ, {"NBLANE_AUTH_FILE": ""}):
+            payload = client.get("/api/v1/system/assistant").json()
+        self.assertEqual(payload["automations"], {"total": 1, "enabled": 1})
+
+    def test_probe_timeouts_yield_null_fields(self) -> None:        client = make_client(runner=make_runner(fail=True))
         with patch.dict(os.environ, {"NBLANE_AUTH_FILE": ""}):
             payload = client.get("/api/v1/system/assistant").json()
         self.assertTrue(payload["available"])

@@ -147,7 +147,8 @@ def _probe_automations(runner: RunnerFn) -> AssistantAutomationsStatus | None:
     except ValueError:
         return None
     if isinstance(data, dict):
-        items = data.get("automations") or data.get("items") or []
+        # 2026.9 wraps the list in "jobs"; older builds used automations/items.
+        items = data.get("automations") or data.get("items") or data.get("jobs") or []
     elif isinstance(data, list):
         items = data
     else:
