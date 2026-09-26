@@ -201,6 +201,10 @@ source_of_truth: 首页星图增强设计(古星名映射/日课钤印/占卜/�
   北斗/外环带同步主从反转),localStorage `nblane.starmap.reveal` 记忆,OFF
   为默认;`scene.setReveal` 就地重建标签(不重建场景,盘旋转角保持)。星表
   维持双名现状。
+- **项目页联动(2026-09-26 落地)**:同一偏好键延伸至 `/projects` 顶栏北极星
+  徽章——OFF=徽章只亮古名「北极星」,悬浮(300ms Tooltip)浮出真名铭文;
+  ON=全文直显。目标/项目名不隐藏(行星不挂名,与星图一致)。共享读取抽在
+  `src/starmap/revealPref.ts`,StarmapView 与 ProjectsPage 同源。
 
 ### 二轮评审修正(2026-09-23 深夜,王军看隔离栈后裁定)
 

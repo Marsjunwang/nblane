@@ -239,9 +239,10 @@ describe('ProjectsPage board view', () => {
     stubFetch();
     renderPage();
 
-    // Toolbar + group header.
+    // Toolbar + group header. 显真 OFF (default): the pole-star badge shows
+    // the ancient name; the true inscription lives on the hover tooltip.
     expect(await screen.findByText('alice · 项目')).toBeInTheDocument();
-    expect(screen.getByTestId('north-star')).toHaveTextContent('成为机器人学习工程师');
+    expect(screen.getByTestId('north-star')).toHaveTextContent('北极星');
     expect(screen.getByTestId('lane-group-g1')).toBeInTheDocument();
     expect(screen.getByTestId('lane-group-header-g1')).toHaveTextContent('目标 · 2026持续学习');
     expect(screen.getByTestId('lane-group-header-g1')).toHaveTextContent('2026-12-31');
@@ -723,6 +724,36 @@ describe('ProjectsPage board view', () => {
     expect(await screen.findByTestId('lane-group-learning')).toBeInTheDocument();
     expect(screen.queryByTestId('lane-group-g1')).not.toBeInTheDocument();
     expect(lastSearch).toContain('group=activity');
+  });
+});
+
+describe('ProjectsPage 北极星显真联动', () => {
+  it('显真 OFF (默认): 徽章只亮古名,悬浮浮出真名铭文', async () => {
+    stubFetch();
+    renderPage();
+
+    const badge = await screen.findByTestId('north-star');
+    expect(badge).toHaveTextContent('北极星');
+    expect(badge).not.toHaveTextContent('成为机器人学习工程师');
+
+    fireEvent.mouseEnter(badge);
+    fireEvent.mouseOver(badge);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('成为机器人学习工程师');
+  });
+
+  it('显真 ON (真印已钤): 徽章直显全文,悬浮不再弹提示', async () => {
+    window.localStorage.setItem('nblane.starmap.reveal', '1');
+    stubFetch();
+    renderPage();
+
+    const badge = await screen.findByTestId('north-star');
+    expect(badge).toHaveTextContent('成为机器人学习工程师');
+
+    fireEvent.mouseOver(badge);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
 });
 

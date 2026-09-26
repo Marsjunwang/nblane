@@ -6,6 +6,7 @@ import { chronicleFlavor, withChronicleFlavor } from './briefing';
 import { DivinationPanel } from './Divination';
 import { HabitSeal } from './HabitSeal';
 import { InscriptionCard } from './InscriptionCard';
+import { readRevealPref, REVEAL_PREF_KEY } from './revealPref';
 import { StarCatalog } from './StarCatalog';
 import { StarmapScene, type StarmapSelection } from './StarmapScene';
 import { goalRows, type StarmapSnapshot } from './snapshot';
@@ -42,9 +43,7 @@ export function StarmapView({ snapshot }: { snapshot: StarmapSnapshot }) {
   const [failed, setFailed] = useState(false);
   // 显真 (design 四轮): remembered global preference — true names primary
   // (泥金) with ancient-name notes when on; ancient names only when off.
-  const [reveal, setReveal] = useState(
-    () => localStorage.getItem('nblane.starmap.reveal') === '1',
-  );
+  const [reveal, setReveal] = useState(() => readRevealPref());
   const revealRef = useRef(reveal);
   revealRef.current = reveal;
   const chronicle = useChronicle(name);
@@ -177,7 +176,7 @@ export function StarmapView({ snapshot }: { snapshot: StarmapSnapshot }) {
             onClick={() => {
               const v = !reveal;
               setReveal(v);
-              localStorage.setItem('nblane.starmap.reveal', v ? '1' : '0');
+              localStorage.setItem(REVEAL_PREF_KEY, v ? '1' : '0');
               sceneRef.current?.setReveal(v);
             }}
           >

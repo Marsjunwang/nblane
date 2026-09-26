@@ -21,6 +21,7 @@ import {
   Stack,
   Text,
   Title,
+  Tooltip,
 } from '@mantine/core';
 import { IconPlus, IconRefresh } from '@tabler/icons-react';
 import { useCallback, useMemo, useState } from 'react';
@@ -35,6 +36,7 @@ import { ProjectEditDrawer } from '../components/projects/ProjectEditDrawer';
 import { TaskDetailCard } from '../components/projects/TaskDetailCard';
 import { TimelineView } from '../components/projects/TimelineView';
 import { handleLaneMutationError } from '../components/projects/ProjectLane';
+import { readRevealPref } from '../starmap/revealPref';
 import {
   buildLaneGroups,
   collectArchivedProjects,
@@ -105,6 +107,8 @@ export function ProjectsPage() {
   const [planOpen, setPlanOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [editProjectId, setEditProjectId] = useState<string | null>(null);
+  // 显真联动 (starmap 真印): OFF = 古名「北极星」,悬浮出真名; ON = 全文直显。
+  const [reveal] = useState(readRevealPref);
 
   // View/group switches preserve the shared task selection; closing the
   // detail card drops only the task param. All switches replace history.
@@ -203,14 +207,21 @@ export function ProjectsPage() {
               {name} · 项目
             </Title>
             {data.north_star && (
-              <Badge
-                variant="outline"
-                size="lg"
-                style={{ borderColor: boardPalette.gold, color: boardPalette.goldText }}
-                data-testid="north-star"
+              <Tooltip
+                label={data.north_star}
+                openDelay={300}
+                withArrow
+                disabled={reveal}
               >
-                {data.north_star}
-              </Badge>
+                <Badge
+                  variant="outline"
+                  size="lg"
+                  style={{ borderColor: boardPalette.gold, color: boardPalette.goldText }}
+                  data-testid="north-star"
+                >
+                  {reveal ? data.north_star : '北极星'}
+                </Badge>
+              </Tooltip>
             )}
           </Group>
           <Group gap="sm" wrap="wrap">
