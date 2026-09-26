@@ -326,6 +326,7 @@ class KanbanCardCreateRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
     planned_start: str = ""
     planned_end: str = ""
+    project_id: str = ""
 
 
 class KanbanCardScheduleRequest(BaseModel):

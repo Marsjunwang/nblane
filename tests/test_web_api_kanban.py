@@ -150,6 +150,52 @@ class TestKanbanMutations(unittest.TestCase):
         self.assertFalse(card["done"])
         self.assertEqual(titles, ["默认进 Queue"])
 
+    def test_add_with_project_id_links_lane_and_syncs_board(self) -> None:
+        from nblane.core.project_board import (
+            ProjectBoard,
+            ProjectCase,
+            load_project_board,
+            save_project_board,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            # The board modules resolve profiles through their own PROFILES_DIR
+            # / profile_dir bindings; patch them like test_project_board_sync.
+            for target, value in (
+                ("nblane.core.project_board.PROFILES_DIR", root),
+            ):
+                patcher = patch(target, value)
+                self.addCleanup(patcher.stop)
+                patcher.start()
+            patcher = patch(
+                "nblane.core.project_board_sync.profile_dir",
+                lambda name: root / name,
+            )
+            self.addCleanup(patcher.stop)
+            patcher.start()
+            save_project_board(
+                "alice",
+                ProjectBoard(
+                    profile="alice",
+                    project_cases=[ProjectCase(id="project:demo", title="Demo")],
+                ),
+            )
+            created = client.post(
+                "/api/v1/profiles/alice/kanban/cards",
+                json={"title": "带项目的新卡", "project_id": "project:demo"},
+            )
+            board = load_project_board("alice")
+            sections = parse_kanban(profile)
+        self.assertEqual(created.status_code, 201)
+        card = created.json()["card"]
+        self.assertEqual(card["project_id"], "project:demo")
+        self.assertEqual(sections["Queue"][0].project_id, "project:demo")
+        case = board.by_id()["project:demo"]
+        self.assertIn(card["id"], case.task_refs)
+
     def test_add_blank_title_422(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

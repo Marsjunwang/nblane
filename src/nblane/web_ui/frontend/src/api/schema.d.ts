@@ -5239,6 +5239,11 @@ export interface components {
              */
             planned_start: string;
             /**
+             * Project Id
+             * @default
+             */
+            project_id: string;
+            /**
              * Section
              * @default Queue
              */

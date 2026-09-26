@@ -1469,6 +1469,11 @@ def add_profile_kanban_card(
             etag,
         )
     snapshot = file_state.snapshot_file(kanban_path(pdir))
+    board_snapshot = (
+        file_state.snapshot_file(pdir / "project-board.yaml")
+        if body.project_id.strip()
+        else None
+    )
     sections = parse_kanban(pdir)
     base = copy_kanban_sections(sections)
     tags = ", ".join(tag.strip() for tag in body.tags if tag.strip())
@@ -1481,6 +1486,7 @@ def add_profile_kanban_card(
         tags=tags,
         planned_start=planned_start or None,
         planned_end=planned_end or None,
+        project_id=body.project_id.strip(),
     )
     today = date.today().isoformat()
     if target == KANBAN_DONE:
@@ -1492,6 +1498,25 @@ def add_profile_kanban_card(
     created_id = ensured[target][-1].id
     result = _save_kanban_mutation(pdir, ensured, base, snapshot)
     section, stored = _find_card_by_id(result.sections, created_id)
+    trace_paths = [kanban_path(pdir)]
+    if stored.project_id:
+        # Lane assignment lives on the card; re-sync project-board refs like
+        # the patch endpoint does.
+        try:
+            sync_project_board_from_kanban(
+                pdir.name,
+                parse_kanban(pdir),
+                expected_snapshot=board_snapshot,
+            )
+            trace_paths.append(pdir / "project-board.yaml")
+        except file_state.FileConflictError:
+            return _kanban_error(
+                412,
+                "etag_mismatch",
+                "project-board.yaml changed while syncing lane assignment; "
+                "reload before retrying.",
+                _kanban_etag(pdir),
+            )
     _record_agent_writeback(
         user,
         pdir.name,
@@ -1499,7 +1524,7 @@ def add_profile_kanban_card(
         target_owner="kanban",
         note=f"kanban add: {title!r} → {section}",
         refs={"card_id": stored.id, "section": section},
-        changed_paths=[kanban_path(pdir)],
+        changed_paths=trace_paths,
     )
     response.headers["ETag"] = _kanban_etag(pdir)
     return KanbanMutationResponse(

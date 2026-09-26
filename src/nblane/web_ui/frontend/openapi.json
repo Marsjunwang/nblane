@@ -3974,6 +3974,11 @@
       "title": "Planned Start",
       "type": "string"
      },
+     "project_id": {
+      "default": "",
+      "title": "Project Id",
+      "type": "string"
+     },
      "section": {
       "default": "Queue",
       "title": "Section",

@@ -272,6 +272,11 @@ def test_semantic_commands_hit_expected_routes(authed, server):
     assert run(ns(["divine", "--mode", "serious", "--question", "Q"]), authed).status_code == 201
     divine = [r for r in server.requests if r.url.path.endswith("/divination")][-1]
     assert json.loads(divine.content) == {"mode": "serious", "question": "Q"}
+    # patch escape hatch issues a real PATCH with the JSON body.
+    assert run(ns(["patch", "/profiles/王军/kanban/cards/kb_1", '{"project_id":"project:x"}']), authed).status_code == 201
+    patch_req = [r for r in server.requests if r.method == "PATCH"][-1]
+    assert patch_req.url.path.endswith("/kanban/cards/kb_1")
+    assert json.loads(patch_req.content) == {"project_id": "project:x"}
 
 
 def test_path_normalization():

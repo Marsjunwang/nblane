@@ -243,9 +243,9 @@ class Session:
     def get(self, path: str) -> httpx.Response:
         return self.checked(self.request("GET", path))
 
-    def mutation(self, path: str, body: object = None) -> httpx.Response:
-        """POST without If-Match first; on 412 refetch the ETag and retry once."""
-        response = self.request("POST", path, body)
+    def mutation(self, path: str, body: object = None, method: str = "POST") -> httpx.Response:
+        """POST/PATCH without If-Match first; on 412 refetch the ETag and retry once."""
+        response = self.request(method, path, body)
         if response.status_code == 412:
             etag = response.headers.get("ETag", "").strip() or self.refresh_etag(path)
             if not etag:
@@ -253,7 +253,7 @@ class Session:
                     f"412 etag_mismatch on {path} and no fresh ETag available; "
                     "re-check the resource state before retrying"
                 )
-            response = self.request("POST", path, body, {"If-Match": etag})
+            response = self.request(method, path, body, {"If-Match": etag})
             if response.status_code == 412:
                 raise ApiFailure(
                     f"412 etag_mismatch persists on {path} after one ETag retry; "
@@ -302,6 +302,14 @@ def run(args: argparse.Namespace, session: Session) -> object:
             except ValueError as exc:
                 raise ApiFailure(f"--json body is not valid JSON: {exc}") from exc
         return session.mutation(normalize_path(args.path), body)
+    if command == "patch":
+        body = None
+        if args.json is not None:
+            try:
+                body = json.loads(args.json)
+            except ValueError as exc:
+                raise ApiFailure(f"--json body is not valid JSON: {exc}") from exc
+        return session.mutation(normalize_path(args.path), body, method="PATCH")
     if command == "checkin":
         body: dict = {"habit": args.habit}
         for field in ("date", "summary", "note", "unit", "project_id", "plan_id"):
@@ -371,6 +379,9 @@ def build_parser() -> argparse.ArgumentParser:
     post = commands.add_parser("post", help="generic POST escape hatch (ETag retry)")
     post.add_argument("path")
     post.add_argument("json", nargs="?", help="JSON request body")
+    patch = commands.add_parser("patch", help="generic PATCH escape hatch (ETag retry)")
+    patch.add_argument("path")
+    patch.add_argument("json", nargs="?", help="JSON request body")
     checkin = commands.add_parser("checkin", help="append one habit check-in")
     checkin.add_argument("habit", help="habit id or title")
     checkin.add_argument("--date", default="", help="ISO date (default: today)")
