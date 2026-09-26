@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-09-20
+last_verified: 2026-09-26
 source_of_truth: true
 ---
 
@@ -330,6 +330,35 @@ WantedBy=multi-user.target
 - **`NBLANE_TRUST_PROXY_HEADERS=1`**：见下文「HTTPS 反向代理」的限流说明；
   不要改用 uvicorn `--proxy-headers`（应用自己读取 X-Forwarded-For）。
 
+生产机上这三个运行期修正建议做成 drop-in（`/etc/systemd/system/nblane-web-api.service.d/`），
+不要直接改 unit 主体：
+
+```bash
+sudo install -d /etc/systemd/system/nblane-web-api.service.d
+
+# 1. 出站代理（如需）：写法与 nblane.service 的 10-proxy.conf 相同，
+#    见 mihomo-deployment.md「让生产 systemd 服务走代理」，含成对的 no_proxy/NO_PROXY。
+
+# 2. PATH：SPA 助手页要在服务端探测/调用 openclaw，而 openclaw 通常装在
+#    用户级 npm-global，systemd 默认 PATH 看不到（症状是助手页显示「本机未安装」）。
+#    systemd Environment= 不做 shell 展开，必须写绝对路径：
+sudo tee /etc/systemd/system/nblane-web-api.service.d/20-path.conf >/dev/null <<'EOF'
+[Service]
+Environment=PATH=/home/nblane/.local/npm-global/bin:/usr/local/bin:/usr/bin:/bin
+EOF
+
+# 3. TRUST_PROXY_HEADERS：上面 unit 模板里已带 =1。若部署时 Caddy 反代尚未就位，
+#    先不要在主体里开启——直连可达时开启等于允许客户端伪造限流身份。
+#    条件满足（Caddy 就位且安全组只放 80/443）后再用 drop-in 打开：
+sudo tee /etc/systemd/system/nblane-web-api.service.d/30-trust-proxy.conf >/dev/null <<'EOF'
+[Service]
+Environment=NBLANE_TRUST_PROXY_HEADERS=1
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl restart nblane-web-api
+```
+
 启动：
 
 ```bash
@@ -398,6 +427,17 @@ your-domain.com {
         reverse_proxy 127.0.0.1:8502
     }
 
+    # OpenClaw Control UI 子路径反代（gateway 监听 127.0.0.1:18789）。
+    # 精确匹配与通配两条都必须写：只写 /openclaw/* 时，无尾斜杠的
+    # /openclaw 会落到下面的 8501 catch-all，WebSocket 握手失败。
+    handle /openclaw {
+        reverse_proxy 127.0.0.1:18789
+    }
+
+    handle /openclaw/* {
+        reverse_proxy 127.0.0.1:18789
+    }
+
     reverse_proxy 127.0.0.1:8501
 }
 ```
@@ -411,6 +451,26 @@ FastAPI 侧的路由前缀会被剥掉，`/dashboard?profile=...` 会 404 或路
 生产环境下打开 `/dashboard` 返回 401。`/blog-editor*`、`/api/blog/*`、`/api/site/*`
 承载 Output Studio 的完整 Blog 编辑器、AI 流接口与公开站点构建接口，缺失时编辑器
 404、发布不可达。
+
+`/openclaw` 两条反代把 OpenClaw Control UI 挂到主站子路径（gateway 只监听
+`127.0.0.1:18789`，不对公网开放）。Caddy 侧之外，Gateway 侧还必须配四件套，
+缺一不可（`publicOrigin` 是裸 origin、不带路径；缺 `trustedProxies` 会 403
+`proxy_attribution_required`；缺 `allowedOrigins` 会在 WS 握手后拒绝来源）：
+
+```bash
+openclaw config patch --stdin --dry-run <<'JSON5'
+{ "gateway": {
+    "controlUi": { "basePath": "/openclaw",
+                   "allowedOrigins": ["https://your-domain.com", "https://spa.your-domain.com"] },
+    "publicOrigin": "https://your-domain.com",
+    "trustedProxies": ["127.0.0.1", "::1"]
+} }
+JSON5
+# dry-run 通过后去掉 --dry-run 再执行同一补丁，然后 openclaw gateway restart
+```
+
+完整变更窗口（前置检查、验证、回滚）见
+[OpenClaw 接入指南 CW-4](openclaw-integration.md)。
 
 Streamlit 只监听 `127.0.0.1:8501`，Reader API 只监听 `127.0.0.1:8502`，
 SPA 后端只监听 `127.0.0.1:8504`，不要在腾讯云安全组开放 `8501`、`8502` 或 `8504`。

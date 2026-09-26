@@ -65,6 +65,7 @@ source_of_truth: true
 | [blog-editor.md](guides/blog-editor.md) | Blog 编辑器、AI patch、视觉候选、发布检查 |
 | [deployment-tencent-cloud.md](guides/deployment-tencent-cloud.md) | 腾讯云小团队部署 |
 | [mihomo-deployment.md](guides/mihomo-deployment.md) | Mihomo 代理完整部署与运维 |
+| [migration.md](guides/migration.md) | 整机迁移 runbook：三树 + OpenClaw 侧 + 系统层的搬迁顺序与验收 |
 | [spa-experience-checklist.md](guides/spa-experience-checklist.md) | 体验官手册：融合 + SPA 全功能走查清单与问题记录表 |
 
 ### Reference

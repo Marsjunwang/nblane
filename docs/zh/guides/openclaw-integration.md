@@ -1,7 +1,7 @@
 ---
 status: active
 owner: 王军
-last_verified: 2026-09-20
+last_verified: 2026-09-26
 source_of_truth: src/nblane/mcp_server.py、src/nblane/core/mcp_client_config.py、src/nblane/core/agent_tasks.py、src/nblane/core/openclaw_automations.py、src/nblane/core/openclaw_ops.py、src/nblane/core/openclaw_corpus.py、src/nblane/core/git_backup.py、src/nblane/core/notify.py、src/nblane/commands/openclaw.py、profiles/template/assistant/、scripts/openclaw/skills/、scripts/openclaw/plugins/weixin-task-bridge/、scripts/openclaw/install.sh
 ---
 
@@ -1214,10 +1214,17 @@ sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$(date +%Y%m%d)
 1. 编辑 `/etc/caddy/Caddyfile`，在兜底 `reverse_proxy 127.0.0.1:8501` 之前加：
 
    ```caddyfile
+       handle /openclaw {
+           reverse_proxy 127.0.0.1:18789
+       }
+
        handle /openclaw/* {
            reverse_proxy 127.0.0.1:18789
        }
    ```
+
+   精确匹配 `/openclaw` 与通配 `/openclaw/*` 两条都必须写：只写通配时，无尾
+   斜杠的 `/openclaw` 请求会落到 8501 catch-all，WebSocket 握手失败。
 
 2. 校验并生效：
 
@@ -1225,12 +1232,16 @@ sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$(date +%Y%m%d)
    sudo caddy validate --config /etc/caddy/Caddyfile
    ```
 
-3. Gateway 侧配置（走 `config patch`，先 dry-run）：
+3. Gateway 侧配置（走 `config patch`，先 dry-run）。四件套缺一不可：
 
    ```bash
    openclaw config patch --stdin --dry-run <<'JSON5'
-   { "gateway": { "controlUi": { "basePath": "/openclaw" },
-                  "publicOrigin": "https://<域名>/openclaw" } }
+   { "gateway": {
+       "controlUi": { "basePath": "/openclaw",
+                      "allowedOrigins": ["https://<域名>", "https://spa.<域名>"] },
+       "publicOrigin": "https://<域名>",
+       "trustedProxies": ["127.0.0.1", "::1"]
+   } }
    JSON5
    # dry-run 通过后去掉 --dry-run 再执行同一补丁
    ```
@@ -1241,6 +1252,17 @@ sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$(date +%Y%m%d)
    sudo systemctl reload caddy        # 优雅重载，无中断
    openclaw gateway restart           # basePath 改动需重启 Gateway（秒级微信中断）
    ```
+
+**实测补充（2026-09-25）**：
+
+- `gateway.publicOrigin` 必须是**裸 origin**（`https://<域名>`），不能带
+  `/openclaw` 路径；路径只写在 `controlUi.basePath`。
+- 缺 `gateway.trustedProxies` 时，经 Caddy 反代的请求被 403 拒绝，报
+  `proxy_attribution_required`。
+- 缺 `controlUi.allowedOrigins` 时，页面可加载但 WS 握手后拒绝来源，报
+  「浏览器来源不被允许」；列表要同时覆盖 www 与 spa 两个 origin。
+- Caddy 侧必须同时精确匹配 `/openclaw`（无尾斜杠），只写 `/openclaw/*`
+  会让该请求落到主站 catch-all 的 8501，WS 握手失败。
 
 验证（只读）：
 
@@ -1256,11 +1278,13 @@ curl -fsS http://127.0.0.1:18789/readyz
 回滚：
 
 ```bash
-# 1. 从 Caddyfile 删除 handle /openclaw/* 块（或恢复 Caddyfile.bak-<date>）
+# 1. 从 Caddyfile 删除两个 handle /openclaw 块（或恢复 Caddyfile.bak-<date>）
 sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
-# 2. 撤掉 Gateway 侧两个键并重启
+# 2. 撤掉 Gateway 侧四个键并重启
 openclaw config unset gateway.controlUi.basePath
+openclaw config unset gateway.controlUi.allowedOrigins
 openclaw config unset gateway.publicOrigin
+openclaw config unset gateway.trustedProxies
 openclaw gateway restart
 ```
 

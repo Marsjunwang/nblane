@@ -487,9 +487,15 @@ handle /openclaw/* {
 Gateway 侧（走 L3 的 overlay，不手改）：
 
 ```json5
-{ gateway: { controlUi: { basePath: "/openclaw" },
-             publicOrigin: "https://<域名>/openclaw" } }
+{ gateway: { controlUi: { basePath: "/openclaw",
+                          allowedOrigins: ["https://<域名>", "https://spa.<域名>"] },
+             publicOrigin: "https://<域名>",
+             trustedProxies: ["127.0.0.1", "::1"] } }
 ```
+
+> 2026-09-25 实测：publicOrigin 必须是裸 origin（带路径会被 schema 拒绝）；
+> 缺 trustedProxies 会 403 `proxy_attribution_required`；缺 allowedOrigins
+> 会「浏览器来源不被允许」。详见 openclaw-integration.md CW-4 实测补充。
 
 - 前置测试：`caddy validate`；`curl -sI https://<域名>/openclaw/` 期望 200；
   桌面浏览器 WS 握手正常（Control UI 能登录）后再上手机。
