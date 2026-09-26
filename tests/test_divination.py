@@ -426,6 +426,48 @@ class TestLlmSourceSwitch(DivinationTestBase):
             captured["llm_timeout_seconds"], divination.LLM_TIMEOUT_SECONDS
         )
 
+    def test_llm_payload_pins_flash_model_and_fail_fast_retries(self) -> None:
+        """占卜走 flash 档模型 + 禁 SDK 重试 (2026-09-26 手机占卜超时事故)。"""
+        captured: dict = {}
+
+        def ok_runner(profile: str, payload: dict) -> SimpleNamespace:
+            captured.update(payload)
+            return SimpleNamespace(
+                ok=True,
+                structured={"judgment": "判", "reading": "解"},
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root)
+            schemas = _write_schemas(base)
+            outcome = self._cast(root, schemas, runner=ok_runner)
+        self.assertEqual(outcome["source"], "llm")
+        self.assertEqual(captured["llm_model"], divination.LLM_MODEL_DEFAULT)
+        self.assertEqual(captured["llm_max_retries"], 0)
+
+    def test_llm_payload_model_env_override(self) -> None:
+        captured: dict = {}
+
+        def ok_runner(profile: str, payload: dict) -> SimpleNamespace:
+            captured.update(payload)
+            return SimpleNamespace(
+                ok=True,
+                structured={"judgment": "判", "reading": "解"},
+            )
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"NBLANE_DIVINATION_MODEL": "qwen3.7-flash"}),
+        ):
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root)
+            schemas = _write_schemas(base)
+            self._cast(root, schemas, runner=ok_runner)
+        self.assertEqual(captured["llm_model"], "qwen3.7-flash")
+
     def test_incomplete_llm_output_falls_back_to_rule(self) -> None:
         def partial_runner(profile: str, payload: dict) -> SimpleNamespace:
             return SimpleNamespace(

@@ -121,6 +121,51 @@ class TestAIGateway(unittest.TestCase):
         self.assertEqual(chat.call_args.kwargs["timeout"], 11.0)
         self.assertTrue(chat.call_args.kwargs["stream"])
 
+    def test_direct_backend_passes_max_retries_override(self) -> None:
+        """Interactive actions can disable the SDK's silent retry-on-timeout."""
+
+        spec = get_action_spec("divination.cast")
+        self.assertIsNotNone(spec)
+        request = AIActionRequest(
+            action="divination.cast",
+            profile="",
+            payload={"llm_max_retries": 0, "llm_timeout_seconds": 90},
+        )
+        with (
+            patch("nblane.core.llm.is_configured", return_value=True),
+            patch(
+                "nblane.core.llm.chat",
+                return_value='{"judgment":"判","reading":"解"}',
+            ) as chat,
+        ):
+            result = DirectLLMBackend().run(request, spec)  # type: ignore[arg-type]
+
+        self.assertTrue(result.ok)
+        self.assertEqual(chat.call_args.kwargs["max_retries"], 0)
+        self.assertEqual(chat.call_args.kwargs["timeout"], 90.0)
+
+    def test_direct_backend_defaults_max_retries_to_sdk(self) -> None:
+        """Without an override the SDK default (2 retries) is left in place."""
+
+        spec = get_action_spec("divination.cast")
+        self.assertIsNotNone(spec)
+        request = AIActionRequest(
+            action="divination.cast",
+            profile="",
+            payload={},
+        )
+        with (
+            patch("nblane.core.llm.is_configured", return_value=True),
+            patch(
+                "nblane.core.llm.chat",
+                return_value='{"judgment":"判","reading":"解"}',
+            ) as chat,
+        ):
+            result = DirectLLMBackend().run(request, spec)  # type: ignore[arg-type]
+
+        self.assertTrue(result.ok)
+        self.assertIsNone(chat.call_args.kwargs["max_retries"])
+
     def test_direct_backend_can_disable_streaming_paper_translation(self) -> None:
         """Operators can temporarily return paper translation to non-streaming HTTP."""
 

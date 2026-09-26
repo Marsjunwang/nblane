@@ -62,6 +62,11 @@ class DirectLLMBackend:
                 "llm_timeout_seconds",
                 "timeout_seconds",
             ),
+            max_retries=_nonnegative_int_override(
+                request.payload,
+                "llm_max_retries",
+                "max_retries",
+            ),
         )
         if raw.startswith("LLM error:") or raw.startswith(
             "AI features not configured"
@@ -512,6 +517,22 @@ def _positive_float_override(payload: dict[str, Any], *keys: str) -> float | Non
         except (TypeError, ValueError):
             continue
         if clean > 0:
+            return clean
+    return None
+
+
+def _nonnegative_int_override(payload: dict[str, Any], *keys: str) -> int | None:
+    """Return an optional non-negative int override from a business payload."""
+
+    for key in keys:
+        value = payload.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            clean = int(value)
+        except (TypeError, ValueError):
+            continue
+        if clean >= 0:
             return clean
     return None
 

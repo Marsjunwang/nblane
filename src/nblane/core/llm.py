@@ -18,6 +18,7 @@ import os
 import re
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from nblane.core.paths import REPO_ROOT
 
@@ -334,6 +335,7 @@ def chat(
     max_tokens: int | None = None,
     meta_out: dict | None = None,
     enable_thinking: bool | None = None,
+    max_retries: int | None = None,
 ) -> str:
     """Send a single-turn chat and return the reply text.
 
@@ -345,6 +347,9 @@ def chat(
 
     *enable_thinking* toggles reasoning models' thinking phase (see
     :func:`_thinking_extra_body`); ``None`` uses the provider default.
+    *max_retries* caps the OpenAI SDK's silent retry-on-timeout (default 2);
+    interactive callers should pass 0 so a slow call fails fast to their own
+    fallback instead of multiplying the wait.
     """
     reload_env_if_changed()
     if not is_configured():
@@ -356,11 +361,14 @@ def chat(
     try:
         from openai import OpenAI
 
-        client = OpenAI(
-            base_url=_BASE_URL,
-            api_key=_API_KEY,
-            timeout=timeout or timeout_seconds(),
-        )
+        client_kwargs: dict[str, Any] = {
+            "base_url": _BASE_URL,
+            "api_key": _API_KEY,
+            "timeout": timeout or timeout_seconds(),
+        }
+        if max_retries is not None:
+            client_kwargs["max_retries"] = max(0, int(max_retries))
+        client = OpenAI(**client_kwargs)
         use_stream = stream or stream_callback is not None
         extra_body = _thinking_extra_body(enable_thinking)
         response = client.chat.completions.create(

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable
@@ -36,7 +37,13 @@ MODE_SERIOUS = "serious"
 MODES = (MODE_PLAY, MODE_SERIOUS)
 
 DIVINATION_ACTION = "divination.cast"
-LLM_TIMEOUT_SECONDS = 60.0
+# Thinking stays ON (王军 ruling 2026-09-26): a qwen3.8-flash cast thinks
+# ~45s, so 60s timed out at the borderline and the SDK's silent retries
+# tripled the wait (mobile clients dropped → "failed to fetch"). 90s gives
+# headroom; llm_max_retries=0 below makes a slow cast fail fast to the rule
+# reading instead of multiplying the wait.
+LLM_TIMEOUT_SECONDS = 90.0
+LLM_MODEL_DEFAULT = "qwen3.8-flash"
 QUESTION_MAX_LENGTH = 500
 
 # Curated hexagram table (King Wen number, name, classical 卦辞, modern
@@ -373,6 +380,12 @@ def _llm_payload(
         "anchors": anchors,
         "gap": gap_summary,
         "llm_timeout_seconds": LLM_TIMEOUT_SECONDS,
+        # Flash-tier model (王军 ruling: thinking stays on); the global
+        # qwen3.6-plus thinks past the timeout on this action. No SDK
+        # retries: a slow cast fails fast to the rule reading.
+        "llm_model": os.getenv("NBLANE_DIVINATION_MODEL", "").strip()
+        or LLM_MODEL_DEFAULT,
+        "llm_max_retries": 0,
     }
 
 
