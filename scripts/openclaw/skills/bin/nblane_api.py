@@ -62,6 +62,32 @@ def cookie_jar_path() -> Path:
     return root / "nblane" / "api-cookies.json"
 
 
+def _read_password() -> str:
+    """Service-account password: env first, then ~/.config/nblane/api.env.
+
+    The file fallback exists because automation sandboxes do not always
+    inherit the gateway process environment (2026-09-26 incident: the
+    morning-report cron saw an expired cookie and no password env).
+    Format: KEY=VALUE lines, ``#`` comments; file should be chmod 0600.
+    """
+    env_value = os.environ.get(PASSWORD_ENV, "").strip()
+    if env_value:
+        return env_value
+    config_home = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    root = Path(config_home).expanduser() if config_home else Path.home() / ".config"
+    try:
+        for line in (root / "nblane" / "api.env").read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key.strip() == PASSWORD_ENV:
+                return value.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
 def load_cookies(path: Path, base_url: str) -> dict[str, str]:
     try:
         data = json.loads(path.read_text())
@@ -152,11 +178,12 @@ class Session:
 
     def login(self) -> dict:
         """POST /auth/login, persist the session cookie, return the user JSON."""
-        password = self._password or os.environ.get(PASSWORD_ENV, "")
+        password = self._password or _read_password()
         if not password:
             raise ApiFailure(
                 f"{PASSWORD_ENV} is not set; configure the openclaw "
-                "service-account password in the environment (plan §3.1)"
+                "service-account password in the environment or in "
+                "~/.config/nblane/api.env (0600) (plan §3.1)"
             )
         response = self.client.post(
             f"{API_PREFIX}/auth/login",
@@ -166,7 +193,12 @@ class Session:
             raise ApiFailure(
                 f"login failed: HTTP {response.status_code}: {error_message(response)}"
             )
-        save_cookies(self.jar_path, self.base_url, dict(self.client.cookies))
+        # dict(client.cookies) raises CookieConflict when the server sets the
+        # same cookie name for multiple paths; dedupe by name, last wins.
+        merged: dict[str, str] = {}
+        for cookie in self.client.cookies.jar:
+            merged[cookie.name] = cookie.value
+        save_cookies(self.jar_path, self.base_url, merged)
         return response.json()
 
     def request(

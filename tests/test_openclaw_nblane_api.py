@@ -224,6 +224,8 @@ def test_password_never_logged(session, server, capsys, tmp_path):
 
 def test_missing_password_env_errors_cleanly(server, tmp_path, monkeypatch, capsys):
     monkeypatch.delenv(nblane_api.PASSWORD_ENV, raising=False)
+    # Isolate from any real ~/.config/nblane/api.env fallback file.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-config"))
     session = nblane_api.Session(
         "http://127.0.0.1:8504",
         jar_path=tmp_path / "api-cookies.json",
@@ -234,6 +236,25 @@ def test_missing_password_env_errors_cleanly(server, tmp_path, monkeypatch, caps
     assert code == 2
     assert nblane_api.PASSWORD_ENV in captured.err
     assert server.login_calls == 0
+
+
+def test_password_falls_back_to_config_file(server, tmp_path, monkeypatch):
+    monkeypatch.delenv(nblane_api.PASSWORD_ENV, raising=False)
+    config = tmp_path / "config" / "nblane"
+    config.mkdir(parents=True)
+    (config / "api.env").write_text(
+        f"# comment\n{nblane_api.PASSWORD_ENV}={PASSWORD}\n"
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    session = nblane_api.Session(
+        "http://127.0.0.1:8504",
+        jar_path=tmp_path / "api-cookies.json",
+        transport=server.transport(),
+    )
+    code = nblane_api.main(["login"], session=session)
+    assert code == 0
+    assert server.login_calls == 1
+    assert PASSWORD in server.requests[0].content.decode()
 
 
 def test_semantic_commands_hit_expected_routes(authed, server):

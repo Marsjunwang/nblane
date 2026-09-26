@@ -161,8 +161,10 @@ tilde 形态调用(不出现 /srv、/home 绝对路径,三树漂移免疫)。子
 `starmap`、`board`、`chronicle`、`divine`、`health`、`activity`;会话 cookie
 缓存在 `~/.cache/nblane/api-cookies.json`,401 自动重登一次,mutation 复刻
 SPA 的 ETag 纪律(首发不带 If-Match,412 取新 ETag 重试一次)。**删除类
-(页面确认级)被客户端硬拒**,无 delete 子命令。密码只从环境变量
-`NBLANE_OPENCLAW_API_PASSWORD` 读;base URL 用 `NBLANE_API_BASE` 覆盖。
+(页面确认级)被客户端硬拒**,无 delete 子命令。密码读取顺序:环境变量
+`NBLANE_OPENCLAW_API_PASSWORD` → `~/.config/nblane/api.env`(0600 文件兜底,
+自动化沙箱不继承 gateway 进程环境时救命,2026-09-26 晨报事故);
+base URL 用 `NBLANE_API_BASE` 覆盖。
 账号设计与分级授权见 `docs/zh/dev/production-launch-plan.md` §3.1/§3.3。
 
 ### 账号与密钥清单(全部私有,不入库)
