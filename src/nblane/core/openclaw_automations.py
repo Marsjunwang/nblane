@@ -679,6 +679,7 @@ def plan_reconcile(
                     ACTION_PRUNE_CANDIDATE,
                     key,
                     "运行时存在但声明已移除（默认不删除，--prune 才执行）",
+                    live_id=live_by_key[key].get("id", ""),
                 )
             )
         else:
@@ -771,12 +772,14 @@ def build_action_argv(action: ReconcileAction) -> list[str] | None:
             *_spec_field_argv(action.spec),
         ]
     if action.kind == ACTION_PRUNE_CANDIDATE:
+        # 2026.9: `rm` targets the live job id positionally.
+        if not action.live_id:
+            return None
         return [
             "openclaw",
             "automations",
             "rm",
-            "--declaration-key",
-            action.key,
+            action.live_id,
         ]
     return None
 

@@ -422,8 +422,7 @@ class TestAdoptReconcile(unittest.TestCase):
                 "openclaw",
                 "automations",
                 "rm",
-                "--declaration-key",
-                "personal-assistant:daily-plan",
+                "job-personal-assistant:daily-plan",
             ],
         )
 
@@ -452,8 +451,7 @@ class TestAdoptReconcile(unittest.TestCase):
                     "openclaw",
                     "automations",
                     "rm",
-                    "--declaration-key",
-                    "personal-assistant:daily-plan",
+                    "job-personal-assistant:daily-plan",
                 ]
             ],
         )
@@ -556,7 +554,7 @@ class TestApplyReconcile(unittest.TestCase):
         )
         self.assertEqual(
             runner.calls,
-            [["openclaw", "automations", "rm", "--declaration-key", "nblane:stale"]],
+            [["openclaw", "automations", "rm", "job-nblane:stale"]],
         )
         self.assertTrue(results[0].executed)
 
