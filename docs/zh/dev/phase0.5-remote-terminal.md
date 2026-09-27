@@ -1,7 +1,7 @@
 ---
 status: active
 owner: 王军 + kimi
-last_verified: 2026-09-22
+last_verified: 2026-09-27
 source_of_truth: 远程车间(网页终端)接入方案;Step 0/1/2 已实施并验收(见文末实施记录)
 ---
 
@@ -86,3 +86,12 @@ ttyd 一个二进制把 bash 暴露为网页终端(xterm.js 内核);配 tmux 得
 - **测试**: `tests/test_web_api_workshop.py` 7 例(URL 默认/覆盖、探活成败、probe URL 覆盖、缓存、401 门控);`WorkshopPage.test.tsx` 3 例。全量 `pytest -q` 1627 通过;前端 `vitest run` 147 通过;`npx tsc --noEmit` 与 `npx vite build --outDir /tmp/spa-build-check` 通过。
 - **未做(刻意推迟)**: 未执行 `npm run build` 写入 `src/nblane/web_ui/static/`(当日该目录正服务于 18504 的另一特性验证)。后续重建命令:`cd src/nblane/web_ui/frontend && npm run build`(脚本内含 `tsc --noEmit`,输出至 `../static`,随包分发)。
 - **打包清单**: Step 2 无新增系统级依赖/端口/服务,docs/zh/guides/packaging-manifest.md 无需改动;仅新增环境变量 `NBLANE_WORKSHOP_URL` / `NBLANE_WORKSHOP_PROBE_URL`,已登入 `.env.example`。
+
+## 实施记录(2026-09-27,移动端叠字修复)
+
+- **症状**: 手机 Chrome 打开 `/terminal/`,流式更新时特定汉字(端/页/试/功等)全文一致性地糊成一团;整屏重绘的旧内容正常,刷新暂时减轻。定位:xterm.js 默认 webgl 渲染器把字形光栅化进 GPU 纹理图集,部分安卓 GPU/驱动下图集条目损坏(坏字每次糊得一样);次要因素为安卓 CJK 后备字形宽度超出按拉丁等宽字体量出的格子。
+- **修复**(均在 wrapper `~/.local/bin/nblane-workshop-ttyd.sh`,重启 `nblane-workshop.service` 生效):
+  1. `-t rescaleOverlappingGlyphs=true`(超格字形缩放回格子内)——单独上未根治;
+  2. `-t rendererType=canvas`(弃 webgl 图集,逐字直绘,没有图集可坏)——**王军手机实测通过,显示清晰**。代价:canvas 滚动性能略低于 webgl,聊天式终端使用无感。
+- **验证手法**(下次改 `-t` 配置可直接用): ttyd 客户端选项不走 HTML 注入,而是 WebSocket 握手(子协议为 `tty`,不是 `web`;需先 GET `/token` 再带 token 连接)后由服务端 `SET_PREFERENCES`('2' 前缀帧)下发;python 裸 socket 握手 + 发送 `{"AuthToken":"","columns":N,"rows":M}` 初始化帧即可抓到该 JSON,确认配置真实到达客户端。
+- **遗留**: ttyd 1.7.7 无 viewport meta 的坑仍在;若移动端再出显示异常,可用 `-I` 挂自定义 index.html 补 meta(最后一招)。
