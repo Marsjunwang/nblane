@@ -533,7 +533,14 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
         schema=schema_for_keys(
             ["evidence_entries", "node_updates"],
             properties={
-                "evidence_entries": {"type": "array"},
+                "evidence_entries": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["source_task_id"],
+                        "properties": {"source_task_id": {"type": "string"}},
+                    },
+                },
                 "node_updates": {"type": "array"},
                 "skipped_tasks": {"type": "array"},
             },

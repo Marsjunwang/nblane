@@ -201,6 +201,9 @@ def attach_task_snapshots(
         if not isinstance(row, dict):
             continue
         refs = task_source_refs(row)
+        source_task_id = _clean(row.pop("source_task_id", ""))
+        if source_task_id:
+            refs.add(kanban_ref(source_task_id))
         refs.update(kanban_ref(_clean(t)) for t in row.pop("source_task_ids", []) if _clean(t))
         if not refs and len(by_ref) == 1:
             refs = set(by_ref)
@@ -208,7 +211,15 @@ def attach_task_snapshots(
         if strict and (not selected_refs or not refs <= by_ref.keys()):
             raise ValueError("Evidence source tasks are missing or outside the selection.")
         if not strict:
-            selected_refs = set(by_ref)
+            # AI drafts must keep their task attribution. Historically this
+            # path attached every row to every selected task, collapsing a
+            # multi-task selection into one shared evidence row.
+            if not selected_refs and len(by_ref) == 1:
+                selected_refs = set(by_ref)
+            elif len(selected_refs) != 1:
+                raise ValueError(
+                    "Each AI evidence row must reference exactly one source task."
+                )
         selected = [snap for ref, snap in by_ref.items() if ref in selected_refs]
         row["kanban_refs"] = list(dict.fromkeys([*(row.get("kanban_refs") or []), *[snap["kanban_ref"] for snap in selected]]))
         row["project_refs"] = list(dict.fromkeys([*(row.get("project_refs") or []), *[snap["project_id"] for snap in selected if snap.get("project_id")]]))
@@ -307,6 +318,15 @@ def apply_crystallization(
                 [task_snapshot(task) for task in tasks], strict=True,
             )
             covered = set().union(*(task_source_refs(row) for row in filtered.evidence_entries))
+            expected_refs = {kanban_ref(task.id) for task in tasks}
+            if covered != expected_refs:
+                raise ValueError(
+                    "Each selected task must have one separately attributed evidence row."
+                )
+            if any(len(task_source_refs(row) & expected_refs) != 1 for row in filtered.evidence_entries):
+                raise ValueError(
+                    "Each evidence row must reference exactly one selected source task."
+                )
             selected_tasks = [task for task in tasks if kanban_ref(task.id) in covered]
             projects = internal_project_goal_index(pdir)
             goal_ids = {goal.id for goal in load_goal_book(pdir).goals}

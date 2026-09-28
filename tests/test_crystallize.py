@@ -228,6 +228,41 @@ class TestDoneCrystallization(unittest.TestCase):
         self.assertEqual(second["kanban_refs"], ["kanban:other", "kanban:taskA"])
         self.assertNotIn("original_content_hash", second)
 
+    def test_ai_rows_keep_one_task_per_evidence(self) -> None:
+        from nblane.core import crystallize
+        from nblane.core.models import KanbanTask
+
+        tasks = [
+            KanbanTask(title="Task A", id="taskA", done=True),
+            KanbanTask(title="Task B", id="taskB", done=True),
+        ]
+        snapshots = [crystallize.task_snapshot(task) for task in tasks]
+        patch = {
+            "evidence_entries": [
+                {"title": "Evidence A", "source_task_id": "taskA"},
+                {"title": "Evidence B", "source_task_id": "taskB"},
+            ]
+        }
+
+        out = crystallize.attach_task_snapshots(patch, snapshots)
+        rows = out["evidence_entries"]
+        self.assertEqual([row["kanban_refs"] for row in rows], [["kanban:taskA"], ["kanban:taskB"]])
+
+    def test_ai_rows_reject_combined_multi_task_evidence(self) -> None:
+        from nblane.core import crystallize
+        from nblane.core.models import KanbanTask
+
+        tasks = [
+            KanbanTask(title="Task A", id="taskA", done=True),
+            KanbanTask(title="Task B", id="taskB", done=True),
+        ]
+        snapshots = [crystallize.task_snapshot(task) for task in tasks]
+        with self.assertRaisesRegex(ValueError, "exactly one source task"):
+            crystallize.attach_task_snapshots(
+                {"evidence_entries": [{"title": "Combined", "kanban_refs": ["kanban:taskA", "kanban:taskB"]}]},
+                snapshots,
+            )
+
     def test_apply_crystallization_writes_and_marks(self) -> None:
         import yaml
 

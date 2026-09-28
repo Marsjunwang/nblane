@@ -139,9 +139,13 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "or invent unrelated implementation detail."
     ),
     "evidence.crystallize": (
-        "Convert selected completed Kanban tasks into reviewable evidence and "
-        "skill-tree candidates. Preserve task provenance and do not invent "
-        "outcomes."
+        "Convert selected completed Kanban tasks into separate reviewable "
+        "evidence entries: create exactly one evidence entry per source task, "
+        "never combine multiple tasks into one entry, and never let one entry "
+        "represent multiple tasks. Every evidence entry must include its "
+        "single source_task_id copied exactly from the supplied task id. Keep "
+        "skill-tree candidates separate from evidence entries. Preserve task "
+        "provenance and do not invent outcomes."
     ),
     "project.suggest_refs": (
         "Suggest project ownership refs from the supplied candidate IDs only. "
