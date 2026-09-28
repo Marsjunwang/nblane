@@ -263,7 +263,7 @@ nblane/
 - [中文文档总览](docs/zh/README.md) — canonical project documentation.
 - [English docs entry](docs/README.md) — short pointer to the canonical Chinese docs.
 - [Product overview](docs/zh/product/overview.md)
-- [Core loop](docs/zh/product/core-loop.md)
+- [Current data-loop plan](docs/zh/dev/phase-plan.md)
 - [Roadmap](docs/zh/product/roadmap.md)
 - [Current status](docs/zh/project/status.md)
 - [Milestones](docs/zh/project/milestones.md)

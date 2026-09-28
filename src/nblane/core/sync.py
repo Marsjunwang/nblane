@@ -215,6 +215,7 @@ def write_generated_blocks(profile_dir: Path) -> None:
     skill_md = profile_dir / "SKILL.md"
     if not skill_md.exists():
         raise ValueError("SKILL.md not found.")
+
     content = skill_md.read_text(encoding="utf-8")
     generated = build_generated_blocks(profile_dir)
     updated = content

@@ -1,7 +1,7 @@
 ---
 status: active
 owner: product
-last_verified: 2026-05-10
+last_verified: 2026-09-28
 source_of_truth: true
 ---
 
@@ -41,27 +41,9 @@ Goal + Skill + Evidence = 一张可审查的能力图谱
 多个成长单元 + 共享产品池 = 一个长期复利团队
 ```
 
-## 核心闭环
+## 当前实现闭环
 
-nblane 的价值来自闭环，而不是单点功能：
-
-```text
-目标 -> 捕获 -> 执行 -> 证据 -> 技能图谱 -> 差距分析 -> 下一步行动 -> 公开输出 -> Agent 复用
-```
-
-这条闭环把“我学了什么”推进到“我有什么证据证明自己具备某种能力”：
-
-- **目标**：用户设定阶段性目标，例如 8 周内完成一个 Agent 项目并写 3 篇技术文章。
-- **捕获**：用户低摩擦记录链接、论文、笔记、项目日志、commit、草稿、想法和打卡。
-- **执行**：任务通过 Kanban、CLI、Web UI、MCP 工具或外部 coding agent 推进。
-- **证据**：完成的任务、阅读、实验、代码和公开输出进入 evidence pool。
-- **技能图谱**：evidence 关联到 skill tree，让 `locked`、`learning`、`solid`、`expert` 等能力状态尽量有证据支撑。
-- **差距分析**：AI/规则系统指出目标路径上的缺口，而不是泛泛推荐内容。
-- **下一步行动**：系统生成可执行建议，例如补一个 demo、写一篇复盘、整理一个项目 README。
-- **公开输出**：将可信 evidence 转化为博客、项目页、简历 bullet、个人网站和作品集。
-- **Agent 复用**：沉淀后的上下文通过 `nblane context` 和 MCP 提供给 Codex/OpenCode/Cursor/Claude 等外部 Agent。
-
-详细流程见 [核心闭环](core-loop.md)。
+当前 SPA 首个数据闭环及其验收口径，以[全局 Phase 计划](../dev/phase-plan.md)为准；页面与 API 的实现状态见 [SPA 迁移总账](../architecture/frontend-spa-migration.md)。本页不再维护另一套流程定义。
 
 ## 产品分层
 
@@ -152,17 +134,4 @@ goal -> evidence -> skill -> gap -> action -> artifact -> public proof
   -> 研究资料、证据图谱和公开输出闭环
 ```
 
-近期实现应优先打穿一个可感知的最小成长闭环：
-
-```text
-阶段目标
-  -> 捕获日常输入
-  -> Done 任务升格为 evidence
-  -> evidence 更新 skill tree
-  -> gap 生成下一步行动
-  -> evidence 转化为博客 / 项目 / 简历 / 个人网站内容
-```
-
-在这个闭环稳定之前，研究热点聚合、复杂图谱可视化、完整团队协作和更强的自动化 Agent 都应服务于它，而不是替代它。
-
-详细开发顺序见 [路线图](roadmap.md) 和 [里程碑](../project/milestones.md)。
+具体开发顺序见[全局 Phase 计划](../dev/phase-plan.md)、[路线图](roadmap.md)和[里程碑](../project/milestones.md)。

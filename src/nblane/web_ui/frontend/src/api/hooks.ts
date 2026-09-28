@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 
-import { ApiError, apiDelete, apiDeleteWithHeaders, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, ifMatch } from './client';
+import { ApiError, apiDelete, apiDeleteWithHeaders, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, apiPut, ifMatch } from './client';
 import type {
   ActivityApplyResponse,
   ActivityDismissResponse,
@@ -114,6 +114,14 @@ import type {
   StudioValidationResponse,
   WeeklyReviewResult,
   WorkshopStatus,
+  CodexSettings,
+  CodexSettingsPatch,
+  CodexStatus,
+  LlmConnection,
+  LlmConnectionUpdate,
+  LlmConnectionVerify,
+  ProfileSettings,
+  ProfileSettingsPatch,
 } from './types';
 
 export function useMe() {
@@ -150,6 +158,88 @@ export function useProfiles() {
   return useQuery({
     queryKey: ['profiles'],
     queryFn: () => apiGet<ProfileSummary[]>('/profiles'),
+  });
+}
+
+/** Deployment-wide LLM connection (the API key is never returned). */
+export function useSettingsConnection(enabled = true) {
+  return useQuery({
+    queryKey: ['settings', 'connection'],
+    queryFn: () => apiGet<LlmConnection>('/settings/connection'),
+    enabled,
+  });
+}
+
+export function useUpdateSettingsConnection() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: LlmConnectionUpdate) =>
+      apiPut<LlmConnection>('/settings/connection', body),
+    onSuccess: (value) => {
+      queryClient.setQueryData(['settings', 'connection'], value);
+    },
+  });
+}
+
+export function useVerifySettingsConnection() {
+  return useMutation({
+    mutationFn: () =>
+      apiPost<LlmConnectionVerify>('/settings/connection/verify', {}),
+  });
+}
+
+export function useProfileSettings(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'settings'],
+    queryFn: () =>
+      apiGet<ProfileSettings>(`/profiles/${encodeURIComponent(profile)}/settings`),
+    enabled: profile.length > 0,
+  });
+}
+
+export function usePatchProfileSettings(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ProfileSettingsPatch) =>
+      apiPatch<ProfileSettings>(
+        `/profiles/${encodeURIComponent(profile)}/settings`,
+        body,
+      ),
+    onSuccess: (value) => {
+      queryClient.setQueryData(['profiles', profile, 'settings'], value);
+    },
+  });
+}
+
+export function useCodexStatus() {
+  return useQuery({
+    queryKey: ['settings', 'codex', 'status'],
+    queryFn: () => apiGet<CodexStatus>('/settings/codex/status'),
+  });
+}
+
+export function useProfileCodexSettings(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'settings', 'codex'],
+    queryFn: () =>
+      apiGet<CodexSettings>(
+        `/profiles/${encodeURIComponent(profile)}/settings/codex`,
+      ),
+    enabled: profile.length > 0,
+  });
+}
+
+export function usePatchProfileCodexSettings(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CodexSettingsPatch) =>
+      apiPatch<CodexSettings>(
+        `/profiles/${encodeURIComponent(profile)}/settings/codex`,
+        body,
+      ),
+    onSuccess: (value) => {
+      queryClient.setQueryData(['profiles', profile, 'settings', 'codex'], value);
+    },
   });
 }
 
@@ -1064,12 +1154,40 @@ export function useEvidenceReviewList(profile: string, filters: EvidenceReviewFi
   });
 }
 
+const CRYSTALLIZE_READ_MODEL_KEYS = [
+  'evidence',
+  'evidence-review',
+  'evidence-stages',
+  'kanban',
+  'skill-tree',
+  'starmap',
+  'home',
+  'project-board',
+  'projects-board',
+  'review',
+  'crystallize-candidates',
+] as const;
+
+/** Invalidate every read model affected by a successful crystallization. */
+export function invalidateCrystallizeReadModels(
+  queryClient: QueryClient,
+  profile: string,
+): void {
+  for (const key of CRYSTALLIZE_READ_MODEL_KEYS) {
+    queryClient.invalidateQueries({ queryKey: ['profiles', profile, key] });
+  }
+}
+
 function useInvalidateEvidenceReview(profile: string) {
   const queryClient = useQueryClient();
   return () => {
     queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'evidence-review'] });
     queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'evidence'] });
     queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'evidence-stages'] });
+    // Evidence grading/linking changes derived growth and project projections.
+    for (const key of ['skill-tree', 'starmap', 'home', 'project-board', 'projects-board', 'review']) {
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, key] });
+    }
   };
 }
 
@@ -1414,7 +1532,6 @@ export function useCrystallizeDraft(profile: string) {
 
 /** Apply a confirmed crystallize draft; marks the source tasks crystallized. */
 export function useCrystallizeApply(profile: string) {
-  const invalidate = useInvalidateEvidenceReview(profile);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: CrystallizeApplyRequest) =>
@@ -1423,14 +1540,7 @@ export function useCrystallizeApply(profile: string) {
         body,
       ),
     onSuccess: () => {
-      invalidate();
-      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'kanban'] });
-      queryClient.invalidateQueries({
-        queryKey: ['profiles', profile, 'crystallize-candidates'],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ['profiles', profile, 'evidence-stages'],
-      });
+      invalidateCrystallizeReadModels(queryClient, profile);
     },
   });
 }

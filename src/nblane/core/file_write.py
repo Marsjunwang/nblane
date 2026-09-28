@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
+from contextlib import contextmanager
+from collections.abc import Iterator
 
 
 def _fsync_directory(path: Path) -> None:
@@ -59,3 +61,37 @@ def atomic_write_text(
                 os.unlink(tmp_name)
             except FileNotFoundError:
                 pass
+
+
+@contextmanager
+def rollback_profile_files(directory: Path, filenames: tuple[str, ...]) -> Iterator[None]:
+    """Snapshot files and restore them when the enclosed operation fails.
+
+    This handles ordinary exceptions, not process death. Callers must use
+    stable source identities so interrupted operations can be safely retried.
+    Individual domain writers retain responsibility for their own file locks.
+    Readers may observe intermediate files while the operation is in flight.
+    """
+    before = {
+        directory / name: (directory / name).read_text(encoding="utf-8")
+        if (directory / name).exists() else None
+        for name in filenames
+    }
+    try:
+        yield
+    except Exception as original:
+        failures = []
+        for path, text in before.items():
+            try:
+                current = path.read_text(encoding="utf-8") if path.exists() else None
+                if current == text:
+                    continue
+                if text is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    atomic_write_text(path, text)
+            except OSError as exc:
+                failures.append(f"{path.name}: {exc}")
+        if failures:
+            raise OSError(f"{original}; rollback failed: {'; '.join(failures)}") from original
+        raise

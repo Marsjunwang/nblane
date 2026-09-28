@@ -21,6 +21,15 @@ from nblane.core.models import Evidence
 from nblane.core.schema_io import load_schema_raw, schema_node_index
 
 
+def task_source_refs(row: dict) -> set[str]:
+    """Return stable Kanban provenance, including legacy origin-only rows."""
+    refs = row.get("kanban_refs") or []
+    return {
+        str(ref).strip() for ref in [*refs, row.get("origin_ref", "")]
+        if str(ref).strip().startswith("kanban:") and str(ref).strip() != "kanban:"
+    }
+
+
 def merge_ingest_patch(
     profile_name: str,
     pool_raw: dict | None,
@@ -29,6 +38,7 @@ def merge_ingest_patch(
     *,
     allow_status_change: bool = False,
     bump_locked_with_evidence: bool = True,
+    match_task_sources: bool = False,
 ) -> MergeOutcome:
     """Merge patch into pool then tree (memory only)."""
     if isinstance(patch, dict):
@@ -98,7 +108,30 @@ def merge_ingest_patch(
             warnings.append("skipped evidence_entries row with empty title")
             continue
 
-        fp = fingerprint_match_id(
+        sources = task_source_refs(norm) if match_task_sources else set()
+        if sources:
+            matches = [e for e in entries if sources & task_source_refs(e)]
+            if len(matches) > 1 or any(e.get("deprecated") for e in matches):
+                return MergeOutcome(
+                    ok=False, merged_pool=None, merged_tree=None,
+                    errors=[f"Ambiguous or deprecated evidence for task sources: {sorted(sources)}"],
+                )
+            if matches:
+                existing = matches[0]
+                if not existing.get("id"):
+                    return MergeOutcome(ok=False, merged_pool=None, merged_tree=None,
+                                        errors=["Source evidence has no id."])
+                for key in ("kanban_refs", "project_refs"):
+                    existing[key] = list(dict.fromkeys([
+                        *(existing.get(key) or []), *(norm.get(key) or []),
+                    ]))
+                for key in ("origin", "origin_ref", "original_content",
+                            "original_content_hash", "original_language"):
+                    if not existing.get(key) and norm.get(key):
+                        existing[key] = norm[key]
+                ordinal_to_id[ord_idx + 1] = existing["id"]
+                continue
+        fp = None if sources else fingerprint_match_id(
             entries,
             norm["type"],
             norm["title"],

@@ -12,6 +12,7 @@ import yaml
 
 from nblane.core.ai import (
     create_remote_dev_task,
+    crystallize_done_tasks,
     draft_kanban_subtasks,
     draft_resume_for_job,
     generate_paper_review_card,
@@ -57,6 +58,7 @@ class TestAIGateway(unittest.TestCase):
                 "output.inline_patch",
                 "kanban.task_alignment",
                 "kanban.subtasks",
+                "evidence.crystallize",
                 "project.suggest_refs",
                 "work.remote_dev_task",
                 "gap.skill_coach",
@@ -85,6 +87,58 @@ class TestAIGateway(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.backend, "direct_llm")
         self.assertIn("ai_not_configured", result.error)
+
+    def test_crystallize_action_uses_ingest_prompt_and_model(self) -> None:
+        """The mature Kanban ingest protocol stays behind the new action."""
+
+        spec = get_action_spec("evidence.crystallize")
+        self.assertIsNotNone(spec)
+        request = AIActionRequest(
+            action="evidence.crystallize",
+            profile="alice",
+            payload={
+                "done_tasks": [SimpleNamespace(id="task-1")],
+                "ai_model": "qwen-plus",
+                "timeout_seconds": 12,
+            },
+        )
+        with patch(
+            "nblane.core.profile_ingest_llm.ingest_kanban_done_json",
+            return_value=({"evidence_entries": [], "node_updates": []}, None),
+        ) as ingest:
+            result = DirectLLMBackend().run(request, spec)  # type: ignore[arg-type]
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.backend, "direct_llm")
+        self.assertEqual(ingest.call_args.kwargs["model"], "qwen-plus")
+        self.assertEqual(ingest.call_args.kwargs["timeout_seconds"], 12.0)
+        self.assertEqual(ingest.call_args.kwargs["ai_backend"], "llm")
+
+    def test_crystallize_preference_selects_codex_and_model(self) -> None:
+        """Profile action preferences choose Codex without a rule fallback."""
+
+        with (
+            patch(
+                "nblane.core.ai.gateway.load_web_preferences",
+                return_value={
+                    "ai": {
+                        "actions": {
+                            "evidence.crystallize": {
+                                "backend": "codex",
+                                "codex_model": "gpt-5.1-codex",
+                            }
+                        }
+                    }
+                },
+            ),
+            patch("nblane.core.ai.gateway.run_ai_action") as run,
+        ):
+            run.return_value = SimpleNamespace(ok=True)
+            crystallize_done_tasks("alice", [SimpleNamespace(id="task-1")])
+
+        self.assertEqual(run.call_args.args[0], "evidence.crystallize")
+        self.assertEqual(run.call_args.kwargs["preferred_backend"], "local_codex_readonly")
+        self.assertEqual(run.call_args.args[1]["codex_model"], "gpt-5.1-codex")
 
     def test_direct_backend_passes_per_action_model_override(self) -> None:
         """Paper action model preferences are handed to the LLM client."""

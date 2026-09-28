@@ -274,6 +274,97 @@ class TestDoneCrystallization(unittest.TestCase):
 
             self._run_with_profiles(tmp, go)
 
+    def test_apply_crystallization_is_idempotent_on_retry(self) -> None:
+        """Retrying the same task patch reuses evidence and leaves state stable."""
+        from nblane.core import crystallize, profile_io
+
+        with tempfile.TemporaryDirectory() as tmp_s:
+            tmp = Path(tmp_s)
+            self._make_profile(tmp)
+
+            def go():
+                tasks, _ = crystallize.resolve_done_tasks("dev", ["taskA"])
+                patch = crystallize.rule_crystallize_patch(tasks)
+                first = crystallize.apply_crystallization(
+                    "dev", patch, task_ids=["taskA"]
+                )
+                second = crystallize.apply_crystallization(
+                    "dev", patch, task_ids=["taskA"]
+                )
+                self.assertTrue(first["ok"], first)
+                self.assertTrue(second["ok"], second)
+                self.assertEqual(len(first["new_evidence_ids"]), 1)
+                self.assertEqual(second["new_evidence_ids"], [])
+                self.assertEqual(second["crystallized_count"], 0)
+                self.assertEqual(first["items"], second["items"])
+                raw = profile_io.load_evidence_pool_raw("dev") or {}
+                rows = raw.get("evidence_entries") or []
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["kanban_refs"], ["kanban:taskA"])
+                self.assertTrue(crystallize.parse_kanban("dev")["Done"][0].crystallized)
+
+            self._run_with_profiles(tmp, go)
+
+    def test_apply_crystallization_failure_restores_all_fact_files(self) -> None:
+        """A failure after pool/tree writes restores pool, tree, SKILL, and Kanban."""
+        import yaml
+
+        from nblane.core import crystallize, profile_io
+
+        with tempfile.TemporaryDirectory() as tmp_s:
+            tmp = Path(tmp_s)
+            profile = self._make_profile(tmp)
+            skill_md = profile / "SKILL.md"
+            skill_md.write_text("# Existing skill content\n", encoding="utf-8")
+            project_board = profile / "project-board.yaml"
+            project_board.write_text(
+                yaml.safe_dump(
+                    {
+                        "schema_version": "1.0",
+                        "profile": "dev",
+                        "project_cases": [
+                            {
+                                "id": "project:perf",
+                                "title": "Performance",
+                                "goal_refs": ["goal:missing"],
+                            }
+                        ],
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            watched = [
+                profile / name
+                for name in (
+                    "evidence-pool.yaml",
+                    "skill-tree.yaml",
+                    "SKILL.md",
+                    "kanban.md",
+                )
+            ]
+            before = {path.name: path.read_bytes() for path in watched}
+
+            def go():
+                tasks, _ = crystallize.resolve_done_tasks("dev", ["taskA"])
+                patch = crystallize.rule_crystallize_patch(tasks)
+                failed = crystallize.apply_crystallization(
+                    "dev", patch, task_ids=["taskA"]
+                )
+                self.assertFalse(failed["ok"])
+                self.assertTrue(failed["errors"])
+                self.assertEqual(failed["new_evidence_ids"], [])
+                self.assertEqual(failed["crystallized_count"], 0)
+                for path in watched:
+                    self.assertEqual(path.read_bytes(), before[path.name], path.name)
+                raw = profile_io.load_evidence_pool_raw("dev") or {}
+                self.assertEqual(raw.get("evidence_entries"), [])
+                task = crystallize.parse_kanban("dev")["Done"][0]
+                self.assertFalse(task.crystallized)
+
+            self._run_with_profiles(tmp, go)
+
 
 if __name__ == "__main__":
     unittest.main()

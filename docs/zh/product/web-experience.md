@@ -14,7 +14,7 @@ source_of_truth: true
 | 项目   | 说明                                                                                         |
 | ---- | ------------------------------------------------------------------------------------------ |
 | 范围   | 本地 Streamlit：`app.py`、`pages/*.py`、自定义编辑组件                                                 |
-| 产品对齐 | [产品总览](overview.md) 中的 `目标 -> 捕获 -> 执行 -> 证据 -> 技能图谱 -> 差距分析 -> 下一步行动 -> 公开输出 -> Agent 复用` |
+| 产品对齐 | 当前首个数据闭环以[全局 Phase 计划](../dev/phase-plan.md)为准；本文仅记录 Streamlit 阶段的体验设计与历史 backlog |
 | 非目标  | 替换 Streamlit 框架、设计完整 CSS 组件库、把 Web 做成托管公开站点                                                |
 
 
@@ -515,7 +515,7 @@ Goal
 | P0   | 首页改成 Dashboard，降低 `SKILL.md` 编辑权重                              | 新用户快速知道当前状态和下一步                                                 |
 | P0   | Profile Context 高级区：结构化编辑长期画像，生成块只读                            | 保留 Agent Context 价值，同时避免首页变成 Markdown 编辑器                       |
 | P0   | 全局 capture 入口或首页轻量 capture bar                                 | 让日常输入不依赖用户先找到正确页面                                               |
-| P0   | Done -> evidence 审阅体验统一                                        | 打穿最小成长闭环                                                        |
+| P0   | Done -> evidence 审阅体验统一                                        | 支持首个数据闭环中的证据结晶与评审                                                |
 | P0   | `st.title` / `select_profile` / scope strip 顺序统一               | 先解决“当前是谁、当前目标是什么、写入哪里”这三个认知问题                                   |
 | P1   | 独立 Pending Evidence / Evidence Review 页                        | 提升 evidence 在 UI 中的地位，降低技能树页复杂度                                 |
 | P1   | 技能树页突出 evidence strength / missing evidence                    | 避免 status 变成主观自评                                                |
@@ -606,8 +606,8 @@ Goal
 
 ## 8. 相关文档
 
-- [产品总览](overview.md) — nblane 的用户、核心闭环和产品分层
-- [核心闭环](core-loop.md) — 捕获、执行、证据、输出、Agent 复用流程
+- [产品总览](overview.md) — nblane 的用户、产品分层和核心对象
+- [全局 Phase 计划](../dev/phase-plan.md) — 当前首个数据闭环和阶段边界
 - [路线图](roadmap.md) — 阶段交付顺序
 - [当前状态](../project/status.md) — 已实现能力和主要缺口
 - [Web 使用手册](../guides/web-ui.md) — 运行方式、页面操作和 CLI 对照

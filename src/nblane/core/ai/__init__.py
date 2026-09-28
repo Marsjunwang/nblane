@@ -13,6 +13,7 @@ _LAZY_EXPORTS = {
     "answer_paper_question": ("nblane.core.ai.gateway", "answer_paper_question"),
     "compare_papers_codex": ("nblane.core.ai.gateway", "compare_papers_codex"),
     "create_remote_dev_task": ("nblane.core.ai.gateway", "create_remote_dev_task"),
+    "crystallize_done_tasks": ("nblane.core.ai.gateway", "crystallize_done_tasks"),
     "deep_read_paper_codex": ("nblane.core.ai.gateway", "deep_read_paper_codex"),
     "draft_kanban_subtasks": ("nblane.core.ai.gateway", "draft_kanban_subtasks"),
     "draft_kanban_task_alignment": (
@@ -65,6 +66,7 @@ __all__ = [
     "answer_paper_question",
     "compare_papers_codex",
     "create_remote_dev_task",
+    "crystallize_done_tasks",
     "deep_read_paper_codex",
     "draft_kanban_subtasks",
     "draft_kanban_task_alignment",

@@ -39,6 +39,7 @@ AI_ACTION_DEFAULT_BACKENDS: dict[str, str] = {
     "dashboard.daily_brief": "llm",
     "kanban.task_alignment": "llm",
     "kanban.subtasks": "llm",
+    "evidence.crystallize": "llm",
     "project.suggest_refs": "llm",
 }
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextvars
+from contextlib import contextmanager
+from collections.abc import Iterator
 import os
 import subprocess
 from dataclasses import dataclass
@@ -113,6 +115,33 @@ def _relative_paths(repo: Path, paths: Iterable[Path]) -> list[str]:
     return out
 
 
+_deferred_changes: contextvars.ContextVar[list[Path] | None] = contextvars.ContextVar(
+    "nblane_deferred_backup", default=None,
+)
+
+
+@contextmanager
+def defer_changes(action: str) -> Iterator[None]:
+    """Back up a multi-file operation only after it fully succeeds."""
+    if _deferred_changes.get() is not None:
+        yield
+        return
+    paths: list[Path] = []
+    token = _deferred_changes.set(paths)
+    try:
+        yield
+    except BaseException:
+        raise
+    else:
+        _deferred_changes.reset(token)
+        token = None
+        if paths:
+            record_change(list(dict.fromkeys(paths)), action=action)
+    finally:
+        if token is not None:
+            _deferred_changes.reset(token)
+
+
 def record_change(
     paths: Iterable[Path],
     *,
@@ -120,6 +149,10 @@ def record_change(
 ) -> GitBackupResult:
     """Commit and optionally push changed paths when backup is enabled."""
     path_list = [p for p in paths]
+    deferred = _deferred_changes.get()
+    if deferred is not None:
+        deferred.extend(path_list)
+        return GitBackupResult(enabled=autocommit_enabled(), skipped_reason="deferred")
     if not autocommit_enabled():
         return _append_result(
             GitBackupResult(

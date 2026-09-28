@@ -14,6 +14,7 @@ import { KanbanRedirect, ProjectBoardRedirect, ProjectsPage } from './pages/Proj
 import { PublicBuildPage } from './pages/PublicBuildPage';
 import { ResearchPage } from './pages/ResearchPage';
 import { ReviewPage } from './pages/ReviewPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { SkillTreePage } from './pages/SkillTreePage';
 import { StudioPage } from './pages/StudioPage';
 import { WorkshopPage } from './pages/WorkshopPage';
@@ -42,6 +43,7 @@ export function App() {
         >
           <Route path="/" element={<ProfilesPage />} />
           <Route path="/assistant" element={<AssistantPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/workshop" element={<WorkshopPage />} />
           <Route path="/p/:name/home" element={<HomePage />} />
           {/* Legacy route: the health page dissolved — 证据风险 lives under

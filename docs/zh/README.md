@@ -14,7 +14,7 @@ source_of_truth: true
 | 读者 | 阅读顺序 |
 |------|----------|
 | 新用户 | [产品总览](product/overview.md) -> [安装与 LLM 配置](guides/setup.md) -> [Web 使用手册](guides/web-ui.md) -> [看板使用手册](guides/kanban.md) |
-| 产品 / 项目管理 | [核心闭环](product/core-loop.md) -> [路线图](product/roadmap.md) -> [当前状态](project/status.md) -> [里程碑](project/milestones.md) -> [问题与风险](project/issues.md) |
+| 产品 / 项目管理 | [全局 Phase 计划](dev/phase-plan.md) -> [SPA 迁移总账](architecture/frontend-spa-migration.md) -> [路线图](product/roadmap.md) -> [当前状态](project/status.md) -> [问题与风险](project/issues.md) |
 | 开发者 | [架构总览](architecture/overview.md) -> [数据契约](architecture/data-contracts.md) -> [模块总览图](architecture/module-map.md) -> [CLI 参考](reference/cli.md) -> [MCP 参考](reference/mcp.md) |
 | Agent / 集成方 | [AI 架构](architecture/ai-architecture.md) -> [Agent Harness 集成](reference/agent-harness.md) -> [MCP 参考](reference/mcp.md) -> [OpenClaw 深度融合](architecture/openclaw-deep-integration.md) |
 | 运维 / 发布 | [腾讯云部署](guides/deployment-tencent-cloud.md) -> [Mihomo 代理部署](guides/mihomo-deployment.md) -> [存储演进](architecture/storage.md) -> [公开站点](guides/public-site.md) |
@@ -26,7 +26,7 @@ source_of_truth: true
 | 文档 | 作用 |
 |------|------|
 | [overview.md](product/overview.md) | nblane 是什么、用户是谁、核心对象和非目标 |
-| [core-loop.md](product/core-loop.md) | 当前最小闭环：捕获、计划、执行、证据、研究、发布、Agent 复用 |
+| [phase-plan.md](dev/phase-plan.md) | 当前首个数据闭环验收口径与全局阶段计划 |
 | [growth-graph.md](product/growth-graph.md) | 成长关系图谱：事实沉淀为 evidence，evidence 支撑 skill，skill 构成 North Star 的能力地基 |
 | [roadmap.md](product/roadmap.md) | 当前统一路线图，替代旧 `product.md` / `design.md` 中分散的 Demo Phase |
 | [web-experience.md](product/web-experience.md) | Streamlit Web 体验设计和 backlog |

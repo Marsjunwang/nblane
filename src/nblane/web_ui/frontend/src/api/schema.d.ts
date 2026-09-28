@@ -618,7 +618,7 @@ export interface paths {
          *
          *     Chip-save semantics: ``skill_ids`` is the desired final set (core
          *     ``set_evidence_skill_refs`` adds missing / removes absent, creates
-         *     unknown nodes as ``learning``). The write lands on skill-tree.yaml only
+         *     schema-valid absent nodes as ``learning``). The write lands on skill-tree.yaml only
          *     — the pool never stores the reverse direction. ``If-Match`` carries the
          *     skill-tree.yaml ETag from the stages/tree reads (412 on mismatch).
          */
@@ -1973,6 +1973,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Settings
+         * @description Return normalized, non-secret preferences for one profile.
+         */
+        get: operations["get_profile_settings_api_v1_profiles__name__settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Profile Settings
+         * @description Merge a safe profile preferences patch using the existing normalizer.
+         */
+        patch: operations["patch_profile_settings_api_v1_profiles__name__settings_patch"];
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/settings/codex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Codex Settings
+         * @description Return profile-owned non-auth Codex settings.
+         */
+        get: operations["get_profile_codex_settings_api_v1_profiles__name__settings_codex_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Profile Codex Settings
+         * @description Persist profile-owned non-auth Codex settings.
+         */
+        patch: operations["patch_profile_codex_settings_api_v1_profiles__name__settings_codex_patch"];
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/skill-tree": {
         parameters: {
             query?: never;
@@ -2326,6 +2374,70 @@ export interface paths {
         get: operations["get_profile_summary_api_v1_profiles__name__summary_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/codex/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Codex Status
+         * @description Return non-secret Codex CLI readiness information.
+         */
+        get: operations["get_codex_status_api_v1_settings_codex_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Settings Connection
+         * @description Return deployment LLM settings without exposing the API key.
+         */
+        get: operations["get_settings_connection_api_v1_settings_connection_get"];
+        /**
+         * Update Settings Connection
+         * @description Persist deployment LLM settings and apply them to this process.
+         */
+        put: operations["update_settings_connection_api_v1_settings_connection_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/connection/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Settings Connection
+         * @description Run a bounded provider ping using the current deployment settings.
+         */
+        post: operations["verify_settings_connection_api_v1_settings_connection_verify_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2936,6 +3048,97 @@ export interface components {
             total: number;
         };
         /**
+         * CodexSettingsPatch
+         * @description Non-auth Codex profile settings.
+         */
+        CodexSettingsPatch: {
+            /** Attempts */
+            attempts?: number | null;
+            /** Bin Path */
+            bin_path?: string | null;
+            /** Branch */
+            branch?: string | null;
+            /** Cloud Env Id */
+            cloud_env_id?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Timeout Seconds */
+            timeout_seconds?: number | null;
+        };
+        /**
+         * CodexSettingsResponse
+         * @description Codex profile settings with no authentication material.
+         */
+        CodexSettingsResponse: {
+            /** Profile */
+            profile: string;
+            /** Settings */
+            settings?: {
+                [key: string]: string | number;
+            };
+        };
+        /**
+         * CodexStatusResponse
+         * @description Non-secret Codex CLI readiness information.
+         */
+        CodexStatusResponse: {
+            /**
+             * Bin Path
+             * @default
+             */
+            bin_path: string;
+            /**
+             * Cloud Env Configured
+             * @default false
+             */
+            cloud_env_configured: boolean;
+            /**
+             * Cloud Env Id
+             * @default
+             */
+            cloud_env_id: string;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /**
+             * Install Command
+             * @default
+             */
+            install_command: string;
+            /**
+             * Installed
+             * @default false
+             */
+            installed: boolean;
+            /**
+             * Logged In
+             * @default false
+             */
+            logged_in: boolean;
+            /**
+             * Login Status
+             * @default
+             */
+            login_status: string;
+            /**
+             * Resolved Path
+             * @default
+             */
+            resolved_path: string;
+            /**
+             * Upgrade Command
+             * @default
+             */
+            upgrade_command: string;
+            /**
+             * Version
+             * @default
+             */
+            version: string;
+        };
+        /**
          * CrystallizeApplyRequest
          * @description Body for the crystallize-apply endpoint.
          *
@@ -2975,6 +3178,8 @@ export interface components {
             crystallized_count: number;
             /** Errors */
             errors?: string[];
+            /** Items */
+            items?: components["schemas"]["CrystallizeTaskResult"][];
             /** New Evidence Ids */
             new_evidence_ids?: string[];
             /** Ok */
@@ -3127,6 +3332,16 @@ export interface components {
              * @default
              */
             title: string;
+        };
+        /**
+         * CrystallizeTaskResult
+         * @description Stable evidence references for a successfully crystallized task.
+         */
+        CrystallizeTaskResult: {
+            /** Evidence Ids */
+            evidence_ids?: string[];
+            /** Task Id */
+            task_id: string;
         };
         /**
          * CurrentUser
@@ -5501,6 +5716,68 @@ export interface components {
             text: string;
         };
         /**
+         * LlmConnectionResponse
+         * @description Deployment-wide LLM connection with the API key always redacted.
+         */
+        LlmConnectionResponse: {
+            /**
+             * Api Key Set
+             * @default false
+             */
+            api_key_set: boolean;
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+            /**
+             * Configured
+             * @default false
+             */
+            configured: boolean;
+            /**
+             * Model
+             * @default
+             */
+            model: string;
+        };
+        /**
+         * LlmConnectionUpdateRequest
+         * @description Update the deployment LLM connection.
+         *
+         *     An omitted/empty ``api_key`` keeps the current key.  ``clear_api_key`` is
+         *     the explicit operation for removing it.
+         */
+        LlmConnectionUpdateRequest: {
+            /**
+             * Api Key
+             * @default
+             */
+            api_key: string;
+            /** Base Url */
+            base_url?: string | null;
+            /**
+             * Clear Api Key
+             * @default false
+             */
+            clear_api_key: boolean;
+            /** Model */
+            model?: string | null;
+        };
+        /**
+         * LlmConnectionVerifyResponse
+         * @description Result of a minimal provider connection check.
+         */
+        LlmConnectionVerifyResponse: {
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /** Ok */
+            ok: boolean;
+        };
+        /**
          * LoginRequest
          * @description Credentials submitted to the login endpoint.
          */
@@ -5778,6 +6055,44 @@ export interface components {
             /** Profile */
             profile: string;
             skill_tree?: components["schemas"]["SkillTreeSummary"];
+        };
+        /**
+         * ProfileSettingsPatch
+         * @description Safe profile-scoped preferences patch.
+         *
+         *     The nested mappings are intentionally flexible because action names are
+         *     an extensible registry.  The core normalizer remains the whitelist and
+         *     strips secret-looking keys before anything is written.
+         */
+        ProfileSettingsPatch: {
+            /** Ai */
+            ai?: {
+                [key: string]: unknown;
+            } | null;
+            /** Evidence Review */
+            evidence_review?: {
+                [key: string]: unknown;
+            } | null;
+            /** Kanban */
+            kanban?: {
+                [key: string]: unknown;
+            } | null;
+            /** Project Board */
+            project_board?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * ProfileSettingsResponse
+         * @description Normalized non-secret settings for one profile.
+         */
+        ProfileSettingsResponse: {
+            /** Preferences */
+            preferences?: {
+                [key: string]: unknown;
+            };
+            /** Profile */
+            profile: string;
         };
         /**
          * ProfileSummary
@@ -13326,6 +13641,246 @@ export interface operations {
             };
         };
     };
+    get_profile_settings_api_v1_profiles__name__settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileSettingsResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_profile_settings_api_v1_profiles__name__settings_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileSettingsPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileSettingsResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_profile_codex_settings_api_v1_profiles__name__settings_codex_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexSettingsResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_profile_codex_settings_api_v1_profiles__name__settings_codex_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodexSettingsPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexSettingsResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_profile_skill_tree_api_v1_profiles__name__skill_tree_get: {
         parameters: {
             query?: never;
@@ -14264,6 +14819,135 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_codex_status_api_v1_settings_codex_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexStatusResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_settings_connection_api_v1_settings_connection_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmConnectionResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_settings_connection_api_v1_settings_connection_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmConnectionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmConnectionResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_settings_connection_api_v1_settings_connection_verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmConnectionVerifyResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

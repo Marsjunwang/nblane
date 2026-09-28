@@ -15,6 +15,18 @@ type Schemas = components['schemas'];
 /** CurrentUser from web_api/auth.py. */
 export type CurrentUser = Schemas['CurrentUser'];
 
+/** Deployment-wide LLM connection; the API key is represented only by a flag. */
+export type LlmConnection = Schemas['LlmConnectionResponse'];
+export type LlmConnectionUpdate = Schemas['LlmConnectionUpdateRequest'];
+export type LlmConnectionVerify = Schemas['LlmConnectionVerifyResponse'];
+
+/** Profile-scoped non-secret preferences and Codex readiness/configuration. */
+export type ProfileSettings = Schemas['ProfileSettingsResponse'];
+export type ProfileSettingsPatch = Schemas['ProfileSettingsPatch'];
+export type CodexStatus = Schemas['CodexStatusResponse'];
+export type CodexSettings = Schemas['CodexSettingsResponse'];
+export type CodexSettingsPatch = Schemas['CodexSettingsPatch'];
+
 /** Generic acknowledgement body (web_api/auth.py OkResponse). */
 export type OkResponse = Schemas['OkResponse'];
 

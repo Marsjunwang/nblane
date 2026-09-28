@@ -243,6 +243,27 @@ class TestWebPreferences(unittest.TestCase):
 
         self.assertEqual(normalized["profile"], "alice")
 
+    def test_legacy_kanban_backend_does_not_select_crystallize_backend(self) -> None:
+        """Legacy Kanban routing remains scoped to Kanban actions only."""
+
+        normalized = normalize_web_preferences(
+            {"ai": {"kanban_backend": "codex"}},
+            profile="alice",
+        )
+
+        self.assertEqual(
+            normalized["ai"]["actions"]["kanban.task_alignment"]["backend"],
+            "codex",
+        )
+        self.assertEqual(
+            normalized["ai"]["actions"]["kanban.subtasks"]["backend"],
+            "codex",
+        )
+        self.assertEqual(
+            normalized["ai"]["actions"]["evidence.crystallize"]["backend"],
+            "",
+        )
+
     def test_update_web_preferences_strips_secret_patch_fields(self) -> None:
         """Partial updates cannot smuggle secret keys into the profile file."""
 

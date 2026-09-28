@@ -593,14 +593,31 @@ def _crystallize_friendly_error(err: str) -> str:
     """Map raw LLM failure strings to actionable Chinese copy."""
     text = _clean(err)
     lowered = text.lower()
-    if "not configured" in lowered or "ai features" in lowered:
-        return "未配置 LLM(请在设置页填 LLM_API_KEY);可改用规则草稿。"
     if "timed out" in lowered or "timeout" in lowered:
         return "AI 生成超时(90 秒);可重试,或改用规则草稿。"
-    if "could not parse" in lowered:
-        return "AI 返回的内容无法解析为草稿;可重试,或改用规则草稿。"
+    if (
+        "ai_not_configured" in lowered
+        or "not configured" in lowered
+        or "ai features" in lowered
+        or "llm not configured" in lowered
+    ):
+        return "未配置 LLM/AI 后端(请在设置页配置兼容 API 或 Codex);可改用规则草稿。"
+    if any(
+        marker in lowered
+        for marker in (
+            "could not parse",
+            "json_error",
+            "schema_error",
+            "validation_error",
+            "response did not contain",
+        )
+    ):
+        return "AI 返回格式不符合结晶协议，无法解析;可重试,或改用规则草稿。"
+    if any(marker in lowered for marker in ("provider_error", "backend_error")):
+        detail = text.split(":", 1)[1].strip() if ":" in text else text
+        return f"AI 后端调用失败:{detail};可重试,或改用规则草稿。"
     if text.startswith("LLM error:"):
-        return f"AI 调用失败:{text.removeprefix('LLM error:').strip()};可改用规则草稿。"
+        return f"AI 后端调用失败:{text.removeprefix('LLM error:').strip()};可重试,或改用规则草稿。"
     return f"AI 草稿失败:{text or '未知原因'};可改用规则草稿。"
 
 
@@ -611,14 +628,8 @@ def _run_evidence_crystallize(
 ) -> dict[str, Any]:
     """LLM crystallize draft; result mirrors ``CrystallizeDraftResponse``."""
     from nblane.core import crystallize as crystallize_core
+    from nblane.core.ai.gateway import crystallize_done_tasks
     from nblane.core.kanban_io import materialize_kanban_task_ids
-    from nblane.core.profile_ingest_llm import ingest_kanban_done_json
-
-    if not llm_client.is_configured():
-        raise JobFailedError(
-            "crystallize_unavailable",
-            "未配置 LLM(请在设置页填 LLM_API_KEY);可改用规则草稿,立等可取。",
-        )
     report(phase="resolving", message="解析 Done 任务。")
     pdir = profile_io.profile_dir(profile)
     # Ids are random until persisted; materialize so refs resolve later.
@@ -632,20 +643,27 @@ def _run_evidence_crystallize(
             "所选 Done 任务都找不到了(可能已归档);请刷新后重选。",
         )
     report(phase="drafting", message="AI 正在生成证据草稿(最长约 90 秒)。")
-    patch, err = ingest_kanban_done_json(
-        profile, tasks, timeout_seconds=_CRYSTALLIZE_LLM_TIMEOUT_SECONDS
+    ai_result = crystallize_done_tasks(
+        profile,
+        tasks,
+        timeout_seconds=_CRYSTALLIZE_LLM_TIMEOUT_SECONDS,
     )
-    if err is not None or patch is None:
+    if not ai_result.ok or not isinstance(ai_result.structured, dict):
         raise JobFailedError(
             "crystallize_draft_failed",
-            _crystallize_friendly_error(err or ""),
+            _crystallize_friendly_error(ai_result.error or ""),
         )
+    patch = ai_result.structured
     snapshots = [crystallize_core.task_snapshot(task) for task in tasks]
     patch = crystallize_core.attach_task_snapshots(patch, snapshots)
     return {
         "ok": True,
         "profile": profile,
-        "backend": "llm",
+        "backend": (
+            "codex"
+            if ai_result.backend == "local_codex_readonly"
+            else "llm"
+        ),
         "patch": patch,
         "tasks": [
             {

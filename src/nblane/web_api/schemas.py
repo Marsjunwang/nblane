@@ -21,6 +21,90 @@ class HealthResponse(BaseModel):
     version: str
 
 
+class LlmConnectionResponse(BaseModel):
+    """Deployment-wide LLM connection with the API key always redacted."""
+
+    base_url: str = ""
+    model: str = ""
+    api_key_set: bool = False
+    configured: bool = False
+
+
+class LlmConnectionUpdateRequest(BaseModel):
+    """Update the deployment LLM connection.
+
+    An omitted/empty ``api_key`` keeps the current key.  ``clear_api_key`` is
+    the explicit operation for removing it.
+    """
+
+    base_url: str | None = None
+    model: str | None = None
+    api_key: str = ""
+    clear_api_key: bool = False
+
+
+class LlmConnectionVerifyResponse(BaseModel):
+    """Result of a minimal provider connection check."""
+
+    ok: bool
+    detail: str = ""
+
+
+class ProfileSettingsPatch(BaseModel):
+    """Safe profile-scoped preferences patch.
+
+    The nested mappings are intentionally flexible because action names are
+    an extensible registry.  The core normalizer remains the whitelist and
+    strips secret-looking keys before anything is written.
+    """
+
+    ai: dict[str, Any] | None = None
+    kanban: dict[str, Any] | None = None
+    evidence_review: dict[str, Any] | None = None
+    project_board: dict[str, Any] | None = None
+
+
+class ProfileSettingsResponse(BaseModel):
+    """Normalized non-secret settings for one profile."""
+
+    profile: str
+    preferences: dict[str, Any] = Field(default_factory=dict)
+
+
+class CodexStatusResponse(BaseModel):
+    """Non-secret Codex CLI readiness information."""
+
+    installed: bool = False
+    bin_path: str = ""
+    resolved_path: str = ""
+    version: str = ""
+    logged_in: bool = False
+    login_status: str = ""
+    cloud_env_id: str = ""
+    cloud_env_configured: bool = False
+    install_command: str = ""
+    upgrade_command: str = ""
+    error: str = ""
+
+
+class CodexSettingsPatch(BaseModel):
+    """Non-auth Codex profile settings."""
+
+    bin_path: str | None = None
+    cloud_env_id: str | None = None
+    model: str | None = None
+    attempts: int | None = Field(default=None, ge=1)
+    branch: str | None = None
+    timeout_seconds: float | None = Field(default=None, ge=5)
+
+
+class CodexSettingsResponse(BaseModel):
+    """Codex profile settings with no authentication material."""
+
+    profile: str
+    settings: dict[str, str | int | float] = Field(default_factory=dict)
+
+
 class ProfileSummary(BaseModel):
     """One row of the profile list endpoint."""
 
@@ -1141,6 +1225,13 @@ class CrystallizeApplyRequest(BaseModel):
     allow_status_change: bool = False
 
 
+class CrystallizeTaskResult(BaseModel):
+    """Stable evidence references for a successfully crystallized task."""
+
+    task_id: str
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
 class CrystallizeApplyResponse(BaseModel):
     """Result of the crystallize apply."""
 
@@ -1149,6 +1240,7 @@ class CrystallizeApplyResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     new_evidence_ids: list[str] = Field(default_factory=list)
     crystallized_count: int = 0
+    items: list[CrystallizeTaskResult] = Field(default_factory=list)
 
 
 class ReviewCandidateModel(BaseModel):

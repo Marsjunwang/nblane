@@ -39,6 +39,8 @@ class DirectLLMBackend:
     ) -> AIActionResult:
         """Run one action through ``nblane.core.llm``."""
 
+        if request.action == "evidence.crystallize":
+            return _run_crystallize_ingest(request, spec, ai_backend="llm")
         run_id = new_run_id(request.action)
         if not llm.is_configured():
             return AIActionResult(
@@ -258,6 +260,8 @@ class LocalReadonlyCodexBackend:
     ) -> AIActionResult:
         """Run one action through ``codex exec --sandbox read-only``."""
 
+        if request.action == "evidence.crystallize":
+            return _run_crystallize_ingest(request, spec, ai_backend="codex")
         run_id = new_run_id(request.action)
         prompt = prompt_for_action(request, spec)
         codex_prompt = _readonly_codex_prompt(request, spec, prompt.system, prompt.user)
@@ -493,6 +497,79 @@ def _merge_warning_texts(*values: object) -> list[str]:
             seen.add(text)
             out.append(text)
     return out
+
+
+def _run_crystallize_ingest(
+    request: AIActionRequest,
+    spec: AIActionSpec,
+    *,
+    ai_backend: str,
+) -> AIActionResult:
+    """Run the mature Kanban ingest prompt behind the AI Action contract."""
+
+    run_id = new_run_id(request.action)
+    payload = request.payload if isinstance(request.payload, dict) else {}
+    done_tasks = payload.get("done_tasks")
+    if not isinstance(done_tasks, list) or not done_tasks:
+        return AIActionResult(
+            ok=False,
+            action=request.action,
+            backend=(
+                "local_codex_readonly"
+                if ai_backend == "codex"
+                else "direct_llm"
+            ),
+            run_id=run_id,
+            error="crystallize_no_tasks",
+        )
+
+    from nblane.core import profile_ingest_llm
+
+    model = _model_override(
+        payload,
+        "codex_model" if ai_backend == "codex" else "ai_model",
+    )
+    patch, error = profile_ingest_llm.ingest_kanban_done_json(
+        request.profile,
+        done_tasks,
+        goal_context=str(payload.get("goal_context") or ""),
+        ai_backend=ai_backend,
+        timeout_seconds=_positive_float_override(
+            payload,
+            "timeout_seconds",
+            "model_timeout_seconds",
+        ),
+        model=model,
+    )
+    backend_name = (
+        "local_codex_readonly" if ai_backend == "codex" else "direct_llm"
+    )
+    if error or patch is None:
+        return AIActionResult(
+            ok=False,
+            action=request.action,
+            backend=backend_name,
+            run_id=run_id,
+            error=error or "crystallize_draft_failed",
+        )
+    schema_error = validate_schema(patch, spec.schema or {})
+    if schema_error:
+        return AIActionResult(
+            ok=False,
+            action=request.action,
+            backend=backend_name,
+            run_id=run_id,
+            structured=patch,
+            error=f"crystallize_schema_error: {schema_error}",
+        )
+    return AIActionResult(
+        ok=True,
+        action=request.action,
+        backend=backend_name,
+        run_id=run_id,
+        content=json.dumps(patch, ensure_ascii=False),
+        structured=patch,
+    )
 
 
 def _model_override(payload: dict[str, Any], *keys: str) -> str:

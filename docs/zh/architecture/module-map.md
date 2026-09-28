@@ -31,7 +31,7 @@ flowchart TB
   Core --> Public
 ```
 
-## 当前核心闭环
+## Evidence 写入路径示意（非产品闭环定义）
 
 ```mermaid
 flowchart LR

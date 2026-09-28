@@ -14,6 +14,7 @@ import {
   IconLogout,
   IconRobot,
   IconRocket,
+  IconSettings,
   IconTerminal2,
   IconTimeline,
   IconUser,
@@ -170,6 +171,15 @@ export function AppLayout() {
               leftSection={<IconRobot size={14} />}
             >
               助手
+            </Button>
+            <Button
+              component={RouterLink}
+              to="/settings"
+              variant={location.pathname.startsWith('/settings') ? 'light' : 'subtle'}
+              size="compact-sm"
+              leftSection={<IconSettings size={14} />}
+            >
+              设置
             </Button>
             {me.data && (
               <Text size="sm" c="dimmed">

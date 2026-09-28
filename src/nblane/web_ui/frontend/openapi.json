@@ -805,6 +805,174 @@
     "title": "ChronicleResponse",
     "type": "object"
    },
+   "CodexSettingsPatch": {
+    "description": "Non-auth Codex profile settings.",
+    "properties": {
+     "attempts": {
+      "anyOf": [
+       {
+        "minimum": 1.0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Attempts"
+     },
+     "bin_path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Bin Path"
+     },
+     "branch": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Branch"
+     },
+     "cloud_env_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cloud Env Id"
+     },
+     "model": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Model"
+     },
+     "timeout_seconds": {
+      "anyOf": [
+       {
+        "minimum": 5.0,
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Timeout Seconds"
+     }
+    },
+    "title": "CodexSettingsPatch",
+    "type": "object"
+   },
+   "CodexSettingsResponse": {
+    "description": "Codex profile settings with no authentication material.",
+    "properties": {
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "settings": {
+      "additionalProperties": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ]
+      },
+      "title": "Settings",
+      "type": "object"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "CodexSettingsResponse",
+    "type": "object"
+   },
+   "CodexStatusResponse": {
+    "description": "Non-secret Codex CLI readiness information.",
+    "properties": {
+     "bin_path": {
+      "default": "",
+      "title": "Bin Path",
+      "type": "string"
+     },
+     "cloud_env_configured": {
+      "default": false,
+      "title": "Cloud Env Configured",
+      "type": "boolean"
+     },
+     "cloud_env_id": {
+      "default": "",
+      "title": "Cloud Env Id",
+      "type": "string"
+     },
+     "error": {
+      "default": "",
+      "title": "Error",
+      "type": "string"
+     },
+     "install_command": {
+      "default": "",
+      "title": "Install Command",
+      "type": "string"
+     },
+     "installed": {
+      "default": false,
+      "title": "Installed",
+      "type": "boolean"
+     },
+     "logged_in": {
+      "default": false,
+      "title": "Logged In",
+      "type": "boolean"
+     },
+     "login_status": {
+      "default": "",
+      "title": "Login Status",
+      "type": "string"
+     },
+     "resolved_path": {
+      "default": "",
+      "title": "Resolved Path",
+      "type": "string"
+     },
+     "upgrade_command": {
+      "default": "",
+      "title": "Upgrade Command",
+      "type": "string"
+     },
+     "version": {
+      "default": "",
+      "title": "Version",
+      "type": "string"
+     }
+    },
+    "title": "CodexStatusResponse",
+    "type": "object"
+   },
    "CrystallizeApplyRequest": {
     "description": "Body for the crystallize-apply endpoint.\n\n``patch`` is the (possibly human-edited) draft from the draft endpoint;\n``include_evidence`` / ``include_nodes`` are the wizard's per-row\ncheckboxes (null = keep all). On success the source tasks are marked\n``crystallized`` in kanban.md.",
     "properties": {
@@ -877,6 +1045,13 @@
        "type": "string"
       },
       "title": "Errors",
+      "type": "array"
+     },
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/CrystallizeTaskResult"
+      },
+      "title": "Items",
       "type": "array"
      },
      "new_evidence_ids": {
@@ -1085,6 +1260,27 @@
      }
     },
     "title": "CrystallizeTaskModel",
+    "type": "object"
+   },
+   "CrystallizeTaskResult": {
+    "description": "Stable evidence references for a successfully crystallized task.",
+    "properties": {
+     "evidence_ids": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Evidence Ids",
+      "type": "array"
+     },
+     "task_id": {
+      "title": "Task Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "task_id"
+    ],
+    "title": "CrystallizeTaskResult",
     "type": "object"
    },
    "CurrentUser": {
@@ -4445,6 +4641,91 @@
     "title": "KanbanTodoModel",
     "type": "object"
    },
+   "LlmConnectionResponse": {
+    "description": "Deployment-wide LLM connection with the API key always redacted.",
+    "properties": {
+     "api_key_set": {
+      "default": false,
+      "title": "Api Key Set",
+      "type": "boolean"
+     },
+     "base_url": {
+      "default": "",
+      "title": "Base Url",
+      "type": "string"
+     },
+     "configured": {
+      "default": false,
+      "title": "Configured",
+      "type": "boolean"
+     },
+     "model": {
+      "default": "",
+      "title": "Model",
+      "type": "string"
+     }
+    },
+    "title": "LlmConnectionResponse",
+    "type": "object"
+   },
+   "LlmConnectionUpdateRequest": {
+    "description": "Update the deployment LLM connection.\n\nAn omitted/empty ``api_key`` keeps the current key.  ``clear_api_key`` is\nthe explicit operation for removing it.",
+    "properties": {
+     "api_key": {
+      "default": "",
+      "title": "Api Key",
+      "type": "string"
+     },
+     "base_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Base Url"
+     },
+     "clear_api_key": {
+      "default": false,
+      "title": "Clear Api Key",
+      "type": "boolean"
+     },
+     "model": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Model"
+     }
+    },
+    "title": "LlmConnectionUpdateRequest",
+    "type": "object"
+   },
+   "LlmConnectionVerifyResponse": {
+    "description": "Result of a minimal provider connection check.",
+    "properties": {
+     "detail": {
+      "default": "",
+      "title": "Detail",
+      "type": "string"
+     },
+     "ok": {
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "ok"
+    ],
+    "title": "LlmConnectionVerifyResponse",
+    "type": "object"
+   },
    "LoginRequest": {
     "description": "Credentials submitted to the login endpoint.",
     "properties": {
@@ -4846,6 +5127,80 @@
      "profile"
     ],
     "title": "ProfileDetailSummary",
+    "type": "object"
+   },
+   "ProfileSettingsPatch": {
+    "description": "Safe profile-scoped preferences patch.\n\nThe nested mappings are intentionally flexible because action names are\nan extensible registry.  The core normalizer remains the whitelist and\nstrips secret-looking keys before anything is written.",
+    "properties": {
+     "ai": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ai"
+     },
+     "evidence_review": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Evidence Review"
+     },
+     "kanban": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kanban"
+     },
+     "project_board": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Project Board"
+     }
+    },
+    "title": "ProfileSettingsPatch",
+    "type": "object"
+   },
+   "ProfileSettingsResponse": {
+    "description": "Normalized non-secret settings for one profile.",
+    "properties": {
+     "preferences": {
+      "additionalProperties": true,
+      "title": "Preferences",
+      "type": "object"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "ProfileSettingsResponse",
     "type": "object"
    },
    "ProfileSummary": {
@@ -10513,7 +10868,7 @@
   },
   "/api/v1/profiles/{name}/evidence/{entry_id}/skill-links": {
    "post": {
-    "description": "Reconcile the skill nodes citing one evidence row (link/unlink).\n\nChip-save semantics: ``skill_ids`` is the desired final set (core\n``set_evidence_skill_refs`` adds missing / removes absent, creates\nunknown nodes as ``learning``). The write lands on skill-tree.yaml only\n— the pool never stores the reverse direction. ``If-Match`` carries the\nskill-tree.yaml ETag from the stages/tree reads (412 on mismatch).",
+    "description": "Reconcile the skill nodes citing one evidence row (link/unlink).\n\nChip-save semantics: ``skill_ids`` is the desired final set (core\n``set_evidence_skill_refs`` adds missing / removes absent, creates\nschema-valid absent nodes as ``learning``). The write lands on skill-tree.yaml only\n— the pool never stores the reverse direction. ``If-Match`` carries the\nskill-tree.yaml ETag from the stages/tree reads (412 on mismatch).",
     "operationId": "set_profile_evidence_skill_links_api_v1_profiles__name__evidence__entry_id__skill_links_post",
     "parameters": [
      {
@@ -15969,6 +16324,302 @@
     "summary": "Save Profile Review Candidates"
    }
   },
+  "/api/v1/profiles/{name}/settings": {
+   "get": {
+    "description": "Return normalized, non-secret preferences for one profile.",
+    "operationId": "get_profile_settings_api_v1_profiles__name__settings_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProfileSettingsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Settings"
+   },
+   "patch": {
+    "description": "Merge a safe profile preferences patch using the existing normalizer.",
+    "operationId": "patch_profile_settings_api_v1_profiles__name__settings_patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ProfileSettingsPatch"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProfileSettingsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Patch Profile Settings"
+   }
+  },
+  "/api/v1/profiles/{name}/settings/codex": {
+   "get": {
+    "description": "Return profile-owned non-auth Codex settings.",
+    "operationId": "get_profile_codex_settings_api_v1_profiles__name__settings_codex_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CodexSettingsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Codex Settings"
+   },
+   "patch": {
+    "description": "Persist profile-owned non-auth Codex settings.",
+    "operationId": "patch_profile_codex_settings_api_v1_profiles__name__settings_codex_patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CodexSettingsPatch"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CodexSettingsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Patch Profile Codex Settings"
+   }
+  },
   "/api/v1/profiles/{name}/skill-tree": {
    "get": {
     "description": "Full skill tree: status counters plus the nested node tree.\n\nThe profile overlay (``skill-tree.yaml``) is a flat list of\n``{id, status, note, evidence_refs}``; titles and hierarchy come from\nthe domain schema it references. ``title`` is the schema ``label``\n(node id as fallback); ``children`` are derived from schema\n``requires`` edges restricted to overlay nodes (X is a child of Y when\nX requires Y). Overlay nodes with no prerequisite inside the overlay\nbecome roots; unknown-to-schema nodes keep overlay order at the end.\nA profile without ``skill-tree.yaml`` answers 200 with empty nodes.",
@@ -17272,6 +17923,140 @@
      }
     },
     "summary": "Get Profile Summary"
+   }
+  },
+  "/api/v1/settings/codex/status": {
+   "get": {
+    "description": "Return non-secret Codex CLI readiness information.",
+    "operationId": "get_codex_status_api_v1_settings_codex_status_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CodexStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     }
+    },
+    "summary": "Get Codex Status"
+   }
+  },
+  "/api/v1/settings/connection": {
+   "get": {
+    "description": "Return deployment LLM settings without exposing the API key.",
+    "operationId": "get_settings_connection_api_v1_settings_connection_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LlmConnectionResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     }
+    },
+    "summary": "Get Settings Connection"
+   },
+   "put": {
+    "description": "Persist deployment LLM settings and apply them to this process.",
+    "operationId": "update_settings_connection_api_v1_settings_connection_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LlmConnectionUpdateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LlmConnectionResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Update Settings Connection"
+   }
+  },
+  "/api/v1/settings/connection/verify": {
+   "post": {
+    "description": "Run a bounded provider ping using the current deployment settings.",
+    "operationId": "verify_settings_connection_api_v1_settings_connection_verify_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LlmConnectionVerifyResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     }
+    },
+    "summary": "Verify Settings Connection"
    }
   },
   "/api/v1/system/assistant": {

@@ -1014,30 +1014,63 @@ class TestCrystallizeJobKind(unittest.TestCase):
     def test_friendly_error_mapping(self) -> None:
         friendly = jobs_module._crystallize_friendly_error
         self.assertIn("未配置 LLM", friendly("AI features not configured"))
+        self.assertIn("未配置 LLM", friendly("LLM not configured"))
         self.assertIn("超时", friendly("LLM error: request timed out"))
         self.assertIn("无法解析", friendly("Could not parse ingest JSON from LLM."))
         self.assertIn("boom", friendly("LLM error: boom"))
         self.assertIn("规则草稿", friendly("LLM error: boom"))
 
-    def test_runner_fails_fast_without_llm(self) -> None:
-        """No LLM key -> structured failure with the degrade hint, no hang."""
+    def test_friendly_error_distinguishes_provider_and_schema_failures(self) -> None:
+        friendly = jobs_module._crystallize_friendly_error
+        provider = friendly("provider_error: LLM error: HTTP 503")
+        schema = friendly("crystallize_schema_error: $.evidence_entries is required")
+        codex_json = friendly("codex_json_error: response did not contain a JSON object")
+        self.assertIn("后端调用失败", provider)
+        self.assertIn("HTTP 503", provider)
+        self.assertIn("格式不符合结晶协议", schema)
+        self.assertIn("格式不符合结晶协议", codex_json)
+
+    def test_runner_fails_when_selected_ai_backend_is_unavailable(self) -> None:
+        """A missing selected backend fails; no implicit rule fallback occurs."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            _write_profile(root)
-            with patch("nblane.web_api.jobs.llm_client.is_configured", lambda: False), patch(
+            profile = _write_profile(root)
+            from nblane.core.kanban_io import render_kanban
+            from nblane.core.models import KanbanTask
+
+            (profile / "kanban.md").write_text(
+                render_kanban(
+                    "alice",
+                    {"Done": [KanbanTask(title="t", id="taskA", done=True)]},
+                ),
+                encoding="utf-8",
+            )
+            from nblane.core.ai.actions import AIActionResult
+
+            with patch(
                 "nblane.core.profile_io.PROFILES_DIR", root
             ), patch("nblane.core.io.PROFILES_DIR", root):
-                try:
-                    jobs_module._run_evidence_crystallize(
-                        "alice", {"task_ids": ["x"], "titles": []}, lambda **kw: None
-                    )
-                    self.fail("expected JobFailedError")
-                except jobs_module.JobFailedError as exc:
-                    self.assertEqual(exc.code, "crystallize_unavailable")
-                    self.assertIn("规则草稿", exc.message)
+                with patch(
+                    "nblane.core.ai.gateway.crystallize_done_tasks",
+                    return_value=AIActionResult(
+                        ok=False,
+                        action="evidence.crystallize",
+                        backend="direct_llm",
+                        run_id="run-test",
+                        error="ai_not_configured: LLM_API_KEY is not configured",
+                    ),
+                ):
+                    try:
+                        jobs_module._run_evidence_crystallize(
+                            "alice", {"task_ids": ["taskA"], "titles": []}, lambda **kw: None
+                        )
+                        self.fail("expected JobFailedError")
+                    except jobs_module.JobFailedError as exc:
+                        self.assertEqual(exc.code, "crystallize_draft_failed")
+                        self.assertIn("规则草稿", exc.message)
 
-    def test_runner_passes_90s_timeout_to_llm(self) -> None:
-        """The wizard path caps the LLM call at 90s (not the 180s default)."""
+    def test_runner_uses_codex_backend_selected_in_profile_settings(self) -> None:
+        """The returned backend reflects the configured Codex action."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             profile = _write_profile(root)
@@ -1058,22 +1091,61 @@ class TestCrystallizeJobKind(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            captured: dict[str, object] = {}
-
-            def fake_ingest(profile_name, tasks, **kwargs):
-                captured.update(kwargs)
-                return {"evidence_entries": [], "node_updates": []}, None
-
-            with patch("nblane.web_api.jobs.llm_client.is_configured", lambda: True), patch(
+            with patch(
                 "nblane.core.profile_io.PROFILES_DIR", root
             ), patch("nblane.core.io.PROFILES_DIR", root), patch(
-                "nblane.core.profile_ingest_llm.ingest_kanban_done_json", fake_ingest
+                "nblane.core.ai.gateway.crystallize_done_tasks",
+                return_value=AIActionResult(
+                    ok=True,
+                    action="evidence.crystallize",
+                    backend="local_codex_readonly",
+                    run_id="run-test",
+                    structured={"evidence_entries": [], "node_updates": []},
+                ),
             ):
                 result = jobs_module._run_evidence_crystallize(
                     "alice", {"task_ids": ["taskA"], "titles": []}, lambda **kw: None
                 )
-            self.assertEqual(captured.get("timeout_seconds"), 90.0)
-            self.assertEqual(result["backend"], "llm")
+            self.assertEqual(result["backend"], "codex")
+
+    def test_runner_passes_90s_timeout_to_gateway(self) -> None:
+        """The wizard caps its action call at 90s, below job timeout."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _write_profile(root)
+            from nblane.core.kanban_io import render_kanban
+            from nblane.core.models import KanbanTask
+
+            (profile / "kanban.md").write_text(
+                render_kanban(
+                    "alice",
+                    {
+                        "Done": [
+                            KanbanTask(
+                                title="t", id="taskA", done=True,
+                                completed_on="2026-01-02",
+                            )
+                        ]
+                    },
+                ),
+                encoding="utf-8",
+            )
+            with patch(
+                "nblane.core.profile_io.PROFILES_DIR", root
+            ), patch("nblane.core.io.PROFILES_DIR", root), patch(
+                "nblane.core.ai.gateway.crystallize_done_tasks",
+                return_value=AIActionResult(
+                    ok=True,
+                    action="evidence.crystallize",
+                    backend="direct_llm",
+                    run_id="run-test",
+                    structured={"evidence_entries": [], "node_updates": []},
+                ),
+            ) as run:
+                jobs_module._run_evidence_crystallize(
+                    "alice", {"task_ids": ["taskA"], "titles": []}, lambda **kw: None
+                )
+            self.assertEqual(run.call_args.kwargs["timeout_seconds"], 90.0)
 
 
 if __name__ == "__main__":

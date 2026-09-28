@@ -686,6 +686,7 @@ def ingest_kanban_done_json(
     goal_context: str = "",
     ai_backend: str = "llm",
     timeout_seconds: float | None = None,
+    model: str = "",
 ) -> tuple[dict | None, str | None]:
     """Produce ingest JSON from Done tasks.
 
@@ -727,11 +728,18 @@ def ingest_kanban_done_json(
         )
     )
     if use_codex:
-        return _codex_ingest_json(profile_name, system, user)
+        return _codex_ingest_json(
+            profile_name,
+            system,
+            user,
+            model=model,
+            timeout_seconds=timeout_seconds,
+        )
     reply = llm_client.chat(
         system,
         user,
         temperature=0.2,
+        model=model or None,
         timeout=timeout_seconds or _kanban_done_llm_timeout_seconds(),
         max_tokens=_kanban_done_llm_max_tokens(len(done_tasks)),
     )
@@ -750,6 +758,9 @@ def _codex_ingest_json(
     profile_name: str,
     system: str,
     user: str,
+    *,
+    model: str = "",
+    timeout_seconds: float | None = None,
 ) -> tuple[dict | None, str | None]:
     """Run the kanban ingest prompt through local read-only Codex."""
 
@@ -765,7 +776,17 @@ def _codex_ingest_json(
         "User message:\n"
         f"{user.strip()}\n"
     )
-    result = codex_adapter.run_readonly_codex_prompt(profile_name, prompt)
+    config = codex_adapter.current_config(profile=profile_name or None)
+    if model:
+        from dataclasses import replace
+
+        config = replace(config, model=model)
+    result = codex_adapter.run_readonly_codex_prompt(
+        profile_name,
+        prompt,
+        config=config,
+        timeout_seconds=timeout_seconds,
+    )
     if not result.ok:
         return None, result.error or result.output or "Codex ingest failed."
     data = extract_json_object(result.output)

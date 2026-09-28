@@ -565,6 +565,35 @@ def draft_kanban_subtasks(
     )
 
 
+def crystallize_done_tasks(
+    profile: str,
+    done_tasks: list[Any],
+    *,
+    goal_context: str = "",
+    timeout_seconds: float = 90.0,
+    context_refs: list[str] | None = None,
+) -> AIActionResult:
+    """Generate a reviewable evidence patch from selected Done tasks."""
+
+    body, preferred_backend = _with_action_ai_preferences(
+        profile,
+        "evidence.crystallize",
+        {
+            "done_tasks": done_tasks,
+            "goal_context": goal_context,
+            "timeout_seconds": timeout_seconds,
+        },
+    )
+    return run_ai_action(
+        "evidence.crystallize",
+        body,
+        profile=profile,
+        context_refs=context_refs or [],
+        preferred_backend=preferred_backend,
+        require_review=False,
+    )
+
+
 def create_remote_dev_task(
     profile: str,
     title: str,

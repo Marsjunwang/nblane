@@ -523,6 +523,22 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
             },
         ),
     ),
+    "evidence.crystallize": AIActionSpec(
+        name="evidence.crystallize",
+        owner="evidence",
+        default_backend="direct_llm",
+        fallback_backend="",
+        output_mode="json",
+        activity_policy="none",
+        schema=schema_for_keys(
+            ["evidence_entries", "node_updates"],
+            properties={
+                "evidence_entries": {"type": "array"},
+                "node_updates": {"type": "array"},
+                "skipped_tasks": {"type": "array"},
+            },
+        ),
+    ),
     "project.suggest_refs": AIActionSpec(
         name="project.suggest_refs",
         owner="project",

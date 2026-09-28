@@ -16,7 +16,7 @@ English docs are intentionally kept as a small entry point to avoid stale mirror
 | Need | Canonical doc |
 |------|---------------|
 | Product overview | [`zh/product/overview.md`](zh/product/overview.md) |
-| Current core loop | [`zh/product/core-loop.md`](zh/product/core-loop.md) |
+| Current data-loop plan | [`zh/dev/phase-plan.md`](zh/dev/phase-plan.md) |
 | Roadmap | [`zh/product/roadmap.md`](zh/product/roadmap.md) |
 | Project status | [`zh/project/status.md`](zh/project/status.md) |
 | Milestones | [`zh/project/milestones.md`](zh/project/milestones.md) |

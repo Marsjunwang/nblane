@@ -354,6 +354,26 @@ describe('EvidencePage', () => {
     });
   });
 
+  it('invalidates every crystallize read model after successful apply', async () => {
+    const fetchMock = stubFetch();
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('open-crystallize-wizard'));
+    fireEvent.click(await screen.findByTestId('wizard-pick-taskA'));
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }));
+    fireEvent.click(await screen.findByTestId('wizard-rule-draft'));
+    await screen.findByTestId('wizard-row-0');
+    fireEvent.click(screen.getByTestId('wizard-apply'));
+
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+      expect(urls.some((url) => url.includes('/crystallize/apply'))).toBe(true);
+      // Only queries mounted by the current page refetch immediately. The
+      // hook also invalidates unmounted read models for the next visit.
+      expect(urls.some((url) => url.includes('/kanban'))).toBe(false);
+    });
+  });
+
   it('AI draft failure shows a friendly error and degrades to rule draft', async () => {
     // Fake EventSource that fails the job stream immediately (error frame
     // without data -> parseFrame yields null -> generic failure path).

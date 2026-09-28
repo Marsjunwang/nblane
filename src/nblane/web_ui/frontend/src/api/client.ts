@@ -121,6 +121,14 @@ export function apiPost<T>(path: string, body?: unknown, init?: RequestInit): Pr
   });
 }
 
+export function apiPut<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
+  return request<T>(path, {
+    ...init,
+    method: 'PUT',
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
 /** POST that also exposes response headers (fresh ETag after a mutation). */
 export function apiPostWithHeaders<T>(
   path: string,

@@ -138,6 +138,11 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "Draft reviewable Kanban subtask candidates. Do not mutate the board "
         "or invent unrelated implementation detail."
     ),
+    "evidence.crystallize": (
+        "Convert selected completed Kanban tasks into reviewable evidence and "
+        "skill-tree candidates. Preserve task provenance and do not invent "
+        "outcomes."
+    ),
     "project.suggest_refs": (
         "Suggest project ownership refs from the supplied candidate IDs only. "
         "Return reviewable candidate refs; never invent IDs and never imply a "

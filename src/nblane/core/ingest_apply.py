@@ -109,6 +109,7 @@ def run_ingest_patch(
     *,
     allow_status_change: bool = False,
     bump_locked_with_evidence: bool = True,
+    match_task_sources: bool = False,
     dry_run: bool = False,
 ) -> tuple[MergeOutcome, ApplyOutcome]:
     """Load current YAML, merge *patch*, optionally write + validate + sync."""
@@ -121,6 +122,7 @@ def run_ingest_patch(
         patch,
         allow_status_change=allow_status_change,
         bump_locked_with_evidence=bump_locked_with_evidence,
+        match_task_sources=match_task_sources,
     )
     if not merge.ok or merge.merged_pool is None:
         return merge, ApplyOutcome(

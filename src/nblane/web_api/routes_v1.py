@@ -84,7 +84,9 @@ from nblane.core.kanban_io import (
 )
 from nblane.core.kanban_merge import copy_kanban_sections, save_kanban_with_merge
 from nblane.core import llm as llm_client
+from nblane.core import codex_adapter
 from nblane.core import crystallize as crystallize_core
+from nblane.core.web_preferences import load_web_preferences, update_web_preferences
 from nblane.core.ai import skill_suggest
 from nblane.core.models import (
     EVIDENCE_CONFIDENCES,
@@ -251,6 +253,9 @@ from nblane.web_api.schemas import (
     HealthIssueModel,
     HealthReportModel,
     HealthResponse,
+    CodexSettingsPatch,
+    CodexSettingsResponse,
+    CodexStatusResponse,
     HomeAgentActivityModel,
     HomeClaimsModel,
     HomeEvidenceModel,
@@ -269,6 +274,9 @@ from nblane.web_api.schemas import (
     InboxMutationResponse,
     InboxNoteRequest,
     InboxResponse,
+    LlmConnectionResponse,
+    LlmConnectionUpdateRequest,
+    LlmConnectionVerifyResponse,
     JobCreateRequest,
     JobCreateResponse,
     JobModel,
@@ -333,6 +341,8 @@ from nblane.web_api.schemas import (
     PublicBuildResultResponse,
     PublicBuildStateModel,
     PublicBuildValidationModel,
+    ProfileSettingsPatch,
+    ProfileSettingsResponse,
     ResearchResponse,
     ResearchSourceItemModel,
     ResearchSummaryModel,
@@ -461,6 +471,13 @@ def require_profile_access(
 PROFILE_DEPENDENCY = [Depends(require_profile_access)]
 
 
+def require_admin(user: CurrentUser = Depends(require_user)) -> CurrentUser:
+    """Dependency for deployment-wide settings mutations and reads."""
+    if user.role != "admin":
+        raise ApiError(403, "admin_required", "Administrator access required.")
+    return user
+
+
 AGENT_ACCOUNT_ID = "openclaw"
 
 
@@ -518,6 +535,159 @@ def _record_agent_writeback(
 def get_health() -> HealthResponse:
     """Liveness probe with the API/package version."""
     return HealthResponse(ok=True, version=app_version())
+
+
+@router.get(
+    "/settings/connection",
+    response_model=LlmConnectionResponse,
+    responses={403: {"model": ErrorResponse}},
+)
+def get_settings_connection(
+    _user: CurrentUser = Depends(require_admin),
+) -> LlmConnectionResponse:
+    """Return deployment LLM settings without exposing the API key."""
+    config = llm_client.current_config(mask_key=True)
+    return LlmConnectionResponse(
+        base_url=str(config.get("base_url") or ""),
+        model=str(config.get("model") or ""),
+        api_key_set=bool(config.get("configured")),
+        configured=bool(config.get("configured")),
+    )
+
+
+@router.put(
+    "/settings/connection",
+    response_model=LlmConnectionResponse,
+    responses={403: {"model": ErrorResponse}},
+)
+def update_settings_connection(
+    body: LlmConnectionUpdateRequest,
+    _user: CurrentUser = Depends(require_admin),
+) -> LlmConnectionResponse:
+    """Persist deployment LLM settings and apply them to this process."""
+    current = llm_client.current_config(mask_key=False)
+    api_key = (
+        ""
+        if body.clear_api_key
+        else (body.api_key.strip() or str(current.get("api_key") or ""))
+    )
+    llm_client.set_env_connection(
+        body.base_url if body.base_url is not None else str(current.get("base_url") or ""),
+        api_key,
+        body.model if body.model is not None else str(current.get("model") or ""),
+    )
+    config = llm_client.current_config(mask_key=True)
+    return LlmConnectionResponse(
+        base_url=str(config.get("base_url") or ""),
+        model=str(config.get("model") or ""),
+        api_key_set=bool(config.get("configured")),
+        configured=bool(config.get("configured")),
+    )
+
+
+@router.post(
+    "/settings/connection/verify",
+    response_model=LlmConnectionVerifyResponse,
+    responses={403: {"model": ErrorResponse}},
+)
+def verify_settings_connection(
+    _user: CurrentUser = Depends(require_admin),
+) -> LlmConnectionVerifyResponse:
+    """Run a bounded provider ping using the current deployment settings."""
+    result = llm_client.verify_connection()
+    detail = str(result.get("detail") or "")
+    secret = llm_client.api_key_unmasked()
+    if secret:
+        detail = detail.replace(secret, "[redacted]")
+    return LlmConnectionVerifyResponse(
+        ok=bool(result.get("ok")), detail=detail[:300]
+    )
+
+
+@router.get(
+    "/profiles/{name}/settings",
+    response_model=ProfileSettingsResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_settings(name: str) -> ProfileSettingsResponse:
+    """Return normalized, non-secret preferences for one profile."""
+    pdir = _resolve_profile(name)
+    return ProfileSettingsResponse(profile=pdir.name, preferences=load_web_preferences(pdir))
+
+
+@router.patch(
+    "/profiles/{name}/settings",
+    response_model=ProfileSettingsResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def patch_profile_settings(
+    name: str, body: ProfileSettingsPatch
+) -> ProfileSettingsResponse:
+    """Merge a safe profile preferences patch using the existing normalizer."""
+    pdir = _resolve_profile(name)
+    patch = body.model_dump(exclude_none=True)
+    update_web_preferences(pdir.name, patch)
+    return ProfileSettingsResponse(
+        profile=pdir.name, preferences=load_web_preferences(pdir)
+    )
+
+
+@router.get(
+    "/settings/codex/status",
+    response_model=CodexStatusResponse,
+    responses={403: {"model": ErrorResponse}},
+)
+def get_codex_status(_user: CurrentUser = Depends(require_user)) -> CodexStatusResponse:
+    """Return non-secret Codex CLI readiness information."""
+    return CodexStatusResponse(**codex_adapter.codex_status().as_dict())
+
+
+@router.get(
+    "/profiles/{name}/settings/codex",
+    response_model=CodexSettingsResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_codex_settings(name: str) -> CodexSettingsResponse:
+    """Return profile-owned non-auth Codex settings."""
+    pdir = _resolve_profile(name)
+    return CodexSettingsResponse(
+        profile=pdir.name,
+        settings=codex_adapter.current_config_dict(profile=pdir.name),
+    )
+
+
+@router.patch(
+    "/profiles/{name}/settings/codex",
+    response_model=CodexSettingsResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def patch_profile_codex_settings(
+    name: str, body: CodexSettingsPatch
+) -> CodexSettingsResponse:
+    """Persist profile-owned non-auth Codex settings."""
+    pdir = _resolve_profile(name)
+    current = codex_adapter.current_config(profile=pdir.name)
+    values = current.__dict__.copy()
+    for key, value in body.model_dump(exclude_none=True).items():
+        values[key] = value
+    config = codex_adapter.CodexConfig(
+        bin_path=str(values.get("bin_path") or "codex"),
+        cloud_env_id=str(values.get("cloud_env_id") or ""),
+        model=str(values.get("model") or ""),
+        attempts=int(values.get("attempts") or 1),
+        branch=str(values.get("branch") or ""),
+        timeout_seconds=float(values.get("timeout_seconds") or 180),
+        codex_home=str(values.get("codex_home") or ""),
+    )
+    codex_adapter.save_profile_config(pdir.name, config)
+    return CodexSettingsResponse(
+        profile=pdir.name,
+        settings=codex_adapter.current_config_dict(profile=pdir.name),
+    )
 
 
 @router.get("/profiles", response_model=list[ProfileSummary])
@@ -3642,7 +3812,7 @@ def set_profile_evidence_skill_links(
 
     Chip-save semantics: ``skill_ids`` is the desired final set (core
     ``set_evidence_skill_refs`` adds missing / removes absent, creates
-    unknown nodes as ``learning``). The write lands on skill-tree.yaml only
+    schema-valid absent nodes as ``learning``). The write lands on skill-tree.yaml only
     — the pool never stores the reverse direction. ``If-Match`` carries the
     skill-tree.yaml ETag from the stages/tree reads (412 on mismatch).
     """
@@ -3670,6 +3840,13 @@ def set_profile_evidence_skill_links(
     link_state: dict[str, list[str]] = {"before": []}
 
     def _apply(raw: dict[str, Any]) -> None:
+        from nblane.core.schema_io import load_schema_raw, schema_node_index
+
+        allowed = schema_node_index(load_schema_raw(str(raw.get("schema", ""))) or {})
+        unknown = sorted(set(skill_ids) - allowed.keys())
+        if unknown:
+            raise ApiError(422, "unknown_skill", f"Unknown schema skill ids: {', '.join(unknown)}")
+
         nodes = [
             node
             for node in (raw.get("nodes") or [])
@@ -4009,6 +4186,7 @@ def apply_profile_crystallize(
         warnings=result["warnings"],
         new_evidence_ids=result["new_evidence_ids"],
         crystallized_count=result["crystallized_count"],
+        items=result["items"],
     )
 
 

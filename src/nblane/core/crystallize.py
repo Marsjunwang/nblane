@@ -108,6 +108,10 @@ def resolve_done_tasks(
     wanted_ids = [_clean(t) for t in task_ids if _clean(t)]
     wanted_titles = [_clean(t) for t in (titles or []) if _clean(t)]
     by_id, by_title = done_tasks_by_id(profile)
+    all_done = parse_kanban(profile).get(KANBAN_DONE) or []
+    for title in wanted_titles:
+        if sum(_clean(task.title) == title for task in all_done) > 1:
+            raise ValueError(f"Ambiguous task title: {title}; select by id.")
     tasks: list[KanbanTask] = []
     missing: list[str] = []
     seen: set[int] = set()
@@ -181,52 +185,44 @@ def task_snapshot(task: KanbanTask) -> dict[str, Any]:
 def attach_task_snapshots(
     patch: dict[str, Any],
     snapshots: list[dict[str, Any]],
+    *,
+    strict: bool = False,
 ) -> dict[str, Any]:
-    """Fill missing provenance/snapshot fields on patch evidence rows.
+    """Attach only the snapshots explicitly attributed to each evidence row.
 
-    Every evidence row gets the source kanban refs (union, de-duped) and the
-    project refs of the source tasks. ``original_content`` / hash / language
-    are only filled when the row does not carry them (LLM drafts may already
-    have distilled content); the snapshot then joins all source tasks'原文 so
-    the row stays auditable even when the task→row mapping is not 1:1.
+    Existing kanban_refs are the wire contract; source_task_ids is accepted
+    as a draft-only alias. A single selected task is an unambiguous fallback.
+    Ambiguous multi-task drafts fail before any evidence is written.
     """
-    entries = patch.get("evidence_entries")
-    if not isinstance(entries, list) or not snapshots:
-        return patch
-    refs = [s["kanban_ref"] for s in snapshots if s.get("kanban_ref")]
-    projects: list[str] = []
-    for snap in snapshots:
-        pid = _clean(snap.get("project_id"))
-        if pid and pid not in projects:
-            projects.append(pid)
-    combined_original = "\n\n---\n\n".join(
-        snap["original_content"]
-        for snap in snapshots
-        if _clean(snap.get("original_content"))
-    )
-    for row in entries:
+    from nblane.core.ingest_merge import task_source_refs
+
+    by_ref = {s["kanban_ref"]: s for s in snapshots if s.get("kanban_ref")}
+    for row in patch.get("evidence_entries") or []:
         if not isinstance(row, dict):
             continue
-        existing_refs = [
-            _clean(r) for r in (row.get("kanban_refs") or []) if _clean(r)
-        ]
-        merged_refs = list(dict.fromkeys([*existing_refs, *refs]))
-        if merged_refs:
-            row["kanban_refs"] = merged_refs
-        existing_projects = [
-            _clean(p) for p in (row.get("project_refs") or []) if _clean(p)
-        ]
-        merged_projects = list(dict.fromkeys([*existing_projects, *projects]))
-        if merged_projects:
-            row["project_refs"] = merged_projects
-        if not _clean(row.get("origin")):
-            row["origin"] = "kanban_task"
-        if not _clean(row.get("origin_ref")) and len(refs) == 1:
-            row["origin_ref"] = refs[0]
-        if not _clean(row.get("original_content")) and combined_original:
-            row["original_content"] = combined_original
-            row["original_content_hash"] = content_hash(combined_original)
-            row.setdefault("original_language", detect_language(combined_original))
+        refs = task_source_refs(row)
+        refs.update(kanban_ref(_clean(t)) for t in row.pop("source_task_ids", []) if _clean(t))
+        if not refs and len(by_ref) == 1:
+            refs = set(by_ref)
+        selected_refs = refs & by_ref.keys()
+        if strict and (not selected_refs or not refs <= by_ref.keys()):
+            raise ValueError("Evidence source tasks are missing or outside the selection.")
+        if not strict:
+            selected_refs = set(by_ref)
+        selected = [snap for ref, snap in by_ref.items() if ref in selected_refs]
+        row["kanban_refs"] = list(dict.fromkeys([*(row.get("kanban_refs") or []), *[snap["kanban_ref"] for snap in selected]]))
+        row["project_refs"] = list(dict.fromkeys([*(row.get("project_refs") or []), *[snap["project_id"] for snap in selected if snap.get("project_id")]]))
+        row["origin"] = "kanban_task"
+        if len(selected) == 1:
+            row["origin_ref"] = selected[0]["kanban_ref"]
+        else:
+            row.pop("origin_ref", None)
+        # The host owns provenance; model-supplied text is not a source snapshot.
+        original = "\n\n---\n\n".join(snap["original_content"] for snap in selected)
+        if not _clean(row.get("original_content")):
+            row["original_content"] = original
+            row["original_content_hash"] = content_hash(original)
+            row["original_language"] = detect_language(original)
     return patch
 
 
@@ -267,63 +263,94 @@ def apply_crystallization(
     include_nodes: list[bool] | None = None,
     allow_status_change: bool = False,
 ) -> dict[str, Any]:
-    """Apply a confirmed crystallization patch and mark the tasks crystallized.
+    """Apply selected source evidence and task flags as one recoverable write.
 
-    Runs the canonical ingest merge (validate + SKILL.md sync + rollback) via
-    ``run_ingest_patch``; only when the apply succeeds are the source Done
-    tasks marked ``crystallized``. Returns a summary dict with ``ok``,
-    ``errors``, ``warnings``, ``new_evidence_ids`` and ``crystallized_count``.
+    Only success/failure is exposed. Normal errors restore all four files;
+    a retry after interruption reuses evidence by stable task provenance.
     """
     from nblane.core import profile_io
+    from nblane.core.evidence_review import confidence_for_origin, internal_project_goal_index
+    from nblane.core.file_write import rollback_profile_files
+    from nblane.core.goals import load_goal_book
     from nblane.core.ingest_apply import run_ingest_patch
+    from nblane.core.ingest_merge import task_source_refs
     from nblane.core.ingest_parse import filter_ingest_patch
 
     profile_name = profile.name if isinstance(profile, Path) else str(profile)
-    filtered, filter_warnings = filter_ingest_patch(
-        patch,
-        include_evidence=include_evidence,
-        include_nodes=include_nodes,
-    )
-    # 置信度按 origin 自动推导(评审只留「分量」单维度);草稿已带的保留。
-    from nblane.core.evidence_review import confidence_for_origin
-
-    for row in filtered.evidence_entries:
-        if isinstance(row, dict) and not _clean(row.get("confidence")):
-            row["confidence"] = confidence_for_origin(row.get("origin"))
-    before_raw = profile_io.load_evidence_pool_raw(profile_name) or {}
-    before_ids = {
-        _clean(row.get("id"))
-        for row in (before_raw.get("evidence_entries") or [])
-        if isinstance(row, dict) and _clean(row.get("id"))
-    }
-    merge, apply = run_ingest_patch(
-        profile_name,
-        filtered,
-        allow_status_change=allow_status_change,
-    )
-    warnings = [*filter_warnings, *merge.warnings, *apply.warnings]
-    errors = [*merge.errors, *apply.errors]
-    if not apply.ok:
+    pdir = profile_io.profile_dir(profile_name)
+    warnings: list[str] = []
+    try:
+        with git_backup.defer_changes(f"crystallize {profile_name}"), rollback_profile_files(pdir, (
+            "evidence-pool.yaml", "skill-tree.yaml", "SKILL.md", "kanban.md",
+        )):
+            tasks, missing = resolve_done_tasks(profile_name, task_ids, titles)
+            if missing or not tasks:
+                raise ValueError(f"Selected Done tasks cannot be resolved: {missing}")
+            # Title-only fallback must never mark multiple same-title tasks.
+            if any(not _clean(task.id) for task in tasks):
+                raise ValueError("Source tasks need stable ids; refresh candidates first.")
+            filtered, warnings = filter_ingest_patch(
+                patch, include_evidence=include_evidence, include_nodes=include_nodes,
+            )
+            if not filtered.evidence_entries:
+                return {"ok": True, "errors": [], "warnings": list(warnings),
+                        "new_evidence_ids": [], "crystallized_count": 0, "items": []}
+            # Preserve the legacy no-op behavior for a patch consisting only
+            # of blank evidence rows. Mixed patches remain invalid below.
+            if all(not _clean(row.get("title")) for row in filtered.evidence_entries):
+                return {"ok": True, "errors": [], "warnings": list(warnings),
+                        "new_evidence_ids": [], "crystallized_count": 0, "items": []}
+            if any(not _clean(row.get("title")) for row in filtered.evidence_entries):
+                raise ValueError("Select at least one evidence row with a non-empty title.")
+            attach_task_snapshots(
+                {"evidence_entries": filtered.evidence_entries},
+                [task_snapshot(task) for task in tasks], strict=True,
+            )
+            covered = set().union(*(task_source_refs(row) for row in filtered.evidence_entries))
+            selected_tasks = [task for task in tasks if kanban_ref(task.id) in covered]
+            projects = internal_project_goal_index(pdir)
+            goal_ids = {goal.id for goal in load_goal_book(pdir).goals}
+            for task in selected_tasks:
+                pid = _clean(task.project_id)
+                if not pid:
+                    warnings.append(f"{task.id}: no project assigned; goal linkage remains incomplete.")
+                    continue
+                project = projects.get(pid)
+                if (pdir / "project-board.yaml").exists() and (
+                    not project or not project["goal_refs"] or not set(project["goal_refs"]) <= goal_ids
+                ):
+                    raise ValueError(f"{task.id}: project {pid} must exist and reference valid goals.")
+            for row in filtered.evidence_entries:
+                if not _clean(row.get("confidence")):
+                    row["confidence"] = confidence_for_origin(row.get("origin"))
+            before = profile_io.load_evidence_pool_raw(profile_name) or {}
+            before_ids = {row.get("id") for row in before.get("evidence_entries", [])}
+            merge, outcome = run_ingest_patch(
+                profile_name, filtered, allow_status_change=allow_status_change,
+                match_task_sources=True,
+            )
+            warnings.extend(outcome.warnings)
+            if not outcome.ok:
+                raise ValueError("; ".join([*merge.errors, *outcome.errors]))
+            rows = (merge.merged_pool or {}).get("evidence_entries", [])
+            if not all(any(ref in task_source_refs(row) for row in rows) for ref in covered):
+                raise ValueError("Evidence does not cover every selected source task.")
+            crystallized = mark_done_crystallized(
+                profile_name, [task.id for task in selected_tasks],
+            )
+            current, missing = resolve_done_tasks(profile_name, [task.id for task in selected_tasks])
+            if missing or any(not task.crystallized for task in current):
+                raise ValueError("Could not mark all source tasks crystallized.")
+            return {
+                "ok": True, "errors": [], "warnings": list(dict.fromkeys(warnings)),
+                "new_evidence_ids": [row["id"] for row in rows if row.get("id") not in before_ids],
+                "crystallized_count": crystallized,
+                "items": [{"task_id": task.id, "evidence_ids": [
+                    row["id"] for row in rows if kanban_ref(task.id) in task_source_refs(row)
+                ]} for task in selected_tasks],
+            }
+    except Exception as exc:
         return {
-            "ok": False,
-            "errors": errors,
-            "warnings": warnings,
-            "new_evidence_ids": [],
-            "crystallized_count": 0,
+            "ok": False, "errors": [str(exc)], "warnings": warnings,
+            "new_evidence_ids": [], "crystallized_count": 0, "items": [],
         }
-    after_raw = profile_io.load_evidence_pool_raw(profile_name) or {}
-    new_ids = [
-        _clean(row.get("id"))
-        for row in (after_raw.get("evidence_entries") or [])
-        if isinstance(row, dict)
-        and _clean(row.get("id"))
-        and _clean(row.get("id")) not in before_ids
-    ]
-    crystallized = mark_done_crystallized(profile_name, task_ids, titles)
-    return {
-        "ok": True,
-        "errors": [],
-        "warnings": warnings,
-        "new_evidence_ids": new_ids,
-        "crystallized_count": crystallized,
-    }
