@@ -7,6 +7,7 @@ import { ApiError, apiDelete, apiDeleteWithHeaders, apiGet, apiGetWithHeaders, a
 import type {
   ActivityApplyResponse,
   ActivityDismissResponse,
+  AIExceptionBulkDismissResponse,
   ActivityItem,
   ActivityItemDetail,
   ActivityListResponse,
@@ -873,6 +874,21 @@ export function useAIExceptions(profile: string) {
     enabled: profile.length > 0,
     staleTime: 15_000,
     refetchInterval: 30_000,
+  });
+}
+
+export function useDismissAIExceptions(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) =>
+      apiPost<AIExceptionBulkDismissResponse>(
+        `/profiles/${encodeURIComponent(profile)}/ai-exceptions/dismiss`,
+        { ids },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'ai-exceptions'] });
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'activity'] });
+    },
   });
 }
 

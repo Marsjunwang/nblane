@@ -1,6 +1,51 @@
 {
  "components": {
   "schemas": {
+   "AIExceptionBulkDismissRequest": {
+    "description": "Activity-backed exception ids to dismiss in one write.",
+    "properties": {
+     "ids": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 200,
+      "minItems": 1,
+      "title": "Ids",
+      "type": "array"
+     },
+     "note": {
+      "default": "",
+      "title": "Note",
+      "type": "string"
+     }
+    },
+    "title": "AIExceptionBulkDismissRequest",
+    "type": "object"
+   },
+   "AIExceptionBulkDismissResponse": {
+    "description": "Result of dismissing activity-backed AI exceptions.",
+    "properties": {
+     "dismissed": {
+      "default": 0,
+      "title": "Dismissed",
+      "type": "integer"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "skipped": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Skipped",
+      "type": "array"
+     }
+    },
+    "title": "AIExceptionBulkDismissResponse",
+    "type": "object"
+   },
    "AIExceptionModel": {
     "description": "One unresolved failure that needs attention from the profile owner.",
     "properties": {
@@ -9435,6 +9480,86 @@
      }
     },
     "summary": "Get Profile Ai Exceptions"
+   }
+  },
+  "/api/v1/profiles/{name}/ai-exceptions/dismiss": {
+   "post": {
+    "description": "Dismiss selected Activity-backed AI failures in one locked write.\n\nThe exception feed also contains historical AI runs and jobs, which do\nnot have a dismiss state. Those ids are reported as skipped rather than\nbeing silently altered.",
+    "operationId": "dismiss_profile_ai_exceptions_api_v1_profiles__name__ai_exceptions_dismiss_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AIExceptionBulkDismissRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AIExceptionBulkDismissResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Dismiss Profile Ai Exceptions"
    }
   },
   "/api/v1/profiles/{name}/checkins": {

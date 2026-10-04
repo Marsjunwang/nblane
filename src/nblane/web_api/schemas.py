@@ -333,6 +333,21 @@ class ActivityDismissResponse(BaseModel):
     item: ActivityItemModel
 
 
+class AIExceptionBulkDismissRequest(BaseModel):
+    """Activity-backed exception ids to dismiss in one write."""
+
+    ids: list[str] = Field(default_factory=list, min_length=1, max_length=200)
+    note: str = ""
+
+
+class AIExceptionBulkDismissResponse(BaseModel):
+    """Result of dismissing activity-backed AI exceptions."""
+
+    ok: bool = True
+    dismissed: int = 0
+    skipped: list[str] = Field(default_factory=list)
+
+
 class ActivityItemErrorResponse(ErrorResponse):
     """Error body that also carries the current activity item."""
 

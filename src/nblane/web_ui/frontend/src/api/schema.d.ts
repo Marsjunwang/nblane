@@ -246,6 +246,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/ai-exceptions/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss Profile Ai Exceptions
+         * @description Dismiss selected Activity-backed AI failures in one locked write.
+         *
+         *     The exception feed also contains historical AI runs and jobs, which do
+         *     not have a dismiss state. Those ids are reported as skipped rather than
+         *     being silently altered.
+         */
+        post: operations["dismiss_profile_ai_exceptions_api_v1_profiles__name__ai_exceptions_dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/checkins": {
         parameters: {
             query?: never;
@@ -2454,6 +2478,37 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AIExceptionBulkDismissRequest
+         * @description Activity-backed exception ids to dismiss in one write.
+         */
+        AIExceptionBulkDismissRequest: {
+            /** Ids */
+            ids?: string[];
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /**
+         * AIExceptionBulkDismissResponse
+         * @description Result of dismissing activity-backed AI exceptions.
+         */
+        AIExceptionBulkDismissResponse: {
+            /**
+             * Dismissed
+             * @default 0
+             */
+            dismissed: number;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Skipped */
+            skipped?: string[];
+        };
         /**
          * AIExceptionModel
          * @description One unresolved failure that needs attention from the profile owner.
@@ -8837,6 +8892,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AIExceptionsResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_profile_ai_exceptions_api_v1_profiles__name__ai_exceptions_dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIExceptionBulkDismissRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIExceptionBulkDismissResponse"];
                 };
             };
             /** @description Invalid profile name. */

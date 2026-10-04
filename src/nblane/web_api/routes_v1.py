@@ -37,7 +37,7 @@ import os
 import re
 import uuid
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -180,6 +180,8 @@ from nblane.web_api.schemas import (
     ActivityApplyResponse,
     ActivityDismissRequest,
     ActivityDismissResponse,
+    AIExceptionBulkDismissRequest,
+    AIExceptionBulkDismissResponse,
     ActivityItemErrorResponse,
     ActivityItemModel,
     ActivityListResponse,
@@ -1099,6 +1101,71 @@ def get_profile_ai_exceptions(
         profile=pdir.name,
         total=len(items),
         items=[AIExceptionModel(**item) for item in items],
+    )
+
+
+@router.post(
+    "/profiles/{name}/ai-exceptions/dismiss",
+    response_model=AIExceptionBulkDismissResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def dismiss_profile_ai_exceptions(
+    name: str,
+    body: AIExceptionBulkDismissRequest,
+) -> AIExceptionBulkDismissResponse:
+    """Dismiss selected Activity-backed AI failures in one locked write.
+
+    The exception feed also contains historical AI runs and jobs, which do
+    not have a dismiss state. Those ids are reported as skipped rather than
+    being silently altered.
+    """
+    pdir = _resolve_profile(name)
+    requested = {str(item or "").strip() for item in body.ids}
+    requested.discard("")
+    activity_ids = {
+        item_id.removeprefix("activity:")
+        for item_id in requested
+        if item_id.startswith("activity:")
+    }
+    skipped = sorted(
+        requested - {f"activity:{item_id}" for item_id in activity_ids}
+    )
+    if not activity_ids:
+        return AIExceptionBulkDismissResponse(dismissed=0, skipped=skipped)
+
+    note = body.note.strip()
+    dismissed = 0
+
+    def _dismiss(activity: dict[str, Any]) -> None:
+        nonlocal dismissed
+        now = datetime.now(timezone.utc).isoformat()
+        found_ids: set[str] = set()
+        for item in activity.get("items") or []:
+            if (
+                not isinstance(item, dict)
+                or str(item.get("id") or "").strip() not in activity_ids
+            ):
+                continue
+            item_id = str(item.get("id") or "").strip()
+            found_ids.add(item_id)
+            if str(item.get("status") or "").strip() != "failed":
+                skipped.append(f"activity:{item_id}")
+                continue
+            item["status"] = "dismissed"
+            item["updated"] = now
+            if note:
+                item["dismiss_note"] = note
+            dismissed += 1
+        skipped.extend(
+            f"activity:{item_id}"
+            for item_id in activity_ids - found_ids
+        )
+
+    agent_activity.update_agent_activity(pdir.name, _dismiss)
+    return AIExceptionBulkDismissResponse(
+        dismissed=dismissed,
+        skipped=sorted(set(skipped)),
     )
 
 

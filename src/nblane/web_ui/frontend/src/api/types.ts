@@ -67,6 +67,9 @@ export type ActivityApplyResponse = Schemas['ActivityApplyResponse'];
 /** ActivityDismissResponse from web_api/schemas.py. */
 export type ActivityDismissResponse = Schemas['ActivityDismissResponse'];
 
+/** Bulk dismissal result for Activity-backed AI exceptions. */
+export type AIExceptionBulkDismissResponse = Schemas['AIExceptionBulkDismissResponse'];
+
 /** AIExceptionModel from web_api/schemas.py. */
 export type AIException = Schemas['AIExceptionModel'];
 

@@ -9,11 +9,13 @@ import {
   Paper,
   Stack,
   Text,
+  Checkbox,
 } from '@mantine/core';
 import { IconAlertTriangle, IconExternalLink, IconRefresh } from '@tabler/icons-react';
+import { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 
-import { useAIExceptions } from '../api/hooks';
+import { useAIExceptions, useDismissAIExceptions } from '../api/hooks';
 
 interface AIExceptionDrawerProps {
   profile: string;
@@ -24,6 +26,29 @@ interface AIExceptionDrawerProps {
 export function AIExceptionDrawer({ profile, opened, onClose }: AIExceptionDrawerProps) {
   const exceptions = useAIExceptions(profile);
   const items = exceptions.data?.items ?? [];
+  const [selected, setSelected] = useState<string[]>([]);
+  const dismiss = useDismissAIExceptions(profile);
+  const selectableIds = items.filter((item) => item.id.startsWith('activity:')).map((item) => item.id);
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.includes(id));
+
+  useEffect(() => {
+    setSelected((current) => current.filter((id) => selectableIds.includes(id)));
+  }, [exceptions.data, selectableIds.join('|')]);
+
+  const toggle = (id: string, checked: boolean) => {
+    setSelected((current) => checked ? [...new Set([...current, id])] : current.filter((item) => item !== id));
+  };
+
+  const dismissSelected = async () => {
+    if (!selected.length) return;
+    try {
+      await dismiss.mutateAsync(selected);
+      setSelected([]);
+    } catch {
+      // The mutation error is exposed by the hook and the list remains selected
+      // so the owner can retry without losing the batch.
+    }
+  };
 
   return (
     <Drawer
@@ -53,20 +78,47 @@ export function AIExceptionDrawer({ profile, opened, onClose }: AIExceptionDrawe
             <Text size="sm" c="dimmed">
               仅显示失败、冲突或被阻止的 AI 操作。
             </Text>
-            <Button
-              variant="subtle"
-              size="compact-sm"
-              leftSection={<IconRefresh size={14} />}
-              loading={exceptions.isFetching}
-              onClick={() => void exceptions.refetch()}
-            >
-              刷新
-            </Button>
+            <Group gap="xs">
+              <Button
+                variant="light"
+                color="gray"
+                size="compact-sm"
+                disabled={!selected.length}
+                loading={dismiss.isPending}
+                onClick={() => void dismissSelected()}
+              >
+                忽略选中 ({selected.length})
+              </Button>
+              <Button
+                variant="subtle"
+                size="compact-sm"
+                leftSection={<IconRefresh size={14} />}
+                loading={exceptions.isFetching}
+                onClick={() => void exceptions.refetch()}
+              >
+                刷新
+              </Button>
+            </Group>
           </Group>
+          {selectableIds.length > 0 && (
+            <Checkbox
+              label="全选可忽略的异常"
+              checked={allSelected}
+              indeterminate={selected.length > 0 && !allSelected}
+              onChange={(event) => setSelected(event.currentTarget.checked ? selectableIds : [])}
+            />
+          )}
           {items.map((item) => (
             <Paper key={item.id} withBorder p="sm" radius="sm">
               <Stack gap="xs">
                 <Group justify="space-between" align="flex-start" wrap="nowrap">
+                  {item.id.startsWith('activity:') && (
+                    <Checkbox
+                      aria-label={`选择 ${item.title}`}
+                      checked={selected.includes(item.id)}
+                      onChange={(event) => toggle(item.id, event.currentTarget.checked)}
+                    />
+                  )}
                   <div>
                     <Text fw={600}>{item.title}</Text>
                     <Group gap="xs" mt={4}>

@@ -156,6 +156,29 @@ class TestActivityMutations(unittest.TestCase):
         self.assertEqual(conflict["code"], "activity_item_not_pending")
         self.assertEqual(conflict["item"]["status"], "applied")
 
+    def test_bulk_dismiss_ai_exceptions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            first_id = _seed_evidence_candidate("Failed candidate one")
+            second_id = _seed_evidence_candidate("Failed candidate two")
+            agent_activity.update_activity_status("alice", first_id, "failed", error="bad input")
+            agent_activity.update_activity_status("alice", second_id, "failed", error="bad input")
+
+            response = client.post(
+                "/api/v1/profiles/alice/ai-exceptions/dismiss",
+                json={"ids": [f"activity:{first_id}", f"activity:{second_id}", "run:old"]},
+            )
+
+            stored = agent_activity.load_agent_activity(profile)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["dismissed"], 2)
+        self.assertEqual(response.json()["skipped"], ["run:old"])
+        statuses = {item["id"]: item["status"] for item in stored["items"]}
+        self.assertEqual(statuses[first_id], "dismissed")
+        self.assertEqual(statuses[second_id], "dismissed")
+
     def test_apply_without_if_match_proceeds(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
