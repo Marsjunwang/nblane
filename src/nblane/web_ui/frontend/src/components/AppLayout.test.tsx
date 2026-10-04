@@ -33,6 +33,11 @@ describe('AppLayout', () => {
 
     const link = await screen.findByRole('link', { name: '项目' });
     expect(link).toHaveAttribute('href', '/p/we%20ird/projects');
+    const evidence = screen.getByRole('link', { name: '证据' });
+    const research = screen.getByRole('link', { name: '研究台' });
+    const studio = screen.getByRole('link', { name: '输出工作室' });
+    expect(evidence.compareDocumentPosition(research) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(research.compareDocumentPosition(studio) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // The old 看板/项目看板 entries are gone (merged into /projects).
     expect(screen.queryByRole('link', { name: '看板' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '项目看板' })).not.toBeInTheDocument();

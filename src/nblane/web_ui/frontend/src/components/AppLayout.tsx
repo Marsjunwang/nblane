@@ -30,9 +30,9 @@ const NAV_ITEMS = [
   { label: '项目', path: 'projects', icon: IconTimeline },
   { label: '技能树', path: 'skill-tree', icon: IconBinaryTree2 },
   { label: '证据', path: 'evidence', icon: IconCertificate },
+  { label: '研究台', path: 'research', icon: IconBook2 },
   { label: '输出工作室', path: 'studio', icon: IconWriting },
   { label: '公开构建', path: 'public-build', icon: IconRocket },
-  { label: '研究台', path: 'research', icon: IconBook2 },
 ];
 
 // Wide-viewport policy: every page's main column is centered and capped so
