@@ -43,6 +43,31 @@ describe('SidecarFrame', () => {
     expect(screen.getByTestId('sidecar-loading')).toBeInTheDocument();
   });
 
+  it('keeps the veil until the embedded app reports ready', () => {
+    renderWithProviders(
+      <SidecarFrame
+        title="Paper Reader"
+        url="http://127.0.0.1:8502/reader/view/paper"
+        base="http://127.0.0.1:8502"
+        readyMessageType="nblane.reader.ready"
+      />,
+    );
+
+    const frame = screen.getByTestId('sidecar-frame');
+    fireEvent.load(frame);
+    expect(screen.getByTestId('sidecar-loading')).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: 'http://127.0.0.1:8502',
+          data: { type: 'nblane.reader.ready' },
+        }),
+      );
+    });
+    expect(screen.queryByTestId('sidecar-loading')).not.toBeInTheDocument();
+  });
+
   it('bootstraps the session before loading content and re-bootstraps on reload', () => {
     vi.useFakeTimers();
     renderWithProviders(
@@ -64,7 +89,11 @@ describe('SidecarFrame', () => {
     act(() => {
       vi.advanceTimersByTime(900);
     });
-    expect(screen.getByTestId('sidecar-frame')).toBeInTheDocument();
+    const frame = screen.getByTestId('sidecar-frame');
+    expect(frame).toHaveAttribute(
+      'src',
+      expect.stringContaining('auth_handoff=handoff-token-123'),
+    );
 
     // Reload re-runs the whole bootstrap: the content frame is pulled until
     // the head start elapses again, then comes back with a fresh load.

@@ -17,10 +17,9 @@ import type { Page, Response } from "@playwright/test";
  *   从证据生成 preview → create draft → draft listed under 博客; JD 匹配
  *   renders the degradation card on the no-LLM job-error contract (stubbed
  *   — same reason as above; a live jd-match job takes ~55s here).
- * - 研究台 Research: summary card + recent sources match the API payload;
- *   Paper Library sidecar entry; sidecar coordinates point at this stack's
- *   reader port (18502, same convention as spa_home.spec.ts); the embedded
- *   workspace bootstraps auth and really loads.
+ * - 研究台 Research: reading queue, progress summary, and standalone Paper
+ *   Library entry match the API payload; sidecar coordinates point at this
+ *   stack's reader port (18502, same convention as spa_home.spec.ts).
  *
  * Every entity the suite creates carries a unique `e2e-<page>-<ts>` prefix so
  * reruns never collide with existing sandbox data or other specs.
@@ -369,7 +368,7 @@ test.describe("SPA Studio (输出工作室)", () => {
 });
 
 test.describe("SPA Research (研究台)", () => {
-  test("summary card + recent sources render from the API payload; sidecar entry exists", async ({
+  test("reading desk + paper library entry render from the API payload", async ({
     page,
     request,
   }) => {
@@ -379,33 +378,19 @@ test.describe("SPA Research (研究台)", () => {
 
     await page.goto(spa("research"));
 
-    const summaryCard = page.getByTestId("research-summary");
-    await expect(summaryCard).toBeVisible();
-    await expect(summaryCard).toContainText(`来源 ${data.summary.total}`);
-    await expect(summaryCard).toContainText(`进行中 ${data.summary.active_total}`);
-
-    const sourcesCard = page.getByTestId("research-sources");
-    await expect(sourcesCard).toBeVisible();
-    const rows = sourcesCard.locator("tbody tr");
-    await expect(rows).toHaveCount(data.sources.length);
-    if (data.sources.length > 0) {
-      await expect(rows.first()).toContainText(
-        data.sources[0].title || data.sources[0].id,
-      );
-    }
-
-    // Paper Library sidecar entry: card + external link with the sidecar URL.
-    await expect(page.getByTestId("research-paper-library")).toBeVisible();
-    await expect(page.getByRole("link", { name: "新标签打开" })).toHaveAttribute(
+    await expect(page.getByText(`${PROFILE} · 研究台`)).toBeVisible();
+    await expect(page.getByText("论文总数")).toBeVisible();
+    await expect(page.getByText("阅读队列")).toBeVisible();
+    await expect(page.getByText("最近读过")).toBeVisible();
+    await expect(page.getByRole("link", { name: /打开论文库/ })).toHaveAttribute(
       "href",
-      data.sidecar.paper_library_url,
+      expect.stringContaining(`${data.sidecar.base}/paper-library?profile=${PROFILE}&auth_handoff=`),
     );
+    await expect(page.getByText("断言")).toHaveCount(0);
+    await expect(page.getByText("引用")).toHaveCount(0);
   });
 
-  test("sidecar coordinates point at 18502 and the embedded Paper Library really loads", async ({
-    page,
-    request,
-  }) => {
+  test("sidecar coordinates point at 18502 and Paper Library stays standalone", async ({ page, request }) => {
     const response = await request.get(api(`/profiles/${encodeURIComponent(PROFILE)}/research`));
     expect(response.status()).toBe(200);
     const sidecar = (await response.json()).sidecar;
@@ -414,32 +399,10 @@ test.describe("SPA Research (研究台)", () => {
     expect(sidecar.base).toBe(EXPECTED_SIDECAR_BASE);
     expect(sidecar.configured).toBe(true);
     expect(sidecar.paper_library_url).toContain(`${EXPECTED_SIDECAR_BASE}/paper-library`);
-
     await page.goto(spa("research"));
-    await expect(page.getByTestId("research-paper-library")).toBeVisible();
+    await expect(page.locator('iframe[data-testid="sidecar-frame"]')).toHaveCount(0);
 
-    // Auth-on sandbox: the SPA bootstraps the sidecar session cookie via a
-    // hidden form POST before the content iframe gets its src (auth-off
-    // stacks skip the bootstrap entirely).
-    const authBootstrap = sidecar.handoff_token
-      ? page.waitForRequest(
-          (req) => req.url() === `${sidecar.base}/auth/session` && req.method() === "POST",
-        )
-      : Promise.resolve(null);
-    const libraryLoaded = page.waitForResponse(
-      (res) =>
-        res.url().startsWith(`${sidecar.base}/paper-library`) &&
-        res.request().resourceType() === "document",
-      { timeout: 20_000 },
-    );
-
-    await page.getByRole("button", { name: "嵌入显示" }).click();
-    await authBootstrap;
-
-    const frame = page.locator('iframe[data-testid="sidecar-frame"]');
-    await expect(frame).toBeVisible();
-    await expect(frame).toHaveAttribute("src", sidecar.paper_library_url);
-    const libraryResponse = await libraryLoaded;
-    expect(libraryResponse.status(), "paper library document should load, not refuse").toBe(200);
+    const libraryResponse = await request.get(sidecar.paper_library_url);
+    expect(libraryResponse.status(), "paper library endpoint should load with the minted handoff").toBe(200);
   });
 });

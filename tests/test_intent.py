@@ -65,10 +65,6 @@ def test_evidence_capture() -> None:
     assert intent.title == "完成了 GR00T 论文复现"
 
 
-def test_weekly_summary() -> None:
-    intent = parse_intent("我这周做了什么", today=NOW)
-    assert intent.kind == "review.weekly_summary"
-
 
 def test_navigate_chinese() -> None:
     intent = parse_intent("打开看板", today=NOW)
@@ -120,11 +116,6 @@ def test_board_noun_kept_inside_title() -> None:
     assert intent.title == "修看板拖拽bug"
 
 
-def test_last_week_and_zhoubao_trigger_weekly() -> None:
-    assert parse_intent("上周总结", today=NOW).kind == "review.weekly_summary"
-    assert parse_intent("周报", today=NOW).kind == "review.weekly_summary"
-
-
 def test_write_zhoubao_is_task_not_weekly() -> None:
     intent = parse_intent("提醒我明天写周报", today=NOW)
     assert intent.kind == "kanban.add"
@@ -138,6 +129,5 @@ def test_parse_never_raises_on_garbage() -> None:
             "kanban.add",
             "evidence.capture",
             "navigate",
-            "review.weekly_summary",
             "unknown",
         }

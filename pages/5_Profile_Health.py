@@ -44,9 +44,6 @@ render_page_help(
     docs_path="docs/zh/guides/profile-health.md",
 )
 
-st.info(ui["review_link_help"])
-st.page_link("pages/8_Review.py", label=ui["review_link"])
-
 m1, m2, m3, m4 = st.columns(4)
 m1.metric(ui["errors"], counts["error"])
 m2.metric(ui["warnings"], counts["warning"])

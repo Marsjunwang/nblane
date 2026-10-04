@@ -72,13 +72,9 @@ class TestResolveCommandText(unittest.TestCase):
         self.assertEqual(resolution["intent"]["kind"], "evidence.capture")
         self.assertEqual(resolution["intent"]["title"], "完成了 demo 联调")
 
-    def test_navigate_and_review_execute_directly(self) -> None:
+    def test_navigate_executes_directly(self) -> None:
         nav = resolve_command_text("打开看板")
         self.assertEqual(nav, {"outcome": "navigate", "page": "pages/3_Kanban.py"})
-        weekly = resolve_command_text("这周做了什么")
-        self.assertEqual(
-            weekly, {"outcome": "navigate", "page": "pages/8_Review.py"}
-        )
 
     def test_unknown_resolves_to_help(self) -> None:
         resolution = resolve_command_text("随便一句话")
@@ -88,7 +84,7 @@ class TestResolveCommandText(unittest.TestCase):
     def test_confirmation_flags_and_deterministic_ids(self) -> None:
         self.assertTrue(intent_needs_confirmation("kanban.add"))
         self.assertTrue(intent_needs_confirmation("evidence.capture"))
-        for kind in ("navigate", "review.weekly_summary", "unknown"):
+        for kind in ("navigate", "unknown"):
             self.assertFalse(intent_needs_confirmation(kind))
         intent = IntentAction(kind="kanban.add", raw="add X", title="X")
         day = date(2026, 9, 16)

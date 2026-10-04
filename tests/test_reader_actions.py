@@ -22,6 +22,7 @@ from nblane.core.research_papers import (
     save_paper_structure_units,
     text_hash,
     translate_full_paper,
+    upsert_paper_translations,
 )
 from nblane.core.research_sources import (
     ResearchSourceInbox,
@@ -264,6 +265,46 @@ class TestReaderActions(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.data["translation_source"], "local_dict")
         self.assertEqual(result.data["translation_text"], "n. 梯度")
+
+    def test_translate_selection_reuses_containing_segment_translation(self) -> None:
+        """A translated paragraph should make an in-paragraph selection instant."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with patch("nblane.core.git_backup.record_change"):
+                upsert_paper_translations(
+                    profile,
+                    ctx.source_id,
+                    [
+                        {
+                            "segment_id": "seg:0007",
+                            "scope_type": "structure",
+                            "scope_ref": "structure:0007",
+                            "source_hash": "hash:paragraph",
+                            "source_text": "A paragraph already translated.",
+                            "target_lang": "zh",
+                            "translated_text": "这是一段已经翻译好的内容。",
+                        }
+                    ],
+                )
+            with patch(
+                "nblane.core.reader_actions.translate_paper_segments",
+                side_effect=AssertionError("LLM must not be called for segment cache hits"),
+            ):
+                result = handle_reader_action(
+                    ctx,
+                    "translate_selection",
+                    {
+                        "selected_text": "already translated",
+                        "page": 1,
+                        "target_lang": "zh",
+                        "segment_refs": ["seg:0007"],
+                    },
+                )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data["translation_source"], "segment_cache")
+        self.assertEqual(result.data["translation_text"], "这是一段已经翻译好的内容。")
 
     def test_translate_multiword_selection_with_segment_refs_uses_llm(self) -> None:
         # Multi-word selections with a segment ref keep the whole-segment LLM
@@ -870,6 +911,7 @@ class TestReaderActions(unittest.TestCase):
                     target_lang="zh",
                     mode="all",
                     batch_size=2,
+                    scope_strategy="segment",
                     ai_profile="alice",
                     require_review=False,
                     progress_callback=progress.append,

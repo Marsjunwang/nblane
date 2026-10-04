@@ -10,7 +10,8 @@ function readerHtml() {
     .readFileSync(readerTemplatePath, "utf-8")
     .replace("{{ source_id_json|safe }}", JSON.stringify(sourceId))
     .replace("{{ reader_prefix_json|safe }}", JSON.stringify("/reader"))
-    .replace("{{ reader_token_json|safe }}", JSON.stringify(""));
+    .replace("{{ reader_token_json|safe }}", JSON.stringify(""))
+    .replace(/\{\{ reader_ui_lang_json\|default\('\"\"', true\)\|safe \}\}/, JSON.stringify("zh"));
 }
 
 const previewDataUrl =
@@ -136,7 +137,7 @@ function readerPayload(withPreview = false) {
   };
 }
 
-async function renderReader(page, payload) {
+async function renderReader(page, payload, readySelector = ".pr-translation-page") {
   await page.route("**/reader/api/**/payload**", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(payload) });
   });
@@ -156,8 +157,10 @@ async function renderReader(page, payload) {
     await route.fulfill({ contentType: "application/javascript", body: "" });
   });
   await page.setContent(readerHtml(), { waitUntil: "domcontentloaded" });
-  await expect(page.locator(".pr-translation-page")).toBeVisible();
-  await expect(page.locator('.pr-translation-block.placed[data-anchor-id="layout:v2:1:00001:main"]')).toBeVisible();
+  await expect(page.locator(readySelector).first()).toBeVisible();
+  if (readySelector === ".pr-translation-page") {
+    await expect(page.locator('.pr-translation-block.placed[data-anchor-id="layout:v2:1:00001:main"]')).toBeVisible();
+  }
 }
 
 async function measuredBox(page, selector) {
@@ -219,10 +222,133 @@ test("late page preview does not move placed overlay blocks", async ({ page }) =
   expect(Math.abs(after.height - before.height)).toBeLessThanOrEqual(1);
 });
 
+test("clicking a normal flow paragraph opens the translation dock", async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 760 });
+  await renderReader(page, readerPayload(false));
+
+  const paragraph = page.locator('.pr-translation-unit[data-anchor-id="segment:page-one-flow"]');
+  await expect(paragraph).toBeVisible();
+  await paragraph.click();
+
+  const dock = page.locator("#selectionDock");
+  await expect(dock).toBeVisible();
+  await expect(dock).toContainText("Fallback source paragraph");
+  await expect(dock).toContainText("普通译文流");
+  await expect(dock).not.toHaveClass(/offscreen/);
+  await expect(page.locator(".pr-workspace")).toHaveClass(/reader-mode-translation/);
+  await expect(dock.locator('[data-action="highlight"]')).toBeEnabled();
+  await expect(dock.locator('[data-action="note"]')).toBeEnabled();
+  // Reading actions stay focused on highlights and notes; citation creation
+  // remains a compatibility endpoint, not a default Reader affordance.
+  await expect(dock.locator('[data-action="cite"]')).toHaveCount(0);
+});
+
+test("compare flow is page-scoped and a translation anchor highlights the matching PDF paragraph", async ({ page }) => {
+  const payload = readerPayload(false);
+  payload.settings = {
+    ...payload.settings,
+    reader_mode: "compare",
+    translation_layout: "flow",
+    debug_overlay_enabled: false,
+  };
+  payload.context_window = { pages: [1, 2], total_pages: 2 };
+  await page.setViewportSize({ width: 1400, height: 760 });
+  await renderReader(page, payload, ".pr-translation-flow-page");
+
+  await expect(page.locator('.pr-translation-flow-page[data-page="1"]')).toBeVisible();
+  await expect(page.locator('.pr-translation-flow-page[data-page="2"]')).toHaveCount(0);
+  await expect(page.locator(".pr-translation-head")).toContainText("1");
+  const followSource = page.locator('[data-action="toggleCompareLock"]');
+  await expect(followSource).toContainText("Follow source");
+  await expect(followSource).toHaveAttribute("aria-pressed", "true");
+
+  await page.locator('.pr-translation-unit[data-anchor-id="layout:v2:1:00001:main"]').click();
+  await expect(page.locator('.pr-translation-unit[data-anchor-id="layout:v2:1:00001:main"]')).toHaveClass(/active/);
+  await expect(page.locator('#highlightLayer-1 .segment-anchor.focus')).toBeVisible();
+
+  await followSource.click();
+  await expect(followSource).toHaveAttribute("aria-pressed", "false");
+
+  await page.locator('[data-page-thumb="2"]').click();
+  await expect(page.locator('.pr-translation-flow-page[data-page="2"]')).toBeVisible();
+  await expect(page.locator('.pr-translation-flow-page[data-page="1"]')).toHaveCount(0);
+  await expect(page.locator(".pr-translation-head")).toContainText("2");
+});
+
+test("compare flow wraps long paragraph text within the available column", async ({ page }) => {
+  const payload = readerPayload(false);
+  payload.settings = { ...payload.settings, reader_mode: "compare", translation_layout: "flow", debug_overlay_enabled: false };
+  payload.translation_units[0].translated_text = `A long paragraph with a source URL https://example.org/${"x".repeat(280)} followed by more text. `.repeat(3);
+  await page.setViewportSize({ width: 1200, height: 760 });
+  await renderReader(page, payload, ".pr-translation-flow-page");
+  const card = page.locator('.pr-translation-unit[data-anchor-id="layout:v2:1:00001:main"]');
+  await expect(card).toBeVisible();
+  const widths = await card.evaluate((node) => ({
+    cardWidth: node.getBoundingClientRect().width,
+    columnWidth: document.querySelector(".pr-translation-body")!.clientWidth,
+    overflow: node.scrollWidth - node.clientWidth,
+  }));
+  expect(widths.cardWidth).toBeLessThanOrEqual(widths.columnWidth);
+  expect(widths.overflow).toBeLessThanOrEqual(1);
+});
+
+test("paragraph selection does not reuse a contained word gloss", async ({ page }) => {
+  const payload = readerPayload(false);
+  payload.translations = [
+    {
+      scope_type: "selection",
+      scope_ref: "sha256:dispensing",
+      source_hash: "sha256:dispensing",
+      source_text: "dispensing",
+      target_lang: "zh",
+      translated_text: "[医] 调剂, 配药",
+      generated_by: "local_dict",
+      status: "translated",
+    },
+  ];
+  await page.setViewportSize({ width: 1200, height: 760 });
+  await renderReader(page, payload);
+
+  const match = await page.evaluate(() => {
+    return (window as any).findSelectionTranslation({
+      selected_text: "We propose a Transformer based solely on attention mechanisms, dispensing with recurrence.",
+      selected_text_hash: "sha256:paragraph",
+      page: 1,
+      segment_refs: [],
+    });
+  });
+
+  expect(match).toBeUndefined();
+});
+
+test("new note appears in the notes panel before the payload refresh completes", async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 760 });
+  await page.route("**/reader/api/**/annotation**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, data: { annotation: { id: "ann:test" } } }),
+    });
+  });
+  await renderReader(page, readerPayload(false));
+
+  await page.locator('.pr-translation-unit[data-anchor-id="segment:page-one-flow"]').click();
+  await page.locator('#selectionDock [data-action="note"]').click();
+  const note = `即时笔记-${Date.now()}`;
+  await page.locator("#annotationNoteInput").fill(note);
+  await page.locator('[data-annotation-popover-save]').click();
+
+  await expect(page.locator(".pr-side")).toContainText(note);
+});
+
 test("side panel resize rail matches compare divider and spans workspace", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   const payload = readerPayload(false);
-  payload.settings = { ...payload.settings, reader_mode: "compare", side_panel_default: "open" };
+  payload.settings = {
+    ...payload.settings,
+    reader_mode: "compare",
+    side_panel_default: "open",
+    side_panel_collapsed: false,
+  };
   await renderReader(page, payload);
 
   const workspaceBox = await measuredBox(page, ".pr-workspace");
@@ -307,7 +433,7 @@ test("translation progress bar reflects actionState and fades out", async ({ pag
   await expect(page.locator("#translationProgressShell")).toHaveClass(/fading/);
 });
 
-test("bulk translations endpoint hydrates overlay across all pages", async ({ page }) => {
+test("bulk translations hydrate every page while compare stays scoped to visible pages", async ({ page }) => {
   const payload = readerPayload(false);
   payload.settings.reader_mode = "compare";
   payload.settings.translation_layout = "overlay";
@@ -338,6 +464,7 @@ test("bulk translations endpoint hydrates overlay across all pages", async ({ pa
             scope_ref: "layout:v2:1:00001:main",
             translated_text: "全文译文一",
             source_text: "Main positioned text",
+            source_hash: "main-hash",
             status: "translated",
             target_lang: "zh",
             font_size: 10,
@@ -351,10 +478,21 @@ test("bulk translations endpoint hydrates overlay across all pages", async ({ pa
             scope_ref: "layout:v2:2:00001:second",
             translated_text: "全文译文二",
             source_text: "Second page text",
+            source_hash: "second-hash",
             status: "translated",
             target_lang: "zh",
             font_size: 10,
             rects: [{ x: 0.1, y: 0.1, w: 0.5, h: 0.2, page: 2 }],
+          },
+          {
+            id: "tr:obsolete",
+            page: 1,
+            scope_type: "segment",
+            scope_ref: "page-one-flow",
+            source_hash: "previous-version-hash",
+            translated_text: "过期缓存不能替换当前段落",
+            status: "translated",
+            target_lang: "zh",
           },
         ],
       }),
@@ -364,8 +502,13 @@ test("bulk translations endpoint hydrates overlay across all pages", async ({ pa
 
   await expect.poll(() => bulkHits, { timeout: 4000 }).toBeGreaterThanOrEqual(1);
   await page.evaluate(() => (window as any).fetchTranslationsBulk({ force: true }));
+  await expect(page.locator(".pr-translation-page-shell")).toHaveCount(1);
+  await expect(page.locator('.pr-translation-page-shell[data-page-shell="1"]')).toContainText("全文译文一");
+  await expect(page.locator('.pr-translation-page-shell[data-page-shell="1"]')).not.toContainText("过期缓存不能替换当前段落");
+
+  await page.locator('[data-mode="translation"]').click();
   await expect(page.locator(".pr-translation-page-shell")).toHaveCount(2);
   await expect(
     page.locator('.pr-translation-page-shell[data-page-shell="2"]'),
-  ).toHaveCount(1);
+  ).toContainText("全文译文二");
 });

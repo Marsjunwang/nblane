@@ -67,6 +67,12 @@ export type ActivityApplyResponse = Schemas['ActivityApplyResponse'];
 /** ActivityDismissResponse from web_api/schemas.py. */
 export type ActivityDismissResponse = Schemas['ActivityDismissResponse'];
 
+/** AIExceptionModel from web_api/schemas.py. */
+export type AIException = Schemas['AIExceptionModel'];
+
+/** Profile-scoped unresolved AI failures. */
+export type AIExceptionsResponse = Schemas['AIExceptionsResponse'];
+
 /** KanbanSubtaskModel from web_api/schemas.py. */
 export type KanbanSubtask = Schemas['KanbanSubtaskModel'];
 
@@ -269,30 +275,6 @@ export interface JobStreamFrame {
 /** GapIntakeRequest from web_api/schemas.py. */
 export type GapIntakeRequest = Schemas['GapIntakeRequest'];
 
-/** ReviewCandidateModel from web_api/schemas.py (round-trippable candidate). */
-export type ReviewCandidate = Schemas['ReviewCandidateModel'];
-
-/** ReviewSummaryModel — candidate counters for the review header. */
-export type ReviewSummary = Schemas['ReviewSummaryModel'];
-
-/** ReviewResponse from web_api/schemas.py (GrowthReview projection). */
-export type ReviewResponse = Schemas['ReviewResponse'];
-
-/** ReviewSaveRequest from web_api/schemas.py (save-to-activity mutation). */
-export type ReviewSaveRequest = Schemas['ReviewSaveRequest'];
-
-/** ReviewSaveResponse from web_api/schemas.py. */
-export type ReviewSaveResponse = Schemas['ReviewSaveResponse'];
-
-/** ReviewApplyRequest from web_api/schemas.py (apply mutation). */
-export type ReviewApplyRequest = Schemas['ReviewApplyRequest'];
-
-/** ReviewApplyResultModel from web_api/schemas.py (per-candidate outcome). */
-export type ReviewApplyResultItem = Schemas['ReviewApplyResultModel'];
-
-/** ReviewApplyResponse from web_api/schemas.py. */
-export type ReviewApplyResponse = Schemas['ReviewApplyResponse'];
-
 /** AssistantGatewayStatus from web_api/assistant.py. */
 export type AssistantGatewayStatus = Schemas['AssistantGatewayStatus'];
 
@@ -440,8 +422,12 @@ export type ResearchSummary = Schemas['ResearchSummaryModel'];
 /** ResearchSourceItemModel from web_api/schemas.py (source list row). */
 export type ResearchSourceItem = Schemas['ResearchSourceItemModel'];
 
+/** ResearchPaperItemModel from web_api/schemas.py. */
+export type ResearchPaperItem = Schemas['ResearchPaperItemModel'];
+
 /** ResearchResponse from web_api/schemas.py (M4 Research overview). */
 export type ResearchResponse = Schemas['ResearchResponse'];
+export type ResearchReaderResponse = Schemas['ResearchReaderResponse'];
 
 // --- Phase 2 unified /projects ------------------------------------------------
 
@@ -543,12 +529,6 @@ export interface InboxListResult {
 /** Review GET result: the payload plus the evidence-pool ETag (W/"<sha256>"). */
 export interface EvidenceReviewListResult {
   data: EvidenceReviewListResponse;
-  etag: string;
-}
-
-/** Review GET result: the payload plus the review-source ETag (W/"<sha256>"). */
-export interface WeeklyReviewResult {
-  data: ReviewResponse;
   etag: string;
 }
 

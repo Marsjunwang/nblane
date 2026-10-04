@@ -82,13 +82,11 @@ scripts/dev-web.sh status       # 确认 nblane-dev-reader-api / nblane-dev-stre
 | 2 | 3D 星系区域（sidecar 可达） | 全宽内嵌 iframe 直接展示（不再是折叠卡片）；指标 chip 悬浮于星系上可点击入潜；iframe 指向本栈 reader 端口（隔离实例=18502，不再是 8502 拒绝连接页） | ☐ |
 | 3 | 3D 星系区域（sidecar 不可达） | 优雅降级为静态指标带（点亮率/进行中/待评审 + 重试按钮），不出现浏览器「refused to connect」灰框 | ☐ |
 
-### 2.2 收件箱 Inbox（`/p/<name>/inbox`）
+### 2.2 收件箱 Inbox（旧兼容路由，`/p/<name>/inbox`）
 | # | 步骤 | 预期 | 结果 |
 |---|------|------|------|
-| 1 | 捕获一条想法 | 列表即时出现新条目 | ☐ |
-| 2 | 点条目 → clarify → 发到看板 Queue | 成功提示；去看板页能看到卡 | ☐ |
-| 3 | archive / discard 各试一条 | 状态流转，筛选 Tab 计数变 | ☐ |
-| 4 | 打开详情模态框后切换筛选 Tab | 条目消失时模态框自动关闭（不再空壳） | ☐ |
+| 1 | 访问旧链接 | 页面仍可读取历史 `inbox.yaml`，但不出现在主导航 | ☐ |
+| 2 | 新输入 | OpenClaw 的“记住这件事”留在 OpenClaw 记忆；明确目标的动作直接在原页面或对话中完成 | ☐ |
 
 ### 2.3 看板 Kanban（`/p/<name>/kanban`）
 | # | 步骤 | 预期 | 结果 |
@@ -99,11 +97,12 @@ scripts/dev-web.sh status       # 确认 nblane-dev-reader-api / nblane-dev-stre
 | 4 | 建两张同名卡，尝试移动其中一张 | 橙色提示说明重名需先去 kanban.md 消歧（已知限制，非崩溃） | ☐ |
 | 5 | 同列拖拽：Queue 里把一张卡拖到另一张上 | 列内拖拽排序可落库——松手调 move（带 to_index），顺序变化且刷新后保持；跨列拖到某张卡上则插到该卡位置（不再总是列尾） | ☐ |
 
-### 2.4 代理活动 Agent Activity（`/p/<name>/activity`）
+### 2.4 AI 异常（顶栏警报入口）
 | # | 步骤 | 预期 | 结果 |
 |---|------|------|------|
-| 1 | 有 pending 项时 apply / dismiss | 仅 Review 来源的 pending 项显示「应用」；其他来源（如 AI Gateway）只显示「驳回」+ 来源说明（P0-2 修复后行为，与 Streamlit 一致）。可 apply 项 apply 后数据真被写入（如 kanban_move 真挪卡） | ☐ |
-| 2 | 另一标签改动数据后再 apply | 412 黄色提示（修复后不再静默覆盖） | ☐ |
+| 1 | profile 存在 AI 调用、异步 Job、Agent task 或写回失败 | 顶栏出现警报图标和数量徽标 | ☐ |
+| 2 | 点击警报图标 | 右侧抽屉只显示失败、冲突、超时和阻止原因，不显示成功运行或普通 AI 回复 | ☐ |
+| 3 | 点击「打开来源」 | 回到产生异常的研究、项目、证据或首页上下文 | ☐ |
 
 ### 2.5 证据 Evidence（单页五阶段，Phase 1 起合并证据池+评审）
 | # | 步骤 | 预期 | 结果 |
@@ -130,15 +129,7 @@ scripts/dev-web.sh status       # 确认 nblane-dev-reader-api / nblane-dev-stre
 | 4 | 点「深度分析(LLM)」 | 进度卡出现（排队中→路由中→合并中），约 1 分钟内出结果（jobs + SSE 基建，2026-09-21 接入） | ☐ |
 | 5 | 深度分析结果 | 同版型渲染，紫色「LLM 深度分析」徽章 + 根因来源行（规则/LLM 各几项）；LLM 不可用时黄色降级提示并回退规则结果 | ☐ |
 
-### 2.7 周回顾 Review（`/p/<name>/review`）
-| # | 步骤 | 预期 | 结果 |
-|---|------|------|------|
-| 1 | 默认本周窗口打开 | 四类候选（证据/下一步/公开草稿/方法笔记）+ 汇总徽章 | ☐ |
-| 2 | 自定义窗口（起 > 止） | 自动交换或 422 提示 | ☐ |
-| 3 | 勾选候选 → 保存到活动 → 应用写回 | 逐候选结果显示；失败单项不拖垮整单 | ☐ |
-| 4 | 窄屏 | 候选表格可横向滚动 | ☐ |
-
-### 2.8 项目看板 Project Board（`/p/<name>/project-board`）
+### 2.7 项目看板 Project Board（`/p/<name>/project-board`）
 
 > 本表 1–4 已被真实浏览器 e2e 覆盖（`tests/e2e/spa_pages.spec.ts`
 > 「SPA Project Board」，2 条，2026-09-21）；第 3 行的 jobs/SSE 链路由
@@ -252,7 +243,7 @@ nblane sync-agent-harness --target openclaw --profile 王军   # 看 MCP 注册 
 | # | 步骤 | 预期 | 结果 | e2e 覆盖 |
 |---|------|------|------|------|
 | 5.1 | 手机或 DevTools 375px 宽：导航 | 汉堡菜单可开合，16 项可点（抽屉 14 个 profile 页项 + 档案列表 + 头部助手）；点「看板」正确跳转并收合 | ☐ | ✅ 自动化（开合状态读 navbar 离屏 transform 断言，逐项点击 + 收合断言） |
-| 5.2 | 周回顾/项目看板/研究台 宽表格 + 证据单页（五阶段） | 宽表格可横向滚动不破版；证据页阶段导航可见且文档不溢出（旧 /evidence-review 重定向亦覆盖） | ☐ | ✅ 自动化 |
+| 5.2 | 项目看板/研究台宽表格 + 证据单页（五阶段） | 宽表格可横向滚动不破版；证据页阶段导航可见且文档不溢出（旧 /evidence-review 重定向亦覆盖） | ☐ | ✅ 自动化 |
 | 5.3 | 看板拖拽/挪卡 | 触屏可用：真 CDP 长按拖拽 Queue→Doing（TouchSensor 250ms 长按 + auto-scroll）实测落库；「…」菜单挪列 tap 回退亦覆盖 | ☐ | ✅ 自动化 |
 | 5.4 | 收件箱快速捕获 | 手机上能单手完成（375px 下标题框整宽可见——2026-09-21 已修 26px 挤压 bug）；提交成功且无横向溢出 | ☐ | ✅ 自动化（输入框宽度下限断言锁定回归） |
 
@@ -275,7 +266,7 @@ nblane sync-agent-harness --target openclaw --profile 王军   # 看 MCP 注册 
 
 | # | 步骤 | 预期 | 结果 | e2e 覆盖 |
 |---|------|------|------|------|
-| 5A.1 | 1920×1080 逐页过（首页/证据/周回顾/项目看板/输出工作室/研究台/差距/目标/健康/活动/公开构建/技能树/收件箱/助手/档案列表） | 内容列 ≤1400px 居中，表格行不再拉成超长行，卡片/表单右侧无大片空白；无横向溢出 | ☐ | ✅ 自动化（代表页断言 + 全页审计脚本 `tests/e2e/audit_layout.mjs`） |
+| 5A.1 | 1920×1080 逐页过（首页/证据/项目看板/输出工作室/研究台/差距/目标/健康/活动/公开构建/技能树/收件箱/助手/档案列表） | 内容列 ≤1400px 居中，表格行不再拉成超长行，卡片/表单右侧无大片空白；无横向溢出 | ☐ | ✅ 自动化（代表页断言 + 全页审计脚本 `tests/e2e/audit_layout.mjs`） |
 | 5A.2 | 看板在 1920×1080 | 全宽豁免生效：列用满视口宽，文档仍无横向溢出 | ☐ | ✅ 自动化（`data-layout="wide"` + 容器宽 >1400 断言） |
 | 5A.3 | 首页星系 hero（1280×800 / 1440×900 / 1920×1080 / 2560×1440） | iframe 与卡片内容同宽；高度落在 clamp 区间（约 640–900px），星系完整可见、iframe 内无高内部滚动；embed 内无固定右栏（点节点才弹检查器抽屉），3D 舞台占 iframe 宽 ≥55% | ☐ | ✅ 自动化（1280/1920 双视口断言 src 含 `compact=1`、宽高、内部滚动 ≤80px） |
 | 5A.4 | 2560×1440 超宽屏抽查首页/证据/看板 | 限宽与豁免规则同 5A.1/5A.2，布局不失衡 | ☐ | 人工（审计脚本可跑任意视口） |
@@ -322,8 +313,8 @@ unzip -l /tmp/nblane-wheel/nblane-*.whl | grep web_ui/static   # 应看到 index
 | # | 页面/命令 | 现象 | 复现步骤 | 严重度（阻塞/难受/别扭/建议） |
 |---|-----------|------|----------|------|
 | 1 | 全部写操作（收件箱捕获/看板建卡/证据评审批量接受等） | **已修复（2026-09-20，P0-1）**。现象：浏览器内所有携带 If-Match 的 mutation 全部 422 `request: Input should be a valid dictionary or object...`，curl 直打后端却正常。根因：`frontend/src/api/client.ts` `requestWithHeaders()` 先写 headers 再展开 `...init`，`ifMatch(etag)` 把合并好的 headers 整体覆盖，Content-Type 丢失，fetch 默认 text/plain，FastAPI 不按 JSON 解析。修复：调整展开顺序一行改动（覆盖全部 28 处 ifMatch 调用点）；回归 `client.test.ts` 新用例 + `tests/e2e/spa_mutations.spec.ts` 断言每条 mutation 出站为 application/json。 | 浏览器开收件箱填一条点「记录」即报红 | 阻塞 |
-| 2 | 活动页（Activity） | **已修复（2026-09-20，P0-2）**。现象：pending 项点「应用」报「Only Review-origin items can be applied from Activity」。根因：SPA 对所有 pending 项都显示「应用」，但后端只允许 Review 来源候选（沙箱里大量 AI Gateway 来源项本不可 apply）；Streamlit 版本就禁用该按钮并附说明。修复：`ActivityPage.tsx` 新增 `canApplyActivityItem`（与 `pages/9_Agent_Activity.py` `_can_apply_here` 同口径），不可 apply 的项隐藏「应用」并显示来源说明；后端判定未动。回归：ActivityPage 单测 + e2e 双向用例（非 Review 项无按钮 / 看板 Done 卡→周回顾保存→活动 apply 全链路）。 | 活动页选 AI Gateway 来源 pending 项点「应用」 | 阻塞 |
-| 3 | 首页 Home | **已修复（2026-09-20，P1-1+P1-3）**。现象：顶部快捷入口条（看板/技能树/目标/证据评审/周回顾/研究台/输出工作室）与左侧导航完全重复；8+ 卡片平铺信息密度过高，3D 星系只是底部一张需手点「嵌入显示」的折叠卡。修复：iOS 式减法——删快捷入口条与七张平铺卡，改为焦点卡（北极星+主目标）→ 成长星系全宽 hero（指标 chip 悬浮、可点击入潜）→ 今日待办聚合带（待审批/待评审/Doing 前 3）。数据层零改动（复用 home 端点现有字段）。回归：`spa_home.spec.ts` + `HomePage.test.tsx`。 | 打开 `/p/dev/home` 即见 | 难受 |
+| 2 | 活动页（Activity） | **已修复（2026-09-20，P0-2）**。现象：pending 项点「应用」报「Only Review-origin items can be applied from Activity」。根因：SPA 对所有 pending 项都显示「应用」，但后端只允许 Review 来源候选（沙箱里大量 AI Gateway 来源项本不可 apply）；Streamlit 版本就禁用该按钮并附说明。修复：`ActivityPage.tsx` 新增 `canApplyActivityItem`（与 `pages/9_Agent_Activity.py` `_can_apply_here` 同口径），不可 apply 的项隐藏「应用」并显示来源说明；后端判定未动。回归：ActivityPage 单测 + e2e 双向用例（非 Review 项无按钮 / 证据页审核→活动应用全链路）。 | 活动页选 AI Gateway 来源 pending 项点「应用」 | 阻塞 |
+| 3 | 首页 Home | **已修复（2026-09-20，P1-1+P1-3）**。现象：顶部快捷入口条（看板/技能树/目标/证据评审/项目看板/研究台/输出工作室）与左侧导航完全重复；8+ 卡片平铺信息密度过高，3D 星系只是底部一张需手点「嵌入显示」的折叠卡。修复：iOS 式减法——删快捷入口条与七张平铺卡，改为焦点卡（北极星+主目标）→ 成长星系全宽 hero（指标 chip 悬浮、可点击入潜）→ 今日待办聚合带（待审批/待评审/Doing 前 3）。数据层零改动（复用 home 端点现有字段）。回归：`spa_home.spec.ts` + `HomePage.test.tsx`。 | 打开 `/p/dev/home` 即见 | 难受 |
 | 4 | 首页/研究台 3D 星系 iframe | **已修复（2026-09-20，P1-2）**。现象：iframe 内「127.0.0.1 refused to connect」。根因：`scripts/dev-web.sh` 给 streamlit 会话注入了 `NBLANE_READER_API_BASE` 却漏了 web-api 会话，隔离实例里 home/research 端点的 `sidecar.base` 落到默认值 8502（沙箱无服务）。修复：web-api tmux 会话补注 `NBLANE_READER_API_BASE='$reader_base'`；另加前端探活（no-cors fetch `/auth/session-ok`），sidecar 不可达时降级为静态指标带而非浏览器错误灰框。生产 8502 未动。回归：`spa_home.spec.ts`（base=18502 断言 + iframe 真实 200 + 拦截模拟不可达）。 | 隔离实例打开 `/p/dev/home` 看星系 iframe | 阻塞 |
 | 5 | 全站 17 页（1920+ 宽屏） | **已修复（2026-09-21，宽屏布局批次）**。现象：所有页面主体在 1920×1080 下无限拉宽（内容列 1668px）——表格行过长、卡片右半大片空白、差距分析表单拉满；首页星系 iframe 写死 560px 高，embed 实际内容 816–1026px，星系被腰斩，且 embed 内固定右栏（Graph nodes 列表 280px + 检查器 ~35% 宽）随 iframe 越宽越失衡，3D 舞台只占 hero 宽 ~42%。修复：① `AppLayout` 主体列统一限宽 1400px 居中（`page-container`，看板 `data-layout="wide"` 豁免）；② dashboard 组件新增 `?compact=1`（仅 embed 生效：检查器改点选抽屉、隐藏与 SPA 重复的 Attention 条、3D 画布高度下限 560→480），后端 `dashboard_url` 统一带 `compact=1`；③ 星系 iframe 高改 `clamp(640px, calc(100vh - 180px), 900px)`（`SidecarFrame` 支持 CSS 高度）。向后兼容：无参 embed / Streamlit / standalone 行为不变。回归：`tests/e2e/spa_layout.spec.ts`（8 条双视口）+ `spa_mobile.spec.ts` 375px 不回归 + `audit_layout.mjs` 17 页×3 视口审计。 | 1920 宽屏打开任一页；首页看星系被截断 | 难受 |
 | 6 |  |  |  |  |

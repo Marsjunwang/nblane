@@ -169,7 +169,6 @@ sidebar_nav_work_group: 每日
 sidebar_nav_growth_group: 构建
 sidebar_nav_output_group: 输出
 sidebar_nav_team_group: 协作
-sidebar_nav_review_group: 回顾
 sidebar_nav_system_group: 系统
 sidebar_nav_dashboard: 每日仪表盘
 sidebar_nav_kanban: 看板
@@ -178,7 +177,6 @@ sidebar_nav_evidence_review: 证据审阅
 sidebar_nav_research: 研究工作台
 sidebar_nav_skill_map: 技能地图
 sidebar_nav_gap: 差距分析
-sidebar_nav_review: 复盘
 sidebar_nav_health: 档案体检
 sidebar_nav_agent_activity: Agent 活动
 sidebar_nav_public: 输出工作台

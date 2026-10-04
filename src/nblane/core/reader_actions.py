@@ -870,15 +870,6 @@ def _fast_translation_result(
     clean = (selected_text or "").strip()
     if not clean:
         return None
-    # A real in-text word selection always carries the segment ref(s) it
-    # falls within. Only bail to the whole-segment LLM path for multi-word
-    # selections; single words go through the dictionary/cache fast path even
-    # when a segment ref is present, since they should not overwrite the
-    # durable per-segment translation rows (the row below is selection-scoped).
-    if _payload_list(payload, "segment_refs", "segment_ids", "segment_id"):
-        if not local_dict.is_lookupable(clean):
-            return None
-
     selected_hash = (
         _payload_text(payload, "selected_text_hash", "text_hash", "source_hash")
         or text_hash(clean)
@@ -888,7 +879,24 @@ def _fast_translation_result(
         profile, source_id, selected_hash, target_lang
     )
     source = "cache"
-    if not cached_text and target_lang in {"zh", "zh-cn", "zh-hans", "zh-hant", "zh-tw"}:
+    # A PDF selection normally carries the id of its containing paragraph.
+    # Reuse a durable paragraph/layout translation before asking the model to
+    # translate the same text again. This keeps selection reading immediate
+    # after a paper or visible page has already been translated.
+    if not cached_text and _payload_list(payload, "segment_refs", "segment_ids", "segment_id"):
+        cached_text = _cached_segment_translation(
+            profile,
+            source_id,
+            _payload_list(payload, "segment_refs", "segment_ids", "segment_id"),
+            target_lang,
+        )
+        if cached_text:
+            source = "segment_cache"
+    if (
+        not cached_text
+        and local_dict.is_lookupable(clean)
+        and target_lang in {"zh", "zh-cn", "zh-hans", "zh-hant", "zh-tw"}
+    ):
         gloss = local_dict.lookup(clean)
         if gloss:
             cached_text = gloss
@@ -953,6 +961,32 @@ def _cached_selection_translation(
         text = (translation.translated_text or "").strip()
         if text:
             return text
+    return ""
+
+
+def _cached_segment_translation(
+    profile: str,
+    source_id: str,
+    segment_refs: list[str],
+    target_lang: str,
+) -> str:
+    """Return the first current translation for a containing paper unit."""
+
+    refs = {str(value).strip() for value in segment_refs if str(value).strip()}
+    if not refs:
+        return ""
+    try:
+        rows = load_paper_translations(profile, source_id)
+    except Exception:
+        return ""
+    for translation in rows:
+        if (translation.target_lang or "zh") != target_lang:
+            continue
+        if translation.status != "translated" or not translation_text_from_row(translation):
+            continue
+        ref = str(translation.segment_id or translation.scope_ref or "").strip()
+        if ref in refs:
+            return translation_text_from_row(translation)
     return ""
 
 
@@ -1102,6 +1136,7 @@ def handle_reader_action(
     payload: dict[str, Any] | None = None,
     *,
     progress_callback: Any | None = None,
+    cancel_callback: Any | None = None,
 ) -> ReaderActionResult:
     """Run one Reader action and return a JSON-friendly result."""
 
@@ -1114,7 +1149,13 @@ def handle_reader_action(
         raise ValueError(f"Reader action source mismatch: {payload_source}")
 
     git_backup.start_operation(ctx.user_id or "reader")
-    result = _handle_reader_action_inner(ctx, clean_action, data, progress_callback=progress_callback)
+    result = _handle_reader_action_inner(
+        ctx,
+        clean_action,
+        data,
+        progress_callback=progress_callback,
+        cancel_callback=cancel_callback,
+    )
     result.warnings.extend(_backup_warnings())
     return result
 
@@ -1125,6 +1166,7 @@ def _handle_reader_action_inner(
     payload: dict[str, Any],
     *,
     progress_callback: Any | None = None,
+    cancel_callback: Any | None = None,
 ) -> ReaderActionResult:
     profile = ctx.profile_path
     source_id = ctx.source_id
@@ -1271,7 +1313,7 @@ def _handle_reader_action_inner(
             source_id,
             target_lang=_payload_text(payload, "target_lang", "language") or "zh",
             mode=_payload_text(payload, "mode") or "missing_or_stale",
-            scope_strategy=_payload_text(payload, "scope_strategy") or "segment",
+            scope_strategy=_payload_text(payload, "scope_strategy") or "structure",
             ai_profile=ctx.profile_name,
             require_review=False,
             progress_callback=progress_callback,
@@ -2072,6 +2114,7 @@ def _handle_reader_action_inner(
                         source_id,
                         payload=batch_payload,
                         require_review=True,
+                        cancel_callback=cancel_callback,
                     )
                     batch_structured = batch_result.structured if isinstance(batch_result.structured, dict) else {}
                     deepread_warnings.extend(str(item) for item in getattr(batch_result, "warnings", []) or [])
@@ -2086,6 +2129,8 @@ def _handle_reader_action_inner(
                         error = getattr(batch_result, "error", "") or "section batch returned no structured output"
                         deepread_warnings.append(f"Deep-read batch {batch_index}/{batch_total} failed: {error}")
 
+            if cancel_callback is not None and cancel_callback():
+                return ReaderActionResult(ok=False, message="Cancelled")
             if batch_reports:
                 emit_deepread_progress(
                     "synthesizing",
@@ -2120,14 +2165,18 @@ def _handle_reader_action_inner(
                     source_id,
                     payload=synthesis_payload,
                     require_review=True,
+                    cancel_callback=cancel_callback,
                 )
 
         if ai_result is None:
+            if cancel_callback is not None and cancel_callback():
+                return ReaderActionResult(ok=False, message="Cancelled")
             ai_result = deep_read_paper_codex(
                 ctx.profile_name,
                 source_id,
                 payload=deep_read_payload,
                 require_review=True,
+                cancel_callback=cancel_callback,
             )
         emit_deepread_progress("structuring", "Structuring findings + reading plan…", current=3, total=5)
         structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}

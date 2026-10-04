@@ -151,7 +151,7 @@ source_of_truth: AI native 改造的计划、决策、进度与中断恢复;改�
   (下游零改动);后台写 ai-runs/agent-activity 后前台必须
   refresh_file_snapshots;key 带 backend 后缀,任务亦按 backend 区分。
 - P5 核心完成(主线):`core/intent.py` 启发式解析器(kanban.add /
-  evidence.capture / review.weekly_summary / navigate / unknown;
+  evidence.capture / navigate / unknown;
   中文日期:明天/周五前/下周三/10月1日/ISO;#tag;Doing/Queue/Someday
   列识别),`tests/test_intent.py` 14 个用例全绿。
   接线拆分:首页 command bar → 子代理 B(resume);看板 quick-add →
@@ -194,7 +194,7 @@ source_of_truth: AI native 改造的计划、决策、进度与中断恢复;改�
   `command_bar_confirm/discard {intent_id}`;payload 增加
   `payload.command_bar = {enabled, placeholder_key, pending_intent}`。
 - `core/intent.py` 产出 kind 枚举(`kanban.add_doing` /
-  `evidence.capture` / `review.weekly_summary` …),写类意图一律经确认,
+  `evidence.capture` …),写类意图一律经确认,
   建议落成 agent-activity candidate 接入"待你决策"闭环;LLM 消歧可复用
   `dashboard.daily_brief` 的 gateway 注册+缓存+静默回退路径。
 

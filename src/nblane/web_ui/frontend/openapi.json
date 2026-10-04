@@ -1,6 +1,91 @@
 {
  "components": {
   "schemas": {
+   "AIExceptionModel": {
+    "description": "One unresolved failure that needs attention from the profile owner.",
+    "properties": {
+     "action": {
+      "default": "",
+      "title": "Action",
+      "type": "string"
+     },
+     "created": {
+      "default": "",
+      "title": "Created",
+      "type": "string"
+     },
+     "href": {
+      "default": "",
+      "title": "Href",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "message": {
+      "default": "",
+      "title": "Message",
+      "type": "string"
+     },
+     "retryable": {
+      "default": true,
+      "title": "Retryable",
+      "type": "boolean"
+     },
+     "severity": {
+      "default": "error",
+      "title": "Severity",
+      "type": "string"
+     },
+     "source": {
+      "default": "",
+      "title": "Source",
+      "type": "string"
+     },
+     "source_ref": {
+      "default": "",
+      "title": "Source Ref",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "AIExceptionModel",
+    "type": "object"
+   },
+   "AIExceptionsResponse": {
+    "description": "Profile-scoped AI failures from gateway, agents, jobs, and writebacks.",
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/AIExceptionModel"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "total": {
+      "default": 0,
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "AIExceptionsResponse",
+    "type": "object"
+   },
    "ActivityApplyResponse": {
     "description": "Success body for the apply mutation.",
     "properties": {
@@ -5179,6 +5264,18 @@
        }
       ],
       "title": "Project Board"
+     },
+     "research": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Research"
      }
     },
     "title": "ProfileSettingsPatch",
@@ -6996,9 +7093,156 @@
     "title": "PublicBuildValidationModel",
     "type": "object"
    },
+   "ResearchPaperItemModel": {
+    "description": "Paper library projection used by the SPA research workbench.",
+    "properties": {
+     "analysis": {
+      "additionalProperties": true,
+      "title": "Analysis",
+      "type": "object"
+     },
+     "annotation_count": {
+      "default": 0,
+      "title": "Annotation Count",
+      "type": "integer"
+     },
+     "captured_at": {
+      "default": "",
+      "title": "Captured At",
+      "type": "string"
+     },
+     "extraction_status": {
+      "default": "",
+      "title": "Extraction Status",
+      "type": "string"
+     },
+     "failed_count": {
+      "default": 0,
+      "title": "Failed Count",
+      "type": "integer"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "last_page": {
+      "default": 0,
+      "title": "Last Page",
+      "type": "integer"
+     },
+     "last_read_at": {
+      "default": "",
+      "title": "Last Read At",
+      "type": "string"
+     },
+     "missing_count": {
+      "default": 0,
+      "title": "Missing Count",
+      "type": "integer"
+     },
+     "page_count": {
+      "default": 0,
+      "title": "Page Count",
+      "type": "integer"
+     },
+     "pdf_available": {
+      "default": false,
+      "title": "Pdf Available",
+      "type": "boolean"
+     },
+     "segment_count": {
+      "default": 0,
+      "title": "Segment Count",
+      "type": "integer"
+     },
+     "stale_count": {
+      "default": 0,
+      "title": "Stale Count",
+      "type": "integer"
+     },
+     "status": {
+      "default": "inbox",
+      "title": "Status",
+      "type": "string"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "tags": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+     },
+     "target_lang": {
+      "default": "zh",
+      "title": "Target Lang",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     },
+     "translated_count": {
+      "default": 0,
+      "title": "Translated Count",
+      "type": "integer"
+     },
+     "translation_status": {
+      "default": "missing",
+      "title": "Translation Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "ResearchPaperItemModel",
+    "type": "object"
+   },
+   "ResearchReaderResponse": {
+    "description": "Reader deep link minted for one profile paper.",
+    "properties": {
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "reader_url": {
+      "title": "Reader Url",
+      "type": "string"
+     },
+     "source_id": {
+      "title": "Source Id",
+      "type": "string"
+     },
+     "token": {
+      "default": "",
+      "title": "Token",
+      "type": "string"
+     }
+    },
+    "required": [
+     "profile",
+     "source_id",
+     "reader_url"
+    ],
+    "title": "ResearchReaderResponse",
+    "type": "object"
+   },
    "ResearchResponse": {
     "description": "Research overview (M4): source-inbox summary plus sidecar entry.\n\nThe PDF reader and Paper Library stay on the Reader API sidecar; this\nresponse gives the SPA page its summary data (sources / claims /\ncitations) and the sidecar coordinates (links + iframe embed bootstrap).\n``sources`` lists the most recently captured sources (capped).",
     "properties": {
+     "papers": {
+      "items": {
+       "$ref": "#/components/schemas/ResearchPaperItemModel"
+      },
+      "title": "Papers",
+      "type": "array"
+     },
      "profile": {
       "title": "Profile",
       "type": "string"
@@ -7113,333 +7357,6 @@
      }
     },
     "title": "ResearchSummaryModel",
-    "type": "object"
-   },
-   "ReviewApplyRequest": {
-    "description": "Body for applying selected candidates to their owner files.\n\n``mark_crystallized`` only affects evidence candidates: the source Done\nkanban card is marked crystallized after a successful pool writeback.",
-    "properties": {
-     "candidate_type": {
-      "title": "Candidate Type",
-      "type": "string"
-     },
-     "candidates": {
-      "items": {
-       "$ref": "#/components/schemas/ReviewCandidateModel"
-      },
-      "minItems": 1,
-      "title": "Candidates",
-      "type": "array"
-     },
-     "end": {
-      "minLength": 1,
-      "title": "End",
-      "type": "string"
-     },
-     "mark_crystallized": {
-      "default": true,
-      "title": "Mark Crystallized",
-      "type": "boolean"
-     },
-     "start": {
-      "minLength": 1,
-      "title": "Start",
-      "type": "string"
-     }
-    },
-    "required": [
-     "start",
-     "end",
-     "candidate_type",
-     "candidates"
-    ],
-    "title": "ReviewApplyRequest",
-    "type": "object"
-   },
-   "ReviewApplyResponse": {
-    "description": "Aggregate outcome of applying the selected candidates.\n\nApply is per-candidate: individual failures (e.g. pool merge conflict)\nland in ``results`` with ``ok=false`` and do not fail the whole request,\nmirroring the Streamlit page which applies candidates one by one.",
-    "properties": {
-     "applied": {
-      "default": 0,
-      "title": "Applied",
-      "type": "integer"
-     },
-     "failed": {
-      "default": 0,
-      "title": "Failed",
-      "type": "integer"
-     },
-     "ok": {
-      "default": true,
-      "title": "Ok",
-      "type": "boolean"
-     },
-     "results": {
-      "items": {
-       "$ref": "#/components/schemas/ReviewApplyResultModel"
-      },
-      "title": "Results",
-      "type": "array"
-     }
-    },
-    "title": "ReviewApplyResponse",
-    "type": "object"
-   },
-   "ReviewApplyResultModel": {
-    "description": "Per-candidate outcome of one apply call (mirrors ReviewApplyResult).",
-    "properties": {
-     "changed_paths": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Changed Paths",
-      "type": "array"
-     },
-     "errors": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Errors",
-      "type": "array"
-     },
-     "ok": {
-      "title": "Ok",
-      "type": "boolean"
-     },
-     "output_path": {
-      "default": "",
-      "title": "Output Path",
-      "type": "string"
-     },
-     "title": {
-      "default": "",
-      "title": "Title",
-      "type": "string"
-     },
-     "warnings": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Warnings",
-      "type": "array"
-     }
-    },
-    "required": [
-     "ok"
-    ],
-    "title": "ReviewApplyResultModel",
-    "type": "object"
-   },
-   "ReviewCandidateModel": {
-    "additionalProperties": true,
-    "description": "One weekly-review candidate (evidence/next_action/method/public_draft).\n\nMirrors the dicts produced by ``core.growth_review.build_weekly_review``;\nextension keys (e.g. ``tags``) are preserved so the SPA can round-trip a\ncandidate from the GET response into the save/apply mutations unchanged.",
-    "properties": {
-     "draft": {
-      "default": true,
-      "title": "Draft",
-      "type": "boolean"
-     },
-     "notes": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Notes",
-      "type": "array"
-     },
-     "resource_id": {
-      "default": "",
-      "title": "Resource Id",
-      "type": "string"
-     },
-     "source": {
-      "default": "",
-      "title": "Source",
-      "type": "string"
-     },
-     "summary": {
-      "default": "",
-      "title": "Summary",
-      "type": "string"
-     },
-     "task_id": {
-      "default": "",
-      "title": "Task Id",
-      "type": "string"
-     },
-     "title": {
-      "default": "",
-      "title": "Title",
-      "type": "string"
-     },
-     "visibility": {
-      "default": "",
-      "title": "Visibility",
-      "type": "string"
-     }
-    },
-    "title": "ReviewCandidateModel",
-    "type": "object"
-   },
-   "ReviewResponse": {
-    "description": "Candidate-only weekly review payload (``GrowthReview`` projection).\n\nRead-only aggregation over kanban.md Done cards plus the optional\nactivity/learning/inbox logs; no LLM involvement in this slice.",
-    "properties": {
-     "activity_summary": {
-      "additionalProperties": true,
-      "title": "Activity Summary",
-      "type": "object"
-     },
-     "done_task_ids": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Done Task Ids",
-      "type": "array"
-     },
-     "evidence_candidates": {
-      "items": {
-       "$ref": "#/components/schemas/ReviewCandidateModel"
-      },
-      "title": "Evidence Candidates",
-      "type": "array"
-     },
-     "inbox_summary": {
-      "additionalProperties": true,
-      "title": "Inbox Summary",
-      "type": "object"
-     },
-     "learning_summary": {
-      "additionalProperties": true,
-      "title": "Learning Summary",
-      "type": "object"
-     },
-     "method_candidates": {
-      "items": {
-       "$ref": "#/components/schemas/ReviewCandidateModel"
-      },
-      "title": "Method Candidates",
-      "type": "array"
-     },
-     "next_queue_candidates": {
-      "items": {
-       "$ref": "#/components/schemas/ReviewCandidateModel"
-      },
-      "title": "Next Queue Candidates",
-      "type": "array"
-     },
-     "profile": {
-      "title": "Profile",
-      "type": "string"
-     },
-     "public_candidates": {
-      "items": {
-       "$ref": "#/components/schemas/ReviewCandidateModel"
-      },
-      "title": "Public Candidates",
-      "type": "array"
-     },
-     "summary": {
-      "$ref": "#/components/schemas/ReviewSummaryModel"
-     },
-     "week_end": {
-      "title": "Week End",
-      "type": "string"
-     },
-     "week_start": {
-      "title": "Week Start",
-      "type": "string"
-     }
-    },
-    "required": [
-     "profile",
-     "week_start",
-     "week_end"
-    ],
-    "title": "ReviewResponse",
-    "type": "object"
-   },
-   "ReviewSaveRequest": {
-    "description": "Body for saving selected candidates to Agent Activity.\n\n``candidate_type`` is one of ``evidence`` / ``next_action`` /\n``public_draft``; ``start``/``end`` are the ISO review window the\ncandidates were generated from (recorded as the activity source_ref).",
-    "properties": {
-     "candidate_type": {
-      "title": "Candidate Type",
-      "type": "string"
-     },
-     "candidates": {
-      "items": {
-       "$ref": "#/components/schemas/ReviewCandidateModel"
-      },
-      "minItems": 1,
-      "title": "Candidates",
-      "type": "array"
-     },
-     "end": {
-      "minLength": 1,
-      "title": "End",
-      "type": "string"
-     },
-     "start": {
-      "minLength": 1,
-      "title": "Start",
-      "type": "string"
-     }
-    },
-    "required": [
-     "start",
-     "end",
-     "candidate_type",
-     "candidates"
-    ],
-    "title": "ReviewSaveRequest",
-    "type": "object"
-   },
-   "ReviewSaveResponse": {
-    "description": "Result of persisting candidates as pending Activity items.",
-    "properties": {
-     "item_ids": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Item Ids",
-      "type": "array"
-     },
-     "ok": {
-      "default": true,
-      "title": "Ok",
-      "type": "boolean"
-     },
-     "saved": {
-      "default": 0,
-      "title": "Saved",
-      "type": "integer"
-     }
-    },
-    "title": "ReviewSaveResponse",
-    "type": "object"
-   },
-   "ReviewSummaryModel": {
-    "description": "Candidate counters for the weekly review header.",
-    "properties": {
-     "done_tasks": {
-      "default": 0,
-      "title": "Done Tasks",
-      "type": "integer"
-     },
-     "evidence_candidates": {
-      "default": 0,
-      "title": "Evidence Candidates",
-      "type": "integer"
-     },
-     "next_action_candidates": {
-      "default": 0,
-      "title": "Next Action Candidates",
-      "type": "integer"
-     },
-     "public_draft_candidates": {
-      "default": 0,
-      "title": "Public Draft Candidates",
-      "type": "integer"
-     }
-    },
-    "title": "ReviewSummaryModel",
     "type": "object"
    },
    "SidecarInfoModel": {
@@ -9436,6 +9353,88 @@
      }
     },
     "summary": "Get Profile Agent Tasks"
+   }
+  },
+  "/api/v1/profiles/{name}/ai-exceptions": {
+   "get": {
+    "description": "Return unresolved failures from all profile-scoped AI surfaces.",
+    "operationId": "get_profile_ai_exceptions_api_v1_profiles__name__ai_exceptions_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "maximum": 200,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AIExceptionsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Ai Exceptions"
    }
   },
   "/api/v1/profiles/{name}/checkins": {
@@ -16018,10 +16017,10 @@
     "summary": "Get Profile Research"
    }
   },
-  "/api/v1/profiles/{name}/review": {
+  "/api/v1/profiles/{name}/research/papers/{source_id}/reader": {
    "get": {
-    "description": "Weekly review: Done tasks plus evidence/next-action/public candidates.\n\nRead-only aggregation (``core.growth_review.build_weekly_review``); the\nresponse carries the review-source ETag (see module docstring) for use as\n``If-Match`` on the save/apply mutations. Candidate generation is\nrule-based only — this page has no LLM dependency.",
-    "operationId": "get_profile_review_api_v1_profiles__name__review_get",
+    "description": "Mint a source-scoped Reader URL for the SPA deep-link page.",
+    "operationId": "get_profile_research_reader_api_v1_profiles__name__research_papers__source_id__reader_get",
     "parameters": [
      {
       "in": "path",
@@ -16033,26 +16032,11 @@
       }
      },
      {
-      "description": "ISO window start; empty = current week.",
-      "in": "query",
-      "name": "start",
-      "required": false,
+      "in": "path",
+      "name": "source_id",
+      "required": true,
       "schema": {
-       "default": "",
-       "description": "ISO window start; empty = current week.",
-       "title": "Start",
-       "type": "string"
-      }
-     },
-     {
-      "description": "ISO window end; empty = current week.",
-      "in": "query",
-      "name": "end",
-      "required": false,
-      "schema": {
-       "default": "",
-       "description": "ISO window end; empty = current week.",
-       "title": "End",
+       "title": "Source Id",
        "type": "string"
       }
      }
@@ -16062,7 +16046,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/ReviewResponse"
+         "$ref": "#/components/schemas/ResearchReaderResponse"
         }
        }
       },
@@ -16109,219 +16093,7 @@
       "description": "Validation Error"
      }
     },
-    "summary": "Get Profile Review"
-   }
-  },
-  "/api/v1/profiles/{name}/review/apply": {
-   "post": {
-    "description": "Apply selected candidates to their owner files (pool/kanban/blog).\n\nDispatches to the ``core.review_actions.apply_review_*`` appliers per\ncandidate; per-candidate failures are reported in ``results`` without\nfailing the whole request (mirroring the Streamlit one-by-one apply).\nHonors ``If-Match`` (412 on mismatch, fresh ETag in the header).",
-    "operationId": "apply_profile_review_candidates_api_v1_profiles__name__review_apply_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "name",
-      "required": true,
-      "schema": {
-       "title": "Name",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "if-match",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "If-Match"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/ReviewApplyRequest"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ReviewApplyResponse"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "400": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Invalid profile name."
-     },
-     "403": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile access denied."
-     },
-     "404": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile not found."
-     },
-     "412": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "If-Match ETag does not match the review source files."
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Invalid window, unknown candidate type, or empty selection."
-     }
-    },
-    "summary": "Apply Profile Review Candidates"
-   }
-  },
-  "/api/v1/profiles/{name}/review/save": {
-   "post": {
-    "description": "Persist selected candidates as pending Agent Activity items.\n\nThin wrapper over ``core.review_actions.save_review_candidates_to_activity``;\nthe review window rides on the activity item's ``source_ref``. Honors\n``If-Match`` (412 on mismatch, fresh ETag in the header).",
-    "operationId": "save_profile_review_candidates_api_v1_profiles__name__review_save_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "name",
-      "required": true,
-      "schema": {
-       "title": "Name",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "if-match",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "If-Match"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/ReviewSaveRequest"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ReviewSaveResponse"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "400": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Invalid profile name."
-     },
-     "403": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile access denied."
-     },
-     "404": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile not found."
-     },
-     "412": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "If-Match ETag does not match the review source files."
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Invalid window, unknown candidate type, or empty selection."
-     }
-    },
-    "summary": "Save Profile Review Candidates"
+    "summary": "Get Profile Research Reader"
    }
   },
   "/api/v1/profiles/{name}/settings": {

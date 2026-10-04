@@ -65,7 +65,7 @@ from ._constants import (
     PAPER_DIAGNOSTIC_BADGES,
     PAPER_DIAGNOSTIC_SEVERITIES,
 )
-from ._paths import _profile_root, _research_root
+from ._paths import _asset_path, _profile_root, _research_root
 from ._types import PaperSegment
 from ._utils import (
     _append_badge,
@@ -419,6 +419,11 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
         metadata = source.metadata or {}
         pdf_download_status = _clean_text(metadata.get("pdf_download_status"))
         pdf_download_error = _clean_text(metadata.get("pdf_download_error"))
+        pdf_asset_ref = _clean_text(metadata.get("pdf_asset_ref"))
+        try:
+            has_pdf = bool(pdf_asset_ref) and _asset_path(profile, pdf_asset_ref).is_file()
+        except (OSError, ValueError):
+            has_pdf = False
         open_access_pdf_url = _clean_text(metadata.get("open_access_pdf_url") or metadata.get("pdf_url"))
         annotations = load_paper_annotations(profile, source.id) if is_paper else []
         translations = load_paper_translations(profile, source.id) if is_paper else []
@@ -454,7 +459,7 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
             "pdf_download_attempted_at": _clean_text(metadata.get("pdf_download_attempted_at")),
             "summary": source.summary or _clean_text(metadata.get("abstract")),
             "notes": source.notes,
-            "has_pdf": bool(metadata.get("pdf_asset_ref")),
+            "has_pdf": has_pdf,
             "pdf_pages": metadata.get("page_count", ""),
             "last_read_page": metadata.get("last_read_page", ""),
             "annotations_count": len([ann for ann in annotations if ann.status == "active"]),

@@ -19,7 +19,7 @@ from nblane.core.review_actions import (
     apply_review_kanban_candidate,
     apply_review_next_action_candidate,
     apply_review_public_draft_candidate,
-    save_review_candidates_to_activity,
+    activity_item_from_review_candidate,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -184,13 +184,13 @@ class TestReviewActions(unittest.TestCase):
                 "nblane.core.kanban_io.profile_dir",
                 lambda _name: profile,
             ):
-                stored = save_review_candidates_to_activity(
+                stored = append_activity_item(
                     "alice",
-                    "2026-05-11",
-                    "2026-05-14",
-                    "next_action",
-                    [{"source": "learning", "resource_id": "learn_1", "title": "Queue me"}],
-                )[0]
+                    activity_item_from_review_candidate(
+                        "alice", "2026-05-11", "2026-05-14", "next_action",
+                        {"source": "learning", "resource_id": "learn_1", "title": "Queue me"},
+                    ),
+                )
                 result = apply_review_activity_item("alice", stored["id"])
                 activity = load_agent_activity("alice")
 

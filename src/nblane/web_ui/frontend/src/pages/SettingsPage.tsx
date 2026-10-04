@@ -12,6 +12,7 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Tabs,
   Text,
   TextInput,
   Title,
@@ -19,6 +20,7 @@ import {
 import { notifications } from '@mantine/notifications';
 import {
   IconCheck,
+  IconBook2,
   IconDeviceFloppy,
   IconKey,
   IconPlugConnected,
@@ -130,33 +132,65 @@ function ConnectionSection({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
+type ActionConfig = { backend: string; model: string };
+
+const ACTION_GROUPS: Array<{ title: string; description: string; actions: Array<{ key: string; label: string; description: string }> }> = [
+  { title: '看板与项目', description: '决定工作流辅助动作使用哪一种 AI 执行路径。', actions: [
+    { key: 'kanban.task_alignment', label: '任务对齐', description: '把任务与技能/目标做关联建议。' },
+    { key: 'kanban.subtasks', label: '子任务拆分', description: '将看板任务拆成可执行步骤。' },
+    { key: 'dashboard.goal_skill_match', label: '目标与技能匹配', description: '分析目标与技能树的相关性。' },
+    { key: 'dashboard.daily_brief', label: '每日简报', description: '生成当天的工作摘要。' },
+    { key: 'project.suggest_refs', label: '项目引用建议', description: '为项目补充相关引用和关联。' },
+  ] },
+  { title: '研究与阅读', description: '配置论文库和 Reader 中的 AI 操作；阅读本身不会自动变成证据。', actions: [
+    { key: 'research.paper_search_codex', label: '论文搜索', description: '扩展论文库的搜索与检索。' },
+    { key: 'research.paper_translate', label: '论文翻译', description: '翻译论文段落或页面内容。' },
+    { key: 'research.paper_explain_selection', label: '选区解释', description: '解释 Reader 中选中的内容。' },
+    { key: 'research.paper_source_guide', label: '来源导览', description: '给出论文来源和阅读路径提示。' },
+    { key: 'research.paper_review_card', label: '阅读回顾卡', description: '整理阅读回顾，不写入证据池。' },
+    { key: 'research.paper_qa', label: '论文问答', description: '针对当前论文进行问答。' },
+    { key: 'research.paper_claim_extract', label: '观点提取', description: '按需提取论文观点，仅作为 AI 输出。' },
+    { key: 'research.paper_deep_read_codex', label: '论文深读', description: '使用 Codex 做长文档深读。' },
+    { key: 'research.paper_compare_codex', label: '论文比较', description: '比较多篇论文的内容与差异。' },
+  ] },
+  { title: '输出与证据', description: '保留现有输出工作流的 AI 路由，和 Reader 阅读默认值相互独立。', actions: [
+    { key: 'evidence.crystallize', label: '证据结晶', description: '仅在证据工作流中使用，不改变 Reader。' },
+  ] },
+];
+
+function ActionRow({ label, description, value, onChange }: { label: string; description: string; value: ActionConfig; onChange: (next: ActionConfig) => void }) {
+  return (
+    <Card withBorder radius="sm" padding="sm">
+      <Stack gap="xs">
+        <div><Text fw={600} size="sm">{label}</Text><Text size="xs" c="dimmed">{description}</Text></div>
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          <Select aria-label={`${label}后端`} label="后端" placeholder="跟随默认" value={value.backend || null} onChange={(next) => onChange({ ...value, backend: next ?? '' })} data={[{ value: 'llm', label: '兼容 API' }, { value: 'codex', label: 'Codex' }]} clearable />
+          <TextInput aria-label={`${label}模型`} label="模型" placeholder="留空使用默认模型" value={value.model} onChange={(event) => onChange({ ...value, model: event.currentTarget.value })} />
+        </SimpleGrid>
+      </Stack>
+    </Card>
+  );
+}
+
 function ProfileSection({ profile }: { profile: string }) {
   const preferences = useProfileSettings(profile);
   const save = usePatchProfileSettings(profile);
   const [uiLang, setUiLang] = useState('');
   const [replyLang, setReplyLang] = useState('');
   const [kanbanBackend, setKanbanBackend] = useState('');
-  const [alignmentBackend, setAlignmentBackend] = useState('');
-  const [alignmentModel, setAlignmentModel] = useState('');
-  const [subtasksBackend, setSubtasksBackend] = useState('');
-  const [subtasksModel, setSubtasksModel] = useState('');
-  const [crystallizeBackend, setCrystallizeBackend] = useState('');
-  const [crystallizeModel, setCrystallizeModel] = useState('');
+  const [actions, setActions] = useState<Record<string, ActionConfig>>({});
 
   useEffect(() => {
     const value = preferences.data?.preferences;
     setUiLang(preferenceString(value, 'ai', 'llm', 'ui_lang'));
     setReplyLang(preferenceString(value, 'ai', 'llm', 'reply_lang'));
     setKanbanBackend(preferenceString(value, 'ai', 'kanban_backend'));
-    const alignmentBackendValue = preferenceString(value, 'ai', 'actions', 'kanban.task_alignment', 'backend');
-    const subtasksBackendValue = preferenceString(value, 'ai', 'actions', 'kanban.subtasks', 'backend');
-    const crystallizeBackendValue = preferenceString(value, 'ai', 'actions', 'evidence.crystallize', 'backend');
-    setAlignmentBackend(alignmentBackendValue);
-    setAlignmentModel(preferenceString(value, 'ai', 'actions', 'kanban.task_alignment', alignmentBackendValue === 'codex' ? 'codex_model' : 'llm_model'));
-    setSubtasksBackend(subtasksBackendValue);
-    setSubtasksModel(preferenceString(value, 'ai', 'actions', 'kanban.subtasks', subtasksBackendValue === 'codex' ? 'codex_model' : 'llm_model'));
-    setCrystallizeBackend(crystallizeBackendValue);
-    setCrystallizeModel(preferenceString(value, 'ai', 'actions', 'evidence.crystallize', crystallizeBackendValue === 'codex' ? 'codex_model' : 'llm_model'));
+    const next: Record<string, ActionConfig> = {};
+    ACTION_GROUPS.flatMap((group) => group.actions).forEach(({ key }) => {
+      const backend = preferenceString(value, 'ai', 'actions', key, 'backend');
+      next[key] = { backend, model: preferenceString(value, 'ai', 'actions', key, backend === 'codex' ? 'codex_model' : 'llm_model') };
+    });
+    setActions(next);
   }, [preferences.data]);
 
   if (preferences.isPending) return <Center py="xl"><Loader /></Center>;
@@ -166,28 +200,20 @@ function ProfileSection({ profile }: { profile: string }) {
     ai: {
       llm: { ui_lang: uiLang, reply_lang: replyLang },
       kanban_backend: kanbanBackend,
-      actions: {
-        'kanban.task_alignment': { backend: alignmentBackend, model: alignmentModel },
-        'kanban.subtasks': { backend: subtasksBackend, model: subtasksModel },
-        'evidence.crystallize': { backend: crystallizeBackend, model: crystallizeModel },
-      },
+      actions: Object.fromEntries(Object.entries(actions).map(([key, config]) => [key, config])),
     },
   };
   return (
     <Card withBorder radius="md" padding="lg">
       <Stack gap="md">
-        <SectionTitle icon={<IconSettings size={22} />} title="当前档案的 AI 偏好" description="先配置看板闭环使用的 AI；论文阅读和写作设置将在后续页面迁移。" />
+        <SectionTitle icon={<IconSettings size={22} />} title="当前档案的 AI 路由" description="每个动作都可以单独选择兼容 API 或 Codex；留空表示沿用系统默认。" />
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
           <Select label="界面语言" placeholder="跟随默认值" value={uiLang || null} onChange={(value) => setUiLang(value ?? '')} data={[{ value: 'zh', label: '中文' }, { value: 'en', label: 'English' }]} clearable />
           <Select label="AI 回复语言" placeholder="自动" value={replyLang || null} onChange={(value) => setReplyLang(value ?? '')} data={[{ value: 'auto', label: '自动' }, { value: 'zh', label: '中文' }, { value: 'en', label: 'English' }]} clearable />
-          <Select label="看板 AI 后端" placeholder="默认" value={kanbanBackend || null} onChange={(value) => setKanbanBackend(value ?? '')} data={[{ value: 'llm', label: '兼容 API' }, { value: 'codex', label: 'Codex' }]} clearable />
-          <Select label="任务对齐后端" placeholder="跟随看板后端" value={alignmentBackend || null} onChange={(value) => setAlignmentBackend(value ?? '')} data={[{ value: 'llm', label: '兼容 API' }, { value: 'codex', label: 'Codex' }]} clearable />
-          <TextInput label="任务对齐模型" placeholder="留空使用默认模型" value={alignmentModel} onChange={(event) => setAlignmentModel(event.currentTarget.value)} />
-          <Select label="子任务拆分后端" placeholder="跟随看板后端" value={subtasksBackend || null} onChange={(value) => setSubtasksBackend(value ?? '')} data={[{ value: 'llm', label: '兼容 API' }, { value: 'codex', label: 'Codex' }]} clearable />
-          <TextInput label="子任务拆分模型" placeholder="留空使用默认模型" value={subtasksModel} onChange={(event) => setSubtasksModel(event.currentTarget.value)} />
-          <Select label="证据结晶后端" placeholder="默认使用兼容 API" value={crystallizeBackend || null} onChange={(value) => setCrystallizeBackend(value ?? '')} data={[{ value: 'llm', label: '兼容 API' }, { value: 'codex', label: 'Codex' }]} clearable />
-          <TextInput label="证据结晶模型" placeholder="留空使用默认模型" value={crystallizeModel} onChange={(event) => setCrystallizeModel(event.currentTarget.value)} />
         </SimpleGrid>
+        <Stack gap="md">
+          {ACTION_GROUPS.map((group) => <Stack key={group.title} gap="xs"><div><Text fw={700}>{group.title}</Text><Text size="xs" c="dimmed">{group.description}</Text></div><SimpleGrid cols={{ base: 1, lg: 2 }}>{group.actions.map((action) => <ActionRow key={action.key} label={action.label} description={action.description} value={actions[action.key] ?? { backend: '', model: '' }} onChange={(next) => setActions((current) => ({ ...current, [action.key]: next }))} />)}</SimpleGrid></Stack>)}
+        </Stack>
         <Group>
           <Button leftSection={<IconDeviceFloppy size={16} />} loading={save.isPending} onClick={() => save.mutate(patch, { onSuccess: () => notifications.show({ title: '档案偏好已保存', message: profile, color: 'green' }) })}>保存档案偏好</Button>
         </Group>
@@ -247,6 +273,54 @@ function CodexSection({ profile }: { profile: string }) {
   );
 }
 
+const READER_DEFAULTS = {
+  default_mode: 'pdf', default_scale: 'fit-width', default_side_panel: 'collapsed',
+  default_active_tab: 'notes', default_left_rail: 'open', default_left_tab: 'outline',
+  default_translation_source: true, default_target_lang: 'zh', default_translation_layout: 'flow',
+  compare_split_ratio: 50, panel_width: 340,
+};
+
+function ReaderDefaultsSection({ profile }: { profile: string }) {
+  const preferences = useProfileSettings(profile);
+  const save = usePatchProfileSettings(profile);
+  const [reader, setReader] = useState(READER_DEFAULTS);
+
+  useEffect(() => {
+    const value = preferences.data?.preferences;
+    const stored = value && typeof value === 'object' ? (value as Record<string, unknown>).research : undefined;
+    const storedReader = stored && typeof stored === 'object' ? (stored as Record<string, unknown>).reader : undefined;
+    if (storedReader && typeof storedReader === 'object') setReader({ ...READER_DEFAULTS, ...(storedReader as Partial<typeof READER_DEFAULTS>) });
+  }, [preferences.data]);
+
+  if (preferences.isPending) return <Center py="xl"><Loader /></Center>;
+  if (preferences.isError) return <ErrorAlert error={preferences.error} />;
+  const update = (key: keyof typeof READER_DEFAULTS, value: string | number | boolean | null) => setReader((current) => ({ ...current, [key]: value }));
+  const patch: ProfileSettingsPatch = { research: { reader } };
+  return (
+    <Card withBorder radius="md" padding="lg">
+      <Stack gap="md">
+        <SectionTitle icon={<IconBook2 size={22} />} title="研究与阅读默认值" description="这是新论文的档案默认值；论文已保存的阅读位置和状态永远优先。" />
+        <Alert color="blue" variant="light">这些设置只决定 Reader 的初始工作面，不会把阅读内容自动写入 claims、citation 或 evidence。</Alert>
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          <Select label="默认模式" value={reader.default_mode} onChange={(value) => update('default_mode', value ?? 'pdf')} data={[{ value: 'pdf', label: 'PDF' }, { value: 'translation', label: '翻译' }, { value: 'compare', label: '对照' }]} />
+          <Select label="默认缩放" value={reader.default_scale} onChange={(value) => update('default_scale', value ?? 'fit-width')} data={[{ value: 'fit-width', label: '适合宽度' }, { value: 'fit-page', label: '适合页面' }, { value: 'actual', label: '实际大小' }]} />
+          <Select label="右侧面板" value={reader.default_side_panel} onChange={(value) => update('default_side_panel', value ?? 'collapsed')} data={[{ value: 'collapsed', label: '默认收起' }, { value: 'open', label: '默认展开' }]} />
+          <Select label="右侧默认页签" value={reader.default_active_tab} onChange={(value) => update('default_active_tab', value ?? 'notes')} data={[{ value: 'notes', label: '笔记' }, { value: 'translation', label: '翻译' }, { value: 'review', label: '回顾' }]} />
+          <Select label="左侧导航栏" value={reader.default_left_rail} onChange={(value) => update('default_left_rail', value ?? 'open')} data={[{ value: 'open', label: '默认展开' }, { value: 'collapsed', label: '默认收起' }]} />
+          <Select label="左侧默认页签" value={reader.default_left_tab} onChange={(value) => update('default_left_tab', value ?? 'outline')} data={[{ value: 'outline', label: '大纲' }, { value: 'thumbnails', label: '缩略图' }]} />
+          <TextInput label="默认目标语言" value={reader.default_target_lang} onChange={(event) => update('default_target_lang', event.currentTarget.value)} placeholder="zh" />
+          <Select label="翻译布局" value={reader.default_translation_layout} onChange={(value) => update('default_translation_layout', value ?? 'flow')} data={[{ value: 'flow', label: '流式' }, { value: 'overlay', label: '叠加' }]} />
+          <TextInput label="对照分栏比例" type="number" min={20} max={80} value={String(reader.compare_split_ratio)} onChange={(event) => update('compare_split_ratio', Number(event.currentTarget.value) || 50)} description="20-80" />
+          <TextInput label="右侧面板宽度" type="number" min={260} max={520} value={String(reader.panel_width)} onChange={(event) => update('panel_width', Number(event.currentTarget.value) || 340)} description="260-520 px" />
+        </SimpleGrid>
+        <Checkbox label="默认显示翻译原文" checked={reader.default_translation_source} onChange={(event) => update('default_translation_source', event.currentTarget.checked)} />
+        <Button w="fit-content" leftSection={<IconDeviceFloppy size={16} />} loading={save.isPending} onClick={() => save.mutate(patch, { onSuccess: () => notifications.show({ title: '研究与阅读设置已保存', message: profile, color: 'green' }) })}>保存研究设置</Button>
+        <ErrorAlert error={save.error} />
+      </Stack>
+    </Card>
+  );
+}
+
 export function SettingsPage() {
   const me = useMe();
   const profiles = useProfiles();
@@ -269,9 +343,20 @@ export function SettingsPage() {
         <div><Title order={2}>设置</Title><Text c="dimmed" size="sm">集中管理 AI 连接、档案偏好与 Codex 运行状态。</Text></div>
         {availableProfiles.length > 0 && <Select w={{ base: 220, sm: 280 }} label="编辑档案" value={profile} onChange={(value) => setProfile(value ?? '')} data={profileOptions(availableProfiles)} />}
       </Group>
-      <ConnectionSection isAdmin={isAdmin} />
+      {isAdmin && <ConnectionSection isAdmin />}
       {!isAdmin && <Alert color="blue" title="部署连接由管理员管理">你可以编辑自己有权限档案的 AI 偏好；部署级 Base URL、模型和 API Key 需要管理员处理。</Alert>}
-      {profile ? <><ProfileSection profile={profile} /><CodexSection profile={profile} /></> : <Alert color="gray" title="暂无可编辑档案">当前账号没有可访问的 profile。</Alert>}
+      <Tabs defaultValue="ai">
+        <Tabs.List mb="md">
+          <Tabs.Tab value="ai" leftSection={<IconSettings size={15} />}>AI 路由</Tabs.Tab>
+          <Tabs.Tab value="research" leftSection={<IconBook2 size={15} />}>研究与阅读</Tabs.Tab>
+          <Tabs.Tab value="codex" leftSection={<IconRefresh size={15} />}>Codex</Tabs.Tab>
+        </Tabs.List>
+        {profile ? <>
+          <Tabs.Panel value="ai"><ProfileSection profile={profile} /></Tabs.Panel>
+          <Tabs.Panel value="research"><ReaderDefaultsSection profile={profile} /></Tabs.Panel>
+          <Tabs.Panel value="codex"><CodexSection profile={profile} /></Tabs.Panel>
+        </> : <Alert color="gray" title="暂无可编辑档案">当前账号没有可访问的 profile。</Alert>}
+      </Tabs>
       <Divider />
       <Text size="xs" c="dimmed">API Key、Codex auth.json 和 token 不会在此页面读取或显示。</Text>
     </Stack>

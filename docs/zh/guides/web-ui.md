@@ -299,6 +299,48 @@ Direct LLM 的 `research.paper_translate` 默认启用流式请求（`NBLANE_STR
 `NBLANE_PAPER_TRANSLATION_STRUCTURE_BATCH_CHARS`、`NBLANE_PAPER_TRANSLATION_LAYOUT_BATCH_CHARS`、
 `NBLANE_PAPER_TRANSLATION_SEGMENT_BATCH_CHARS`、`NBLANE_PAPER_TRANSLATION_PAGE_BATCH_CHARS` 或通用
 `NBLANE_PAPER_TRANSLATION_BATCH_CHARS` 覆盖字符预算。
+
+Reader 还支持可选的 CPU 本地首译。安装 `nblane[local-translation]` 后，把 OPUS-MT 英文到中文模型目录配置到
+`NBLANE_LOCAL_TRANSLATION_MODEL`，即可让短句和段落先走本地模型；模型不可用、语言不支持或输入过长时自动回到配置的 LLM。
+默认优先识别包含 `pytorch_model.bin` 或 `model.safetensors` 的原始 Transformers 目录，以保证翻译质量；
+只有目录含 `model.bin` 时才按 CTranslate2 目录加载。
+本地模型不进入 Git，也不改变论文翻译数据格式。2 vCPU 环境建议将
+`NBLANE_LOCAL_TRANSLATION_THREADS=2`，并保持 `NBLANE_LOCAL_TRANSLATION_MAX_CHARS=6000`。
+首次翻译会加载模型，之后在 Reader 进程内复用；整篇论文仍应使用后台批量任务。
+
+示例配置：
+
+```bash
+.venv/bin/pip install -e '.[local-translation]'
+export NBLANE_LOCAL_TRANSLATION_ENABLED=1
+export NBLANE_LOCAL_TRANSLATION_MODEL=/var/lib/nblane/models/opus-mt-en-zh
+export NBLANE_LOCAL_TRANSLATION_COMPUTE_TYPE=int8
+export NBLANE_LOCAL_TRANSLATION_THREADS=2
+export NBLANE_LOCAL_TRANSLATION_BEAM_SIZE=4
+```
+
+模型文件需要在可访问 Hugging Face 或模型镜像的机器上下载（或转换成 CTranslate2 后）再复制到服务器；当前
+服务只在启动后懒加载本地目录，不会自行修改仓库。
+
+在可联网且已安装 `transformers` 的机器上，可以直接下载原始目录（不要把生成目录提交到 Git）：
+
+```bash
+.venv/bin/python - <<'PY'
+from huggingface_hub import snapshot_download
+snapshot_download("Helsinki-NLP/opus-mt-en-zh", local_dir="/var/lib/nblane/models/opus-mt-en-zh")
+PY
+```
+
+如果需要较小的 CTranslate2 `int8` 目录，也可以在可联网机器上转换：
+
+```bash
+.venv/bin/pip install 'ctranslate2>=4.5' 'sentencepiece>=0.2' 'transformers>=4.45,<5' 'huggingface_hub>=0.24'
+.venv/bin/ct2-transformers-converter \
+  --model Helsinki-NLP/opus-mt-en-zh \
+  --output_dir /var/lib/nblane/models/opus-mt-en-zh-int8 \
+  --quantization int8 \
+  --low_cpu_mem_usage
+```
 如果 sidecar 在长翻译中短暂断开，页面会显示重连倒计时并保留当前进度；如果 sidecar 重启导致内存 job
 丢失，页面会刷新最新已保存产物，并提示再次点击 `Retry translation` 继续剩余单元。
 
@@ -430,13 +472,13 @@ Research 页右上角有 **Research AI 配置**。这里保存的是当前 profi
 6. 打开 **Evidence Review** — 审阅 Done 任务摄入、编辑证据引用，并从已确认 evidence 生成 / 刷新 Claim Studio 中的 claim candidates。
 7. 打开 **Skill Map** — 看长期能力状态、备注、内联证据、证据池与引用；点 **保存**
    写入 `skill-tree.yaml`、`evidence-pool.yaml` 并尽量同步 SKILL.md 生成块。
-8. 阶段复盘用 **Review**，导出上下文前或阶段体检用 **Profile Health**，跨页面 Agent 候选和失败记录在 **Agent Activity** 管理。
+8. 阶段复盘由 OpenClaw 和各 owner 页面完成，导出上下文前或阶段体检用 **Profile Health**；跨所有 AI 来源的失败、冲突和超时从顶栏 **AI 异常** 入口处理。
 9. 整理公开资料、博客、简历、项目/成果草稿时打开 **Output Studio**，校验和构建静态站时打开 **Public Build**；协作编辑共享池时用 **Team View**。
 
 中文界面的侧栏采用双语标签：中文任务名在前，英文对象名在后，例如
 **研究工作台 Research**、**输出工作台 Studio**、**公开构建 Build**。
 英文别名用于对照文档、文件名和 CLI，不代表需要在中文界面里用英文理解页面职责。
-侧栏按产品心智分组：**工作 Work** 放 Project Board、Kanban、Gap Analysis、Research 和 Evidence Review；**成长 Growth** 放 Skill Map、Review、Profile Health 和 Agent Activity；**输出 Output** 放 Output Studio 和 Public Build。
+侧栏按产品心智分组：**工作 Work** 放 Project Board、Kanban、Gap Analysis、Research 和 Evidence Review；**成长 Growth** 放 Skill Map 和 Profile Health；**输出 Output** 放 Output Studio 和 Public Build。AI 异常从顶栏警报入口打开，不占用侧栏一级导航。
 
 产品层地图见 [Web 体验设计](../product/web-experience.md)。
 
@@ -514,7 +556,7 @@ Research 页右上角有 **Research AI 配置**。这里保存的是当前 profi
 - Done 卡片保留单卡 **归档**（写入 `kanban-archive.md` 后移出 Done）和 **删除**；批量 Done 整理已移到 **Evidence Review → Done 队列 / 整理**，说明见 [看板使用手册](kanban.md)。
 - **已完成 → 证据** 统一在 Evidence Review 处理：多选 Done 任务生成草案后，可按条勾选 **采纳** 证据行与节点更新，**应用所选条目**（或 **应用完整草案**）；可选 **应用后标记已结晶**。流程对齐 `nblane ingest-kanban`，Web 侧重分项审阅。
 - 侧栏 **AI / LLM** 中的 **看板 AI 引擎** 可在普通 LLM 与本地 Codex 间切换；选择 Codex 时，Gap 节点路由、拆任务、任务理解和 Done → evidence 使用部署级 / 终端同款 `CODEX_HOME` 下的只读 `codex exec`，不需要看板内额外配置，也不会创建 patch handoff。
-- 看板拆子任务的粒度和风格提示会按 profile 记入 `web-preferences.yaml`；如果 Codex 配置错误导致生成失败，卡片上的错误可跳转到 Agent Activity 中对应的 failed 条目。
+- 看板拆子任务的粒度和风格提示会按 profile 记入 `web-preferences.yaml`；如果 Codex 或其他 AI 配置错误导致生成失败，卡片上的错误可从顶栏 **AI 异常** 入口回到来源页面处理。
 - Kanban 卡片上的 **Gap** 预览会带入 privacy-safe current goal context，与
   差距分析页选择 Kanban task 时的上下文一致；不会自动写回 goal、kanban 或
   skill-tree。
@@ -533,32 +575,17 @@ Research 页右上角有 **Research AI 配置**。这里保存的是当前 profi
 
 - 只读报告，与 `nblane health <名称>` 同源。
 - 检查校验结果、生成块 drift、solid/expert 节点缺证据、Done 任务未结晶。
-- 不写入 profile 文件；阶段 / 周复盘候选已拆到独立 **Review** 页面。
+- 不写入 profile 文件；周期性总结由 OpenClaw 生成，明确证据只在证据页审核和入池。
 
-### 5.8 Review（`pages/8_Review.py`）
+### 5.8 AI 异常（顶栏警报入口）
 
-详细使用说明见 [Review 使用说明](review.md)。
+- 读取 profile 级 AI run、异步 Job、外部 Agent task 和失败写回的聚合结果。
+- 只展示失败、冲突、超时、权限错误和被阻止的操作，不展示普通 AI 回答或成功写回。
+- 入口位于顶栏「助手」和「设置」之间，有未解决异常时才显示数量徽标；点击打开右侧抽屉。
+- 每条异常提供来源、错误原因和「打开来源」动作，回到研究、项目、证据或首页处理。
+- 旧 `/p/<name>/activity` 路由和 `agent-activity.yaml` 保留用于兼容历史数据；它们不再是主导航入口。
 
-- 从周 / 阶段窗口生成 `evidence`、`next_action`、`public_draft` 候选，以及只读
-  `method_note`。
-- 生成候选只读；保存所选会写入 `agent-activity.yaml` 的 pending 队列。
-- Evidence 候选可直接写入 `evidence-pool.yaml`，并可把来源 Done task 标记为
-  `crystallized`；不会自动提升 skill status。
-- Next action 候选可追加到 `kanban.md` 的 Queue。
-- Public draft 候选只创建 draft blog，不发布。
-
-### 5.9 Agent Activity（`pages/9_Agent_Activity.py`）
-
-- 读取 `agent-activity.yaml`，按 status、kind、candidate type、source page 和 owner
-  过滤跨页面候选、patch 和写回结果。
-- 页面按 `source_page` 分组展示。看板错误卡片跳入时会携带
-  `activity_item` 与 `source_page=Kanban` 查询参数，并高亮对应条目。
-- pending Review 候选可以在 Activity 页应用；其他来源的 patch 第一版只审查并跳转
-  owner 页面。
-- `dismissed` / `failed` 条目可以 reopen，便于重新审阅。
-- Codex 配置不在本页编辑；统一使用侧栏 **AI / LLM -> 配置 Codex**。
-
-### 5.10 Research Workspace（`pages/7_Research.py`）
+### 5.9 Research Workspace（`pages/7_Research.py`）
 
 详细使用说明见 [Research 使用说明](research.md)。
 

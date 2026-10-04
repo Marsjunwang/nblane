@@ -269,27 +269,37 @@ class TestEvidenceSkillLinks(Phase1TestBase):
             root = Path(tmp)
             profile = _write_profile(root)
             client = self._client(root)
-            # Link ev_alpha to two nodes (one pre-existing, one new).
+            # Link ev_alpha to two schema-defined nodes.
             link = client.post(
                 "/api/v1/profiles/alice/evidence/ev_alpha/skill-links",
-                json={"skill_ids": ["ros2_basics", "custom_new_skill"]},
+                json={"skill_ids": ["ros2_basics", "slam_basics"]},
             )
             self.assertEqual(link.status_code, 200, link.text)
             nodes = {n["id"]: n for n in _tree_nodes(profile)}
             self.assertIn("ev_alpha", nodes["ros2_basics"]["evidence_refs"])
-            # New nodes are created as learning.
-            self.assertEqual(nodes["custom_new_skill"]["status"], "learning")
-            self.assertEqual(nodes["custom_new_skill"]["evidence_refs"], ["ev_alpha"])
+            self.assertIn("ev_alpha", nodes["slam_basics"]["evidence_refs"])
 
             # Unlink from ros2_basics by omitting it; ev_beta stays put.
             unlink = client.post(
                 "/api/v1/profiles/alice/evidence/ev_alpha/skill-links",
-                json={"skill_ids": ["custom_new_skill"]},
+                json={"skill_ids": ["slam_basics"]},
             )
             self.assertEqual(unlink.status_code, 200)
             nodes = {n["id"]: n for n in _tree_nodes(profile)}
             self.assertNotIn("ev_alpha", nodes["ros2_basics"].get("evidence_refs", []))
             self.assertEqual(nodes["ros2_basics"]["evidence_refs"], ["ev_beta"])
+
+    def test_unknown_skill_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_profile(root)
+            client = self._client(root)
+            response = client.post(
+                "/api/v1/profiles/alice/evidence/ev_alpha/skill-links",
+                json={"skill_ids": ["custom_new_skill"]},
+            )
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(response.json()["code"], "unknown_skill")
 
     def test_unknown_entry_404(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -463,13 +473,14 @@ class TestCrystallizeFlow(Phase1TestBase):
             payload = apply.json()
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["crystallized_count"], 1)
-            self.assertEqual(len(payload["new_evidence_ids"]), 1)
+            # ev_beta already cites taskA in the fixture. Crystallize is
+            # idempotent and reuses that evidence instead of duplicating it.
+            self.assertEqual(payload["new_evidence_ids"], [])
             rows = _pool_entries(profile)
-            new_id = payload["new_evidence_ids"][0]
-            row = next(r for r in rows if r["id"] == new_id)
-            self.assertEqual(row["kanban_refs"], ["kanban:taskA"])
-            # 置信度按 origin 自动推导(kanban_task -> medium)。
-            self.assertEqual(row["confidence"], "medium")
+            row = next(r for r in rows if r["id"] == "ev_beta")
+            self.assertIn("kanban:taskA", row["kanban_refs"])
+            # Existing evidence metadata is preserved during an idempotent
+            # reuse; confidence derivation is covered by review tests.
             # The Done task is now crystallized in kanban.md.
             text = (profile / "kanban.md").read_text(encoding="utf-8")
             done_section = text.split("## Done", 1)[1]

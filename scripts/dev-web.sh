@@ -211,6 +211,24 @@ stop_sessions() {
   tmux kill-session -t "$web_api_session" 2>/dev/null || true
 }
 
+sync_tmux_proxy_environment() {
+  # A long-lived tmux server keeps the environment from when it was first
+  # created. Synchronize proxy variables explicitly so a later dev restart
+  # does not silently fall back to a slow direct download path.
+  local name value
+  for name in \
+    http_proxy https_proxy all_proxy \
+    HTTP_PROXY HTTPS_PROXY ALL_PROXY \
+    no_proxy NO_PROXY; do
+    value="${!name-}"
+    if [[ -n "$value" ]]; then
+      tmux set-environment -g "$name" "$value"
+    else
+      tmux set-environment -gu "$name" 2>/dev/null || true
+    fi
+  done
+}
+
 show_status() {
   tmux ls 2>/dev/null | grep -E "^(${reader_session}|${streamlit_session}|${web_api_session}):" || true
   echo
@@ -298,8 +316,34 @@ fi
 # the auth file from --auth-file / NBLANE_DEV_AUTH_FILE, or auto-detects
 # <dev-root>/auth/users.yaml in isolated mode.
 auth_env=""
+reader_token_env=""
 if [[ "$mode" == "isolated" ]]; then
-  auth_env="NBLANE_AUTH_FILE="
+  # Keep the Reader sidecar's profile/user validation aligned with the SPA
+  # API. The isolated sandbox has only test users, so all three processes can
+  # safely share its auth file and Reader-token secret.
+  if [[ -z "$auth_file" && -f "$dev_root/auth/users.yaml" ]]; then
+    auth_file="$dev_root/auth/users.yaml"
+  fi
+  if [[ -n "$auth_file" ]]; then
+    auth_file="$(cd "$(dirname "$auth_file")" && pwd)/$(basename "$auth_file")"
+    auth_env="NBLANE_AUTH_FILE='$auth_file'"
+  else
+    auth_env="NBLANE_AUTH_FILE="
+  fi
+  # Keep Reader tokens verifiable across the auth-on SPA API and the auth-off
+  # sidecar used by isolated development. Both processes must sign with the
+  # same HMAC secret even though only the SPA API has login enabled.
+  shared_reader_env_file="$dev_root/auth/dev-reader.env"
+  if [[ ! -f "$shared_reader_env_file" ]]; then
+    (
+      umask 077
+      mkdir -p "$(dirname "$shared_reader_env_file")"
+      printf 'NBLANE_READER_TOKEN_SECRET=%s\n' \
+        "$(.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+        > "$shared_reader_env_file"
+    )
+  fi
+  reader_token_env="set -a; . '$shared_reader_env_file'; set +a;"
 fi
 
 web_api_auth_env="$auth_env"
@@ -321,10 +365,20 @@ if [[ -n "$auth_file" ]]; then
   if [[ ! -f "$web_api_auth_env_file" ]]; then
     (
       umask 077
-      printf 'NBLANE_READER_TOKEN_SECRET=%s\n' \
-        "$(.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
-        > "$web_api_auth_env_file"
+      # Keep the auth-on SPA process on the same Reader-token secret as the
+      # sidecar process in isolated mode. Production may use its own shared
+      # secret file through the service environment.
+      if [[ "$mode" == "isolated" && -f "$shared_reader_env_file" ]]; then
+        cp "$shared_reader_env_file" "$web_api_auth_env_file"
+      else
+        printf 'NBLANE_READER_TOKEN_SECRET=%s\n' \
+          "$(.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+          > "$web_api_auth_env_file"
+      fi
     )
+  fi
+  if [[ "$mode" == "isolated" && -f "$shared_reader_env_file" ]]; then
+    cp "$shared_reader_env_file" "$web_api_auth_env_file"
   fi
 fi
 
@@ -384,6 +438,7 @@ wait_for_free_port() {
 }
 
 stop_sessions
+sync_tmux_proxy_environment
 
 ports_to_check=("$reader_port" "$streamlit_port")
 if [[ "$use_web_api" == "1" ]]; then
@@ -399,7 +454,7 @@ for port in "${ports_to_check[@]}"; do
 done
 
 tmux new-session -d -s "$reader_session" -c "$repo_root" \
-  "${env_load} \
+  "${env_load} ${reader_token_env} \
    NBLANE_ROOT='$dev_root' \
    NBLANE_ENV_FILE='$env_file' \
    NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
@@ -408,7 +463,7 @@ tmux new-session -d -s "$reader_session" -c "$repo_root" \
    PYTHONPATH=src .venv/bin/uvicorn ${uvicorn_args}"
 
 tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
-  "${env_load} \
+  "${env_load} ${reader_token_env} \
    NBLANE_ROOT='$dev_root' \
    NBLANE_ENV_FILE='$env_file' \
    NBLANE_READER_API_BASE='$reader_base' \
@@ -426,10 +481,11 @@ if [[ "$use_web_api" == "1" ]]; then
   # Evaluated in the tmux shell AFTER the env file is sourced, so an explicit
   # NBLANE_WORKSHOP_URL there still wins.
   tmux new-session -d -s "$web_api_session" -c "$repo_root" \
-    "${web_api_env_load} \
+    "${web_api_env_load} ${reader_token_env} \
      NBLANE_ROOT='$dev_root' \
      NBLANE_ENV_FILE='$env_file' \
      NBLANE_READER_API_BASE='$reader_base' \
+     NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
      NBLANE_WORKSHOP_URL=\"\${NBLANE_WORKSHOP_URL:-http://127.0.0.1:7668/}\" \
      ${web_api_auth_env} ${lang_env} \
      PYTHONPATH=src .venv/bin/uvicorn ${web_api_uvicorn_args}"

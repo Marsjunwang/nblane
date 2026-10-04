@@ -47,6 +47,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from nblane.core import agent_activity, agent_tasks, file_state, gap, inbox
+from nblane.core.ai.exceptions import collect_profile_exceptions
 from nblane.core import chronicle as chronicle_core
 from nblane.core import north_star as north_star_core
 from nblane.core import evidence_review as evidence_review_core
@@ -98,7 +99,6 @@ from nblane.core.models import (
     KanbanTask,
     KanbanTodo,
 )
-from nblane.core.growth_review import build_weekly_review
 from nblane.core.public_curation import evidence_contexts
 from nblane.core.paths import REPO_ROOT, SCHEMAS_DIR
 from nblane.core.public_site import (
@@ -170,13 +170,7 @@ from nblane.core.profile_context import (
 from nblane.core.profile_health import analyze_profile_health
 from nblane.core.review_actions import (
     apply_review_activity_item,
-    apply_review_evidence_candidate,
-    apply_review_next_action_candidate,
-    apply_review_public_draft_candidate,
-    normalize_review_window,
     record_writeback_activity,
-    review_window_default,
-    save_review_candidates_to_activity,
 )
 from nblane.core.status import count_nodes
 from nblane.core.sync import write_generated_blocks
@@ -190,6 +184,8 @@ from nblane.web_api.schemas import (
     ActivityItemModel,
     ActivityListResponse,
     ActivitySummaryModel,
+    AIExceptionModel,
+    AIExceptionsResponse,
     AgentTaskListResponse,
     AgentTaskModel,
     CheckinCreateRequest,
@@ -344,16 +340,10 @@ from nblane.web_api.schemas import (
     ProfileSettingsPatch,
     ProfileSettingsResponse,
     ResearchResponse,
+    ResearchPaperItemModel,
+    ResearchReaderResponse,
     ResearchSourceItemModel,
     ResearchSummaryModel,
-    ReviewApplyRequest,
-    ReviewApplyResponse,
-    ReviewApplyResultModel,
-    ReviewCandidateModel,
-    ReviewResponse,
-    ReviewSaveRequest,
-    ReviewSaveResponse,
-    ReviewSummaryModel,
     SidecarInfoModel,
     SkillNodePatchRequest,
     SkillNodePatchResponse,
@@ -1084,6 +1074,31 @@ def get_profile_health(name: str) -> HealthReportModel:
             )
             for issue in report.issues
         ],
+    )
+
+
+@router.get(
+    "/profiles/{name}/ai-exceptions",
+    response_model=AIExceptionsResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_ai_exceptions(
+    name: str,
+    limit: int = Query(50, ge=1, le=200),
+) -> AIExceptionsResponse:
+    """Return unresolved failures from all profile-scoped AI surfaces."""
+
+    pdir = _resolve_profile(name)
+    items = collect_profile_exceptions(
+        pdir,
+        jobs=jobs.failed_jobs(pdir.name, profile_scope=pdir, limit=limit),
+        limit=limit,
+    )
+    return AIExceptionsResponse(
+        profile=pdir.name,
+        total=len(items),
+        items=[AIExceptionModel(**item) for item in items],
     )
 
 
@@ -4084,6 +4099,7 @@ def draft_profile_crystallize(
                 pdir.name,
                 jobs.KIND_EVIDENCE_CRYSTALLIZE,
                 {"task_ids": body.task_ids, "titles": body.titles},
+                profile_scope=pdir,
             )
         except jobs.JobInputError as exc:
             raise ApiError(422, exc.code, exc.message) from exc
@@ -4225,7 +4241,12 @@ def create_profile_job(name: str, body: JobCreateRequest) -> JobCreateResponse:
     """
     pdir = _resolve_profile(name)
     try:
-        snapshot = jobs.create_job(pdir.name, body.kind, body.input)
+        snapshot = jobs.create_job(
+            pdir.name,
+            body.kind,
+            body.input,
+            profile_scope=pdir,
+        )
     except jobs.UnknownJobKindError as exc:
         raise ApiError(422, "unknown_job_kind", str(exc)) from exc
     except jobs.JobInputError as exc:
@@ -4390,7 +4411,10 @@ def analyze_profile_gap(
     if body.use_llm:
         try:
             snapshot = jobs.create_job(
-                pdir.name, jobs.KIND_GAP_ANALYSIS, {"task": body.task}
+                pdir.name,
+                jobs.KIND_GAP_ANALYSIS,
+                {"task": body.task},
+                profile_scope=pdir,
             )
         except jobs.JobInputError as exc:
             raise ApiError(422, exc.code, exc.message) from exc
@@ -4451,359 +4475,6 @@ def intake_profile_gap(name: str, body: GapIntakeRequest) -> KanbanMutationRespo
         ok=True,
         card=_kanban_task_model(task),
         section=section,
-    )
-
-
-# --- Review (M3): weekly review aggregation + candidate save/apply ----------
-
-
-PUBLIC_LAYER_ETAG_FILES = (
-    PUBLIC_PROFILE_FILENAME,
-    RESUME_SOURCE_FILENAME,
-    PROJECTS_FILENAME,
-    OUTPUTS_FILENAME,
-    BLOG_TAXONOMY_FILENAME,
-    PUBLIC_LIBRARY_FILENAME,
-)
-
-
-def _public_layer_fingerprints(pdir: Path) -> list[str]:
-    """Fingerprint lines for the public-layer YAML files + blog documents."""
-    fingerprints = []
-    for relative in PUBLIC_LAYER_ETAG_FILES:
-        snapshot = file_state.snapshot_file(pdir / relative)
-        fingerprints.append(f"{relative}:{snapshot.sha256 or 'empty'}")
-    blog_dir = pdir / BLOG_DIRNAME
-    if blog_dir.exists():
-        for path in sorted(blog_dir.rglob("*")):
-            if not path.is_file():
-                continue
-            if path.suffix not in (".md", ".json"):
-                continue
-            snapshot = file_state.snapshot_file(path)
-            rel = path.relative_to(pdir).as_posix()
-            fingerprints.append(f"{rel}:{snapshot.sha256 or 'empty'}")
-    return fingerprints
-
-
-def _review_etag(pdir: Path) -> str:
-    """Weak ETag over the review's source files (sha256 fingerprint).
-
-    The review GET aggregates kanban.md plus the optional activity/learning/
-    inbox logs; the save mutation writes agent-activity.yaml; the apply
-    mutation additionally writes evidence-pool.yaml and (for public_draft
-    candidates) the public layer's blog drafts. The ETag therefore covers
-    all of them — the five aggregation files, agent-activity.yaml, and the
-    public-layer fingerprint (same file set as the studio ETag). Weak
-    (``W/``) because the hash identifies the source file versions, not the
-    JSON response bytes.
-    """
-    fingerprints = []
-    for filename in (
-        kanban_path(pdir).name,
-        learning_log.LEARNING_LOG_FILENAME,
-        activity_log.ACTIVITY_LOG_FILENAME,
-        inbox.INBOX_FILENAME,
-        profile_io.EVIDENCE_POOL_FILENAME,
-        agent_activity.AGENT_ACTIVITY_FILENAME,
-    ):
-        snapshot = file_state.snapshot_file(pdir / filename)
-        fingerprints.append(f"{filename}:{snapshot.sha256 or 'empty'}")
-    fingerprints.extend(_public_layer_fingerprints(pdir))
-    digest = hashlib.sha256("|".join(fingerprints).encode("utf-8")).hexdigest()
-    return f'W/"{digest}"'
-
-
-def _review_error(
-    status_code: int,
-    code: str,
-    message: str,
-    etag: str,
-) -> JSONResponse:
-    """4xx body plus a fresh review ETag header for client reloads."""
-    body = ErrorResponse(code=code, message=message)
-    return JSONResponse(
-        status_code=status_code,
-        content=body.model_dump(),
-        headers={"ETag": etag},
-    )
-
-
-def _resolve_review_window(start: str, end: str) -> tuple[str, str]:
-    """Normalize the review window query params to an ISO (start, end) pair.
-
-    Both params empty defaults to the current natural week (Monday → today);
-    exactly one provided is a 422. Reversed windows are swapped.
-    """
-    clean_start, clean_end = start.strip(), end.strip()
-    if not clean_start and not clean_end:
-        default_start, default_end = review_window_default()
-        return default_start.isoformat(), default_end.isoformat()
-    if not clean_start or not clean_end:
-        raise ApiError(
-            422,
-            "invalid_review_window",
-            "Both start and end are required for a custom review window.",
-        )
-    try:
-        start_date, end_date = normalize_review_window(clean_start, clean_end)
-    except ValueError as exc:
-        raise ApiError(
-            422,
-            "invalid_review_window",
-            f"Invalid review window: {exc}",
-        ) from exc
-    return start_date.isoformat(), end_date.isoformat()
-
-
-@router.get(
-    "/profiles/{name}/review",
-    response_model=ReviewResponse,
-    responses=ERROR_RESPONSES,
-    dependencies=PROFILE_DEPENDENCY,
-)
-def get_profile_review(
-    name: str,
-    response: Response,
-    start: str = Query("", description="ISO window start; empty = current week."),
-    end: str = Query("", description="ISO window end; empty = current week."),
-) -> ReviewResponse:
-    """Weekly review: Done tasks plus evidence/next-action/public candidates.
-
-    Read-only aggregation (``core.growth_review.build_weekly_review``); the
-    response carries the review-source ETag (see module docstring) for use as
-    ``If-Match`` on the save/apply mutations. Candidate generation is
-    rule-based only — this page has no LLM dependency.
-    """
-    pdir = _resolve_profile(name)
-    window_start, window_end = _resolve_review_window(start, end)
-    review = build_weekly_review(
-        pdir.name, window_start, window_end, profile_path=pdir
-    )
-    data = review.to_dict()["review"]
-    response.headers["ETag"] = _review_etag(pdir)
-    return ReviewResponse(
-        profile=pdir.name,
-        week_start=str(data["week_start"]),
-        week_end=str(data["week_end"]),
-        done_task_ids=[str(task_id) for task_id in data["done_task_ids"]],
-        activity_summary=dict(data["activity_summary"]),
-        learning_summary=dict(data["learning_summary"]),
-        inbox_summary=dict(data["inbox_summary"]),
-        evidence_candidates=[
-            ReviewCandidateModel(**c) for c in data["evidence_candidates"]
-        ],
-        next_queue_candidates=[
-            ReviewCandidateModel(**c) for c in data["next_queue_candidates"]
-        ],
-        method_candidates=[
-            ReviewCandidateModel(**c) for c in data["method_candidates"]
-        ],
-        public_candidates=[
-            ReviewCandidateModel(**c) for c in data["public_candidates"]
-        ],
-        summary=ReviewSummaryModel(
-            done_tasks=len(data["done_task_ids"]),
-            evidence_candidates=len(data["evidence_candidates"]),
-            next_action_candidates=len(data["next_queue_candidates"]),
-            public_draft_candidates=len(data["public_candidates"]),
-        ),
-    )
-
-
-REVIEW_CANDIDATE_TYPES = ("evidence", "next_action", "public_draft")
-
-REVIEW_MUTATION_RESPONSES = {
-    **ERROR_RESPONSES,
-    412: {
-        "model": ErrorResponse,
-        "description": "If-Match ETag does not match the review source files.",
-    },
-    422: {
-        "model": ErrorResponse,
-        "description": "Invalid window, unknown candidate type, or empty selection.",
-    },
-}
-
-
-def _check_review_mutation(
-    name: str,
-    candidate_type: str,
-    if_match: str | None,
-) -> tuple[Path, str] | JSONResponse:
-    """Shared save/apply guards: candidate-type whitelist + If-Match."""
-    clean_type = candidate_type.strip()
-    if clean_type not in REVIEW_CANDIDATE_TYPES:
-        raise ApiError(
-            422,
-            "invalid_review_candidate_type",
-            f"Unknown review candidate type {candidate_type!r} "
-            f"(expected one of: {', '.join(REVIEW_CANDIDATE_TYPES)}).",
-        )
-    pdir = _resolve_profile(name)
-    etag = _review_etag(pdir)
-    if not _if_match_satisfied(if_match, etag):
-        return _review_error(
-            412,
-            "etag_mismatch",
-            "Review source files changed since they were loaded; "
-            "reload before mutating.",
-            etag,
-        )
-    return pdir, etag
-
-
-@router.post(
-    "/profiles/{name}/review/save",
-    response_model=ReviewSaveResponse,
-    responses=REVIEW_MUTATION_RESPONSES,
-    dependencies=PROFILE_DEPENDENCY,
-)
-def save_profile_review_candidates(
-    name: str,
-    body: ReviewSaveRequest,
-    response: Response,
-    if_match: str | None = Header(default=None),
-) -> ReviewSaveResponse | JSONResponse:
-    """Persist selected candidates as pending Agent Activity items.
-
-    Thin wrapper over ``core.review_actions.save_review_candidates_to_activity``;
-    the review window rides on the activity item's ``source_ref``. Honors
-    ``If-Match`` (412 on mismatch, fresh ETag in the header).
-    """
-    checked = _check_review_mutation(name, body.candidate_type, if_match)
-    if isinstance(checked, JSONResponse):
-        return checked
-    pdir, _etag = checked
-    window_start, window_end = _resolve_review_window(body.start, body.end)
-    try:
-        stored = save_review_candidates_to_activity(
-            pdir.name,
-            window_start,
-            window_end,
-            body.candidate_type.strip(),
-            [candidate.model_dump(exclude_unset=True) for candidate in body.candidates],
-            expected_snapshot=file_state.snapshot_file(
-                pdir / agent_activity.AGENT_ACTIVITY_FILENAME
-            ),
-        )
-    except file_state.FileConflictError:
-        # A concurrent write landed between the If-Match check and the
-        # in-lock snapshot re-check (TOCTOU closure).
-        return _review_error(
-            412,
-            "etag_mismatch",
-            "Review source files changed while saving; "
-            "reload before retrying.",
-            _review_etag(pdir),
-        )
-    response.headers["ETag"] = _review_etag(pdir)
-    return ReviewSaveResponse(
-        ok=True,
-        saved=len(stored),
-        item_ids=[str(item.get("id") or "") for item in stored],
-    )
-
-
-@router.post(
-    "/profiles/{name}/review/apply",
-    response_model=ReviewApplyResponse,
-    responses=REVIEW_MUTATION_RESPONSES,
-    dependencies=PROFILE_DEPENDENCY,
-)
-def apply_profile_review_candidates(
-    name: str,
-    body: ReviewApplyRequest,
-    response: Response,
-    if_match: str | None = Header(default=None),
-) -> ReviewApplyResponse | JSONResponse:
-    """Apply selected candidates to their owner files (pool/kanban/blog).
-
-    Dispatches to the ``core.review_actions.apply_review_*`` appliers per
-    candidate; per-candidate failures are reported in ``results`` without
-    failing the whole request (mirroring the Streamlit one-by-one apply).
-    Honors ``If-Match`` (412 on mismatch, fresh ETag in the header).
-    """
-    checked = _check_review_mutation(name, body.candidate_type, if_match)
-    if isinstance(checked, JSONResponse):
-        return checked
-    pdir, _etag = checked
-    window_start, window_end = _resolve_review_window(body.start, body.end)
-    candidate_type = body.candidate_type.strip()
-    # Request-start fingerprints, threaded into the appliers' first write
-    # per file and consumed on first use (later candidates in this request
-    # legitimately see the files changed by earlier ones).
-    snapshots: dict[str, file_state.FileSnapshot | None] = {
-        "activity": file_state.snapshot_file(
-            pdir / agent_activity.AGENT_ACTIVITY_FILENAME
-        ),
-        "pool": file_state.snapshot_file(
-            pdir / profile_io.EVIDENCE_POOL_FILENAME
-        ),
-        "kanban": file_state.snapshot_file(kanban_path(pdir)),
-    }
-    results: list[ReviewApplyResultModel] = []
-    try:
-        for candidate in body.candidates:
-            raw = candidate.model_dump(exclude_unset=True)
-            if candidate_type == "evidence":
-                applied = apply_review_evidence_candidate(
-                    pdir.name,
-                    window_start,
-                    window_end,
-                    raw,
-                    mark_crystallized=body.mark_crystallized,
-                    activity_snapshot=snapshots.pop("activity", None),
-                    pool_snapshot=snapshots.pop("pool", None),
-                    kanban_snapshot=snapshots.pop("kanban", None),
-                )
-            elif candidate_type == "next_action":
-                applied = apply_review_next_action_candidate(
-                    pdir.name,
-                    window_start,
-                    window_end,
-                    raw,
-                    activity_snapshot=snapshots.pop("activity", None),
-                    kanban_snapshot=snapshots.pop("kanban", None),
-                )
-            else:
-                applied = apply_review_public_draft_candidate(
-                    pdir.name,
-                    window_start,
-                    window_end,
-                    raw,
-                    activity_snapshot=snapshots.pop("activity", None),
-                )
-            results.append(
-                ReviewApplyResultModel(
-                    ok=applied.ok,
-                    title=str(raw.get("title") or ""),
-                    warnings=list(applied.warnings),
-                    errors=list(applied.errors),
-                    changed_paths=[str(path) for path in applied.changed_paths],
-                    output_path=(
-                        str(applied.output_path) if applied.output_path else ""
-                    ),
-                )
-            )
-    except file_state.FileConflictError:
-        # A concurrent write landed between the If-Match check and an
-        # applier's in-lock snapshot re-check (TOCTOU closure). Candidates
-        # already applied stay applied; the client must reload.
-        return _review_error(
-            412,
-            "etag_mismatch",
-            "Review source files changed while applying; "
-            "reload before retrying.",
-            _review_etag(pdir),
-        )
-    response.headers["ETag"] = _review_etag(pdir)
-    applied_count = sum(1 for result in results if result.ok)
-    return ReviewApplyResponse(
-        ok=applied_count == len(results),
-        applied=applied_count,
-        failed=len(results) - applied_count,
-        results=results,
     )
 
 
@@ -7607,6 +7278,33 @@ def instantiate_profile_plan_template(
 # --- Output Studio (M4): public blog drafts + evidence/claim-first drafts ---
 
 
+PUBLIC_LAYER_ETAG_FILES = (
+    PUBLIC_PROFILE_FILENAME,
+    RESUME_SOURCE_FILENAME,
+    PROJECTS_FILENAME,
+    OUTPUTS_FILENAME,
+    BLOG_TAXONOMY_FILENAME,
+    PUBLIC_LIBRARY_FILENAME,
+)
+
+
+def _public_layer_fingerprints(pdir: Path) -> list[str]:
+    """Fingerprint public-layer YAML files and blog documents for Studio."""
+    fingerprints = []
+    for relative in PUBLIC_LAYER_ETAG_FILES:
+        snapshot = file_state.snapshot_file(pdir / relative)
+        fingerprints.append(f"{relative}:{snapshot.sha256 or 'empty'}")
+    blog_dir = pdir / BLOG_DIRNAME
+    if blog_dir.exists():
+        for path in sorted(blog_dir.rglob("*")):
+            if not path.is_file() or path.suffix not in (".md", ".json"):
+                continue
+            snapshot = file_state.snapshot_file(path)
+            rel = path.relative_to(pdir).as_posix()
+            fingerprints.append(f"{rel}:{snapshot.sha256 or 'empty'}")
+    return fingerprints
+
+
 def _studio_etag(pdir: Path) -> str:
     """Weak ETag over the profile's public-layer files (sha256 fingerprint).
 
@@ -8783,7 +8481,13 @@ def _sidecar_info(name: str, user: CurrentUser) -> SidecarInfoModel:
             handoff = auth_core.mint_auth_handoff_token(user.id)
         except auth_core.AuthConfigError:
             handoff = ""
-    query = urlencode({"profile": name})
+    query_params = {"profile": name}
+    if handoff:
+        # The standalone Paper Library tab has no hidden bootstrap iframe.
+        # Carry the same short-lived handoff so the sidecar can establish its
+        # session directly; auth-off URLs remain unchanged.
+        query_params["auth_handoff"] = handoff
+    query = urlencode(query_params)
     # compact=1: the embedded dashboard drops its permanent inspector rail in
     # favour of an on-demand drawer (implemented in the home_dashboard
     # component), so the 3D galaxy keeps the full iframe width at hero sizes.
@@ -8925,6 +8629,40 @@ def get_profile_home(
 
 
 @router.get(
+    "/profiles/{name}/research/papers/{source_id}/reader",
+    response_model=ResearchReaderResponse,
+    responses=ERROR_RESPONSES,
+)
+def get_profile_research_reader(
+    name: str,
+    source_id: str,
+    user: CurrentUser = Depends(require_profile_access),
+) -> ResearchReaderResponse:
+    """Mint a source-scoped Reader URL for the SPA deep-link page."""
+    pdir = _resolve_profile(name)
+    source = load_research_sources(pdir).by_id().get(source_id)
+    if source is None:
+        raise ApiError(404, "paper_not_found", f"Unknown paper: {source_id}")
+    from nblane.core.research_papers import paper_pdf_asset_path
+
+    try:
+        paper_pdf_asset_path(pdir, source_id)
+    except (FileNotFoundError, ValueError, OSError):
+        raise ApiError(409, "paper_pdf_missing", "Paper PDF is not ready")
+    from urllib.parse import quote
+
+    token = auth_core.mint_reader_token(user.id, pdir.name, source_id)
+    base = _sidecar_info(pdir.name, user).base
+    reader_url = f"{base}/reader/view/{quote(source_id, safe='')}?token={quote(token, safe='')}"
+    return ResearchReaderResponse(
+        profile=pdir.name,
+        source_id=source_id,
+        reader_url=reader_url,
+        token=token,
+    )
+
+
+@router.get(
     "/profiles/{name}/research",
     response_model=ResearchResponse,
     responses=ERROR_RESPONSES,
@@ -8961,6 +8699,97 @@ def get_profile_research(
         reverse=True,
     )[:8]
 
+    # Keep the SPA projection aligned with the existing Paper Library source
+    # of truth. The library helpers only read YAML/JSONL and do not mutate the
+    # profile, so this remains a read-only overview request.
+    papers: list[ResearchPaperItemModel] = []
+    try:
+        from nblane.core.paper_library_workspace import paper_rows
+        from nblane.core.research_papers import (
+            build_translation_units,
+            load_paper_analysis,
+            load_paper_annotations,
+            load_paper_pages,
+            load_paper_segments,
+            load_paper_structure_units,
+            load_paper_translations,
+            reader_translation_structure_units,
+        )
+
+        library_rows = paper_rows(pdir, view="all")
+        for row in library_rows:
+            paper_id = str(row.get("id") or "")
+            source = inbox.by_id().get(paper_id)
+            metadata = dict(source.metadata or {}) if source else {}
+            segments = load_paper_segments(pdir, paper_id)
+            translations = load_paper_translations(pdir, paper_id)
+            annotations = load_paper_annotations(pdir, paper_id)
+            page_count = int(metadata.get("page_count") or len(load_paper_pages(pdir, paper_id)) or 0)
+            structure_rows = reader_translation_structure_units(
+                load_paper_structure_units(pdir, paper_id)
+            )
+            if structure_rows:
+                # Reader translation is keyed by the positioned canonical
+                # structure.  Reuse the same projection here so the SPA badge
+                # cannot claim completion from an obsolete segment graph.
+                _, translation_counts = build_translation_units(
+                    pages=[],
+                    segments=[],
+                    translations=[item.to_dict() for item in translations],
+                    target_lang="zh",
+                    layout_units=structure_rows,
+                )
+                translation_total = sum(translation_counts.values())
+                translated = int(translation_counts.get("translated", 0))
+                missing = int(translation_counts.get("missing", 0))
+                stale = int(translation_counts.get("stale", 0))
+                failed = int(translation_counts.get("failed", 0))
+            else:
+                translated = missing = stale = failed = 0
+                for segment in segments:
+                    matching = next(
+                        (item for item in translations if item.segment_id == segment.segment_id and item.target_lang == "zh"),
+                        None,
+                    )
+                    if matching is None:
+                        missing += 1
+                    elif matching.status == "failed":
+                        failed += 1
+                    elif matching.status == "translated" and matching.source_hash == segment.text_hash and matching.translated_text:
+                        translated += 1
+                    else:
+                        stale += 1
+                translation_total = len(segments)
+            translation_status = "translated" if translation_total and translated == translation_total else "failed" if failed and not translated else "stale" if stale else "missing"
+            papers.append(
+                ResearchPaperItemModel(
+                    id=paper_id,
+                    title=str(row.get("title") or paper_id or ""),
+                    status=str(row.get("status") or "inbox"),
+                    tags=[str(tag) for tag in row.get("tags", []) or []],
+                    summary=str(row.get("summary") or ""),
+                    analysis=load_paper_analysis(pdir, paper_id),
+                    pdf_available=bool(row.get("has_pdf")),
+                    captured_at=str(getattr(source, "captured_at", "") or ""),
+                    page_count=page_count,
+                    segment_count=translation_total,
+                    annotation_count=len([item for item in annotations if item.status != "deleted"]),
+                    translated_count=translated,
+                    missing_count=missing,
+                    stale_count=stale,
+                    failed_count=failed,
+                    translation_status=translation_status,
+                    last_page=int(metadata.get("last_read_page") or 0),
+                    last_read_at=str(metadata.get("last_read_at") or ""),
+                    extraction_status=str(row.get("pdf_download_status") or ""),
+                    target_lang="zh",
+                )
+            )
+    except Exception:
+        # A missing or malformed optional paper artifact must not take down
+        # the research overview, which still has the source inbox projection.
+        logging.getLogger(__name__).debug("paper library projection unavailable", exc_info=True)
+
     return ResearchResponse(
         profile=pdir.name,
         summary=ResearchSummaryModel(
@@ -8984,6 +8813,7 @@ def get_profile_research(
             )
             for source in recent
         ],
+        papers=papers,
         sidecar=_sidecar_info(pdir.name, user),
     )
 

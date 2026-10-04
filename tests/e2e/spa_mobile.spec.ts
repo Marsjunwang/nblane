@@ -10,7 +10,7 @@ import type { APIRequestContext, Page } from "@playwright/test";
  * Coverage:
  *  a) navigation: hamburger open/close, every menu entry clickable, 项目
  *     navigates and collapses the drawer;
- *  b) the wide-content pages (周回顾/项目抽屉/研究台 keep wide tables; 证据 is
+ *  b) the wide-content pages (项目抽屉/研究台 keep wide tables; 证据 is
  *     now the Phase 1 single page with the five-stage nav): tables stay
  *     inside their Table.ScrollContainer and the document never overflows
  *     horizontally;
@@ -161,7 +161,6 @@ test.describe("SPA mobile 375px — 导航", () => {
       { label: "项目", url: spa("projects") },
       { label: "技能树", url: spa("skill-tree") },
       { label: "证据", url: spa("evidence") },
-      { label: "周回顾", url: spa("review") },
       { label: "输出工作室", url: spa("studio") },
       { label: "公开构建", url: spa("public-build") },
       { label: "研究台", url: spa("research") },
@@ -215,23 +214,6 @@ test.describe("SPA mobile 375px — 宽表格五页", () => {
     // empty (consumable) — the stage nav renders either way.
     await expect(page.getByTestId("stage-nav")).toBeVisible();
     await expect(page).toHaveURL(/\/evidence\?stage=review/);
-    await expectNoHorizontalOverflow(page);
-  });
-
-  test("周回顾页: 近 30 天窗口候选表格横向滚动且文档不溢出", async ({ page, request }) => {
-    // Seed a Done card dated today so the 近 30 天 window always has at least
-    // one 证据候选 row (the default tab).
-    const title = `e2e-mob-review-${Date.now()}`;
-    await seedKanbanCard(request, title);
-    const done = await request.post(api(`/kanban/cards/${encodeURIComponent(title)}/done`));
-    expect(done.status(), "mark-done seed should succeed").toBeLessThan(300);
-
-    await page.goto(spa("review"));
-    await page.getByRole("textbox", { name: "时间窗口预设" }).click();
-    await page.getByRole("option", { name: "近 30 天" }).click();
-    await expect(page.locator("table").first()).toBeVisible();
-    await expect(page.getByText(title).first()).toBeVisible();
-    await expectTablesScrollable(page);
     await expectNoHorizontalOverflow(page);
   });
 

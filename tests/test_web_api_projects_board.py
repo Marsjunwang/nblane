@@ -886,7 +886,7 @@ class TestExplicitHabitLink(ProjectsBoardTestBase):
         self.assertEqual(habits["reading"]["project_id"], "project:robot-arm")
         # last_activity merges task dates (09-18) with the habit's last
         # check-in (10 days ago) — the max wins.
-        self.assertEqual(arm["last_activity"], "2026-09-18")
+        self.assertEqual(arm["last_activity"], max("2026-09-18", TEN_DAYS_AGO.isoformat()))
         # The name-heuristic link (exercise <-> project:exercise) still works.
         self.assertEqual(habits["exercise"]["project_id"], "project:exercise")
         exercise_project = goals["goal-2"]["projects"][0]

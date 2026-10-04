@@ -85,45 +85,6 @@ async function seedKanbanCard(page: Page, title: string): Promise<string> {
   return body.card.id;
 }
 
-/**
- * Seed one needs_review evidence row through the real chain (kanban card →
- * 标记 Done on /projects → weekly-review save → activity apply). The
- * bulk-accept test must NOT consume whatever row the sandbox happens to
- * hold: every suite run depletes the seeded pool by one, so after a few runs
- * the "first row" simply does not exist and the test dies waiting for it.
- */
-async function seedNeedsReviewEvidence(page: Page, title: string): Promise<void> {
-  // 1. Done card through the UI (API seed + detail card 标记 Done).
-  const cardId = await seedKanbanCard(page, title);
-  await page.goto(spa("projects"));
-  await page.getByTestId(`task-card-${cardId}`).click();
-  await expect(page.getByTestId("task-detail-card")).toBeVisible();
-  await expectJsonMutation(page, "/done", () =>
-    page.getByTestId("detail-done").click(),
-  );
-
-  // 2. Weekly review: the Done card is an evidence candidate → 保存到活动.
-  await page.goto(spa("review"));
-  const candidateRow = page
-    .locator('[data-testid^="review-candidate-evidence-"]')
-    .filter({ hasText: title });
-  await expect(candidateRow).toBeVisible();
-  await candidateRow.getByRole("checkbox").click();
-  await expectJsonMutation(page, "/review/save", () =>
-    page.getByRole("button", { name: /^保存到活动/ }).click(),
-  );
-  await expect(page.getByTestId("save-success-evidence")).toBeVisible();
-
-  // 3. Activity: apply the saved Review candidate — that writes the
-  // needs_review evidence row into the pool.
-  await page.goto(spa("activity"));
-  await page.getByText(title, { exact: true }).click();
-  await expectJsonMutation(page, "/apply", () =>
-    page.getByRole("button", { name: "应用", exact: true }).click(),
-  );
-  await expect(page.getByText("应用成功")).toBeVisible();
-}
-
 test.describe("SPA mutations (P0-1/P0-2 acceptance)", () => {
   test("inbox capture: 201 as JSON and the item shows up in the list", async ({ page }) => {
     const title = `e2e-capture-${Date.now()}`;
@@ -164,30 +125,6 @@ test.describe("SPA mutations (P0-1/P0-2 acceptance)", () => {
     ).toHaveCount(0);
   });
 
-  test("evidence review: accept removes the row from the needs_review queue", async ({
-    page,
-  }) => {
-    // Self-seeded (see seedNeedsReviewEvidence): the sandbox pool of
-    // needs_review rows is finite and every suite run consumes one, so the
-    // test accepts the exact row it created — never a foreign "first row".
-    const title = `e2e-bulk-${Date.now()}`;
-    await seedNeedsReviewEvidence(page, title);
-
-    // Phase 1: /evidence-review redirects into the single Evidence page.
-    await page.goto(spa("evidence-review"));
-    const row = page.locator('[data-testid^="evidence-row-"]').filter({ hasText: title });
-    await expect(row).toBeVisible();
-    const testId = (await row.getAttribute("data-testid")) ?? "";
-
-    await row.click();
-    await expectJsonMutation(page, "/review", () =>
-      page.getByTestId("evidence-accept").click(),
-    );
-
-    // Accepted rows leave the needs_review stage after the list refetch.
-    await expect(page.locator(`[data-testid="${testId}"]`)).toHaveCount(0);
-  });
-
   test("activity P0-2: pending non-Review item offers no 应用, with an explanation", async ({
     page,
     request,
@@ -212,43 +149,4 @@ test.describe("SPA mutations (P0-1/P0-2 acceptance)", () => {
     await expect(page.getByText(/只能应用 pending 的 Review 候选/)).toBeVisible();
   });
 
-  test("activity apply: kanban done card → review save → activity apply (full chain)", async ({
-    page,
-  }) => {
-    const title = `e2e-chain-${Date.now()}`;
-
-    // 1. Seed a Done card through the UI (API seed + detail card 标记 Done).
-    const cardId = await seedKanbanCard(page, title);
-    await page.goto(spa("projects"));
-    await page.getByTestId(`task-card-${cardId}`).click();
-    await expect(page.getByTestId("task-detail-card")).toBeVisible();
-    await expectJsonMutation(page, "/done", () =>
-      page.getByTestId("detail-done").click(),
-    );
-
-    // 2. Weekly review: the Done card is an evidence candidate → 保存到活动.
-    await page.goto(spa("review"));
-    const candidateRow = page
-      .locator('[data-testid^="review-candidate-evidence-"]')
-      .filter({ hasText: title });
-    await expect(candidateRow).toBeVisible();
-    await candidateRow.getByRole("checkbox").click();
-    await expectJsonMutation(page, "/review/save", () =>
-      page.getByRole("button", { name: /^保存到活动/ }).click(),
-    );
-    await expect(page.getByTestId("save-success-evidence")).toBeVisible();
-
-    // 3. Activity: the saved Review candidate offers 应用 and applies cleanly.
-    await page.goto(spa("activity"));
-    await page.getByText(title, { exact: true }).click();
-    await expectJsonMutation(page, "/apply", () =>
-      page.getByRole("button", { name: "应用", exact: true }).click(),
-    );
-    await expect(page.getByText("应用成功")).toBeVisible();
-    // Applied items leave the default pending list after invalidation refetch
-    // (list rows are Cards; the open drawer renders no Card with the title).
-    await expect(
-      page.locator("div.mantine-Card-root").filter({ hasText: title }),
-    ).toHaveCount(0);
-  });
 });

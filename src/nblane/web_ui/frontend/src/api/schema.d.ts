@@ -226,6 +226,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/ai-exceptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Ai Exceptions
+         * @description Return unresolved failures from all profile-scoped AI surfaces.
+         */
+        get: operations["get_profile_ai_exceptions_api_v1_profiles__name__ai_exceptions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/checkins": {
         parameters: {
             query?: never;
@@ -1899,7 +1919,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/review": {
+    "/api/v1/profiles/{name}/research/papers/{source_id}/reader": {
         parameters: {
             query?: never;
             header?: never;
@@ -1907,66 +1927,12 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Profile Review
-         * @description Weekly review: Done tasks plus evidence/next-action/public candidates.
-         *
-         *     Read-only aggregation (``core.growth_review.build_weekly_review``); the
-         *     response carries the review-source ETag (see module docstring) for use as
-         *     ``If-Match`` on the save/apply mutations. Candidate generation is
-         *     rule-based only — this page has no LLM dependency.
+         * Get Profile Research Reader
+         * @description Mint a source-scoped Reader URL for the SPA deep-link page.
          */
-        get: operations["get_profile_review_api_v1_profiles__name__review_get"];
+        get: operations["get_profile_research_reader_api_v1_profiles__name__research_papers__source_id__reader_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/review/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Apply Profile Review Candidates
-         * @description Apply selected candidates to their owner files (pool/kanban/blog).
-         *
-         *     Dispatches to the ``core.review_actions.apply_review_*`` appliers per
-         *     candidate; per-candidate failures are reported in ``results`` without
-         *     failing the whole request (mirroring the Streamlit one-by-one apply).
-         *     Honors ``If-Match`` (412 on mismatch, fresh ETag in the header).
-         */
-        post: operations["apply_profile_review_candidates_api_v1_profiles__name__review_apply_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/review/save": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Save Profile Review Candidates
-         * @description Persist selected candidates as pending Agent Activity items.
-         *
-         *     Thin wrapper over ``core.review_actions.save_review_candidates_to_activity``;
-         *     the review window rides on the activity item's ``source_ref``. Honors
-         *     ``If-Match`` (412 on mismatch, fresh ETag in the header).
-         */
-        post: operations["save_profile_review_candidates_api_v1_profiles__name__review_save_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2488,6 +2454,74 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AIExceptionModel
+         * @description One unresolved failure that needs attention from the profile owner.
+         */
+        AIExceptionModel: {
+            /**
+             * Action
+             * @default
+             */
+            action: string;
+            /**
+             * Created
+             * @default
+             */
+            created: string;
+            /**
+             * Href
+             * @default
+             */
+            href: string;
+            /** Id */
+            id: string;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Retryable
+             * @default true
+             */
+            retryable: boolean;
+            /**
+             * Severity
+             * @default error
+             */
+            severity: string;
+            /**
+             * Source
+             * @default
+             */
+            source: string;
+            /**
+             * Source Ref
+             * @default
+             */
+            source_ref: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /**
+         * AIExceptionsResponse
+         * @description Profile-scoped AI failures from gateway, agents, jobs, and writebacks.
+         */
+        AIExceptionsResponse: {
+            /** Items */
+            items?: components["schemas"]["AIExceptionModel"][];
+            /** Profile */
+            profile: string;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
         /**
          * ActivityApplyResponse
          * @description Success body for the apply mutation.
@@ -6081,6 +6115,10 @@ export interface components {
             project_board?: {
                 [key: string]: unknown;
             } | null;
+            /** Research */
+            research?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * ProfileSettingsResponse
@@ -7216,6 +7254,122 @@ export interface components {
             warnings?: string[];
         };
         /**
+         * ResearchPaperItemModel
+         * @description Paper library projection used by the SPA research workbench.
+         */
+        ResearchPaperItemModel: {
+            /** Analysis */
+            analysis?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Annotation Count
+             * @default 0
+             */
+            annotation_count: number;
+            /**
+             * Captured At
+             * @default
+             */
+            captured_at: string;
+            /**
+             * Extraction Status
+             * @default
+             */
+            extraction_status: string;
+            /**
+             * Failed Count
+             * @default 0
+             */
+            failed_count: number;
+            /** Id */
+            id: string;
+            /**
+             * Last Page
+             * @default 0
+             */
+            last_page: number;
+            /**
+             * Last Read At
+             * @default
+             */
+            last_read_at: string;
+            /**
+             * Missing Count
+             * @default 0
+             */
+            missing_count: number;
+            /**
+             * Page Count
+             * @default 0
+             */
+            page_count: number;
+            /**
+             * Pdf Available
+             * @default false
+             */
+            pdf_available: boolean;
+            /**
+             * Segment Count
+             * @default 0
+             */
+            segment_count: number;
+            /**
+             * Stale Count
+             * @default 0
+             */
+            stale_count: number;
+            /**
+             * Status
+             * @default inbox
+             */
+            status: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** Tags */
+            tags?: string[];
+            /**
+             * Target Lang
+             * @default zh
+             */
+            target_lang: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Translated Count
+             * @default 0
+             */
+            translated_count: number;
+            /**
+             * Translation Status
+             * @default missing
+             */
+            translation_status: string;
+        };
+        /**
+         * ResearchReaderResponse
+         * @description Reader deep link minted for one profile paper.
+         */
+        ResearchReaderResponse: {
+            /** Profile */
+            profile: string;
+            /** Reader Url */
+            reader_url: string;
+            /** Source Id */
+            source_id: string;
+            /**
+             * Token
+             * @default
+             */
+            token: string;
+        };
+        /**
          * ResearchResponse
          * @description Research overview (M4): source-inbox summary plus sidecar entry.
          *
@@ -7225,6 +7379,8 @@ export interface components {
          *     ``sources`` lists the most recently captured sources (capped).
          */
         ResearchResponse: {
+            /** Papers */
+            papers?: components["schemas"]["ResearchPaperItemModel"][];
             /** Profile */
             profile: string;
             sidecar?: components["schemas"]["SidecarInfoModel"];
@@ -7305,228 +7461,6 @@ export interface components {
              * @default 0
              */
             total: number;
-        };
-        /**
-         * ReviewApplyRequest
-         * @description Body for applying selected candidates to their owner files.
-         *
-         *     ``mark_crystallized`` only affects evidence candidates: the source Done
-         *     kanban card is marked crystallized after a successful pool writeback.
-         */
-        ReviewApplyRequest: {
-            /** Candidate Type */
-            candidate_type: string;
-            /** Candidates */
-            candidates: components["schemas"]["ReviewCandidateModel"][];
-            /** End */
-            end: string;
-            /**
-             * Mark Crystallized
-             * @default true
-             */
-            mark_crystallized: boolean;
-            /** Start */
-            start: string;
-        };
-        /**
-         * ReviewApplyResponse
-         * @description Aggregate outcome of applying the selected candidates.
-         *
-         *     Apply is per-candidate: individual failures (e.g. pool merge conflict)
-         *     land in ``results`` with ``ok=false`` and do not fail the whole request,
-         *     mirroring the Streamlit page which applies candidates one by one.
-         */
-        ReviewApplyResponse: {
-            /**
-             * Applied
-             * @default 0
-             */
-            applied: number;
-            /**
-             * Failed
-             * @default 0
-             */
-            failed: number;
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-            /** Results */
-            results?: components["schemas"]["ReviewApplyResultModel"][];
-        };
-        /**
-         * ReviewApplyResultModel
-         * @description Per-candidate outcome of one apply call (mirrors ReviewApplyResult).
-         */
-        ReviewApplyResultModel: {
-            /** Changed Paths */
-            changed_paths?: string[];
-            /** Errors */
-            errors?: string[];
-            /** Ok */
-            ok: boolean;
-            /**
-             * Output Path
-             * @default
-             */
-            output_path: string;
-            /**
-             * Title
-             * @default
-             */
-            title: string;
-            /** Warnings */
-            warnings?: string[];
-        };
-        /**
-         * ReviewCandidateModel
-         * @description One weekly-review candidate (evidence/next_action/method/public_draft).
-         *
-         *     Mirrors the dicts produced by ``core.growth_review.build_weekly_review``;
-         *     extension keys (e.g. ``tags``) are preserved so the SPA can round-trip a
-         *     candidate from the GET response into the save/apply mutations unchanged.
-         */
-        ReviewCandidateModel: {
-            /**
-             * Draft
-             * @default true
-             */
-            draft: boolean;
-            /** Notes */
-            notes?: string[];
-            /**
-             * Resource Id
-             * @default
-             */
-            resource_id: string;
-            /**
-             * Source
-             * @default
-             */
-            source: string;
-            /**
-             * Summary
-             * @default
-             */
-            summary: string;
-            /**
-             * Task Id
-             * @default
-             */
-            task_id: string;
-            /**
-             * Title
-             * @default
-             */
-            title: string;
-            /**
-             * Visibility
-             * @default
-             */
-            visibility: string;
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * ReviewResponse
-         * @description Candidate-only weekly review payload (``GrowthReview`` projection).
-         *
-         *     Read-only aggregation over kanban.md Done cards plus the optional
-         *     activity/learning/inbox logs; no LLM involvement in this slice.
-         */
-        ReviewResponse: {
-            /** Activity Summary */
-            activity_summary?: {
-                [key: string]: unknown;
-            };
-            /** Done Task Ids */
-            done_task_ids?: string[];
-            /** Evidence Candidates */
-            evidence_candidates?: components["schemas"]["ReviewCandidateModel"][];
-            /** Inbox Summary */
-            inbox_summary?: {
-                [key: string]: unknown;
-            };
-            /** Learning Summary */
-            learning_summary?: {
-                [key: string]: unknown;
-            };
-            /** Method Candidates */
-            method_candidates?: components["schemas"]["ReviewCandidateModel"][];
-            /** Next Queue Candidates */
-            next_queue_candidates?: components["schemas"]["ReviewCandidateModel"][];
-            /** Profile */
-            profile: string;
-            /** Public Candidates */
-            public_candidates?: components["schemas"]["ReviewCandidateModel"][];
-            summary?: components["schemas"]["ReviewSummaryModel"];
-            /** Week End */
-            week_end: string;
-            /** Week Start */
-            week_start: string;
-        };
-        /**
-         * ReviewSaveRequest
-         * @description Body for saving selected candidates to Agent Activity.
-         *
-         *     ``candidate_type`` is one of ``evidence`` / ``next_action`` /
-         *     ``public_draft``; ``start``/``end`` are the ISO review window the
-         *     candidates were generated from (recorded as the activity source_ref).
-         */
-        ReviewSaveRequest: {
-            /** Candidate Type */
-            candidate_type: string;
-            /** Candidates */
-            candidates: components["schemas"]["ReviewCandidateModel"][];
-            /** End */
-            end: string;
-            /** Start */
-            start: string;
-        };
-        /**
-         * ReviewSaveResponse
-         * @description Result of persisting candidates as pending Activity items.
-         */
-        ReviewSaveResponse: {
-            /** Item Ids */
-            item_ids?: string[];
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-            /**
-             * Saved
-             * @default 0
-             */
-            saved: number;
-        };
-        /**
-         * ReviewSummaryModel
-         * @description Candidate counters for the weekly review header.
-         */
-        ReviewSummaryModel: {
-            /**
-             * Done Tasks
-             * @default 0
-             */
-            done_tasks: number;
-            /**
-             * Evidence Candidates
-             * @default 0
-             */
-            evidence_candidates: number;
-            /**
-             * Next Action Candidates
-             * @default 0
-             */
-            next_action_candidates: number;
-            /**
-             * Public Draft Candidates
-             * @default 0
-             */
-            public_draft_candidates: number;
         };
         /**
          * SidecarInfoModel
@@ -8843,6 +8777,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentTaskListResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_profile_ai_exceptions_api_v1_profiles__name__ai_exceptions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIExceptionsResponse"];
                 };
             };
             /** @description Invalid profile name. */
@@ -13432,17 +13426,13 @@ export interface operations {
             };
         };
     };
-    get_profile_review_api_v1_profiles__name__review_get: {
+    get_profile_research_reader_api_v1_profiles__name__research_papers__source_id__reader_get: {
         parameters: {
-            query?: {
-                /** @description ISO window start; empty = current week. */
-                start?: string;
-                /** @description ISO window end; empty = current week. */
-                end?: string;
-            };
+            query?: never;
             header?: never;
             path: {
                 name: string;
+                source_id: string;
             };
             cookie?: never;
         };
@@ -13454,7 +13444,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReviewResponse"];
+                    "application/json": components["schemas"]["ResearchReaderResponse"];
                 };
             };
             /** @description Invalid profile name. */
@@ -13491,152 +13481,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    apply_profile_review_candidates_api_v1_profiles__name__review_apply_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReviewApplyRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReviewApplyResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the review source files. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Invalid window, unknown candidate type, or empty selection. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    save_profile_review_candidates_api_v1_profiles__name__review_save_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReviewSaveRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReviewSaveResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the review source files. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Invalid window, unknown candidate type, or empty selection. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

@@ -1,16 +1,15 @@
-import { AppShell, Badge, Burger, Button, Divider, Group, NavLink, Text, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, AppShell, Badge, Burger, Button, Divider, Group, Indicator, NavLink, Text, Title, Tooltip } from '@mantine/core';
 import { useDisclosure, useLocalStorage, useMediaQuery } from '@mantine/hooks';
 import {
   IconArrowLeft,
+  IconAlertTriangle,
   IconBinaryTree2,
   IconBook2,
-  IconCalendarWeek,
   IconCertificate,
   IconChevronsLeft,
   IconChevronsRight,
 
   IconHome,
-  IconInbox,
   IconLogout,
   IconRobot,
   IconRocket,
@@ -22,7 +21,8 @@ import {
 } from '@tabler/icons-react';
 import { NavLink as RouterNavLink, Link as RouterLink, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom';
 
-import { useLogout, useMe } from '../api/hooks';
+import { useAIExceptions, useLogout, useMe } from '../api/hooks';
+import { AIExceptionDrawer } from './AIExceptionDrawer';
 import { chrome } from '../theme';
 
 const NAV_ITEMS = [
@@ -30,12 +30,9 @@ const NAV_ITEMS = [
   { label: '项目', path: 'projects', icon: IconTimeline },
   { label: '技能树', path: 'skill-tree', icon: IconBinaryTree2 },
   { label: '证据', path: 'evidence', icon: IconCertificate },
-  { label: '周回顾', path: 'review', icon: IconCalendarWeek },
   { label: '输出工作室', path: 'studio', icon: IconWriting },
   { label: '公开构建', path: 'public-build', icon: IconRocket },
   { label: '研究台', path: 'research', icon: IconBook2 },
-  { label: '收件箱', path: 'inbox', icon: IconInbox },
-  { label: '代理活动', path: 'activity', icon: IconRobot },
 ];
 
 // Wide-viewport policy: every page's main column is centered and capped so
@@ -69,10 +66,14 @@ export function AppLayout() {
     key: RAIL_EXPANDED_STORAGE_KEY,
     defaultValue: false,
   });
+  const [exceptionsOpened, setExceptionsOpened] = useDisclosure(false);
   const isDesktop = useMediaQuery('(min-width: 48em)') ?? true;
   const profileMatch = useMatch('/p/:name/*');
   const currentProfile = profileMatch?.params.name ?? '';
   const authEnabled = me.data?.auth_enabled ?? false;
+  const exceptions = useAIExceptions(currentProfile);
+  const exceptionCount = exceptions.data?.total ?? 0;
+  const hasExceptionSignal = exceptionCount > 0 || exceptions.isError;
   const fullBleed = FULL_BLEED_SEGMENTS.some((segment) => location.pathname.includes(segment));
   const immersive = IMMERSIVE_SEGMENTS.some((segment) => location.pathname.includes(segment));
   const railWidth = railExpanded ? RAIL_WIDTH_EXPANDED : RAIL_WIDTH_COLLAPSED;
@@ -172,6 +173,27 @@ export function AppLayout() {
             >
               助手
             </Button>
+            {currentProfile && hasExceptionSignal && (
+              <Tooltip label="AI 异常" withArrow>
+                <Indicator
+                  inline
+                  label={exceptions.isError ? '!' : exceptionCount > 99 ? '99+' : exceptionCount}
+                  size={18}
+                  color="red"
+                  offset={4}
+                  disabled={!hasExceptionSignal}
+                >
+                  <ActionIcon
+                    variant="subtle"
+                    color="red"
+                    aria-label={exceptions.isError ? 'AI 异常列表加载失败' : `AI 异常 ${exceptionCount} 条`}
+                    onClick={setExceptionsOpened.open}
+                  >
+                    <IconAlertTriangle size={18} />
+                  </ActionIcon>
+                </Indicator>
+              </Tooltip>
+            )}
             <Button
               component={RouterLink}
               to="/settings"
@@ -243,6 +265,13 @@ export function AppLayout() {
           <Outlet />
         </div>
       </AppShell.Main>
+      {currentProfile && (
+        <AIExceptionDrawer
+          profile={currentProfile}
+          opened={exceptionsOpened}
+          onClose={setExceptionsOpened.close}
+        />
+      )}
     </AppShell>
   );
 }

@@ -62,6 +62,7 @@ class ProfileSettingsPatch(BaseModel):
     kanban: dict[str, Any] | None = None
     evidence_review: dict[str, Any] | None = None
     project_board: dict[str, Any] | None = None
+    research: dict[str, Any] | None = None
 
 
 class ProfileSettingsResponse(BaseModel):
@@ -336,6 +337,29 @@ class ActivityItemErrorResponse(ErrorResponse):
     """Error body that also carries the current activity item."""
 
     item: ActivityItemModel | None = None
+
+
+class AIExceptionModel(BaseModel):
+    """One unresolved failure that needs attention from the profile owner."""
+
+    id: str
+    source: str = ""
+    title: str = ""
+    message: str = ""
+    action: str = ""
+    source_ref: str = ""
+    created: str = ""
+    severity: str = "error"
+    retryable: bool = True
+    href: str = ""
+
+
+class AIExceptionsResponse(BaseModel):
+    """Profile-scoped AI failures from gateway, agents, jobs, and writebacks."""
+
+    profile: str
+    total: int = 0
+    items: list[AIExceptionModel] = Field(default_factory=list)
 
 
 class KanbanSubtaskModel(BaseModel):
@@ -1241,113 +1265,6 @@ class CrystallizeApplyResponse(BaseModel):
     new_evidence_ids: list[str] = Field(default_factory=list)
     crystallized_count: int = 0
     items: list[CrystallizeTaskResult] = Field(default_factory=list)
-
-
-class ReviewCandidateModel(BaseModel):
-    """One weekly-review candidate (evidence/next_action/method/public_draft).
-
-    Mirrors the dicts produced by ``core.growth_review.build_weekly_review``;
-    extension keys (e.g. ``tags``) are preserved so the SPA can round-trip a
-    candidate from the GET response into the save/apply mutations unchanged.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    source: str = ""
-    task_id: str = ""
-    resource_id: str = ""
-    title: str = ""
-    summary: str = ""
-    notes: list[str] = Field(default_factory=list)
-    visibility: str = ""
-    draft: bool = True
-
-
-class ReviewSummaryModel(BaseModel):
-    """Candidate counters for the weekly review header."""
-
-    done_tasks: int = 0
-    evidence_candidates: int = 0
-    next_action_candidates: int = 0
-    public_draft_candidates: int = 0
-
-
-class ReviewResponse(BaseModel):
-    """Candidate-only weekly review payload (``GrowthReview`` projection).
-
-    Read-only aggregation over kanban.md Done cards plus the optional
-    activity/learning/inbox logs; no LLM involvement in this slice.
-    """
-
-    profile: str
-    week_start: str
-    week_end: str
-    done_task_ids: list[str] = Field(default_factory=list)
-    activity_summary: dict[str, Any] = Field(default_factory=dict)
-    learning_summary: dict[str, Any] = Field(default_factory=dict)
-    inbox_summary: dict[str, Any] = Field(default_factory=dict)
-    evidence_candidates: list[ReviewCandidateModel] = Field(default_factory=list)
-    next_queue_candidates: list[ReviewCandidateModel] = Field(default_factory=list)
-    method_candidates: list[ReviewCandidateModel] = Field(default_factory=list)
-    public_candidates: list[ReviewCandidateModel] = Field(default_factory=list)
-    summary: ReviewSummaryModel = Field(default_factory=ReviewSummaryModel)
-
-
-class ReviewSaveRequest(BaseModel):
-    """Body for saving selected candidates to Agent Activity.
-
-    ``candidate_type`` is one of ``evidence`` / ``next_action`` /
-    ``public_draft``; ``start``/``end`` are the ISO review window the
-    candidates were generated from (recorded as the activity source_ref).
-    """
-
-    start: str = Field(min_length=1)
-    end: str = Field(min_length=1)
-    candidate_type: str
-    candidates: list[ReviewCandidateModel] = Field(min_length=1)
-
-
-class ReviewSaveResponse(BaseModel):
-    """Result of persisting candidates as pending Activity items."""
-
-    ok: bool = True
-    saved: int = 0
-    item_ids: list[str] = Field(default_factory=list)
-
-
-class ReviewApplyRequest(ReviewSaveRequest):
-    """Body for applying selected candidates to their owner files.
-
-    ``mark_crystallized`` only affects evidence candidates: the source Done
-    kanban card is marked crystallized after a successful pool writeback.
-    """
-
-    mark_crystallized: bool = True
-
-
-class ReviewApplyResultModel(BaseModel):
-    """Per-candidate outcome of one apply call (mirrors ReviewApplyResult)."""
-
-    ok: bool
-    title: str = ""
-    warnings: list[str] = Field(default_factory=list)
-    errors: list[str] = Field(default_factory=list)
-    changed_paths: list[str] = Field(default_factory=list)
-    output_path: str = ""
-
-
-class ReviewApplyResponse(BaseModel):
-    """Aggregate outcome of applying the selected candidates.
-
-    Apply is per-candidate: individual failures (e.g. pool merge conflict)
-    land in ``results`` with ``ok=false`` and do not fail the whole request,
-    mirroring the Streamlit page which applies candidates one by one.
-    """
-
-    ok: bool = True
-    applied: int = 0
-    failed: int = 0
-    results: list[ReviewApplyResultModel] = Field(default_factory=list)
 
 
 class ProjectMilestoneModel(BaseModel):
@@ -2671,6 +2588,31 @@ class ResearchSummaryModel(BaseModel):
     citations_total: int = 0
 
 
+class ResearchPaperItemModel(BaseModel):
+    """Paper library projection used by the SPA research workbench."""
+
+    id: str
+    title: str = ""
+    status: str = "inbox"
+    captured_at: str = ""
+    tags: list[str] = Field(default_factory=list)
+    summary: str = ""
+    analysis: dict[str, object] = Field(default_factory=dict)
+    pdf_available: bool = False
+    page_count: int = 0
+    extraction_status: str = ""
+    segment_count: int = 0
+    annotation_count: int = 0
+    translated_count: int = 0
+    missing_count: int = 0
+    stale_count: int = 0
+    failed_count: int = 0
+    translation_status: str = "missing"
+    last_page: int = 0
+    last_read_at: str = ""
+    target_lang: str = "zh"
+
+
 class ResearchResponse(BaseModel):
     """Research overview (M4): source-inbox summary plus sidecar entry.
 
@@ -2683,4 +2625,14 @@ class ResearchResponse(BaseModel):
     profile: str
     summary: ResearchSummaryModel = Field(default_factory=ResearchSummaryModel)
     sources: list[ResearchSourceItemModel] = Field(default_factory=list)
+    papers: list[ResearchPaperItemModel] = Field(default_factory=list)
     sidecar: SidecarInfoModel = Field(default_factory=SidecarInfoModel)
+
+
+class ResearchReaderResponse(BaseModel):
+    """Reader deep link minted for one profile paper."""
+
+    profile: str
+    source_id: str
+    reader_url: str
+    token: str = ""

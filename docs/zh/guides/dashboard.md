@@ -40,7 +40,7 @@ Context Header 底部（次目标 rail 之下、操作按钮之上）有一行�
 - **写类意图**（`kanban.add`、`evidence.capture`）**先确认后写入**：submit 只把解析结果（动作类型 / 标题 / 列 / 截止日期 / 标签）存为 pending intent，下一帧命令栏下方出现确认卡；点「确认写入」发 `command_bar_confirm {intent_id}` 才真正执行，点「放弃」发 `command_bar_discard {intent_id}` 清掉 pending。
   - `kanban.add` 确认时从磁盘现取 kanban（`parse_kanban`）→ 追加任务（Doing 落 `started_on=今天`；due 以 `due: <iso>` 存进 task details；tags 逗号连接）→ `ensure_kanban_task_ids` → `core/kanban_merge.save_kanban_with_merge(profile, sections, base=None)`（冲突时 union 合并）保存 → 刷新文件快照 + toast。
   - `evidence.capture` 确认时复用首页 capture inbox 的既有写入通道（Research Source Inbox，`capture_event="command_bar"` 标记来源），保持单一写入路径。
-- **只读意图直接执行**：`navigate`（如「打开看板」）跳对应页面；`review.weekly_summary`（如「这周做了什么」）跳 `pages/8_Review.py`。
+- **只读意图直接执行**：`navigate`（如「打开看板」）跳对应页面；周期性总结由 OpenClaw 生成。
 - **未识别**（`unknown`）不写任何数据，下一帧在命令栏下方显示一行示例命令帮助（单帧一次性）。
 
 命令栏事件只影响当前 profile；pending intent 按 profile 存在 session state 里，confirm 时校验 `intent_id` 匹配才执行。

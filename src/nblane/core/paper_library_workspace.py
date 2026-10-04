@@ -73,7 +73,6 @@ LIBRARY_VIEW_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             "reading",
             "no_pdf",
             "needs_extraction",
-            "claims_need_review",
             "duplicate_risk",
             "stale_translation",
         ),
@@ -527,10 +526,9 @@ def _paper_component_rows(
                 "pdf_download_error": _clean_text(row.get("pdf_download_error")),
                 "metrics": " · ".join(
                     [
-                        f"Annotations: {row.get('annotations_count', 0)}",
-                        f"Chunk refs: {row.get('chunks_count', 0)}",
-                        f"Research claims: {row.get('claims_count', 0)}",
-                        f"Research citations: {row.get('citations_count', 0)}",
+                        f"第 {_clean_text(source_metadata.get('last_read_page')) or '—'} 页",
+                        f"标注 {row.get('annotations_count', 0)}",
+                        f"阅读记录 {'有' if row.get('last_read') else '无'}",
                     ]
                 ),
             }
@@ -565,7 +563,7 @@ def _paper_detail_payload(
     pages = load_paper_pages(profile, source_id)
     segments = load_paper_segments(profile, source_id)
     chunks = load_chunks(_profile_root(profile), source_id)
-    has_pdf = bool(source_metadata.get("pdf_asset_ref"))
+    has_pdf = bool(row.get("has_pdf"))
     reader_url = _reader_view_url(profile, source_id, user_id=user_id, reader_base=reader_base) if has_pdf else ""
     open_access_pdf_url = _clean_text(
         source_metadata.get("open_access_pdf_url")
@@ -609,9 +607,8 @@ def _paper_detail_payload(
             {"label": "PDF", "value": "ready" if has_pdf else "missing"},
             {"label": "Last page", "value": _clean_text(source_metadata.get("last_read_page")) or "-"},
             {"label": "Segments", "value": len(segments)},
-            {"label": "Annotations", "value": len([ann for ann in annotations if ann.status == "active"])},
-            {"label": "Research claims", "value": int(row.get("claims_count") or 0)},
-            {"label": "Research citations", "value": int(row.get("citations_count") or 0)},
+            {"label": "Notes", "value": len([ann for ann in annotations if ann.status == "active"])},
+            {"label": "Translations", "value": len(translations)},
         ],
         "artifacts": {
             "pdf_asset_ref": _clean_text(source_metadata.get("pdf_asset_ref")),

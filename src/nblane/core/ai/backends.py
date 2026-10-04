@@ -25,6 +25,11 @@ from nblane.core.ai.actions import (
 from nblane.core.ai.prompts import prompt_for_action
 from nblane.core.ai.runs import new_run_id
 from nblane.core.ai.structured import validate_json_response, validate_schema
+from nblane.core.ai.local_translation import (
+    LOCAL_TRANSLATION_BACKEND,
+    is_available as local_translation_available,
+    translate_segments as translate_local_segments,
+)
 
 
 class DirectLLMBackend:
@@ -107,6 +112,60 @@ class DirectLLMBackend:
             backend=self.name,
             run_id=run_id,
             content=raw,
+        )
+
+
+class LocalTranslationBackend:
+    """Optional CPU-local English-to-Chinese paper translation backend."""
+
+    name = LOCAL_TRANSLATION_BACKEND
+
+    def run(
+        self,
+        request: AIActionRequest,
+        spec: AIActionSpec,
+    ) -> AIActionResult:
+        run_id = new_run_id(request.action)
+        payload = request.payload if isinstance(request.payload, dict) else {}
+        if request.action != "research.paper_translate":
+            return AIActionResult(
+                ok=False,
+                action=request.action,
+                backend=self.name,
+                run_id=run_id,
+                error="local_translation only supports research.paper_translate",
+            )
+        if not local_translation_available():
+            return AIActionResult(
+                ok=False,
+                action=request.action,
+                backend=self.name,
+                run_id=run_id,
+                error="local_translation_unavailable: configure a supported local translation model",
+            )
+        segments = payload.get("segments")
+        if not isinstance(segments, list):
+            segments = []
+        try:
+            translations = translate_local_segments(
+                [item for item in segments if isinstance(item, dict)],
+                target_lang=str(payload.get("target_lang") or "zh"),
+            )
+        except Exception as exc:
+            return AIActionResult(
+                ok=False,
+                action=request.action,
+                backend=self.name,
+                run_id=run_id,
+                error=f"local_translation_error: {exc}",
+            )
+        return AIActionResult(
+            ok=True,
+            action=request.action,
+            backend=self.name,
+            run_id=run_id,
+            content=json.dumps({"translations": translations}, ensure_ascii=False),
+            structured={"translations": translations, "warnings": [], "ref": str(payload.get("source_id") or "")},
         )
 
 
@@ -435,7 +494,9 @@ def _readonly_codex_paper_search_prompt(request: AIActionRequest, system_prompt:
                     "- Do not edit files.",
                     "- Do not generate patches.",
                     "- Do not run code-changing commands.",
-                    "- You may run read-only commands such as python/curl to query arXiv APIs, search pages, and inspect web results.",
+                    "- Use Codex's built-in web search capability first; the read-only sandbox may not provide network access to shell commands.",
+                    "- Prefer arXiv APIs and other primary paper sources when the built-in search exposes them.",
+                    "- Use python/curl only for local parsing or read-only verification after a search result provides a URL; do not depend on shell access to arXiv APIs.",
                     "- Do not write profile facts.",
                     "- Return one JSON object only, no markdown.",
                 ]
@@ -699,6 +760,7 @@ def default_backends() -> dict[str, object]:
 
     backends = [
         DirectLLMBackend(),
+        LocalTranslationBackend(),
         WorkflowAgentBackend(),
         ExternalAgentBackend(),
         LocalReadonlyCodexBackend(),

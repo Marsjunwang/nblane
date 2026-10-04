@@ -13,7 +13,7 @@ import { ProfilesPage } from './pages/ProfilesPage';
 import { KanbanRedirect, ProjectBoardRedirect, ProjectsPage } from './pages/ProjectsPage';
 import { PublicBuildPage } from './pages/PublicBuildPage';
 import { ResearchPage } from './pages/ResearchPage';
-import { ReviewPage } from './pages/ReviewPage';
+import { PaperReaderPage } from './pages/PaperReaderPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { SkillTreePage } from './pages/SkillTreePage';
 import { StudioPage } from './pages/StudioPage';
@@ -60,13 +60,13 @@ export function App() {
           <Route path="/p/:name/evidence" element={<EvidencePage />} />
           {/* Legacy route: the review queue merged into the Evidence page. */}
           <Route path="/p/:name/evidence-review" element={<EvidenceReviewRedirect />} />
-          <Route path="/p/:name/review" element={<ReviewPage />} />
           {/* Legacy route: the project board merged into the Projects page. */}
           <Route path="/p/:name/project-board" element={<ProjectBoardRedirect />} />
           <Route path="/p/:name/projects" element={<ProjectsPage />} />
           <Route path="/p/:name/studio" element={<StudioPage />} />
           <Route path="/p/:name/public-build" element={<PublicBuildPage />} />
           <Route path="/p/:name/research" element={<ResearchPage />} />
+          <Route path="/p/:name/research/papers/:sourceId" element={<PaperReaderPage />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

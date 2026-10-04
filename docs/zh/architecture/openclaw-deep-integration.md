@@ -327,18 +327,16 @@ daily-review,weekly-maintenance}.md`（L3 的 automations.yaml 引用它们）�
 
 ### 4.3 微信随手记 → inbox 闭环
 
-Blinko 双层笔记模式（§8.5）：闪记（闪念）→ 周回顾时晋升（整理）。
+Blinko 双层笔记模式（§8.5）：闪记（闪念）→ 由 OpenClaw 周总结时整理。
 落法：
 
 1. L1 的 `capture_inbox` 工具 + 微信侧 prompt 规则：用户转发链接/想法/
    截图描述 → agent 分类打 tag → `capture_inbox`。
-2. 人侧处置面：inbox 目前**没有 UI 页面**（实测确认），短期由
-   `pages/8_Review.py` 的周回顾流程承载（它已读 inbox 计数，
-   `core/growth_review.py:143/303`）；中期在 SPA 里做专门的 Inbox 页
-   （见配套文档 L5 页面规划）。
+2. 人侧处置面：Inbox 页面负责记录和人工处置原始事实；周期性总结由
+   OpenClaw 生成并推送（见配套文档 L5 页面规划）。
 3. 验收：微信发"记一下：https://… 这篇讲的技能图谱方法不错" →
    `profiles/王军/inbox.yaml` 新增 `captured_by: openclaw` 条目 →
-   周回顾页可见可处置（to_kanban_queue / to_evidence_draft 等已有动作，
+   OpenClaw 周总结可见可处置（to_kanban_queue / to_evidence_draft 等已有动作，
    `core/inbox.py:26`）。
 
 ### 4.4 测试与验收
@@ -631,7 +629,7 @@ windmill.dev/docs/advanced/git_sync
 
 ### 8.5 Blinko / Memos → 闪记双层模型
 
-Blinko："Blinkos（闪记流）vs Notes（晋升整理）"双层，周回顾时晋升；
+Blinko："Blinkos（闪记流）vs Notes（晋升整理）"双层，由 OpenClaw 周总结时晋升；
 Memos：零字段快速捕获。**借**：L2.3 微信随手记 = 闪记，`inbox.yaml` 状态机
 （inbox→captured→clarified…，已有）= 晋升管道。github.com/blinkospace/blinko
 

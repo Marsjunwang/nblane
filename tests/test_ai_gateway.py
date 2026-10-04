@@ -23,6 +23,7 @@ from nblane.core.ai import (
 from nblane.core.ai.actions import AIActionRequest
 from nblane.core.ai.backends import (
     DirectLLMBackend,
+    LocalTranslationBackend,
     LocalReadonlyCodexBackend,
     RuleFallbackBackend,
     default_backends,
@@ -310,6 +311,57 @@ class TestAIGateway(unittest.TestCase):
             get_action_spec("research.paper_translate").default_backend,  # type: ignore[union-attr]
             "direct_llm",
         )
+
+    def test_local_translation_backend_is_registered_without_being_required(self) -> None:
+        registry = default_backends()
+        self.assertIsInstance(registry["local_translation"], LocalTranslationBackend)
+
+    def test_local_translation_backend_returns_structured_rows(self) -> None:
+        spec = get_action_spec("research.paper_translate")
+        self.assertIsNotNone(spec)
+        request = AIActionRequest(
+            action="research.paper_translate",
+            profile="alice",
+            payload={
+                "source_id": "source:paper:1",
+                "target_lang": "zh",
+                "segments": [{
+                    "segment_id": "seg:1",
+                    "source_hash": "sha256:abc",
+                    "text": "The model is fast.",
+                }],
+            },
+        )
+        with (
+            patch("nblane.core.ai.backends.local_translation_available", return_value=True),
+            patch(
+                "nblane.core.ai.backends.translate_local_segments",
+                return_value=[{
+                    "segment_id": "seg:1",
+                    "source_hash": "sha256:abc",
+                    "translated_text": "模型很快。",
+                }],
+            ),
+        ):
+            result = LocalTranslationBackend().run(request, spec)  # type: ignore[arg-type]
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.backend, "local_translation")
+        self.assertEqual(result.structured["translations"][0]["translated_text"], "模型很快。")  # type: ignore[index]
+
+    def test_local_translation_is_selected_when_model_is_available(self) -> None:
+        with patch("nblane.core.ai.gateway.local_translation_available", return_value=True):
+            # The explicit backend is exercised through the gateway registry
+            # below; this assertion verifies the auto-selection signal.
+            with patch("nblane.core.ai.gateway.run_ai_action") as run:
+                run.return_value = SimpleNamespace(ok=True, backend="local_translation")
+                translate_paper_segments(
+                    "alice",
+                    "source:paper:1",
+                    [{"segment_id": "seg:1", "text": "hello", "text_hash": "sha256:abc"}],
+                    require_review=False,
+                )
+                self.assertEqual(run.call_args.kwargs["preferred_backend"], "local_translation")
 
     def test_local_readonly_codex_backend_parses_paper_search_json(self) -> None:
         """Gateway parses Codex's final JSON message as structured candidates."""

@@ -169,7 +169,6 @@ sidebar_nav_work_group: Daily
 sidebar_nav_growth_group: Build
 sidebar_nav_output_group: Output
 sidebar_nav_team_group: Collaborate
-sidebar_nav_review_group: Review
 sidebar_nav_system_group: System
 sidebar_nav_dashboard: Daily Dashboard
 sidebar_nav_kanban: Kanban
@@ -178,7 +177,6 @@ sidebar_nav_evidence_review: Evidence Review
 sidebar_nav_research: Research
 sidebar_nav_skill_map: Skill Map
 sidebar_nav_gap: Gap Analysis
-sidebar_nav_review: Review
 sidebar_nav_health: Profile Health
 sidebar_nav_agent_activity: Agent Activity
 sidebar_nav_public: Output Studio

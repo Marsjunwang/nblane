@@ -1785,3 +1785,174 @@ select {
     position: static;
   }
 }
+
+/* Align the sidecar workbench with the SPA/home chrome: indigo ground,
+   moon-white type, and clay-gold actions. The PDF itself remains a light
+   reading surface inside this shell. */
+body {
+  color: #f2ede0;
+  background: #0f1930;
+}
+
+.paper-tree-shell,
+.paper-tree-shell.is-standalone {
+  min-height: 100vh;
+  padding: 16px;
+  background: #0f1930;
+}
+
+.paper-workspace-head,
+.paper-workbench {
+  color: #f2ede0;
+}
+
+.paper-workbench {
+  grid-template-columns: minmax(210px, 0.26fr) minmax(340px, 0.48fr) minmax(280px, 0.26fr);
+  gap: 14px;
+}
+
+.paper-tree-pane,
+.paper-list-pane,
+.paper-detail-pane {
+  border: 1px solid rgba(220, 174, 85, 0.18);
+  border-radius: 8px;
+  background: #101d30;
+  box-shadow: 0 12px 28px rgba(3, 10, 19, 0.16);
+}
+
+.paper-tree-pane,
+.paper-list-pane,
+.paper-detail-pane {
+  padding: 12px;
+}
+
+.paper-discovery,
+.paper-workspace-metric,
+.paper-list-card,
+.paper-detail-section,
+.paper-detail-artifacts,
+.paper-detail-empty {
+  border-color: rgba(220, 174, 85, 0.16);
+  background: #16263d;
+  color: #f2ede0;
+  box-shadow: none;
+}
+
+.paper-discovery-title,
+.paper-discovery-title strong,
+.paper-list-title,
+.paper-card-title,
+.paper-detail-title,
+.paper-detail-section-title,
+.paper-workspace-metric strong {
+  color: #f2ede0;
+}
+
+.paper-discovery-title span,
+.paper-discovery-advanced-toggle span,
+.paper-tree-toolbar button,
+.paper-list-select-all {
+  border-color: rgba(220, 174, 85, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+  color: #b0a78c;
+}
+
+.paper-discovery-mode,
+.paper-discovery-depth-options {
+  border-color: rgba(220, 174, 85, 0.22);
+  background: #101d30;
+}
+
+.paper-discovery-mode button,
+.paper-discovery-depth-options button {
+  color: #b0a78c;
+}
+
+.paper-discovery-mode button.is-active,
+.paper-discovery-depth-options button.is-active {
+  background: #dcae55;
+  color: #0f1930;
+}
+
+.paper-discovery-form label,
+.paper-discovery-importbar label,
+.paper-discovery-advanced-grid label,
+.paper-workspace-metric span,
+.paper-detail-metric span,
+.paper-card-meta,
+.paper-card-metrics,
+.paper-reading-empty,
+.paper-detail-meta,
+.paper-detail-artifacts {
+  color: #b0a78c;
+}
+
+.paper-discovery-form input,
+.paper-discovery-form select,
+.paper-discovery-importbar select,
+.paper-discovery-advanced-grid input,
+.paper-workspace-controls input,
+.paper-workspace-controls select,
+.paper-list-search input {
+  border-color: #3a4d6e;
+  background: #0f1930;
+  color: #f2ede0;
+}
+
+.paper-discovery-search,
+.paper-discovery-import {
+  border-color: #dcae55;
+  background: #dcae55;
+  color: #0f1930;
+}
+
+.paper-discovery-cancel,
+.paper-detail-actions button,
+.paper-detail-actions select {
+  border-color: #3a4d6e;
+  background: #101d30;
+  color: #f2ede0;
+}
+
+.paper-discovery-policy span,
+.paper-card-status,
+.paper-card-badges span {
+  border-color: rgba(220, 174, 85, 0.22);
+  background: rgba(220, 174, 85, 0.1);
+  color: #eac57e;
+}
+
+.paper-list-card:hover,
+.paper-list-card.is-active,
+.paper-list-card.is-selected {
+  border-color: rgba(220, 174, 85, 0.52);
+  background: #1d3450;
+}
+
+.paper-card-summary,
+.paper-reading-body,
+.paper-detail-section p,
+.paper-discovery-card p {
+  color: #d9d2c0;
+}
+
+.paper-reading-links,
+.paper-reading-related,
+.paper-card-reading-links {
+  border-left-color: rgba(220, 174, 85, 0.42);
+}
+
+.paper-reading-link,
+.paper-detail-section a,
+.paper-tree-item.is-active,
+.paper-tree-item:hover {
+  color: #eac57e;
+}
+
+.paper-workspace-metrics {
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+}
+
+.paper-workspace-metric {
+  background: #101d30;
+}

@@ -168,7 +168,6 @@ class TestGoalPresenceI18n(unittest.TestCase):
             "pages/4_Team_View.py": "selected_profile = select_profile()\nui = team_ui()",
             "pages/5_Profile_Health.py": "selected = select_profile()\nui = profile_health_ui()",
             "pages/7_Research.py": "selected = select_profile()\nui = research_ui()",
-            "pages/8_Review.py": "selected = select_profile()\nui = review_ui()",
             "pages/9_Agent_Activity.py": "selected = select_profile()\nui = agent_activity_ui()",
             "src/nblane/web_output_studio.py": "selected = select_profile()\n    ui = _ui()",
             "src/nblane/web_public_build.py": "selected = select_profile()\n    ui = _ui()",

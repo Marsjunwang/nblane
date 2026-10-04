@@ -155,13 +155,37 @@ function bootstrapProfile() {
   return cleanText(new URLSearchParams(window.location.search).get("profile"));
 }
 
+function sidecarAuthHandoff() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return cleanText(new URLSearchParams(window.location.search).get("auth_handoff"));
+}
+
+function withSidecarAuth(url) {
+  const handoff = sidecarAuthHandoff();
+  if (!handoff || typeof window === "undefined") {
+    return url;
+  }
+  try {
+    const parsed = new URL(url, window.location.origin);
+    parsed.searchParams.set("auth_handoff", handoff);
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}auth_handoff=${encodeURIComponent(handoff)}`;
+  }
+}
+
 function paperLibraryApiUrl(profile, suffix = "") {
   const encoded = encodeURIComponent(profile);
-  return `/api/research/${encoded}/paper-library${suffix}`;
+  return withSidecarAuth(`/api/research/${encoded}/paper-library${suffix}`);
 }
 
 function paperApiUrl(profile, sourceId, suffix = "") {
-  return `/api/research/${encodeURIComponent(profile)}/papers/${encodeURIComponent(sourceId)}${suffix}`;
+  return withSidecarAuth(
+    `/api/research/${encodeURIComponent(profile)}/papers/${encodeURIComponent(sourceId)}${suffix}`,
+  );
 }
 
 function safeReturnHref(value, fallback = "/Research") {
@@ -2023,7 +2047,6 @@ function WorkspaceHeader({ payload, paperQuery, setPaperQuery, sortMode, setSort
     ["reading", "Reading"],
     ["no_pdf", "PDF missing"],
     ["needs_extraction", "Needs extraction"],
-    ["claims_need_review", "Claims review"],
   ];
   return (
     <header className="paper-workspace-head">
@@ -2060,7 +2083,6 @@ function WorkspaceHeader({ payload, paperQuery, setPaperQuery, sortMode, setSort
           <option value="added">Recently added</option>
           <option value="title">Title</option>
           <option value="status">Status</option>
-          <option value="claims">Research claims</option>
         </select>
         <button type="button" onClick={() => onApply({ query: paperQuery })}>
           Apply

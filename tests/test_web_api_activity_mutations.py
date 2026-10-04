@@ -17,9 +17,10 @@ from unittest.mock import patch
 import yaml
 from fastapi.testclient import TestClient
 
+from nblane.core import agent_activity
 from nblane.core import auth as auth_core
 from nblane.core.paths import REPO_ROOT
-from nblane.core.review_actions import save_review_candidates_to_activity
+from nblane.core.review_actions import activity_item_from_review_candidate
 from nblane.web_api import app, create_app
 
 TEMPLATE_DIR = REPO_ROOT / "profiles" / "template"
@@ -44,22 +45,19 @@ def _template_profile(root: Path, name: str = "alice") -> Path:
 
 def _seed_evidence_candidate(title: str) -> str:
     """Persist one pending Review evidence candidate; return its item id."""
-    stored = save_review_candidates_to_activity(
+    stored = agent_activity.append_activity_item(
         "alice",
-        WINDOW_START,
-        WINDOW_END,
-        "evidence",
-        [
-            {
+        activity_item_from_review_candidate(
+            "alice", WINDOW_START, WINDOW_END, "evidence", {
                 "title": title,
                 "type": "project",
                 "date": "2026-09-15",
                 "url": "https://example.com/nav",
                 "summary": f"summary for {title}",
             }
-        ],
+        ),
     )
-    return str(stored[0]["id"])
+    return str(stored["id"])
 
 
 def _write_users_file(path: Path) -> Path:

@@ -35,7 +35,7 @@ from nblane.core.file_write import atomic_write_text
 from nblane.core.kanban_io import KANBAN_QUEUE, parse_kanban, render_kanban
 from nblane.core.models import KanbanTask
 from nblane.core.paths import REPO_ROOT
-from nblane.core.review_actions import save_review_candidates_to_activity
+from nblane.core.review_actions import activity_item_from_review_candidate
 from nblane.web_api import app
 
 TEMPLATE_DIR = REPO_ROOT / "profiles" / "template"
@@ -240,14 +240,14 @@ class TestWebApiWriteConflict(unittest.TestCase):
     # -- agent activity -----------------------------------------------------
 
     def _seed_next_action(self) -> str:
-        stored = save_review_candidates_to_activity(
+        stored = agent_activity.append_activity_item(
             "alice",
-            WINDOW_START,
-            WINDOW_END,
-            "next_action",
-            [{"title": "Review follow-up", "source": "review"}],
+            activity_item_from_review_candidate(
+                "alice", WINDOW_START, WINDOW_END, "next_action",
+                {"title": "Review follow-up", "source": "review"},
+            ),
         )
-        return str(stored[0]["id"])
+        return str(stored["id"])
 
     def _external_activity_write(self, profile: Path) -> None:
         doc = agent_activity.load_agent_activity(profile)
@@ -373,60 +373,6 @@ class TestWebApiWriteConflict(unittest.TestCase):
         self.assertNotEqual(
             by_id[ids[0]].get("review_status"), "reviewed"
         )
-
-    # -- review save/apply ----------------------------------------------------
-
-    def test_review_save_conflict_412(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _template_profile(root)
-            client = self._client(root)
-            review = client.get("/api/v1/profiles/alice/review")
-            etag = review.headers["etag"]
-
-            with _wrap_lock(
-                agent_activity.locked_profile_write,
-                lambda: self._external_activity_write(profile),
-            ) as wrapped:
-                with patch.object(
-                    agent_activity, "locked_profile_write", wrapped
-                ):
-                    conflicted = client.post(
-                        "/api/v1/profiles/alice/review/save",
-                        json={
-                            "candidate_type": "next_action",
-                            "start": WINDOW_START,
-                            "end": WINDOW_END,
-                            "candidates": [{"title": "候选"}],
-                        },
-                        headers={"If-Match": etag},
-                    )
-
-        self.assertEqual(conflicted.status_code, 412)
-        self.assertEqual(conflicted.json()["code"], "etag_mismatch")
-        self.assertNotEqual(conflicted.headers["etag"], etag)
-
-    def test_review_etag_covers_activity_and_blog(self) -> None:
-        """M-API-5: agent-activity.yaml and blog drafts rotate the ETag."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _template_profile(root)
-            client = self._client(root)
-            base = client.get("/api/v1/profiles/alice/review").headers["etag"]
-            self._external_activity_write(profile)
-            after_activity = client.get(
-                "/api/v1/profiles/alice/review"
-            ).headers["etag"]
-            blog_dir = profile / "blog"
-            blog_dir.mkdir(exist_ok=True)
-            (blog_dir / "2026-09-19-draft.md").write_text(
-                "---\ntitle: 草稿\n---\n\n正文\n", encoding="utf-8"
-            )
-            after_blog = client.get(
-                "/api/v1/profiles/alice/review"
-            ).headers["etag"]
-        self.assertNotEqual(base, after_activity)
-        self.assertNotEqual(after_activity, after_blog)
 
     # -- project board --------------------------------------------------------
 

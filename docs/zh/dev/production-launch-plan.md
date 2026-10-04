@@ -159,23 +159,18 @@ Streamlit 已冻结(phase-plan.md:29;home-editing-starmap-design.md §10),
 
 ## 2. 页面删除裁决
 
-### 2.1 周回顾(SPA `ReviewPage` /p/:name/review + Streamlit `pages/8_Review.py`)
+### 2.1 周回顾页面（已删除）
 
-**裁决:删,但等 Phase 4 复盘推送闭环落地之后。**
-
-它的三个角色现状:
+周回顾页面的三个角色已分别归位:
 1. 窗口聚合的**证据候选**(Done→evidence)——已被证据页「待结晶」向导取代
    (phase1 设计;结晶三段 API 已上线);
-2. **周统计/体检摘要**——预定去向是 openclaw 周回顾主动推送
+2. **周统计/体检摘要**——预定去向是 openclaw OpenClaw 周总结主动推送
    (phase1-evidence-page-design.md:54),**尚未实现**;
-3. **next-action 候选与 public-draft 候选**(`core/growth_review.py` +
-   review 三端点 :3746/:3843/:3895)——**目前唯一载体**。
+3. **next-action 候选与 public-draft 候选**由 OpenClaw 周总结和 Studio 承接。
 
-删除前置(X):openclaw 晚复盘/周报能把候选集合经对话送达并提供一键处置
-(apply/dismiss 端点是通用的,与页面解耦);public-draft 候选并入 Studio
-(Studio 已有 candidates/preview|create,:6281/:6303);next-action 候选由
-复盘 candidate 链承接。X 达成前保留页面但可以从主导航降为深链。
-Streamlit `pages/8_Review.py` 随 8501 终态一起退,不单独删。
+Kanban、学习日志继续记录原始事实，OpenClaw 负责周期性总结，证据页只处理
+人工确认后的证据。通用 Agent Activity 审批链和 `core/review_actions.py`
+仍供 OpenClaw、MCP 及其他候选写回流程使用。
 
 ### 2.2 健康页(SPA `HealthPage` /health + Streamlit `pages/5_Profile_Health.py`)
 
@@ -192,7 +187,7 @@ Health 解散是已定案(phase-plan.md:31;phase1-evidence-page-design.md:54),
 四个去向逐一核对:
 - **证据风险 → 证据页「待补强」:已落地**(`GET /evidence-stages` :3160 +
   SPA 证据页五阶段)。
-- **体检报告 → openclaw 周回顾推送:未实现**,列入 §3.4 每周自动化
+- **体检报告 → OpenClaw 周总结推送:未实现**,列入 §3.4 每周自动化
   (`GET /health` :620 现成,推送只是接 deliver 通道)。
 - **成长统计 → 首页/拓片:首页简报行已有,拓片未建**(§4)。
 - **数据卫生 → Settings「档案维护」:目标不存在**——`pages/12_Settings.py`
@@ -314,7 +309,7 @@ commit actor 是默认 "cli"~~(现由 `GitActorMiddleware` 按请求设为当前
    一站。周日流程:自治整理照旧;新增 `POST /divination`(戏占;用户点名
    正占需带所问之事)→ 卦辞推微信(卦象对(档案,日,模式)确定性,
    :5196–5198,推送与首页所见一致);`GET /health` 摘要随周报推送(落实
-   Health 解散的「体检→openclaw 周回顾」);`nblane openclaw doctor` 结果
+   Health 解散的「体检→OpenClaw 周总结」);`nblane openclaw doctor` 结果
    附尾(deep-integration §7.4)。
 6. **计划实例化**——「我想开始 30 天减脂」→ `GET /plan-templates` 列内置
    3 个 → 确认 → `POST /plan-templates/instantiate`(:5558,一次建成
@@ -373,7 +368,7 @@ commit actor 是默认 "cli"~~(现由 `GitActorMiddleware` 按请求设为当前
 4. prompt 改写 + CW-3 纳管 + 新增 weekly-divination(§3.4/3.5)→
 5. 页面删除:~~GapPage(卦辞卡接 intake **已落地 2026-09-24**)~~ **页面/nav
    本体已删除 2026-09-24**(/gap/analyze 与 /gap/intake API 保留)、
-   周回顾(复盘推送闭环后)、
+   OpenClaw 周总结、
    ~~SPA HealthPage(接受 §2.2.1 过渡即可先行)~~ **已删除 2026-09-24**
    (/health → /evidence?stage=strengthen,API 保留)→
 6. 观测两周:留痕簿抽查、git 历史、自动化投递、412 重试日志 →

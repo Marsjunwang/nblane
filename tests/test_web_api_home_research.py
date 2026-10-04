@@ -11,6 +11,15 @@ from unittest.mock import patch
 import yaml
 from fastapi.testclient import TestClient
 
+from nblane.core.research_papers import (
+    PaperSegment,
+    PaperStructureUnit,
+    PaperTranslation,
+    save_paper_segments,
+    save_paper_structure_units,
+    save_paper_translations,
+    text_hash,
+)
 from nblane.web_api import app
 
 KANBAN_MD = """# alice · Kanban
@@ -380,6 +389,83 @@ class TestResearchEndpoint(_HomeResearchBase):
             "http://127.0.0.1:8502/dashboard?profile=alice&embed=1&view=3d&compact=1",
         )
 
+    def test_research_translation_progress_uses_canonical_structure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _write_profile(root)
+            first_text = "First canonical paragraph."
+            second_text = "Second canonical paragraph."
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(
+                    profile,
+                    "src:001",
+                    [
+                        PaperSegment(
+                            segment_id="legacy:only",
+                            source_id="src:001",
+                            page=1,
+                            order=1,
+                            text=first_text,
+                            text_hash=text_hash(first_text),
+                        )
+                    ],
+                )
+                save_paper_structure_units(
+                    profile,
+                    "src:001",
+                    [
+                        PaperStructureUnit(
+                            unit_id="psu:first",
+                            source_id="src:001",
+                            kind="paragraph",
+                            page_start=1,
+                            page_end=1,
+                            order=1,
+                            text=first_text,
+                            text_hash=text_hash(first_text),
+                            rects=[{"page": 1, "x": 10, "y": 20, "w": 100, "h": 15}],
+                        ),
+                        PaperStructureUnit(
+                            unit_id="psu:second",
+                            source_id="src:001",
+                            kind="paragraph",
+                            page_start=1,
+                            page_end=1,
+                            order=2,
+                            text=second_text,
+                            text_hash=text_hash(second_text),
+                            rects=[{"page": 1, "x": 10, "y": 50, "w": 100, "h": 15}],
+                        ),
+                    ],
+                )
+                save_paper_translations(
+                    profile,
+                    "src:001",
+                    [
+                        PaperTranslation(
+                            id="translation:legacy",
+                            source_id="src:001",
+                            scope_type="segment",
+                            scope_ref="legacy:only",
+                            segment_id="legacy:only",
+                            page=1,
+                            source_hash=text_hash(first_text),
+                            source_text=first_text,
+                            translated_text="第一段。",
+                            status="translated",
+                        )
+                    ],
+                )
+            client = self._client(root)
+            response = client.get("/api/v1/profiles/alice/research")
+
+        self.assertEqual(response.status_code, 200)
+        paper = next(row for row in response.json()["papers"] if row["id"] == "src:001")
+        self.assertEqual(paper["segment_count"], 2)
+        self.assertEqual(paper["translated_count"], 1)
+        self.assertEqual(paper["missing_count"], 1)
+        self.assertEqual(paper["translation_status"], "missing")
+
     def test_research_empty_profile_returns_zeroed_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -394,6 +480,43 @@ class TestResearchEndpoint(_HomeResearchBase):
         self.assertEqual(payload["summary"]["claims_total"], 0)
         self.assertEqual(payload["summary"]["citations_total"], 0)
         self.assertEqual(payload["sources"], [])
+        self.assertEqual(payload["papers"], [])
+
+    def test_reader_link_requires_pdf_asset_in_current_asset_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            profile = _write_profile(root)
+            sources_path = profile / "research" / "sources.yaml"
+            sources_doc = yaml.safe_load(sources_path.read_text(encoding="utf-8"))
+            paper = next(item for item in sources_doc["sources"] if item["id"] == "src:001")
+            paper["metadata"] = {
+                "pdf_asset_ref": "papers/slam.pdf",
+                "pdf_download_status": "downloaded",
+            }
+            sources_path.write_text(
+                yaml.safe_dump(sources_doc, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            asset_root = Path(tmp) / "assets"
+            client = self._client(
+                root,
+                env={"NBLANE_RESEARCH_ASSET_ROOT": str(asset_root)},
+            )
+
+            missing = client.get(
+                "/api/v1/profiles/alice/research/papers/src:001/reader"
+            )
+            pdf_path = asset_root / "profiles" / "alice" / "papers" / "slam.pdf"
+            pdf_path.parent.mkdir(parents=True, exist_ok=True)
+            pdf_path.write_bytes(b"%PDF-1.4 test")
+            ready = client.get(
+                "/api/v1/profiles/alice/research/papers/src:001/reader"
+            )
+
+        self.assertEqual(missing.status_code, 409)
+        self.assertEqual(missing.json()["code"], "paper_pdf_missing")
+        self.assertEqual(ready.status_code, 200)
+        self.assertIn("/reader/view/src%3A001?token=", ready.json()["reader_url"])
 
     def test_research_unknown_profile_404(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

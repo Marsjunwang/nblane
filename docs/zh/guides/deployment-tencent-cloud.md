@@ -287,7 +287,7 @@ Reader sidecar 是生产 PDF Reader 的唯一主路径；不要依赖旧的 Stre
 
 新版 SPA（`web_ui`）由独立 FastAPI 进程承载：同一进程服务 `/api/v1/*` JSON
 接口和 `src/nblane/web_ui/static/` 构建产物（客户端路由回退 `index.html`）。
-它是完整写路径——看板、Inbox、证据评审、周回顾、Studio 的全部 mutation 都走
+它是完整写路径——看板、Inbox、证据评审、Studio 的全部 mutation 都走
 这里，生产必须和 8501 一样配置认证与 Git 备份变量。
 
 示例服务文件 `/etc/systemd/system/nblane-web-api.service`（沿用前两个 unit 的写法）：

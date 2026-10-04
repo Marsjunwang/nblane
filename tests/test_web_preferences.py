@@ -59,6 +59,28 @@ class TestWebPreferences(unittest.TestCase):
         self.assertIs(fallback["kanban"]["focus_mode"], False)
         self.assertIs(fallback["kanban"]["auto_dates"], True)
 
+    def test_reader_defaults_are_normalized_and_bounded(self) -> None:
+        normalized = normalize_web_preferences(
+            {
+                "research": {
+                    "reader": {
+                        "default_mode": "compare",
+                        "default_side_panel": "open",
+                        "default_translation_source": "false",
+                        "compare_split_ratio": 99,
+                        "panel_width": 100,
+                    }
+                }
+            },
+            profile="alice",
+        )
+        reader = normalized["research"]["reader"]
+        self.assertEqual(reader["default_mode"], "compare")
+        self.assertEqual(reader["default_side_panel"], "open")
+        self.assertFalse(reader["default_translation_source"])
+        self.assertEqual(reader["compare_split_ratio"], 80)
+        self.assertEqual(reader["panel_width"], 260)
+
 
     def test_save_and_load_profile_scoped_preferences(self) -> None:
         """LLM and Kanban usage preferences are stored per profile."""

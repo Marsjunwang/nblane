@@ -27,6 +27,8 @@ interface SidecarFrameProps {
   handoffToken?: string;
   /** Fixed pixel height, or any CSS height (e.g. a viewport-relative clamp). */
   height?: number | string;
+  /** Optional postMessage type emitted when the embedded app is ready. */
+  readyMessageType?: string;
 }
 
 export function SidecarFrame({
@@ -35,16 +37,34 @@ export function SidecarFrame({
   base,
   handoffToken = '',
   height = 720,
+  readyMessageType = '',
 }: SidecarFrameProps) {
   const targetName = `sidecar-auth-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const formRef = useRef<HTMLFormElement>(null);
   const [ready, setReady] = useState(!handoffToken);
   const [loaded, setLoaded] = useState(false);
+  const [appReady, setAppReady] = useState(!readyMessageType);
   const [reloadNonce, setReloadNonce] = useState(0);
+
+  // Some browsers partition or reject the cookie written by the hidden
+  // bootstrap iframe. Keep the short-lived handoff on the content request as
+  // a second path; the sidecar consumes it and establishes the same session.
+  const contentUrl = (() => {
+    if (!handoffToken) return url;
+    try {
+      const parsed = new URL(url, window.location.href);
+      parsed.searchParams.set('auth_handoff', handoffToken);
+      return parsed.toString();
+    } catch {
+      const separator = url.includes('?') ? '&' : '?';
+      return `${url}${separator}auth_handoff=${encodeURIComponent(handoffToken)}`;
+    }
+  })();
 
   useEffect(() => {
     setReady(!handoffToken);
     setLoaded(false);
+    setAppReady(!readyMessageType);
     if (!handoffToken) {
       return;
     }
@@ -61,7 +81,19 @@ export function SidecarFrame({
     // the cookie bootstrap a short head start, then load the content frame.
     const timer = window.setTimeout(() => setReady(true), 800);
     return () => window.clearTimeout(timer);
-  }, [handoffToken, url, reloadNonce]);
+  }, [handoffToken, url, readyMessageType, reloadNonce]);
+
+  useEffect(() => {
+    if (!readyMessageType) return undefined;
+    const expectedOrigin = base ? new URL(base, window.location.href).origin : window.location.origin;
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== expectedOrigin) return;
+      const data = event.data as { type?: string } | null;
+      if (data?.type === readyMessageType) setAppReady(true);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [base, readyMessageType, reloadNonce]);
 
   return (
     <>
@@ -99,12 +131,12 @@ export function SidecarFrame({
           <iframe
             key={reloadNonce}
             title={title}
-            src={url}
+            src={contentUrl}
             data-testid="sidecar-frame"
             onLoad={() => setLoaded(true)}
             style={{ width: '100%', height, border: 0, borderRadius: 8 }}
           />
-          {!loaded && (
+          {(!loaded || !appReady) && (
             <Center
               data-testid="sidecar-loading"
               style={{
@@ -115,7 +147,7 @@ export function SidecarFrame({
             >
               <Loader size="sm" />
               <Text size="sm" c="dimmed" ml="xs">
-                加载中…长时间无响应请点击「重新加载」。
+                {readyMessageType && loaded ? '正在准备阅读器…' : '加载中…长时间无响应请点击「重新加载」。'}
               </Text>
             </Center>
           )}

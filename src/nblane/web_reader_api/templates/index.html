@@ -6,19 +6,27 @@
   <style>
     :root {
       color-scheme: light;
-      --ink: #17211f;
-      --muted: #60716e;
-      --line: #d8e0dc;
-      --paper: #ffffff;
-      --soft: #f6f8f7;
-      --soft-strong: #edf3f0;
-      --accent: #21685b;
-      --accent-strong: #174d43;
-      --accent-soft: #e3f2ee;
-      --warn: #8a5b12;
-      --danger: #9f1d1d;
+      --ink: #1b2524;
+      --muted: #697571;
+      --line: #3a4d6e;
+      --paper: #fbfaf5;
+      --soft: #f1f3ef;
+      --soft-strong: #e7ece7;
+      --ground: #0f1930;
+      --ground-soft: #101d30;
+      --ground-line: rgba(220, 174, 85, .22);
+      --accent: #dcae55;
+      --accent-strong: #a67a2c;
+      --accent-soft: rgba(220, 174, 85, .16);
+      --gold: #dcae55;
+      --warn: #93651a;
+      --danger: #a62b2b;
       --mark: rgba(255, 214, 102, .42);
-      --select: rgba(33, 104, 91, .18);
+      --select: rgba(220, 174, 85, .20);
+      /* Locator overlays must preserve the PDF text underneath. */
+      --locator-fill: rgba(33, 104, 91, .055);
+      --locator-fill-focus: rgba(33, 104, 91, .085);
+      --locator-line: rgba(33, 104, 91, .72);
     }
     * { box-sizing: border-box; }
     html, body, #root {
@@ -27,7 +35,7 @@
       min-height: 0;
       margin: 0;
       overflow: hidden;
-      background: transparent;
+      background: var(--ground);
       color: var(--ink);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       letter-spacing: 0;
@@ -41,7 +49,8 @@
       gap: 6px;
       height: 100%;
       min-height: 0;
-      padding: 2px 0 6px;
+      padding: 8px;
+      background: var(--ground);
     }
     .pr-shell.fullscreen {
       position: fixed;
@@ -59,19 +68,27 @@
       top: 0;
       z-index: 30;
       display: grid;
-      grid-template-columns: minmax(120px, 1fr) auto auto auto;
+      grid-template-columns: minmax(190px, .8fr) minmax(0, 1.65fr) auto;
+      grid-template-areas:
+        "title controls mode"
+        "title actions actions";
       gap: 6px;
       align-items: center;
-      padding: 6px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: rgba(255, 255, 255, .97);
-      box-shadow: 0 2px 10px rgba(23, 33, 31, .05);
+      padding: 8px 10px;
+      border: 1px solid var(--ground-line);
+      border-radius: 7px;
+      background: var(--ground-soft);
+      color: #f4f0e6;
+      box-shadow: 0 8px 22px rgba(3, 10, 19, .2);
     }
     .pr-title {
+      grid-area: title;
+      align-self: center;
       min-width: 0;
       overflow: hidden;
-      font-size: .95rem;
+      color: #f5f0e4;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1rem;
       font-weight: 850;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -83,19 +100,33 @@
       align-items: center;
       justify-content: flex-end;
     }
+    .pr-controls { grid-area: controls; justify-content: flex-start; }
+    .pr-mode { grid-area: mode; justify-content: flex-end; }
+    .pr-actions { grid-area: actions; justify-content: flex-start; }
+    .pr-action-group {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+    .pr-ai-group {
+      padding-right: 8px;
+      border-right: 1px solid rgba(219, 231, 225, .18);
+    }
     .pr-toolbar-note {
-      width: 100%;
-      color: var(--muted);
+      width: auto;
+      margin-left: auto;
+      color: rgba(244, 240, 230, .58);
       font-size: .72rem;
       line-height: 1.25;
-      text-align: right;
+      text-align: left;
     }
     .pr-search { flex-wrap: nowrap; justify-content: stretch; }
-    .pr-mode { justify-content: flex-start; }
+    .pr-mode { justify-content: flex-end; }
     .pr-button, .pr-icon-button, .pr-input, .pr-select, .pr-textarea {
-      min-height: 30px;
+      min-height: 29px;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 6px;
       background: var(--paper);
       color: var(--ink);
       outline: 0;
@@ -111,10 +142,48 @@
       white-space: nowrap;
     }
     .pr-icon-button { width: 30px; padding: 0; font-size: .88rem; }
+    .pr-toolbar .pr-button,
+    .pr-toolbar .pr-icon-button {
+      border-color: rgba(219, 231, 225, .2);
+      background: rgba(255, 255, 255, .06);
+      color: #f4f0e6;
+    }
+    .pr-toolbar .pr-button:hover,
+    .pr-toolbar .pr-icon-button:hover {
+      border-color: rgba(199, 164, 94, .75);
+      background: rgba(199, 164, 94, .14);
+      color: #fff8e7;
+    }
+    .pr-toolbar .pr-button.active {
+      border-color: rgba(199, 164, 94, .72);
+      background: rgba(199, 164, 94, .18);
+      color: #fff2c9;
+    }
     .pr-button.primary {
       border-color: var(--accent);
       background: var(--accent);
-      color: #fff;
+      color: #0f1930;
+    }
+    .pr-toolbar .pr-status { color: rgba(244, 240, 230, .72); }
+    .pr-toolbar .pr-prep-status {
+      border-color: rgba(219, 231, 225, .2);
+      background: rgba(255, 255, 255, .06);
+      color: rgba(244, 240, 230, .72);
+    }
+    .pr-toolbar .pr-prep-status.ready {
+      border-color: rgba(92, 184, 148, .42);
+      background: rgba(59, 138, 115, .2);
+      color: #bfe8d8;
+    }
+    .pr-toolbar .pr-prep-status.pending {
+      border-color: rgba(199, 164, 94, .42);
+      background: rgba(199, 164, 94, .12);
+      color: #f3d99d;
+    }
+    .pr-toolbar .pr-action-status {
+      border-color: rgba(219, 231, 225, .2);
+      background: rgba(255, 255, 255, .06);
+      color: rgba(244, 240, 230, .78);
     }
     .pr-button:hover, .pr-icon-button:hover {
       border-color: rgba(33, 104, 91, .55);
@@ -564,18 +633,18 @@
     }
     .pr-highlight.has-note { outline: 2px solid rgba(33, 104, 91, .62); }
     .pr-highlight.segment-anchor {
-      background: rgba(33, 104, 91, .16);
-      outline-color: rgba(33, 104, 91, .52);
+      background: var(--locator-fill);
+      outline: 1px solid var(--locator-line);
       pointer-events: none;
     }
     .pr-highlight.focus {
-      background: rgba(33, 104, 91, .28);
-      outline: 2px solid rgba(33, 104, 91, .74);
-      box-shadow: 0 0 0 3px rgba(33, 104, 91, .14);
+      background: var(--locator-fill-focus);
+      outline: 1.5px solid var(--locator-line);
+      box-shadow: 0 0 0 2px rgba(33, 104, 91, .09);
     }
     .pr-highlight.pending {
-      background: rgba(33, 104, 91, .16);
-      outline: 1px dashed rgba(33, 104, 91, .55);
+      background: rgba(33, 104, 91, .045);
+      outline: 1px dashed rgba(33, 104, 91, .48);
     }
     .pr-page-error {
       position: absolute;
@@ -643,10 +712,19 @@
     }
     .pr-translation-body {
       display: grid;
+      grid-template-columns: minmax(0, 1fr);
       gap: 10px;
       align-content: start;
       padding: 10px;
       overflow-x: hidden;
+    }
+    .pr-translation-flow,
+    .pr-translation-flow-page,
+    .pr-translation-section,
+    .pr-translation-unit {
+      min-width: 0;
+      grid-template-columns: minmax(0, 1fr);
+      overflow-wrap: anywhere;
     }
     .pr-translation-pages {
       display: grid;
@@ -778,6 +856,27 @@
       max-width: 860px;
       width: 100%;
       margin: 0 auto;
+    }
+    .pr-translation-flow-page {
+      display: grid;
+      gap: 10px;
+      scroll-margin-top: 52px;
+      padding: 0 0 16px;
+      border-bottom: 1px solid rgba(33, 104, 91, .20);
+    }
+    .pr-translation-flow-page:last-child { border-bottom: 0; }
+    .pr-translation-flow-page-label {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      width: fit-content;
+      padding: 4px 9px;
+      border: 1px solid rgba(33, 104, 91, .22);
+      border-radius: 999px;
+      background: rgba(244, 249, 246, .97);
+      color: var(--accent-strong);
+      font-size: .72rem;
+      font-weight: 850;
     }
     .pr-translation-section {
       display: grid;
@@ -923,8 +1022,8 @@
       display: grid;
       gap: 6px;
       grid-template-columns: minmax(0, 1fr);
-      width: min(520px, calc(100vw - 24px));
-      max-height: min(360px, calc(100vh - 24px));
+      width: min(460px, calc(100vw - 24px));
+      max-height: min(340px, calc(100vh - 24px));
       overflow: auto;
       margin: 0;
       padding: 8px;
@@ -949,6 +1048,10 @@
       bottom: 12px;
       width: auto;
       max-height: 42vh;
+    }
+    .pr-dock.side-left,
+    .pr-dock.side-right {
+      max-height: min(420px, calc(100vh - 24px));
     }
     .pr-dock-main {
       display: grid;
@@ -1116,6 +1219,42 @@
     }
     .pr-side .pr-panel {
       overflow: visible;
+      box-shadow: 0 8px 18px rgba(23, 33, 31, .06);
+    }
+    .pr-panel-context {
+      display: grid;
+      gap: 3px;
+      padding: 10px 10px 8px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #f7f8f4 0%, var(--paper) 100%);
+    }
+    .pr-panel-context-kicker {
+      color: var(--accent-strong);
+      font-size: .66rem;
+      font-weight: 850;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .pr-panel-context-title {
+      color: var(--ink);
+      font-size: .92rem;
+      font-weight: 850;
+      line-height: 1.25;
+    }
+    .pr-panel-context-copy {
+      color: var(--muted);
+      font-size: .73rem;
+      line-height: 1.4;
+    }
+    .pr-translation-backend {
+      color: var(--accent-strong);
+      font-size: .74rem;
+      margin: 7px 0 8px;
+    }
+    .pr-panel-context-meta {
+      color: var(--muted);
+      font-size: .68rem;
+      font-weight: 760;
     }
     .pr-panel-head {
       display: flex;
@@ -1161,7 +1300,7 @@
     .pr-qa-context summary { cursor: pointer; }
     .pr-qa-context-body { padding: 3px 0 0 2px; overflow-wrap: anywhere; }
     .pr-panel-resize { z-index: 8; }
-    .pr-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
+    .pr-tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--line); }
     .pr-tab {
       min-height: 34px;
       border: 0;
@@ -1173,6 +1312,13 @@
       font-weight: 780;
     }
     .pr-tab.active { background: var(--paper); color: var(--accent-strong); }
+    .pr-tab:focus-visible,
+    .pr-button:focus-visible,
+    .pr-icon-button:focus-visible,
+    .pr-translation-unit:focus-visible {
+      outline: 2px solid rgba(199, 164, 94, .9);
+      outline-offset: 2px;
+    }
     .pr-summary {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -1265,6 +1411,18 @@
     .pr-ref-chip:hover { background: rgba(70, 158, 130, .22); }
     .pr-ref-chip[data-ref-kind="chunk"] { background: rgba(192, 132, 252, .12); border-color: rgba(192, 132, 252, .35); color: #6d28d9; }
     .pr-ref-chip[data-ref-kind="annotation"] { background: rgba(251, 191, 36, .15); border-color: rgba(251, 191, 36, .45); color: #92400e; }
+    .pr-ref-more {
+      border: 1px dashed var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: transparent;
+      color: var(--muted);
+      font-size: .68rem;
+      cursor: pointer;
+    }
+    .pr-ref-more:hover { color: var(--accent-strong); border-color: var(--accent-strong); }
+    .pr-ref-overflow { display: none; }
+    .pr-ref-overflow.expanded { display: contents; }
     .pr-list { display: grid; gap: 7px; max-height: 360px; overflow: auto; }
     .pr-review-flow {
       display: grid;
@@ -1382,8 +1540,12 @@
       line-height: 1.4;
     }
     @media (max-width: 1080px) {
-      .pr-toolbar { grid-template-columns: 1fr; }
+      .pr-toolbar {
+        grid-template-columns: 1fr;
+        grid-template-areas: "title" "controls" "mode" "actions";
+      }
       .pr-controls, .pr-actions { justify-content: flex-start; }
+      .pr-ai-group { padding-right: 0; border-right: 0; }
       .pr-workspace,
       .pr-workspace.panel-collapsed,
       .pr-workspace.reader-mode-compare,
@@ -1415,12 +1577,20 @@
       sourceId: {{ source_id_json|safe }},
       prefix: {{ reader_prefix_json|safe }},
       token: {{ reader_token_json|safe }},
+      uiLang: {{ reader_ui_lang_json|default('""', true)|safe }} || new URLSearchParams(window.location.search).get("ui_lang") || "",
     };
     const DEFAULT_UI = {
       annotations: "Annotations",
       notes: "Notes",
       translation: "Translation",
       review: "Review",
+      notes_context_title: "Notes and highlights",
+      notes_context_copy: "Keep the passages and questions you want to return to.",
+      translation_context_title: "Read with translation",
+      translation_context_copy: "Translate a paragraph, then compare it with the original page.",
+      review_context_title: "AI reading desk",
+      review_context_copy: "Turn the paper into a short map of methods, results, limits, and open questions.",
+      page_context_meta: "Current page {page}",
       figures: "Figures",
       ai: "Review",
       claims: "Claims",
@@ -1432,7 +1602,13 @@
       translate_selection: "Translate",
       translate_full_paper: "Full translation",
       translate_full_paper_help: "Translate missing or stale structure/layout units for the whole paper.",
-      translate_visible_pages: "Visible pages",
+      translation_structure_incomplete: "Complete paper parsing before full translation.",
+      translate_visible_pages: "Translate visible page",
+      translation_panel_hint: "Paragraph actions live in the reading flow; this panel only shows progress and starts a visible-page batch.",
+      translation_backend_local: "Local CPU translator",
+      translation_backend_ai: "AI model translator",
+      translation_backend_cache: "Cache / dictionary",
+      translation_backend_unknown: "Not started",
       explain_selection: "Explain",
       ask_paper: "Ask",
       ask_followup: "Ask follow-up",
@@ -1441,10 +1617,10 @@
       qa_context_pages: "Pages",
       qa_context_segments: "Segments",
       qa_thinking: "Thinking...",
-      save_progress: "Save progress",
-      review_card: "Analyze Paper",
-      analyze_paper: "Analyze Paper",
-      deep_read: "Deep read",
+      save_progress: "Save position",
+      review_card: "Quick analysis",
+      analyze_paper: "Quick analysis",
+      deep_read: "Deep study",
       deep_read_empty: "No reliable deep-read findings yet.",
       deep_section_takeaway: "Takeaway",
       deep_section_findings: "Key findings",
@@ -1468,6 +1644,7 @@
       mode_pdf: "PDF",
       mode_compare: "Compare",
       mode_translation: "Translation only",
+      compare_lock_scroll: "Follow source",
       search: "Search",
       page: "Page",
       previous_page: "Previous page",
@@ -1479,6 +1656,11 @@
       pdf_missing: "No PDF page preview is available.",
       pdf_preview_mode: "Using page preview",
       pdf_error: "PDF.js could not render this paper.",
+      pdf_retry: "Retry PDF",
+      refs: "References",
+      refs_more: "+{count} more references",
+      refs_show_all: "Show all references",
+      refs_show_less: "Show fewer references",
       extracting_page_text: "Extracting page text",
       running_grobid: "Running GROBID",
       structured_text_ready: "Structured text ready",
@@ -1501,7 +1683,7 @@
       hide_source: "Hide source",
       translated: "Translated",
       translating: "Translating...",
-      translating_visible_pages: "Translating visible pages...",
+      translating_visible_pages: "Translating visible page...",
       translating_full_paper: "Translating paper...",
       reviewing_paper: "Reviewing paper...",
       deep_reading: "Analyzing paper...",
@@ -1514,6 +1696,7 @@
       saved: "Saved",
       ask_selection: "Ask with selection",
       retry: "Retry",
+      retry_translation_unit: "Retranslate paragraph",
       edit: "Edit",
       cancel: "Cancel",
       close: "Close",
@@ -1533,6 +1716,7 @@
     let args = {};
     let pdfDoc = null;
     let currentPage = 1;
+    let deepLinkPageApplied = false;
     let totalPages = 0;
     let scaleMode = "fit-width";
     let customScale = 1.25;
@@ -1578,6 +1762,7 @@
     let viewportTimer = null;
     let pageThumbTimer = null;
     let payloadRefreshTimer = null;
+    let payloadRefreshQueued = null;
     let readerStateTimer = null;
     let lastReaderStateEmit = 0;
     let lastTranslationProgressRefreshKey = "";
@@ -1592,6 +1777,7 @@
     let qaHistory = [];
     let qaPending = null;
     let actionState = { action: "", phase: "idle", message: "", task_id: "", event_id: "", progress: {} };
+    let queryActionStarted = false;
     let activeTaskSource = null;
     let activeTaskPollTimer = null;
     const PANEL_MIN_WIDTH = 220;
@@ -1864,6 +2050,27 @@
           seen.set(key, merged);
         }
         args.translations = Array.from(seen.values());
+        // Hydrate the current canonical units without importing old geometry
+        // or letting an obsolete cached translation replace changed text.
+        const byScope = new Map();
+        for (const raw of body.segments) {
+          const row = asObj(raw);
+          const ref = text(row.scope_ref || row.segment_id || row.anchor_id);
+          if (ref && text(row.target_lang || "zh") === targetLang()) {
+            byScope.set(`${text(row.scope_type || "segment")}:${ref}`, row);
+          }
+        }
+        args.translation_units = asArr(args.translation_units).map((raw) => {
+          const unit = asObj(raw);
+          const ref = text(unit.scope_ref || unit.segment_id || unit.anchor_id || unit.unit_id);
+          const row = byScope.get(`${text(unit.scope_type || "segment")}:${ref}`);
+          if (!row || !text(unit.source_hash) || text(row.source_hash) !== text(unit.source_hash)) return unit;
+          return {
+            ...unit,
+            translated_text: translatedTextFromRow(row),
+            status: text(row.status || (translatedTextFromRow(row) ? "translated" : "missing")),
+          };
+        });
         const ctx = asObj(args.context_window);
         if (Array.isArray(ctx.pages)) {
           const total = Number(body.total_pages || ctx.total_pages || 0);
@@ -1959,6 +2166,7 @@
       emit({ action, event_id: cleanPayload.event_id, payload: cleanPayload });
     }
     function taskActionLabel(action) {
+      if (action === "translate_selection" || action === "translate_segment") return label("translating");
       if (action === "translate_visible_pages" || action === "retry_translation_scope") return label("translating_visible_pages");
       if (action === "translate_full_paper") return label("translating_full_paper");
       if (action === "generate_review_card" || action === "analyze_paper") return label("reviewing_paper");
@@ -1975,6 +2183,21 @@
     }
     function translationTaskBusy() {
       return taskIsPending() && translationTaskAction(actionState.action);
+    }
+    function selectionTranslationBusy() {
+      return taskIsPending() && text(actionState.action) === "translate_selection";
+    }
+    function translationSourceLabel(result, data = {}) {
+      const rows = [
+        ...asArr(data.translations),
+        ...asArr(asObj(data.structured).translations),
+      ];
+      const source = text(data.translation_source || rows.find((row) => text(asObj(row).generated_by))?.generated_by || result && result.backend).toLowerCase();
+      if (source.includes("local:opus") || source.includes("local_translation")) return "本地快速翻译";
+      if (source === "cache" || source === "segment_cache" || source === "local_dict") return "本地缓存";
+      if (source.includes("direct_llm") || source === "llm" || source.includes("openai")) return "AI 翻译";
+      if (source.includes("rule_fallback")) return "规则回退";
+      return "翻译完成";
     }
     function taskDoneLabel(action, result) {
       const message = text(result && result.message);
@@ -2079,7 +2302,6 @@
     function actionButtonSelector(action) {
       if (action === "translate_full_paper") return '[data-action="translateFull"]';
       if (action === "translate_visible_pages" || action === "retry_translation_scope") return '[data-action="translateVisible"]';
-      if (action === "generate_review_card" || action === "analyze_paper") return '[data-action="analyzePaper"]';
       if (action === "codex_deep_read") return '[data-action="deepRead"]';
       if (action === "ask_paper") return '[data-action="askQuestion"]';
       return "";
@@ -2133,6 +2355,13 @@
         button.classList.toggle("busy", busy);
         button.disabled = busy;
         if (busy) button.setAttribute("aria-busy", "true");
+        else button.removeAttribute("aria-busy");
+      });
+      const selectionBusy = selectionTranslationBusy();
+      document.querySelectorAll('[data-action="translate"]').forEach((button) => {
+        button.classList.toggle("busy", selectionBusy);
+        button.disabled = selectionBusy || !Boolean(currentSelection && currentSelection.selected_text);
+        if (selectionBusy) button.setAttribute("aria-busy", "true");
         else button.removeAttribute("aria-busy");
       });
       refreshTranslationProgressBar();
@@ -2224,6 +2453,11 @@
     }
     async function startReaderTask(action, payload = {}) {
       if (translationTaskAction(action) && translationTaskBusy()) {
+        status(actionState.message || label("translating"));
+        refreshActionStatus();
+        return null;
+      }
+      if (action === "translate_selection" && selectionTranslationBusy()) {
         status(actionState.message || label("translating"));
         refreshActionStatus();
         return null;
@@ -2427,9 +2661,12 @@
       if (["translate_selection", "translate_segment", "explain_selection", "ask_paper"].includes(action)) {
         const data = asObj(result && result.data);
         dockState.pending = false;
-        dockState.status = primaryMessage;
+        dockState.status = (action === "translate_selection" || action === "translate_segment")
+          ? `${translationSourceLabel(result, data)} · ${primaryMessage}`
+          : primaryMessage;
         if (action === "translate_selection" || action === "translate_segment") {
-          dockState.result = translationTextFromResult(result) || text(data.summary && data.summary.message);
+          dockState.failed = !ok || !translationTextFromResult(result);
+          dockState.result = translationTextFromResult(result) || text(data.summary && data.summary.message) || text(result && result.message);
         } else if (action === "ask_paper") {
           setActionState(action, ok ? "done" : "error", primaryMessage);
           const answer = askPaperResultText(result);
@@ -2712,9 +2949,18 @@
       const updated = Number(asObj(local).updated || 0);
       return Boolean(updated) && Date.now() - updated >= 0 && Date.now() - updated <= maxAgeMs;
     }
+    function readerQueryParam(name) {
+      try {
+        return text(new URLSearchParams(window.location.search).get(name) || "");
+      } catch {
+        return "";
+      }
+    }
     function activeTranslationAnchorFromState(local) {
+      const queryAnchor = readerQueryParam("anchor");
       const serverAnchor = text(settings().active_translation_anchor || "");
       const localAnchor = text(asObj(local).active_translation_anchor || "");
+      if (queryAnchor) return queryAnchor;
       if (userAnchorIntent) return text(activeTranslationAnchor || userAnchorIntent || localAnchor || serverAnchor || "");
       if (localAnchor && localStateFresh(local)) return localAnchor;
       return text(serverAnchor || localAnchor || activeTranslationAnchor || "");
@@ -2834,7 +3080,7 @@
     }
     function initialPage() {
       const local = readLocalState();
-      return Math.max(1, Number(local.page || settings().initial_page || settings().page || currentPage || 1));
+      return Math.max(1, Number(readerQueryParam("page") || local.page || settings().initial_page || settings().page || currentPage || 1));
     }
     function syncDockUiFromLocal(local = readLocalState()) {
       const position = asObj(local.dock_position);
@@ -2906,7 +3152,9 @@
     function renderShell(message = "") {
       const source = asObj(args.source);
       const title = text(source.title || source.id || "Paper");
-      if (!["notes", "translation", "review", "claims"].includes(activeTab)) activeTab = "notes";
+      const translationReadiness = asObj(args.translation_readiness);
+      const fullTranslationBlocked = text(translationReadiness.status) === "incomplete" || translationReadiness.ready === false;
+      if (!["notes", "translation", "review"].includes(activeTab)) activeTab = "notes";
       syncDockFromArgs();
       const dockVisible = dockState.mode !== "idle" || Boolean(currentSelection && currentSelection.selected_text);
       panelWidth = clampPanelWidth(panelWidth);
@@ -2932,15 +3180,18 @@
               <button class="pr-button ${readerMode === "pdf" ? "active" : ""}" data-mode="pdf">${esc(label("mode_pdf"))}</button>
               <button class="pr-button ${readerMode === "compare" ? "active" : ""}" data-mode="compare">${esc(label("mode_compare"))}</button>
               <button class="pr-button ${readerMode === "translation" ? "active" : ""}" data-mode="translation">${esc(label("mode_translation"))}</button>
-              <button class="pr-button ${compareDualScrollLockEnabled() ? "active" : ""}" data-action="toggleCompareLock" title="${attr(label("compare_lock_scroll") || "Lock dual scroll")}" aria-pressed="${compareDualScrollLockEnabled() ? "true" : "false"}">⇅</button>
+              <button class="pr-button ${compareDualScrollLockEnabled() ? "active" : ""}" data-action="toggleCompareLock" title="${attr(label("compare_lock_scroll") || "Follow source")}" aria-pressed="${compareDualScrollLockEnabled() ? "true" : "false"}">${esc(label("compare_lock_scroll") || "Follow source")} ${compareDualScrollLockEnabled() ? "●" : "○"}</button>
             </div>
             <div class="pr-actions">
-              <button class="pr-button" data-action="translateFull" title="${attr(label("translate_full_paper_help"))}">${esc(label("translate_full_paper"))}</button>
-              <button class="pr-button primary" data-action="analyzePaper">${esc(label("analyze_paper"))}</button>
-              <button class="pr-button" data-action="deepRead">${esc(label("deep_read"))}</button>
-              <button class="pr-button" data-action="saveProgress">${esc(label("save_progress"))}</button>
-              <button class="pr-button" data-action="fullscreen">${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</button>
-              <button class="pr-button" data-action="togglePanel">${esc(label("panel"))}</button>
+              <div class="pr-action-group pr-ai-group">
+                <button class="pr-button" data-action="translateFull" title="${attr(fullTranslationBlocked ? label("translation_structure_incomplete") : label("translate_full_paper_help"))}" ${fullTranslationBlocked ? "disabled" : ""}>${esc(label("translate_full_paper"))}</button>
+                <button class="pr-button" data-action="deepRead">${esc(label("deep_read"))}</button>
+              </div>
+              <div class="pr-action-group">
+                <button class="pr-button" data-action="saveProgress">${esc(label("save_progress"))}</button>
+                <button class="pr-button" data-action="fullscreen">${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</button>
+                <button class="pr-button" data-action="togglePanel">${esc(label("panel"))}</button>
+              </div>
               <span class="pr-action-status" aria-live="polite"></span>
               <span class="pr-translation-progress-shell" id="translationProgressShell" aria-hidden="true">
                 <span class="pr-progress-label" id="translationProgressLabel">0%</span>
@@ -2953,8 +3204,8 @@
             <aside class="pr-left-rail ${leftRailCollapsed ? "collapsed" : ""}" id="leftRail">${leftRailHtml()}</aside>
             <section class="pr-viewer" id="viewer">
               <div class="pr-continuous-document" id="continuousDocument">${startupPdfSkeletonHtml()}</div>
-              <section class="pr-dock pr-selection-popover ${dockVisible ? "" : "idle"}" id="selectionDock">${dockHtml()}</section>
             </section>
+            <section class="pr-dock pr-selection-popover ${dockVisible ? "" : "idle"}" id="selectionDock">${dockHtml()}</section>
             <div class="pr-compare-divider" id="compareDivider" data-resize="compare" title="Resize compare panes"></div>
             <section class="pr-translation-reader" id="translationReader">${translationReaderHtml()}</section>
             <div class="pr-panel-resize" id="panelResize" data-resize="panel" title="${attr(label("panel"))}"></div>
@@ -2965,7 +3216,6 @@
                   ${tabButton("notes", label("notes"))}
                   ${tabButton("translation", label("translation"))}
                   ${tabButton("review", label("review"))}
-                  ${tabButton("claims", label("claims"))}
                 </div>
                 <div class="pr-panel-body" id="sideBody">${sideBodyHtml()}</div>
               </section>
@@ -3078,6 +3328,18 @@
         if (value) return value;
       }
       return "";
+    }
+    function comparableSelectionText(value) {
+      return text(value)
+        .replace(/[\u00a0\u200b]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+    }
+    function exactSelectionSource(row, selected) {
+      const source = comparableSelectionText(asObj(row).source_text || asObj(row).text);
+      const picked = comparableSelectionText(selected);
+      return Boolean(source && picked && source === picked);
     }
     function translationTextFromResult(result) {
       const data = asObj(result && result.data);
@@ -3193,7 +3455,7 @@
       const pages = readerMode === "translation"
         ? (fullContext ? allPages : (asArr(contextWindow().pages).length ? asArr(contextWindow().pages) : [currentPage || initialPage()]))
         : readerMode === "compare"
-          ? (fullContext ? allPages : (visiblePages.length ? visiblePages : [currentPage]))
+          ? (visiblePages.length ? visiblePages : [currentPage || initialPage()])
           : [currentPage || initialPage()];
       const merged = [...new Set(pages.map((page) => Number(page || 0)).filter(Boolean))].sort((a, b) => a - b);
       return merged.length ? merged : [currentPage || 1];
@@ -3350,10 +3612,12 @@
     function sectionTitleForUnit(unit) {
       const obj = asObj(unit);
       const path = asArr(obj.section_path).map((row) => text(row)).filter(Boolean);
+      const nearPath = asArr(asObj(obj.metadata).near_section_path).map((row) => text(row)).filter(Boolean);
       const kind = text(obj.kind || obj.scope_type || "Text");
       if (kind === "title") return "Front Matter";
-      if (kind === "table" || kind === "caption") return "Captions";
       if (path.length) return path.join(" / ");
+      if (nearPath.length) return nearPath.join(" / ");
+      if (kind === "table" || kind === "caption") return "Captions";
       return "Body";
     }
     function translationUnitGroups() {
@@ -3366,16 +3630,17 @@
           || text(a.unit_id).localeCompare(text(b.unit_id))
         ));
       const groups = [];
-      const byKey = new Map();
+      const pageIndexes = new Map();
       units.forEach((unit) => {
+        const page = unitStartPage(unit);
         const title = sectionTitleForUnit(unit);
-        const key = `${title}`;
-        if (!byKey.has(key)) {
-          const group = { key, title, units: [] };
-          byKey.set(key, group);
-          groups.push(group);
+        const previous = groups[groups.length - 1];
+        if (!previous || previous.page !== page || previous.title !== title) {
+          groups.push({ key: `${page}:${groups.length}:${title}`, page, title, units: [] });
         }
-        byKey.get(key).units.push(unit);
+        const pageIndex = (pageIndexes.get(page) || 0) + 1;
+        pageIndexes.set(page, pageIndex);
+        groups[groups.length - 1].units.push({ ...unit, page_unit_index: pageIndex });
       });
       return groups;
     }
@@ -3405,10 +3670,14 @@
       const usefulSource = sourceTextLooksUseful(obj.source_text);
       const display = statusName === "failed" || !translated ? sourceSnippet : flowText(translated);
       const page = Number(obj.page || 0);
+      const pageIndex = Number(obj.page_unit_index || 0);
+      const locator = page && pageIndex
+        ? `${label("page")} ${page} · ${pageIndex}`
+        : (obj.locator || (page ? `${label("page")} ${page}` : label("page")));
       const stale = statusName === "stale";
       const missing = statusName === "missing";
       const failed = statusName === "failed";
-      const actionText = failed ? label("retry") : label("translate");
+      const actionText = failed ? label("retry_translation_unit") : label("translate");
       const actionDisabled = translationTaskBusy() ? ` disabled aria-busy="true"` : "";
       const actionHtml = (stale || missing || failed) ? `
         <div class="pr-translation-unit-actions">
@@ -3418,7 +3687,7 @@
       return `
         <article class="pr-translation-unit ${anchorId === activeTranslationAnchor ? "active" : ""}" data-anchor-id="${attr(anchorId)}" data-page="${page || ""}" data-segment-id="${attr(obj.segment_id || obj.scope_ref || "")}" data-scope-type="${attr(obj.scope_type || "")}">
           <div class="pr-translation-unit-head">
-            <div class="pr-translation-locator">${esc(obj.locator || (page ? `p. ${page}` : label("page")))}</div>
+            <div class="pr-translation-locator">${esc(locator)}</div>
             <span class="pr-translation-unit-status ${attr(statusName)}">${esc(translationUnitStatusLabel(statusName))}</span>
           </div>
           <div class="pr-translation-unit-text">${esc(display || translationUnitStatusLabel(statusName))}</div>
@@ -3430,39 +3699,30 @@
     function translationFlowHtml() {
       const groups = translationUnitGroups();
       if (!groups.length) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
+      const pages = [];
+      groups.forEach((group) => {
+        let page = pages[pages.length - 1];
+        if (!page || page.page !== group.page) {
+          page = { page: group.page, groups: [] };
+          pages.push(page);
+        }
+        page.groups.push(group);
+      });
       return `
         <div class="pr-translation-flow">
-          ${groups.map((group) => `
-            <section class="pr-translation-section" data-section="${attr(group.key)}">
-              <div class="pr-translation-section-title">${esc(group.title)}</div>
-              ${group.units.map((unit) => translationUnitHtml(unit)).join("")}
+          ${pages.map((page) => `
+            <section class="pr-translation-flow-page" data-page="${Number(page.page || 0)}">
+              <div class="pr-translation-flow-page-label">${esc(label("page"))} ${Number(page.page || 0)}</div>
+              ${page.groups.map((group) => `
+                <section class="pr-translation-section" data-section="${attr(group.key)}">
+                  <div class="pr-translation-section-title">${esc(group.title)}</div>
+                  ${group.units.map((unit) => translationUnitHtml(unit)).join("")}
+                </section>
+              `).join("")}
             </section>
           `).join("")}
         </div>
       `;
-    }
-    function translationQueueHtml(limit = 24) {
-      const pending = translationUnits()
-        .map((row) => asObj(row))
-        .filter((row) => row.translatable !== false)
-        .filter((row) => {
-          const statusName = text(row.status || (text(row.translated_text) ? "translated" : "missing"));
-          return ["missing", "stale", "failed"].includes(statusName);
-        })
-        .slice(0, limit);
-      if (!pending.length) return `<div class="pr-empty">${esc(label("translated"))}</div>`;
-      const statuses = ["failed", "stale", "missing"];
-      const sections = statuses.map((statusName) => {
-        const rows = pending.filter((row) => text(row.status || "missing") === statusName);
-        if (!rows.length) return "";
-        return `
-          <section class="pr-translation-section" data-section="${attr(statusName)}">
-            <div class="pr-translation-section-title">${esc(translationUnitStatusLabel(statusName))}</div>
-            ${rows.map((unit) => translationUnitHtml(unit)).join("")}
-          </section>
-        `;
-      }).filter(Boolean);
-      return `<div class="pr-translation-flow">${sections.join("")}</div>`;
     }
     function buildAnchorIndex() {
       const index = new Map();
@@ -3588,7 +3848,7 @@
         if (page && (hasRect || allowPageFallback)) {
           muteViewportAnchorSync(Number(options.syncMuteMs || 900));
         }
-        if (page && (hasRect || allowPageFallback) && readerMode === "translation") {
+        if (page && (hasRect || allowPageFallback) && readerMode === "translation" && options.keepTranslationMode !== true) {
           setReaderMode("pdf");
           scrollPromise = delay(100).then(() => scrollToUnit(unit, { smooth: options.smooth !== false, allowPageFallback, page, intentSeq: options.intentSeq || 0, intentAnchor: clean }));
         } else if (page && (hasRect || allowPageFallback)) {
@@ -3895,10 +4155,16 @@
       const pageLabel = pages.length > 5
         ? `${label("translation")} · ${label("page")} ${pages[0]}-${pages[pages.length - 1]}`
         : `${label("translation")} · ${label("page")} ${pages.join(", ")}`;
-      const body = translationLayoutMode() === "overlay"
+      // Segment-flow fallback has no page geometry. Rendering an empty PDF
+      // page shell before each fallback group pushes the actual translation
+      // below the fold and looks like a blank reader. Keep overlay only when
+      // at least one positioned unit can be placed on a page.
+      const hasPositionedUnits = pages.some((pageNumber) => layoutOverlayUnitsForPage(pageNumber).length > 0);
+      const useOverlay = translationLayoutMode() === "overlay" && hasPositionedUnits;
+      const body = useOverlay
         ? pages.map((pageNumber) => renderTranslationPage(pageNumber)).join("")
         : translationFlowHtml();
-      const bodyClass = translationLayoutMode() === "overlay" ? "pr-translation-pages" : "pr-translation-flow-wrap";
+      const bodyClass = useOverlay ? "pr-translation-pages" : "pr-translation-flow-wrap";
       return `
         <div class="pr-translation-head">${esc(pageLabel)}</div>
         <div class="pr-translation-body ${bodyClass}">${body}</div>
@@ -3994,7 +4260,39 @@
         restoreScroll();
         window.requestAnimationFrame(restoreScroll);
       }
-      window.requestAnimationFrame(() => fitTranslationBlocks());
+      window.requestAnimationFrame(() => {
+        fitTranslationBlocks();
+        applyDeepLinkTranslationPage();
+      });
+    }
+    function applyDeepLinkTranslationPage() {
+      if (deepLinkPageApplied || readerMode === "pdf") return;
+      const target = Math.max(1, Number(readerQueryParam("page") || 1));
+      if (target <= 1) {
+        deepLinkPageApplied = true;
+        return;
+      }
+      const scroller = translationScrollElement();
+      const reader = document.getElementById("translationReader");
+      const targetRow = reader?.querySelector(`[data-page="${target}"]`);
+      if (!scroller || !targetRow) {
+        window.setTimeout(applyDeepLinkTranslationPage, 120);
+        return;
+      }
+      const scrollerBox = scroller.getBoundingClientRect();
+      const rowBox = targetRow.getBoundingClientRect();
+      muteTranslationScrollSync(1200);
+      scroller.scrollTop = Math.max(0, scroller.scrollTop + rowBox.top - scrollerBox.top);
+      currentPage = target;
+      deepLinkPageApplied = true;
+      updatePageUi();
+    }
+    function retryDeepLinkTranslationPage() {
+      if (readerMode === "pdf") return;
+      const target = Math.max(1, Number(readerQueryParam("page") || 1));
+      if (target <= 1 || currentPage === target) return;
+      deepLinkPageApplied = false;
+      applyDeepLinkTranslationPage();
     }
     function analysisObj() {
       return asObj(args.analysis || args.review_card || args.paper_analysis);
@@ -4061,6 +4359,9 @@
       if (value && typeof value === "object") {
         if (depth > 8) return "";
         const obj = asObj(value);
+        const referenceOnlyKeys = ["refs", "evidence_refs", "cited_refs", "cited_segment_refs", "cited_chunk_refs", "cited_annotation_refs", "segment_refs", "chunk_refs", "annotation_refs"];
+        const contentKeys = Object.keys(obj).filter((key) => !referenceOnlyKeys.includes(key));
+        if (!contentKeys.length) return "";
         const label = ["section", "heading", "section_title", "title", "label", "name"]
           .map((key) => reviewCleanText(obj[key]))
           .find(Boolean) || "";
@@ -4208,9 +4509,27 @@
       if (!clean) return "";
       const kind = refKindFor(clean);
       const page = refLookupPage(clean);
-      const labelText = kind === "segment" && page ? `p.${page}` : (kind === "chunk" ? "quote" : (kind === "annotation" ? "note" : clean.slice(0, 12)));
+      const labelText = kind === "segment" && page ? `p.${page} · ${clean.slice(-5)}` : (kind === "chunk" ? "quote" : (kind === "annotation" ? "note" : clean.slice(0, 12)));
       const segmentAttr = kind === "segment" ? ` data-jump-segment="${attr(clean)}"` : "";
       return `<button class="pr-ref-chip" data-jump-ref="${attr(clean)}"${segmentAttr} data-ref-kind="${attr(kind)}" data-page="${page || ""}" title="${attr(clean)}">${esc(labelText)}</button>`;
+    }
+    function uniqueReviewRefs(values) {
+      const seen = new Set();
+      return asArr(values).map((row) => refIdText(row)).filter((ref) => {
+        if (!ref || seen.has(ref)) return false;
+        seen.add(ref);
+        return true;
+      });
+    }
+    function refRowHtml(values, limit = 12) {
+      const refs = uniqueReviewRefs(values);
+      if (!refs.length) return "";
+      const visible = refs.slice(0, limit);
+      const hidden = refs.slice(limit);
+      const overflowId = `refs-${Math.random().toString(36).slice(2, 9)}`;
+      return `<div class="pr-ref-row">${visible.map((ref) => refButtonHtml(ref)).join("")}
+        ${hidden.length ? `<span class="pr-ref-overflow" id="${attr(overflowId)}">${hidden.map((ref) => refButtonHtml(ref)).join("")}</span><button type="button" class="pr-ref-more" data-ref-toggle="${attr(overflowId)}" data-more-label="${attr(label("refs_show_all"))}" data-less-label="${attr(label("refs_show_less"))}">${esc(label("refs_more").replace("{count}", String(hidden.length)))}</button>` : ""}
+      </div>`;
     }
     function listHtml(values, options = {}) {
       const items = asArr(values);
@@ -4223,7 +4542,7 @@
       return `<div class="pr-list">${rows.map((row) => `
         <div class="pr-item ${attr(itemClass)}">
           <div class="pr-item-title">${esc(row.body)}</div>
-          ${row.refs.length ? `<div class="pr-ref-row">${row.refs.map((ref) => refButtonHtml(ref)).join("")}</div>` : ""}
+          ${row.refs.length ? refRowHtml(row.refs, 4) : ""}
         </div>
       `).join("")}</div>`;
     }
@@ -4343,9 +4662,9 @@
         ...asArr(analysis.cited_segment_refs),
         ...asArr(analysis.cited_chunk_refs),
         ...asArr(analysis.cited_annotation_refs),
-      ].map((row) => refIdText(row)).filter(Boolean);
-      if (citedRefs.length) {
-        chunks.push(`<div class="pr-panel-head">Refs</div><div class="pr-item"><div class="pr-ref-row">${citedRefs.map((ref) => refButtonHtml(ref)).join("")}</div></div>`);
+      ];
+      if (uniqueReviewRefs(citedRefs).length) {
+        chunks.push(`<details class="pr-review-section pr-review-refs"><summary class="pr-panel-head">${esc(label("refs"))}</summary><div class="pr-item">${refRowHtml(citedRefs)}</div></details>`);
       }
       const deepRead = asObj(analysis.codex_deep_read || {});
       if (Object.keys(deepRead).length) {
@@ -4370,8 +4689,32 @@
         text(row.target_lang || "zh") === targetLang()
         && translatedTextFromRow(row)
         && refs.includes(text(row.segment_id || row.scope_ref))
+        && exactSelectionSource(row, selected)
         && text(row.status || "translated") !== "failed"
       ));
+      if (found) return found;
+      // Structure/layout translations are exposed as reader units rather than
+      // durable segment rows. Match the containing unit as well, so selecting
+      // text inside an already translated paragraph is instant.
+      const units = translationUnits().map((row) => asObj(row));
+      found = units.find((row) => (
+        text(row.target_lang || "zh") === targetLang()
+        && translatedTextFromRow(row)
+        && refs.includes(text(row.segment_id || row.scope_ref || row.unit_id))
+        && exactSelectionSource(row, selected)
+        && text(row.status || "translated") !== "failed"
+      ));
+      if (found) return found;
+      found = units.find((row) => {
+        const sourceText = text(row.source_text || row.text).trim();
+        const rowPage = Number(row.page || 0);
+        return text(row.target_lang || "zh") === targetLang()
+          && translatedTextFromRow(row)
+          && text(row.status || "translated") !== "failed"
+          && (!Number(picked.page || 0) || !rowPage || rowPage === Number(picked.page))
+          && sourceText
+          && comparableSelectionText(sourceText) === comparableSelectionText(selected);
+      });
       if (found) return found;
       found = rows.find((row) => (
         text(row.target_lang || "zh") === targetLang()
@@ -4381,12 +4724,16 @@
         && text(row.status || "translated") !== "failed"
       ));
       if (found) return found;
+      // Selection-scoped dictionary rows are only valid for the exact word or
+      // phrase they were created from. Never let a one-word gloss such as
+      // "dispensing" match a larger paragraph that merely contains that word;
+      // that made the Translate button appear to do nothing for paragraph
+      // selections.
       return rows.find((row) => (
         text(row.target_lang || "zh") === targetLang()
         && translatedTextFromRow(row)
         && selected
-        && text(row.source_text).trim()
-        && (text(row.source_text).trim() === selected || selected.includes(text(row.source_text).trim()))
+        && text(row.source_text).trim() === selected
         && text(row.status || "translated") !== "failed"
       ));
     }
@@ -4396,6 +4743,7 @@
       return row ? text(row.text || row.answer || row.result || row.content || row.message) : "";
     }
     function syncDockFromArgs() {
+      if (dockState.mode === "translation" && dockState.selection_hash) return;
       if (currentSelection && currentSelection.selected_text) {
         const hit = findSelectionTranslation(currentSelection);
         const hitText = translatedTextFromRow(hit);
@@ -4420,7 +4768,6 @@
         }
         return;
       }
-      if (dockState.mode === "translation" && dockState.selection_hash) return;
       const aiText = latestAiText();
       if (aiText) {
         dockState = { mode: "ai", status: label("ai"), selected_text: "", result: aiText, pending: false, selection_hash: "" };
@@ -4457,8 +4804,6 @@
           <button class="pr-button" data-action="note" ${hasSelection ? "" : "disabled"}>${esc(label("create_note"))}</button>
           <button class="pr-button" data-action="explain" ${hasSelection ? "" : "disabled"}>${esc(label("explain_selection"))}</button>
           <button class="pr-button" data-action="askSelection" ${hasSelection ? "" : "disabled"}>${esc(label("ask_selection"))}</button>
-          <button class="pr-button" data-action="chunk" ${hasSelection ? "" : "disabled"}>${esc(label("create_chunk"))}</button>
-          <button class="pr-button" data-action="cite" ${hasSelection ? "" : "disabled"}>${esc(label("create_citation"))}</button>
           ${dockState.mode === "translation" && dockState.failed ? `<button class="pr-button" data-action="retryTranslation">${esc(label("retry"))}</button>` : ""}
         </div>
       `;
@@ -4489,8 +4834,6 @@
             </div>
             <div class="pr-annotation-popover-actions">
               <button class="pr-button" data-annotation-popover-edit>${esc(label("edit"))}</button>
-              <button class="pr-button" data-annotation-popover-chunk>${esc(label("create_chunk"))}</button>
-              <button class="pr-button" data-annotation-popover-cite>${esc(label("create_citation"))}</button>
               <button class="pr-danger-button" data-annotation-popover-delete="${attr(id)}" title="${attr(label("delete_annotation"))}">x</button>
             </div>
           </div>
@@ -4585,6 +4928,7 @@
       const kind = text(ann.kind || "note") || "note";
       optimisticAnnotations.push({ ...selection, id: `pending:${Date.now()}`, kind, status: "pending", note });
       renderHighlights(selection.page || currentPage);
+      refreshSide();
       closeAnnotationPopover();
       return emitAction("annotation_create", { ...selection, note, kind });
     }
@@ -4628,15 +4972,40 @@
       if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
       return { left, top, right, bottom, width: Math.max(2, right - left), height: Math.max(2, bottom - top) };
     }
+    function translationAnchorRect(anchorId = activeTranslationAnchor) {
+      const clean = text(anchorId);
+      if (!clean) return null;
+      const escaped = typeof CSS !== "undefined" && CSS.escape
+        ? CSS.escape(clean)
+        : clean.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+      const row = document.querySelector(`[data-anchor-id="${escaped}"]`);
+      if (!row) return null;
+      const box = row.getBoundingClientRect();
+      if (!box.width || !box.height) return null;
+      return { left: box.left, top: box.top, right: box.right, bottom: box.bottom, width: box.width, height: box.height };
+    }
+    function dockAnchorRect() {
+      if (currentSelection && currentSelection.selected_text) {
+        const selectionRect = selectionAnchorRect(currentSelection);
+        if (selectionRect) return selectionRect;
+      }
+      return translationAnchorRect(activeTranslationAnchor || dockState.selection_hash);
+    }
     function placeSelectionDock() {
       const dock = document.getElementById("selectionDock");
       if (!dock || dock.classList.contains("idle")) return;
       const viewer = document.getElementById("viewer");
-      const viewerBox = viewer ? viewer.getBoundingClientRect() : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight, width: window.innerWidth, height: window.innerHeight };
+      const translationSurface = document.getElementById("translationReader");
+      const viewerBox = viewer && viewer.getBoundingClientRect().width > 0
+        ? viewer.getBoundingClientRect()
+        : translationSurface && translationSurface.getBoundingClientRect().width > 0
+          ? translationSurface.getBoundingClientRect()
+          : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight, width: window.innerWidth, height: window.innerHeight };
       const layout = dockPlacementDefault();
       const useFloating = layout === "floating" && dockUiState.dock_position;
-      const useBottom = !useFloating && (layout === "bottom" || window.innerWidth <= 720 || Number(viewerBox.width || 0) < 420 || !(currentSelection && currentSelection.selected_text));
-      dock.classList.remove("bottom-sheet", "offscreen");
+      const anchor = dockAnchorRect();
+      const useBottom = !useFloating && (layout === "bottom" || window.innerWidth <= 720 || Number(viewerBox.width || 0) < 420 || !anchor);
+      dock.classList.remove("bottom-sheet", "side-left", "side-right", "offscreen");
       dock.style.removeProperty("--pr-dock-left");
       dock.style.removeProperty("--pr-dock-top");
       dock.style.removeProperty("width");
@@ -4648,19 +5017,22 @@
         const pos = clampDockPosition(dockUiState.dock_position.x, dockUiState.dock_position.y, dock);
         dock.style.setProperty("--pr-dock-left", `${pos.x}px`);
         dock.style.setProperty("--pr-dock-top", `${pos.y}px`);
-        dock.style.width = `${Math.min(520, window.innerWidth - 24)}px`;
+        dock.style.width = `${Math.min(460, window.innerWidth - 24)}px`;
         return;
       }
-      const anchor = selectionAnchorRect(currentSelection);
       if (!anchor || anchor.bottom < viewerBox.top || anchor.top > viewerBox.bottom || anchor.right < viewerBox.left || anchor.left > viewerBox.right) {
+        if (readerMode === "translation" && dockState.mode === "translation") {
+          dock.classList.add("bottom-sheet");
+          return;
+        }
         dock.classList.add("offscreen");
         return;
       }
       const margin = 10;
-      const width = Math.min(520, Math.max(280, Number(viewerBox.width || window.innerWidth) - 20, 280));
+      const width = Math.min(460, Math.max(280, Number(viewerBox.width || window.innerWidth) - 20, 280));
       dock.style.width = `${Math.min(width, window.innerWidth - 24)}px`;
       const dockBox = dock.getBoundingClientRect();
-      const dockWidth = dockBox.width || Math.min(520, window.innerWidth - 24);
+      const dockWidth = dockBox.width || Math.min(460, window.innerWidth - 24);
       const dockHeight = dockBox.height || 120;
       const minLeft = Math.max(8, Number(viewerBox.left || 0) + 8);
       const maxLeft = Math.min(window.innerWidth - dockWidth - 8, Number(viewerBox.right || window.innerWidth) - dockWidth - 8);
@@ -4669,7 +5041,29 @@
       const minTop = Math.max(8, Number(viewerBox.top || 0) + 8);
       const maxTop = Math.min(window.innerHeight - dockHeight - 8, Number(viewerBox.bottom || window.innerHeight) - dockHeight - 8);
       let top = anchor.top - dockHeight - margin;
-      if (top < minTop) top = anchor.bottom + margin;
+      const topFits = top >= minTop;
+      const bottomTop = anchor.bottom + margin;
+      const bottomFits = bottomTop <= maxTop;
+      if (!topFits && bottomFits) top = bottomTop;
+      if (!topFits && !bottomFits) {
+        const sideGap = 12;
+        const rightSpace = Number(viewerBox.right || window.innerWidth) - anchor.right - sideGap;
+        const leftSpace = anchor.left - Number(viewerBox.left || 0) - sideGap;
+        const rightWins = rightSpace >= 260 || rightSpace >= leftSpace;
+        const available = rightWins ? rightSpace : leftSpace;
+        if (available >= 220) {
+          const sideWidth = Math.max(220, Math.min(360, available));
+          dock.classList.add(rightWins ? "side-right" : "side-left");
+          dock.style.width = `${sideWidth}px`;
+          top = Math.max(minTop, Math.min(maxTop, anchor.top));
+          const sideLeft = rightWins
+            ? Math.min(window.innerWidth - sideWidth - 8, anchor.right + sideGap)
+            : Math.max(8, anchor.left - sideWidth - sideGap);
+          dock.style.setProperty("--pr-dock-left", `${sideLeft}px`);
+          dock.style.setProperty("--pr-dock-top", `${top}px`);
+          return;
+        }
+      }
       top = Math.max(minTop, Math.min(Math.max(minTop, maxTop), top));
       dock.style.setProperty("--pr-dock-left", `${left}px`);
       dock.style.setProperty("--pr-dock-top", `${top}px`);
@@ -4688,7 +5082,7 @@
       const pos = clampDockPosition(x, y, dock);
       dockUiState = { dock_position: pos, dock_pinned: true, dock_layout: "floating" };
       if (dock) {
-        dock.classList.remove("bottom-sheet", "offscreen");
+        dock.classList.remove("bottom-sheet", "side-left", "side-right", "offscreen");
         dock.style.setProperty("--pr-dock-left", `${pos.x}px`);
         dock.style.setProperty("--pr-dock-top", `${pos.y}px`);
       }
@@ -4761,7 +5155,20 @@
       dock.classList.toggle("idle", !visible);
       dock.innerHTML = dockHtml();
       dock.querySelectorAll("[data-action]").forEach((button) => {
-        button.addEventListener("click", () => handleAction(button.dataset.action));
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const action = text(button.dataset.action);
+          // Rehydrate from the visible selection before translating. This is
+          // important after a payload refresh has redrawn the floating dock.
+          if (action === "translate" && (!currentSelection || !text(currentSelection.selected_text).trim())) {
+            const selected = text(window.getSelection?.()?.toString?.() || "").trim();
+            if (selected) {
+              currentSelection = { ...basePayload({ selected_text: selected }), selected_text: selected };
+            }
+          }
+          handleAction(action);
+        });
       });
       wireDockControls();
       placeSelectionDock();
@@ -4802,9 +5209,15 @@
       };
     }
     function notesPanelHtml() {
-      const all = asArr(args.annotations)
+      const serverAnnotations = asArr(args.annotations)
         .map((row) => asObj(row))
         .filter((row) => row.status !== "deleted");
+      const serverHashes = new Set(serverAnnotations.map((row) => text(row.selected_text_hash)).filter(Boolean));
+      const all = serverAnnotations.concat(
+        optimisticAnnotations
+          .map((row) => asObj(row))
+          .filter((row) => row.status !== "deleted" && !serverHashes.has(text(row.selected_text_hash))),
+      );
       const rows = all.filter((row) => !notesFilterCurrentPage || Number(row.page || 0) === currentPage);
       const filter = `
         <div class="pr-dock-actions">
@@ -4850,19 +5263,29 @@
     }
     function translationPanelHtml() {
       const counts = translationCounts();
+      const generatedBy = asArr(args.translations)
+        .map((row) => text(asObj(row).generated_by).toLowerCase())
+        .filter(Boolean);
+      const backend = generatedBy.some((value) => value.includes("local:opus") || value.includes("local_translation"))
+        ? label("translation_backend_local")
+        : generatedBy.some((value) => value.includes("direct_llm") || value.includes("openai") || value === "llm")
+          ? label("translation_backend_ai")
+          : generatedBy.some((value) => value.includes("cache") || value.includes("dict"))
+            ? label("translation_backend_cache")
+            : label("translation_backend_unknown");
       const summary = `
         <div class="pr-summary">
           ${["translated", "missing", "stale", "failed"].map((key) => `
             <div class="pr-chip"><strong>${Number(counts[key] || 0)}</strong><span>${esc(label(key))}</span></div>
           `).join("")}
         </div>
+        <div class="pr-panel-context-copy">${esc(label("translation_panel_hint"))}</div>
+        <div class="pr-translation-backend">${esc(backend)}</div>
         <div class="pr-dock-actions">
           <button class="pr-button primary" data-action="translateVisible">${esc(label("translate_visible_pages"))}</button>
-          <button class="pr-button" data-action="toggleTranslationSource">${esc(translationSourceVisible ? label("hide_source") : label("show_source"))}</button>
-          <button class="pr-button" data-translation-panel-retry>${esc(label("retry"))}</button>
         </div>
       `;
-      return `${summary}${translationQueueHtml()}`;
+      return summary;
     }
     function pageFromLocator(value) {
       const match = text(value).match(/p\.\s*(\d+)/i) || text(value).match(/page\s*(\d+)/i);
@@ -4902,18 +5325,35 @@
     function reviewPanelHtml() {
       return `${analysisBodyHtml()}${figuresPanelHtml()}${debugOverlayEnabled() ? `<div class="pr-panel-head">${esc(label("debug"))}</div>${debugPanelHtml()}` : ""}`;
     }
+    function sidePanelContextHtml(tab) {
+      const config = {
+        notes: ["notes", "notes_context_title", "notes_context_copy"],
+        translation: ["translation", "translation_context_title", "translation_context_copy"],
+        review: ["review", "review_context_title", "review_context_copy"],
+      }[tab];
+      if (!config) return "";
+      const meta = label("page_context_meta").replace("{page}", String(currentPage || 1));
+      return `
+        <div class="pr-panel-context">
+          <div class="pr-panel-context-kicker">${esc(label(config[0]))}</div>
+          <div class="pr-panel-context-title">${esc(label(config[1]))}</div>
+          <div class="pr-panel-context-copy">${esc(label(config[2]))}</div>
+          <div class="pr-panel-context-meta">${esc(meta)}</div>
+        </div>
+      `;
+    }
     function sideBodyHtml() {
       if (activeTab === "notes") {
-        return notesPanelHtml();
+        return `${sidePanelContextHtml("notes")}${notesPanelHtml()}`;
       }
       if (activeTab === "translation") {
-        return translationPanelHtml();
+        return `${sidePanelContextHtml("translation")}${translationPanelHtml()}`;
       }
       if (activeTab === "claims") {
         return claimsPanelHtml();
       }
       if (activeTab === "review") {
-        return reviewPanelHtml();
+        return `${sidePanelContextHtml("review")}${reviewPanelHtml()}`;
       }
       const rows = asArr(args.segments).filter((row) => Number(asObj(row).page || 0) === currentPage).slice(0, 16);
       if (!rows.length) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
@@ -5043,6 +5483,30 @@
       if (!pages.includes(currentPage)) pages.push(currentPage);
       requestPagePreviews(pages);
     }
+    function notifyParentReaderState() {
+      if (window.parent === window) return;
+      try {
+        window.parent.postMessage({
+          type: "nblane.reader.state",
+          source_id: sourceId(),
+          mode: readerMode,
+          page: currentPage,
+          total_pages: totalPages,
+          progress: totalPages > 0 ? Math.round((currentPage / totalPages) * 100) : 0,
+          active_tab: activeTab,
+          side_panel_collapsed: sidePanelCollapsed,
+        }, "*");
+      } catch {}
+    }
+    function notifyParentReaderReady() {
+      if (window.parent === window) return;
+      try {
+        window.parent.postMessage({
+          type: "nblane.reader.ready",
+          source_id: sourceId(),
+        }, "*");
+      } catch {}
+    }
     function setReaderMode(mode) {
       const next = ["pdf", "compare", "translation"].includes(mode) ? mode : "pdf";
       if (readerMode === next) return;
@@ -5063,6 +5527,7 @@
       scheduleViewportUpdate();
       if (readerMode === "translation" && !hasFullTranslationContext()) schedulePayloadRefresh(20, { fullTranslation: true });
       if (!userAnchorLocked()) scheduleReaderStateChanged(true);
+      notifyParentReaderState();
       window.setTimeout(() => {
         renderAround(anchorPage, { force: true });
         try { scrollToPage(anchorPage, { smooth: false }); } catch (scrollError) {
@@ -5138,7 +5603,10 @@
       }
     }
     function translationPageElement(pageNumber) {
-      return document.querySelector(`.pr-translation-page[data-page="${Number(pageNumber || 0)}"]`);
+      const page = Number(pageNumber || 0);
+      return document.querySelector(
+        `.pr-translation-page[data-page="${page}"], .pr-translation-flow-page[data-page="${page}"]`,
+      );
     }
     function compareDualScrollLockEnabled() {
       try {
@@ -5178,29 +5646,24 @@
       if (!viewer || !translationReader) return;
       const scrollEl = translationScrollElement() || translationReader;
       const dualLock = compareDualScrollLockEnabled();
+      if (!dualLock) return;
       syncLock = true;
       window.setTimeout(() => { syncLock = false; }, 180);
       if (source === "pdf") {
         const anchorId = activeSegmentFromViewport();
-        if (anchorId && !dualLock) {
+        if (anchorId) {
           setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: true, refresh: false });
           return;
         }
-        if (dualLock) {
-          const page = currentPage || activePageFromViewport(viewer) || 1;
-          const pdfPageEl = pageElement(page);
-          const ratio = pageVisibleOffsetRatio(viewer, pdfPageEl);
-          const transPageEl = translationPageElement(page);
-          if (transPageEl && ratio != null) {
-            applyPageOffsetTo(scrollEl, transPageEl, ratio);
-          } else if (transPageEl) {
-            transPageEl.scrollIntoView({ block: "start" });
-          }
-          if (anchorId) setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: false, refresh: false });
-          return;
+        const page = activePageFromViewport(viewer) || currentPage || 1;
+        const pdfPageEl = pageElement(page);
+        const ratio = pageVisibleOffsetRatio(viewer, pdfPageEl);
+        const transPageEl = translationPageElement(page);
+        if (transPageEl && ratio != null) {
+          applyPageOffsetTo(scrollEl, transPageEl, ratio);
+        } else if (transPageEl) {
+          transPageEl.scrollIntoView({ block: "start" });
         }
-        const pageEl = translationPageElement(currentPage);
-        if (pageEl) pageEl.scrollIntoView({ block: "start" });
         return;
       }
       if (translationScrollSyncMuted()) return;
@@ -5209,26 +5672,40 @@
         clearStickyUserAnchor(stickyUserAnchor);
       }
       const box = scrollEl.getBoundingClientRect();
-      const rows = [...translationReader.querySelectorAll(".pr-translation-unit[data-anchor-id], .pr-translation-page[data-page]")];
-      const picked = rows.find((row) => {
+      const units = [...translationReader.querySelectorAll(".pr-translation-unit[data-anchor-id], .pr-translation-block[data-anchor-id]")];
+      const pickedUnit = units.find((row) => {
         const rect = row.getBoundingClientRect();
         return rect.bottom > box.top + 40 && rect.top < box.bottom - 40;
       });
+      const pages = [...translationReader.querySelectorAll(".pr-translation-page[data-page], .pr-translation-flow-page[data-page]")];
+      const pickedPage = pages.find((row) => {
+        const rect = row.getBoundingClientRect();
+        return rect.bottom > box.top + 40 && rect.top < box.bottom - 40;
+      });
+      const picked = pickedUnit || pickedPage;
       const page = Number(picked?.dataset.page || 0);
       const anchorId = text(picked?.dataset.anchorId || "");
-      if (anchorId) setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: false, refresh: false });
+      if (anchorId) {
+        setActiveAnchor(anchorId, {
+          jumpToPage: true,
+          scrollTranslation: false,
+          refresh: false,
+          smooth: false,
+          allowPageFallback: true,
+          syncMuteMs: 700,
+        });
+        return;
+      }
       if (page) {
-        if (dualLock) {
-          const transPageEl = translationPageElement(page);
-          const ratio = pageVisibleOffsetRatio(scrollEl, transPageEl);
-          const pdfPageEl = pageElement(page);
-          if (pdfPageEl && ratio != null) {
-            muteViewportAnchorSync(600);
-            applyPageOffsetTo(viewer, pdfPageEl, ratio);
-            currentPage = page;
-            updatePageUi();
-            return;
-          }
+        const transPageEl = translationPageElement(page);
+        const ratio = pageVisibleOffsetRatio(scrollEl, transPageEl);
+        const pdfPageEl = pageElement(page);
+        if (pdfPageEl && ratio != null) {
+          muteViewportAnchorSync(600);
+          applyPageOffsetTo(viewer, pdfPageEl, ratio);
+          currentPage = page;
+          updatePageUi();
+          return;
         }
         if (page !== currentPage) {
           muteViewportAnchorSync(600);
@@ -5252,17 +5729,38 @@
     function showTranslationUnitDock(anchorId) {
       const unit = buildAnchorIndex().get(text(anchorId));
       if (!unit) return false;
+      activeTranslationAnchor = text(anchorId);
       const statusName = text(unit.status || (text(unit.translated_text) ? "translated" : "missing"));
+      const sourceText = text(unit.source_text || unit.text).trim();
+      const page = Number(unit.page || currentPage || 1);
+      const scopeRef = text(unit.scope_ref || unit.unit_id || anchorId);
+      const segmentRefs = text(unit.segment_id || (unit.scope_type === "segment" ? scopeRef : ""));
+      // A clicked translation unit is also a real reading selection. Reuse
+      // the existing annotation/chunk/citation payload contract so paragraph
+      // reading can continue into notes without a second PDF selection step.
+      currentSelection = {
+        source_id: sourceId(),
+        page,
+        selected_text: sourceText,
+        selected_text_hash: text(unit.source_hash || unit.text_hash || scopeRef),
+        rects: asArr(unit.rects),
+        segment_refs: segmentRefs ? [segmentRefs] : [],
+        locator: text(unit.locator || `p. ${page}`),
+        anchor_id: text(unit.anchor_id || unit.unit_id || anchorId),
+        scope_ref: scopeRef,
+      };
       dockState = {
         mode: "translation",
         status: translationUnitStatusLabel(statusName),
-        selected_text: text(unit.source_text),
+        selected_text: sourceText,
         result: unitDisplayText(unit),
         pending: false,
-        selection_hash: text(unit.scope_ref || unit.unit_id || anchorId),
+        selection_hash: scopeRef,
         failed: ["failed", "missing", "stale"].includes(statusName),
       };
       refreshDock();
+      window.requestAnimationFrame(() => placeSelectionDock());
+      window.setTimeout(() => placeSelectionDock(), 180);
       return true;
     }
     function wireTranslationRows() {
@@ -5275,12 +5773,21 @@
           const anchorId = row.dataset.anchorId || "";
           const unit = buildAnchorIndex().get(anchorId) || {};
           const page = preferredTranslationClickPage(unit, Number(row.dataset.page || 0));
-          performUserAnchorJump(anchorId, { scrollTranslation: false, refresh: false, targetPage: page, preserveTranslationScroll: true, syncMuteMs: 2400, smooth: false }).catch(() => {});
-          if (row.classList.contains("overflowing") || isPositionedTranslationScope(row.dataset.scopeType)) {
-            showTranslationUnitDock(anchorId);
-          } else {
-            refreshSide();
-          }
+          const keepTranslationMode = readerMode === "translation";
+          performUserAnchorJump(anchorId, {
+            scrollTranslation: false,
+            refresh: false,
+            targetPage: page,
+            preserveTranslationScroll: true,
+            keepTranslationMode,
+            jumpToPage: !keepTranslationMode,
+            syncMuteMs: 2400,
+            smooth: false,
+          }).catch(() => {});
+          // Every paragraph opens the same compact translation dock. This
+          // keeps flow reading, overlay reading, and PDF selection on one
+          // interaction path instead of making normal paragraphs a dead end.
+          showTranslationUnitDock(anchorId);
         });
       });
       document.querySelectorAll("[data-translation-action]").forEach((button) => {
@@ -5316,15 +5823,6 @@
           notesFilterCurrentPage = button.dataset.notesFilter !== "all";
           persistLocalState();
           refreshSide();
-        });
-      });
-      document.querySelector("[data-translation-panel-retry]")?.addEventListener("click", () => {
-        const pages = visiblePages.length ? visiblePages : [currentPage];
-        startReaderTask("retry_translation_scope", {
-          target_lang: targetLang(),
-          visible_pages: pages,
-          primary_page: currentPage,
-          scope_strategy: "auto",
         });
       });
       document.querySelector("[data-debug-action=\"toggleOverlay\"]")?.addEventListener("click", () => {
@@ -5449,6 +5947,7 @@
         if (btn) {
           btn.classList.toggle("active", next);
           btn.setAttribute("aria-pressed", next ? "true" : "false");
+          btn.textContent = `${label("compare_lock_scroll") || "Follow source"} ${next ? "●" : "○"}`;
         }
         return;
       }
@@ -5586,7 +6085,10 @@
         return emitAction("create_citation", selection);
       }
       if (action === "translate") {
-        const hit = findSelectionTranslation(selection);
+        // Preserve the exact selection payload. A later payload refresh must not
+        // replace it before the background task returns its result.
+        currentSelection = { ...selection, selected_text: text(selection.selected_text).trim() };
+        const hit = findSelectionTranslation(currentSelection);
         const hitText = translatedTextFromRow(hit);
         dockState = {
           mode: "translation",
@@ -5598,7 +6100,9 @@
         };
         refreshDock();
         if (hit && hitText) return;
-        return emitAction("translate_selection", { ...selection, target_lang: targetLang() });
+        // Keep the reader responsive while an uncached sentence is translated.
+        // The task result is rendered into the same dock when it completes.
+        return startReaderTask("translate_selection", { ...selection, target_lang: targetLang() });
       }
       if (action === "retryTranslation") {
         dockState = { ...dockState, status: label("translating"), failed: false, pending: true };
@@ -5674,6 +6178,7 @@
           layer.addEventListener("pointerdown", () => { selectingText = true; });
           layer.addEventListener("mouseup", handleSelection);
           layer.addEventListener("keyup", handleSelection);
+          layer.addEventListener("click", handleTextClick);
           layer.addEventListener("dblclick", handleTextDoubleClick);
         });
         applyAllKnownHighlights();
@@ -5849,7 +6354,11 @@
       const state = pageRenderStates.get(pageNumber) || {};
       const sameRenderedScale = Math.abs(Number(state.renderedScale || 0) - currentScale) < .001;
       const samePreviewScale = Math.abs(Number(state.previewScale || 0) - currentScale) < .001;
-      if (!force && state.rendering) return;
+      // IntersectionObserver and the initial forced render can arrive in the
+      // same frame. Do not cancel an in-flight render for the same scale; the
+      // cancellation was the reason ordinary PDFs fell back to PNG previews.
+      if (state.rendering && sameRenderedScale === false && samePreviewScale === false) return;
+      if (state.rendering) return;
       if (!force && state.status === "rendered" && sameRenderedScale && pageDomReady(pageNumber, "rendered")) return;
       if (!force && state.status === "preview" && samePreviewScale && pageDomReady(pageNumber, "preview")) return;
       if (force && state.renderTask) {
@@ -5886,6 +6395,13 @@
         if (state.renderTask) {
           try { state.renderTask.cancel(); } catch {}
         }
+        // Do not leave a blank white page when PDF.js fails after allocating a canvas.
+        // A supplied page preview is a usable fallback even if the render task rejects.
+        if (hasPreview) {
+          const preview = document.getElementById(`pagePreview-${pageNumber}`);
+          if (preview) preview.classList.add("visible");
+          canvas.classList.add("pending-fallback");
+        }
         const textLayerPromise = withTimeout(
           renderTextLayer(pageNumber, page, viewport),
           pdfTextLayerTimeoutMs(),
@@ -5912,6 +6428,9 @@
           state.renderedScale = pageScale;
           state.previewScale = 0;
         } catch (error) {
+          if (!(error && error.name === "RenderingCancelledException")) {
+            try { console.error("PDF.js page.render failed", pageNumber, error); } catch {}
+          }
           if (hasPreview) {
             state.status = "preview";
             state.previewScale = pageScale;
@@ -6115,6 +6634,7 @@
         <span class="pr-page-error-text" title="${attr(safeMessage)}">${esc(`${label("page")} ${pageNumber}: ${label("pdf_error")}`)}${truncated ? ` <small>${esc(truncated)}</small>` : ""}</span>
         <span class="pr-page-error-actions">
           <button type="button" class="pr-page-error-btn" data-page-retry="${attr(String(pageNumber))}">${esc(label("retry"))}</button>
+          <button type="button" class="pr-page-error-btn" data-page-reload="1">${esc(label("pdf_retry"))}</button>
         </span>
       `;
       const retryBtn = overlay.querySelector("[data-page-retry]");
@@ -6122,6 +6642,13 @@
         retryBtn.addEventListener("click", (event) => {
           event.preventDefault();
           retryPageRender(pageNumber);
+        });
+      }
+      const reloadBtn = overlay.querySelector("[data-page-reload]");
+      if (reloadBtn) {
+        reloadBtn.addEventListener("click", (event) => {
+          event.preventDefault();
+          loadPdf().catch(() => {});
         });
       }
       wrap.appendChild(overlay);
@@ -6386,10 +6913,16 @@
       };
       renderSelectionBar();
       if (emitPassiveEvents()) emitAction("selection_created", currentSelection);
-      // Auto-translate a single word so a double-click shows its meaning (with
-      // phonetics) instantly, without a second click on the Translate button.
+      // Auto-translate a single word after the double-click window closes.
+      // This prevents the first mouseup of a double-click from racing the
+      // paragraph/word interaction handlers.
       if (isSingleWordSelection(selectedText)) {
-        handleAction("translate");
+        window.setTimeout(() => {
+          if (Date.now() < suppressParagraphClickUntil) return;
+          if (currentSelection && text(currentSelection.selected_text).trim() === selectedText) {
+            handleAction("translate");
+          }
+        }, 240);
       }
     }
     function pageNumberForPoint(x, y) {
@@ -6476,48 +7009,34 @@
       hits.sort((a, b) => a.area - b.area || a.y - b.y);
       return hits.length ? hits[0].unit : null;
     }
-    async function handleTextDoubleClick(event) {
-      // In pure PDF reading, let the browser's native double-click word
-      // selection stand (the mouseup handler turns it into the translate
-      // bar). Don't yank the reader into compare mode or auto-translate the
-      // segment — translation on demand via selection is enough here.
-      if (readerMode === "pdf") return;
-      const page = Number(event.currentTarget?.dataset?.page || pageNumberForPoint(event.clientX, event.clientY) || currentPage || 0);
-      const unit = layoutUnitAtPoint(page, event.clientX, event.clientY);
-      if (!unit) {
-        requestReaderContext([page]);
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      try { window.getSelection()?.removeAllRanges(); } catch {}
-      currentSelection = null;
-      const anchorId = text(unit.anchor_id || unit.unit_id || unit.scope_ref);
-      const scopeRef = text(unit.scope_ref || unit.unit_id || anchorId);
-      if (!anchorId) return;
-      const intentSeq = beginUserAnchorIntent(anchorId);
-      setStickyUserAnchor(anchorId);
-      refreshTranslationReader();
-      const scrollPromise = Promise.resolve(setActiveAnchor(anchorId, { jumpToPage: false, scrollTranslation: true, refresh: false }));
-      persistLocalState();
-      scheduleReaderStateChanged(true);
-      scrollPromise
-        .then(() => waitForScrollSettled(translationScrollElement(), { timeoutMs: 2600, minWaitMs: 120, quietFrames: 6 }))
-        .then(() => waitForLayoutFrames(2))
-        .catch(() => {})
-        .finally(() => releaseUserAnchorIntent(anchorId, intentSeq));
-      showTranslationUnitDock(anchorId);
-      renderHighlights(page);
-      const statusName = text(unit.status || (text(unit.translated_text) ? "translated" : "missing"));
-      if (unit.translatable !== false && ["missing", "stale", "failed"].includes(statusName) && scopeRef) {
-        await startReaderTask("retry_translation_scope", {
-          target_lang: targetLang(),
-          visible_pages: [page],
-          primary_page: page,
-          scope_strategy: text(unit.scope_type || "structure"),
-          scope_refs: [scopeRef],
-        });
-      }
+    let textClickTimer = 0;
+    let suppressParagraphClickUntil = 0;
+    function handleTextClick(event) {
+      // Delay the paragraph action so a native double-click can finish word
+      // selection first. In PDF mode the browser selection remains untouched.
+      if (readerMode === "pdf" || Date.now() < suppressParagraphClickUntil) return;
+      if (textClickTimer) window.clearTimeout(textClickTimer);
+      textClickTimer = window.setTimeout(() => {
+        textClickTimer = 0;
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed && text(selection.toString()).trim()) return;
+        const page = Number(event.currentTarget?.dataset?.page || pageNumberForPoint(event.clientX, event.clientY) || currentPage || 0);
+        const unit = layoutUnitAtPoint(page, event.clientX, event.clientY);
+        if (!unit) {
+          requestReaderContext([page]);
+          return;
+        }
+        const anchorId = text(unit.anchor_id || unit.unit_id || unit.scope_ref);
+        if (anchorId) showTranslationUnitDock(anchorId);
+      }, 220);
+    }
+    function handleTextDoubleClick() {
+      // Keep browser-native word selection. handleSelection turns a single
+      // English word into the local dictionary lookup; selecting more text
+      // leaves the explicit selection toolbar as the only action.
+      if (textClickTimer) window.clearTimeout(textClickTimer);
+      textClickTimer = 0;
+      suppressParagraphClickUntil = Date.now() + 420;
     }
     function segmentRefsForPages(pages) {
       const picked = new Set(pages.map((page) => Number(page || 0)));
@@ -6850,6 +7369,8 @@
       sidePanelCollapsed = settings().side_panel_collapsed != null
         ? truthySetting(settings().side_panel_collapsed, true)
         : typeof local.side_panel_collapsed === "boolean" ? local.side_panel_collapsed : text(settings().side_panel_default || "collapsed") !== "open";
+      // Keep the first Reader view focused on the PDF. A saved preference still wins.
+      if (!localStateFresh(local) && settings().side_panel_collapsed == null) sidePanelCollapsed = true;
       leftRailCollapsed = settings().left_rail_collapsed != null
         ? truthySetting(settings().left_rail_collapsed, false)
         : Boolean(local.left_rail_collapsed);
@@ -6860,12 +7381,12 @@
         : typeof local.translation_source_visible === "boolean" ? local.translation_source_visible : true;
       activeTranslationAnchor = activeTranslationAnchorFromState(local);
       debugOverlayActive = debugOverlayEnabled() && Boolean(local.debug_overlay_active || text(settings().translation_layout) === "overlay");
-      readerMode = text(settings().reader_mode || local.reader_mode || readerMode || "pdf") || "pdf";
+      const queryMode = readerQueryParam("mode");
+      readerMode = text(queryMode || settings().reader_mode || local.reader_mode || readerMode || "pdf") || "pdf";
       activeTab = text(settings().active_tab || local.active_tab || activeTab || "notes") || "notes";
-      if (!["notes", "translation", "review", "claims"].includes(activeTab)) activeTab = "notes";
-      if (activeTab === "review" && sidePanelCollapsed && hasReviewContent() && !localStateFresh(local)) {
-        sidePanelCollapsed = false;
-      }
+      if (!["notes", "translation", "review"].includes(activeTab)) activeTab = "notes";
+      if (!localStateFresh(local) && settings().active_tab == null) activeTab = "notes";
+
       notesFilterCurrentPage = typeof local.notes_filter_current_page === "boolean" ? local.notes_filter_current_page : false;
       syncDockUiFromLocal(local);
       compareSplitRatio = Math.max(25, Math.min(75, Number(settings().compare_split_ratio || local.compare_split_ratio || args.compare_split_ratio || 50)));
@@ -6895,8 +7416,15 @@
       }
       if (!window.pdfjsLib) {
         pdfDocumentLoading = false;
+        status(`${label("pdf_preview_mode")} · ${label("pdf_error")}`);
         const viewer = document.querySelector(".pr-viewer");
-        if (viewer) viewer.innerHTML = `<div class="pr-error">${esc(label("pdf_error"))} PDF.js CDN failed to load.</div>`;
+        if (viewer) {
+          const errorBox = document.createElement("div");
+          errorBox.className = "pr-error";
+          errorBox.innerHTML = `${esc(label("pdf_error"))} PDF.js CDN failed to load. <button type="button" class="pr-page-error-btn">${esc(label("pdf_retry"))}</button>`;
+          errorBox.querySelector("button")?.addEventListener("click", () => loadPdf().catch(() => {}));
+          viewer.replaceChildren(errorBox);
+        }
         return;
       }
       let loadingTask = null;
@@ -6959,7 +7487,7 @@
         pdfDocumentLoading = false;
         pdfDoc = null;
         totalPages = knownPageCount(currentPage);
-        status(label("pdf_preview_mode"));
+        status(`${label("pdf_preview_mode")} · ${label("pdf_error")}`);
         debugState.lastLoadMs = performance.now() - startedAt;
         renderDocumentSkeleton();
         setupIntersectionObserver();
@@ -7022,7 +7550,12 @@
       }, wait);
     }
     async function loadReaderPayload(options = {}) {
-      if (payloadLoading) return;
+      if (payloadLoading) {
+        // Mutations can finish while the initial/context payload is still in flight.
+        // Keep the newest refresh request so the write is visible without a reload.
+        payloadRefreshQueued = { ...(payloadRefreshQueued || {}), ...asObj(options) };
+        return;
+      }
       payloadLoading = true;
       const requestedPages = Array.from(requestedContextPages)
         .map((page) => Number(page || 0))
@@ -7031,9 +7564,15 @@
       try {
         const params = new URLSearchParams();
         if (currentPage) params.set("page", String(currentPage));
+        if (READER_BOOT.uiLang) params.set("ui_lang", READER_BOOT.uiLang);
         if (requestedPages.length) params.set("pages", requestedPages.join(","));
         if (wantsFullTranslationContext(options)) params.set("full_translation", "1");
-        if (!wantsFullDocumentPayload()) params.set("full_document", "0");
+        // The first PDF view should become usable with the current page only.
+        // Full-document payloads include every segment, translation and
+        // analysis row and can make the reader look frozen before PDF.js has
+        // rendered anything. Translation mode and explicit full-paper actions
+        // still request the complete context through full_translation.
+        if (options.initial === true || !wantsFullDocumentPayload()) params.set("full_document", "0");
         const query = params.toString() ? `?${params.toString()}` : "";
         const headers = authHeaders({});
         if (payloadEtag && options.preserveView !== false && options.force !== true) {
@@ -7067,6 +7606,11 @@
         scheduleBulkTranslationsFetch(40, { force: Boolean(options.fullTranslation) });
       } finally {
         payloadLoading = false;
+        if (payloadRefreshQueued) {
+          const queued = payloadRefreshQueued;
+          payloadRefreshQueued = null;
+          schedulePayloadRefresh(0, queued);
+        }
       }
     }
     async function sendProgressBeacon() {
@@ -7083,6 +7627,15 @@
         const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
         navigator.sendBeacon(apiPath(`/api/${sourcePath()}/progress`), blob);
       } catch {}
+    }
+    function maybeStartQueryAction() {
+      if (queryActionStarted) return;
+      const requested = readerQueryParam("action");
+      if (!["analyze_paper", "codex_deep_read"].includes(requested)) return;
+      queryActionStarted = true;
+      window.setTimeout(() => {
+        handleAction(requested === "codex_deep_read" ? "deepRead" : "analyzePaper");
+      }, 360);
     }
     async function onRender(event) {
       try {
@@ -7109,10 +7662,13 @@
           onRender.lastSignature = sourceSignature;
           await loadPdf();
         } else {
+          if (!preserveView && readerMode !== "pdf") deepLinkPageApplied = false;
           refreshForArgsUpdate({ preserveTranslationScroll: preserveView });
         }
         refreshActionStatus();
         maybeStartPreparationTask();
+        notifyParentReaderReady();
+        maybeStartQueryAction();
       } catch (error) {
         try { console.error("onRender failed", error); } catch {}
         const message = error && error.message ? error.message : text(error);
@@ -7132,6 +7688,14 @@
         if (viewer) viewer.innerHTML = `<div class="pr-error">${esc(label("pdf_error"))}<br>${esc(message)}</div>`;
       }
     }
+    document.addEventListener("click", (event) => {
+      const button = event.target && event.target.closest ? event.target.closest("[data-ref-toggle]") : null;
+      if (!button) return;
+      const target = document.getElementById(button.dataset.refToggle || "");
+      if (!target) return;
+      const expanded = target.classList.toggle("expanded");
+      button.textContent = expanded ? (button.dataset.lessLabel || "Show fewer references") : (button.dataset.moreLabel || "Show all references");
+    });
     window.addEventListener("resize", () => {
       if (resizeTimer) window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => {
@@ -7151,8 +7715,15 @@
     window.addEventListener("error", (event) => {
       try { console.error("reader window.error", event && event.error); } catch {}
     });
+    // Seed the first payload request from the deep link so translation and
+    // compare modes do not briefly load page 1 and then lose the requested page.
+    currentPage = initialPage();
     renderShell("Loading PDF...");
-    loadReaderPayload().catch((error) => {
+    loadReaderPayload({ initial: true }).then(() => {
+      // Translation context can arrive in a second payload after the PDF shell.
+      // Reapply the URL location while those asynchronous updates settle.
+      [250, 900, 2200, 5000, 9000].forEach((delay) => window.setTimeout(retryDeepLinkTranslationPage, delay));
+    }).catch((error) => {
       try { console.error("initial loadReaderPayload failed", error); } catch {}
       const message = error && error.message ? error.message : text(error);
       try { renderShell(label("pdf_error")); } catch {

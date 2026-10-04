@@ -13,7 +13,6 @@ from datetime import date, timedelta
 
 _KIND_KANBAN_ADD = "kanban.add"
 _KIND_EVIDENCE_CAPTURE = "evidence.capture"
-_KIND_REVIEW_WEEKLY = "review.weekly_summary"
 _KIND_NAVIGATE = "navigate"
 _KIND_UNKNOWN = "unknown"
 
@@ -27,7 +26,6 @@ _PAGE_MAP: tuple[tuple[str, ...], str] = (
     (("gap", "差距", "缺口"), "pages/2_Gap_Analysis.py"),
     (("健康", "health"), "pages/5_Profile_Health.py"),
     (("研究", "research", "论文", "paper"), "pages/7_Research.py"),
-    (("复盘", "review"), "pages/8_Review.py"),
     (("agent", "代理活动"), "pages/9_Agent_Activity.py"),
     (("项目", "project"), "pages/11_Project_Board.py"),
     (("设置", "settings"), "pages/12_Settings.py"),
@@ -188,9 +186,6 @@ def parse_intent(text: str, *, today: date | None = None) -> IntentAction:
     raw = (text or "").strip()
     if not raw:
         return IntentAction(kind=_KIND_UNKNOWN, raw="", confidence=0.0)
-
-    if re.search(r"(这周|本周|这一周|上周).*(做|完成|进展|总结|干了|复盘)|^(?:看|总结一下?)?周报$|weekly\s+(summary|review)", raw, re.IGNORECASE):
-        return IntentAction(kind=_KIND_REVIEW_WEEKLY, raw=raw, confidence=0.9)
 
     nav = re.match(r"^(打开|跳转?到?|去|go\s+to|open)\s*(.+)$", raw, re.IGNORECASE)
     if nav:

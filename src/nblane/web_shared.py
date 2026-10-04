@@ -1704,11 +1704,8 @@ def render_workspace_navigation() -> None:
             ],
         ),
         (
-            u["sidebar_nav_review_group"],
-            [
-                ("pages/8_Review.py", u["sidebar_nav_review"]),
-                ("pages/5_Profile_Health.py", u["sidebar_nav_health"]),
-            ],
+            u["sidebar_nav_system_group"],
+            [("pages/5_Profile_Health.py", u["sidebar_nav_health"])],
         ),
     ]
     with st.expander(u["sidebar_nav_title"], expanded=True):

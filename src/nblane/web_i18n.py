@@ -104,11 +104,6 @@ def profile_health_ui() -> dict[str, str]:
     return _merged("common", "profile_health")
 
 
-def review_ui() -> dict[str, str]:
-    """Review page."""
-    return _merged("common", "review")
-
-
 def agent_activity_ui() -> dict[str, str]:
     """Agent Activity page."""
     return _merged("common", "agent_activity")

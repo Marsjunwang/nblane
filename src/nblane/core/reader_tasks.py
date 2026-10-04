@@ -109,6 +109,7 @@ def start(
                 clean_action,
                 data,
                 progress_callback=_progress_callback(clean_task_id, clean_action),
+                cancel_callback=cancel_event.is_set,
             )
             with _COND:
                 task = _TASKS.get(clean_task_id)
@@ -426,6 +427,8 @@ def _lost_snapshot(
 
 
 def _action_label(action: str) -> str:
+    if action in {TRANSLATE_SELECTION, "translate_segment"}:
+        return "Translating selection..."
     if action in {TRANSLATE_VISIBLE_PAGES, RETRY_TRANSLATION_SCOPE}:
         return "Translating visible pages..."
     if action == TRANSLATE_FULL_PAPER:

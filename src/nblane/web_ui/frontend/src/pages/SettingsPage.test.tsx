@@ -131,7 +131,11 @@ describe('SettingsPage', () => {
         ...PROFILE_SETTINGS.preferences,
         ai: {
           ...PROFILE_SETTINGS.preferences.ai,
-          actions: {
+      actions: {
+            'research.paper_translate': { backend: 'llm', llm_model: 'paper-model' },
+            'research.paper_explain_selection': { backend: 'codex', codex_model: 'paper-explain' },
+            'research.paper_qa': { backend: 'llm', llm_model: 'paper-qa' },
+            'research.paper_deep_read_codex': { backend: 'codex', codex_model: 'paper-deep' },
             'evidence.crystallize': { backend: 'codex', codex_model: 'codex-crystal' },
           },
         },
@@ -153,6 +157,8 @@ describe('SettingsPage', () => {
     renderPage(fetchMock);
 
     expect(await screen.findByDisplayValue('codex-crystal')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('paper-model')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('paper-explain')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('证据结晶模型'), { target: { value: 'codex-crystal-v2' } });
     fireEvent.click(screen.getByRole('button', { name: '保存档案偏好' }));
 

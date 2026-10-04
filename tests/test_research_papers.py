@@ -853,9 +853,15 @@ class TestResearchPapers(unittest.TestCase):
                 )
                 save_research_sources(profile, inbox)
 
-            no_pdf = {row["id"] for row in paper_rows(profile, view="no_pdf")}
-            needs_extraction = paper_rows(profile, view="needs_extraction", node_id=node.id)
-            duplicate_risk = {row["id"] for row in paper_rows(profile, view="duplicate_risk")}
+            asset_root = Path(tmp) / "assets"
+            asset_file = asset_root / "profiles" / "alice" / "papers" / "demo.pdf"
+            asset_file.parent.mkdir(parents=True, exist_ok=True)
+            asset_file.write_bytes(PDF_BYTES)
+
+            with patch.dict(os.environ, {"NBLANE_RESEARCH_ASSET_ROOT": str(asset_root)}):
+                no_pdf = {row["id"] for row in paper_rows(profile, view="no_pdf")}
+                needs_extraction = paper_rows(profile, view="needs_extraction", node_id=node.id)
+                duplicate_risk = {row["id"] for row in paper_rows(profile, view="duplicate_risk")}
             vla_row = needs_extraction[0]
 
         self.assertIn("source:paper:grounded", no_pdf)
@@ -865,6 +871,30 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(vla_row["tags"], ["vla", "robotics"])
         self.assertIn("source:paper:grounded", duplicate_risk)
         self.assertIn("source:paper:grounded-duplicate", duplicate_risk)
+
+    def test_paper_rows_treat_missing_referenced_pdf_as_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            inbox = load_research_sources(profile)
+            update_research_source(
+                inbox,
+                "source:paper:grounded",
+                metadata={
+                    "pdf_asset_ref": "papers/missing.pdf",
+                    "pdf_download_status": "downloaded",
+                },
+            )
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                save_research_sources(profile, inbox)
+
+            asset_root = Path(tmp) / "assets"
+            with patch.dict(os.environ, {"NBLANE_RESEARCH_ASSET_ROOT": str(asset_root)}):
+                row = paper_rows(profile)[0]
+                no_pdf = paper_rows(profile, view="no_pdf")
+
+        self.assertFalse(row["has_pdf"])
+        self.assertIn("PDF missing", row["badges"])
+        self.assertEqual([item["id"] for item in no_pdf], ["source:paper:grounded"])
 
     def test_annotations_and_translations_are_segment_hash_aware(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1203,6 +1233,229 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual({row["scope_type"] for row in payload["translation_units"]}, {"segment"})
         self.assertEqual(payload["translation_summary"], {"translated": 1, "missing": 0, "stale": 0, "failed": 0})
 
+    def test_build_reader_payload_excludes_unlocated_legacy_rows_from_first_page(self) -> None:
+        """Legacy page-zero rows must not masquerade as page-one content."""
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            first = PaperSegment(
+                segment_id="seg:front-matter",
+                source_id=source_id,
+                page=0,
+                order=1,
+                text="Paper abstract front matter.",
+                text_hash=text_hash("Paper abstract front matter."),
+            )
+            second = PaperSegment(
+                segment_id="seg:body",
+                source_id=source_id,
+                page=2,
+                order=1,
+                text="Body paragraph.",
+                text_hash=text_hash("Body paragraph."),
+            )
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_pages(
+                    profile,
+                    source_id,
+                    [
+                        PaperPage(
+                            source_id=source_id,
+                            page=1,
+                            text="Page one",
+                            text_hash=text_hash("Page one"),
+                        ),
+                        PaperPage(
+                            source_id=source_id,
+                            page=2,
+                            text="Page two",
+                            text_hash=text_hash("Page two"),
+                        ),
+                    ],
+                )
+                save_paper_segments(profile, source_id, [first, second])
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "segment_id": first.segment_id,
+                            "source_hash": first.text_hash,
+                            "source_text": first.text,
+                            "target_lang": "zh",
+                            "translated_text": "摘要前言译文。",
+                        },
+                        {
+                            "segment_id": second.segment_id,
+                            "source_hash": second.text_hash,
+                            "source_text": second.text,
+                            "target_lang": "zh",
+                            "translated_text": "正文译文。",
+                        },
+                    ],
+                )
+
+            with patch("nblane.core.research_papers.get_stable_pdf_url", return_value="/media/stable.pdf"):
+                payload = build_reader_payload(
+                    profile,
+                    source_id,
+                    page=1,
+                    requested_pages={1},
+                    target_lang="zh",
+                    include_page_previews=False,
+                )
+
+        self.assertNotIn("seg:front-matter", [row.get("segment_id") for row in payload["segments"]])
+        self.assertNotIn("seg:front-matter", [row.get("segment_id") for row in payload["translation_units"]])
+        self.assertNotIn("摘要前言译文。", [row.get("translated_text") for row in payload["translation_units"]])
+
+    def test_build_reader_payload_keeps_structure_when_translation_cache_is_partial(self) -> None:
+        """Translation coverage must not replace the canonical structure graph."""
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            pages = [
+                PaperPage(
+                    source_id=source_id,
+                    page=1,
+                    text="Page one",
+                    text_hash=text_hash("Page one"),
+                )
+            ]
+            segments = [
+                PaperSegment(
+                    segment_id=f"seg:{index}",
+                    source_id=source_id,
+                    page=1,
+                    order=index,
+                    text=f"Segment {index}.",
+                    text_hash=text_hash(f"Segment {index}."),
+                )
+                for index in range(1, 5)
+            ]
+            structure = [
+                PaperStructureUnit(
+                    unit_id=f"structure:{index}",
+                    source_id=source_id,
+                    kind="paragraph",
+                    page_start=1,
+                    page_end=1,
+                    order=index,
+                    text=f"Structure {index}.",
+                    text_hash=text_hash(f"Structure {index}."),
+                    translatable=True,
+                )
+                for index in range(1, 5)
+            ]
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_pages(profile, source_id, pages)
+                save_paper_segments(profile, source_id, segments)
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "segment_id": segment.segment_id,
+                            "source_hash": segment.text_hash,
+                            "source_text": segment.text,
+                            "target_lang": "zh",
+                            "translated_text": f"段落 {index} 译文。",
+                        }
+                        for index, segment in enumerate(segments, start=1)
+                    ]
+                    + [
+                        {
+                            "scope_type": "structure",
+                            "scope_ref": structure[0].unit_id,
+                            "source_hash": structure[0].text_hash,
+                            "source_text": structure[0].text,
+                            "target_lang": "zh",
+                            "translated_text": "结构译文。",
+                        }
+                    ],
+                )
+
+            with (
+                patch("nblane.core.research_papers.build_paper_structure_units", return_value=structure),
+                patch("nblane.core.research_papers.build_paper_layout_units", return_value=[]),
+                patch("nblane.core.research_papers.get_stable_pdf_url", return_value="/media/stable.pdf"),
+            ):
+                payload = build_reader_payload(
+                    profile,
+                    source_id,
+                    page=1,
+                    requested_pages={1},
+                    target_lang="zh",
+                    include_page_previews=False,
+                )
+
+        self.assertEqual({row["scope_type"] for row in payload["translation_units"]}, {"structure"})
+        self.assertEqual(len(payload["translation_units"]), 4)
+        self.assertEqual(payload["translation_summary"], {"translated": 1, "missing": 3, "stale": 0, "failed": 0})
+        self.assertIn("structure", {row["scope_type"] for row in payload["translations"]})
+
+    def test_build_reader_payload_uses_structure_units_when_structure_cache_is_complete(self) -> None:
+        """Complete structure translations retain their positioned scope."""
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            page = PaperPage(
+                source_id=source_id,
+                page=1,
+                text="Page one",
+                text_hash=text_hash("Page one"),
+            )
+            structure = [
+                PaperStructureUnit(
+                    unit_id=f"structure:{index}",
+                    source_id=source_id,
+                    kind="paragraph",
+                    page_start=1,
+                    page_end=1,
+                    order=index,
+                    text=f"Structure {index}.",
+                    text_hash=text_hash(f"Structure {index}."),
+                    translatable=True,
+                )
+                for index in range(1, 3)
+            ]
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_pages(profile, source_id, [page])
+                save_paper_segments(profile, source_id, [])
+                upsert_paper_translations(
+                    profile,
+                    source_id,
+                    [
+                        {
+                            "scope_type": "structure",
+                            "scope_ref": unit.unit_id,
+                            "source_hash": unit.text_hash,
+                            "source_text": unit.text,
+                            "target_lang": "zh",
+                            "translated_text": f"结构 {index} 译文。",
+                        }
+                        for index, unit in enumerate(structure, start=1)
+                    ],
+                )
+
+            with (
+                patch("nblane.core.research_papers.build_paper_structure_units", return_value=structure),
+                patch("nblane.core.research_papers.build_paper_layout_units", return_value=[]),
+                patch("nblane.core.research_papers.get_stable_pdf_url", return_value="/media/stable.pdf"),
+            ):
+                payload = build_reader_payload(
+                    profile,
+                    source_id,
+                    page=1,
+                    requested_pages={1},
+                    target_lang="zh",
+                    include_page_previews=False,
+                )
+
+        self.assertEqual({row["scope_type"] for row in payload["translation_units"]}, {"structure"})
+        self.assertEqual(len(payload["translation_units"]), 2)
+        self.assertEqual(payload["translation_summary"], {"translated": 2, "missing": 0, "stale": 0, "failed": 0})
+
     def test_build_reader_payload_prefers_layout_units_when_layout_translations_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))
@@ -1449,6 +1702,166 @@ class TestResearchPapers(unittest.TestCase):
             self.assertGreaterEqual(rect["y_pct"], 0)
             self.assertLessEqual(rect["x_pct"] + rect["w_pct"], 1)
             self.assertLessEqual(rect["y_pct"] + rect["h_pct"], 1)
+
+    def test_pymupdf_fallback_projects_positioned_segments(self) -> None:
+        """GROBID outages must not collapse a readable PDF into page-sized units."""
+
+        if not pymupdf_available():
+            self.skipTest("PyMuPDF is not available")
+        import fitz  # type: ignore[import-not-found]
+
+        doc = fitz.open()
+        page = doc.new_page(width=240, height=320)
+        page.insert_text((24, 32), "A Precise Title", fontsize=18)
+        page.insert_textbox(
+            fitz.Rect(24, 60, 210, 112),
+            "This is the first paragraph. It contains enough text to form a stable reading unit.\n"
+            "The second visual line remains attached to the same paragraph.",
+            fontsize=10,
+        )
+        page.insert_text((24, 128), "Abstract: This summary is intentionally kept on one PDF text block.", fontsize=10)
+        page.insert_text((24, 150), "2 Methods", fontsize=13)
+        page.insert_textbox(
+            fitz.Rect(24, 174, 210, 226),
+            "The method paragraph is positioned independently from the introduction.",
+            fontsize=10,
+        )
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")},
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with (
+                patch("nblane.core.research_papers.grobid_readiness", return_value={"available": False, "status": "unavailable"}),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                import_paper_pdf(profile, source_id, pdf_bytes, "fallback.pdf")
+                segments = extract_paper_segments(profile, source_id, backend="grobid")
+            source = load_research_sources(profile).by_id()[source_id]
+
+        self.assertGreaterEqual(len(segments), 3)
+        self.assertGreater(len(segments), 1)
+        self.assertTrue(all(segment.rects for segment in segments))
+        self.assertIn("Methods", " ".join(segment.text for segment in segments))
+        self.assertIn("Abstract", " ".join(segment.text for segment in segments))
+        self.assertTrue(any(segment.kind == "heading" and segment.text == "Abstract" for segment in segments))
+        quality = source.metadata["fallback_structure_quality"]
+        self.assertTrue(quality["layout_projection"])
+        self.assertEqual(quality["segments"], len(segments))
+        self.assertEqual(quality["positioned_segments"], len(segments))
+
+    def test_legacy_fallback_upgrade_is_local_idempotent_and_keeps_translation_files(self) -> None:
+        if not pymupdf_available():
+            self.skipTest("PyMuPDF is not available")
+        import fitz
+
+        doc = fitz.open()
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((60, 70), "Grounded Reading", fontsize=18)
+        page.insert_text((60, 125), "Abstract: A scalable robot policy is evaluated.", fontsize=10)
+        page.insert_text((60, 160), "Keywords: robot policies", fontsize=10)
+        page.insert_text((60, 220), "1 Introduction", fontsize=12, fontname="hebo")
+        page.insert_text((60, 245), "A complete body paragraph remains positioned independently.", fontsize=10)
+        pdf_bytes = doc.tobytes()
+        doc.close()
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ, {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"), "NBLANE_RESEARCH_PDF_BACKEND": "pymupdf"},
+        ):
+            profile = self._profile(Path(tmp))
+            sid = "source:paper:grounded"
+            with patch("nblane.core.git_backup.record_change"):
+                import_paper_pdf(profile, sid, pdf_bytes, "legacy.pdf")
+                save_paper_pages(profile, sid, [PaperPage(source_id=sid, page=1, text="Old entire page.")])
+                save_paper_segments(profile, sid, [PaperSegment("seg:old", sid, 1, 1, "Old entire page.")])
+                upsert_paper_translations(profile, sid, [{
+                    "scope_type": "segment", "segment_id": "seg:old", "scope_ref": "seg:old",
+                    "source_hash": text_hash("Old entire page."), "source_text": "Old entire page.",
+                    "translated_text": "旧译文", "target_lang": "zh", "page": 1,
+                }])
+                inbox = load_research_sources(profile)
+                source = inbox.by_id()[sid]
+                update_research_source(inbox, sid, metadata={
+                    **source.metadata,
+                    "structure_backend": "pymupdf_fallback",
+                    "reading_artifacts_pdf_sha256": source.metadata["pdf_sha256"],
+                    "grobid_last_error": "GROBID extraction failed: timed out",
+                    "grobid_last_failed_at": "2999-01-01T00:00:00+00:00",
+                })
+                save_research_sources(profile, inbox)
+                from nblane.core.research_papers._constants import PAPER_TRANSLATIONS_DIRNAME
+                from nblane.core.research_papers._paths import _jsonl_path
+
+                translation_file = _jsonl_path(profile, PAPER_TRANSLATIONS_DIRNAME, sid)
+                translations_before = translation_file.read_bytes()
+                with patch("nblane.core.research_papers.process_grobid_fulltext") as grobid:
+                    first = ensure_paper_reading_artifacts(profile, sid)
+                    units = build_paper_structure_units(profile, sid)
+                    with patch("nblane.core.research_papers.build_paper_layout_units") as rebuild:
+                        second = ensure_paper_reading_artifacts(profile, sid)
+                        cached = build_paper_structure_units(profile, sid)
+                grobid.assert_not_called()
+                rebuild.assert_not_called()
+                self.assertEqual(translations_before, translation_file.read_bytes())
+        self.assertGreater(first["segments"], 1)
+        self.assertEqual(first["segments"], second["segments"])
+        self.assertEqual([unit.to_dict() for unit in units], [unit.to_dict() for unit in cached])
+        self.assertTrue(any(unit.section_path == ["Abstract"] and unit.kind == "paragraph" for unit in units))
+        self.assertTrue(all(unit.section_path == [] for unit in units if unit.text.startswith("Keywords:")))
+
+    def test_structure_cache_rebuilds_when_semantic_inputs_change(self) -> None:
+        sid = "source:paper:grounded"
+        layout = [{
+            "unit_id": "layout:body", "page": 2, "order": 1, "kind": "paragraph",
+            "source_text": "This positioned paragraph belongs to a semantic section.",
+            "rects": [{"x": 50, "y": 160, "w": 350, "h": 40, "page_width": 600, "page_height": 800}],
+        }]
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with patch("nblane.core.git_backup.record_change"), patch(
+                "nblane.core.research_papers.build_paper_layout_units", return_value=layout,
+            ) as extract:
+                first = build_paper_structure_units(profile, sid)
+                build_paper_structure_units(profile, sid)
+                self.assertEqual(extract.call_count, 1)
+                save_paper_segments(profile, sid, [PaperSegment(
+                    "seg:new", sid, 2, 1, layout[0]["source_text"], section_path=["Methods"],
+                )])
+                second = build_paper_structure_units(profile, sid)
+                self.assertEqual(extract.call_count, 2)
+                with patch("nblane.core.research_papers.build_paper_layout_units", return_value=[]):
+                    # A transient engine failure during a requested rebuild
+                    # keeps the previous durable structure available.
+                    save_paper_segments(profile, sid, [])
+                    retained = build_paper_structure_units(profile, sid)
+                    forced_retained = build_paper_structure_units(profile, sid, force=True)
+                self.assertEqual([unit.to_dict() for unit in second], [unit.to_dict() for unit in retained])
+                self.assertEqual([unit.to_dict() for unit in second], [unit.to_dict() for unit in forced_retained])
+        self.assertEqual(first[0].section_path, [])
+        self.assertEqual(second[0].section_path, ["Methods"])
+
+    def test_structure_reads_columns_in_bands_beneath_spanning_heading(self) -> None:
+        from nblane.core.research_papers import _paper_structure_reassign_order_and_sections
+        sid = "source:paper:grounded"
+        def unit(name: str, x: int, y: int, w: int, kind: str = "paragraph") -> PaperStructureUnit:
+            return PaperStructureUnit(
+                name, sid, kind, 2, 2, 1, name,
+                rects=[{"page": 2, "x": x, "y": y, "w": w, "h": 20, "page_width": 600, "page_height": 800}],
+            )
+        rows = [unit("right-one", 330, 100, 220), unit("left-two", 50, 140, 220),
+                unit("Methods", 50, 50, 500, "heading"), unit("left-one", 50, 100, 220),
+                unit("right-two", 330, 140, 220), unit("Results", 50, 220, 500, "heading"),
+                unit("left-three", 50, 260, 220), unit("right-three", 330, 260, 220)]
+        ordered = _paper_structure_reassign_order_and_sections(rows)
+        self.assertEqual([row.text for row in ordered], [
+            "Methods", "left-one", "left-two", "right-one", "right-two", "Results", "left-three", "right-three",
+        ])
+        self.assertEqual(ordered[1].section_path, ["Methods"])
+        self.assertEqual(ordered[-1].section_path, ["Results"])
 
     def test_layout_formula_detection_excludes_formula_from_translation_units(self) -> None:
         from nblane.core.research_papers import (
@@ -1748,6 +2161,7 @@ class TestResearchPapers(unittest.TestCase):
                     text_hash=text_hash("The method paragraph should be translated."),
                     section_path=["Method"],
                     translatable=True,
+                    rects=[{"page": 1, "x": 40, "y": 80, "w": 360, "h": 48, "page_width": 500, "page_height": 700}],
                 )
                 reference = PaperStructureUnit(
                     unit_id="psu:paper:9:00099:ref",
@@ -1760,6 +2174,7 @@ class TestResearchPapers(unittest.TestCase):
                     text_hash=text_hash("Smith, J.: A reference entry."),
                     section_path=["References"],
                     translatable=True,
+                    rects=[{"page": 9, "x": 40, "y": 80, "w": 360, "h": 48, "page_width": 500, "page_height": 700}],
                 )
                 with patch("nblane.core.research_papers.git_backup.record_change"):
                     save_paper_segments(
@@ -1904,6 +2319,131 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(len(paragraphs), 1)
         self.assertEqual(paragraphs[0].section_path, ["1 Introduction"])
         self.assertEqual(paragraphs[0].text, "A layout-grounded paragraph about robots.")
+
+    def test_build_paper_structure_units_uses_grobid_boundaries_without_losing_pdf_rects(self) -> None:
+        source_id = "source:paper:grounded"
+
+        def layout_row(page: int, order: int, text: str, *, x: float, y: float, kind: str = "paragraph") -> dict[str, object]:
+            unit_id = f"layout:v2:{page}:{order:05d}:{order}"
+            return {
+                "unit_id": unit_id,
+                "scope_type": "layout",
+                "scope_ref": unit_id,
+                "page": page,
+                "order": order,
+                "kind": kind,
+                "source_text": text,
+                "source_hash": text_hash(text),
+                "translatable": kind != "symbol",
+                "font_size": 10,
+                "line_count": 1,
+                "rects": [
+                    {
+                        "x": x,
+                        "y": y,
+                        "w": max(36, min(390, len(text) * 4.5)),
+                        "h": 10,
+                        "page_width": 612,
+                        "page_height": 792,
+                        "x_pct": x / 612,
+                        "y_pct": y / 792,
+                    }
+                ],
+            }
+
+        model_tail = (
+            "The Transformer follows this overall architecture using stacked self-attention and point-wise, "
+            "fully connected layers for both the encoder and decoder, shown in the left and right halves of Figure 1,"
+        )
+        encoder_first = "The encoder is composed of a stack of N=6 identical layers. Each layer has two"
+        encoder_rest = (
+            "sub-layers. The first is a multi-head self-attention mechanism, and the second is a simple, "
+            "positionwise fully connected feed-forward network."
+        )
+        layout_units = [
+            layout_row(2, 1, "3", x=108, y=642, kind="symbol"),
+            layout_row(2, 2, "Model Architecture", x=126, y=642),
+            layout_row(2, 3, "Most competitive neural sequence transduction models use an encoder-decoder structure.", x=108, y=668),
+            layout_row(3, 1, "Figure 1: The Transformer - model architecture.", x=210, y=404, kind="caption"),
+            layout_row(3, 2, model_tail, x=108, y=436),
+            layout_row(3, 3, "respectively.", x=108, y=458),
+            layout_row(3, 4, "3.1", x=108, y=482),
+            layout_row(3, 5, "Encoder and Decoder Stacks", x=130, y=482),
+            # PyMuPDF can emit the indented text a fraction of a point before
+            # its inline label.  The canonical flow must restore x order.
+            layout_row(3, 6, encoder_first, x=158, y=502.8),
+            layout_row(3, 7, "Encoder:", x=108, y=502.9),
+            layout_row(3, 8, encoder_rest, x=108, y=514),
+            layout_row(3, 9, "3.2", x=108, y=681),
+            layout_row(3, 10, "Attention", x=130, y=681),
+            layout_row(3, 11, "An attention function maps a query and key-value pairs to an output.", x=108, y=701),
+        ]
+        segments = [
+            PaperSegment("seg:model-head", source_id, 2, 1, "Model Architecture", ["Model Architecture"], "heading"),
+            PaperSegment(
+                "seg:model-body",
+                source_id,
+                2,
+                2,
+                "Most competitive neural sequence transduction models use an encoder-decoder structure. "
+                f"{model_tail} respectively.",
+                ["Model Architecture"],
+            ),
+            PaperSegment(
+                "seg:figure",
+                source_id,
+                3,
+                3,
+                "Figure 1: The Transformer - model architecture.",
+                [],
+                "caption",
+            ),
+            PaperSegment("seg:encoder-head", source_id, 3, 4, "Encoder and Decoder Stacks", ["Encoder and Decoder Stacks"], "heading"),
+            PaperSegment(
+                "seg:encoder-body",
+                source_id,
+                3,
+                5,
+                f"Encoder: {encoder_first} {encoder_rest}",
+                ["Encoder and Decoder Stacks"],
+            ),
+            PaperSegment("seg:attention-head", source_id, 3, 6, "Attention", ["Attention"], "heading"),
+            PaperSegment(
+                "seg:attention-body",
+                source_id,
+                3,
+                7,
+                "An attention function maps a query and key-value pairs to an output.",
+                ["Attention"],
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(profile, source_id, segments)
+            with (
+                patch("nblane.core.research_papers.build_paper_layout_units", return_value=layout_units),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+            ):
+                units = build_paper_structure_units(profile, source_id, force=True)
+
+        captions = [unit for unit in units if unit.kind == "caption"]
+        self.assertEqual([unit.text for unit in captions], ["Figure 1: The Transformer - model architecture."])
+        model_page_three = next(unit for unit in units if unit.kind == "paragraph" and "Transformer follows" in unit.text)
+        self.assertTrue(model_page_three.text.endswith("respectively."))
+        self.assertEqual(model_page_three.section_path, ["Model Architecture"])
+        encoder = next(unit for unit in units if unit.kind == "paragraph" and unit.text.startswith("Encoder:"))
+        self.assertIn("Encoder: The encoder is composed", encoder.text)
+        self.assertIn("two sub-layers", encoder.text)
+        self.assertEqual(encoder.section_path, ["Encoder and Decoder Stacks"])
+        self.assertEqual(len(encoder.rects), 3)
+        headings = [unit.text for unit in units if unit.kind == "heading"]
+        self.assertIn("3.1 Encoder and Decoder Stacks", headings)
+        self.assertIn("3.2 Attention", headings)
+        attention = next(unit for unit in units if unit.kind == "paragraph" and unit.text.startswith("An attention function"))
+        self.assertEqual(attention.section_path, ["Attention"])
+        self.assertTrue(all(unit.rects for unit in units if unit.kind in {"heading", "paragraph", "caption"}))
 
     def test_build_paper_structure_units_keeps_pre_abstract_caption_outside_abstract_and_merges_cross_page_abstract(self) -> None:
         layout_units = [
@@ -2718,6 +3258,7 @@ class TestResearchPapers(unittest.TestCase):
                     target_lang="zh",
                     mode="missing_or_stale",
                     batch_size=20,
+                    scope_strategy="segment",
                     ai_profile="",
                     require_review=False,
                 )
@@ -2787,6 +3328,7 @@ class TestResearchPapers(unittest.TestCase):
                     target_lang="zh",
                     mode="all",
                     batch_size=2,
+                    scope_strategy="segment",
                     ai_profile="",
                     require_review=False,
                 )
@@ -2864,6 +3406,7 @@ class TestResearchPapers(unittest.TestCase):
                     target_lang="zh",
                     mode="all",
                     batch_size=1,
+                    scope_strategy="segment",
                     ai_profile="",
                     require_review=False,
                 )
@@ -2927,6 +3470,7 @@ class TestResearchPapers(unittest.TestCase):
                     source_id,
                     target_lang="zh",
                     mode="all",
+                    scope_strategy="segment",
                     ai_profile="",
                     require_review=False,
                 )
@@ -3114,7 +3658,7 @@ class TestResearchPapers(unittest.TestCase):
                     source_id,
                     target_lang="zh",
                     mode="all",
-                    scope_strategy="auto",
+                    scope_strategy="page",
                     ai_profile="",
                     require_review=False,
                 )
@@ -3707,6 +4251,40 @@ class TestResearchPapers(unittest.TestCase):
         self.assertIn("§ Method", segments[1].locator)
         self.assertEqual(refs[0]["title"], "Useful Paper")
         self.assertEqual(refs[0]["year"], "1843")
+
+    def test_grobid_tei_to_segments_includes_title_and_abstract_before_body(self) -> None:
+        tei = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+          <teiHeader>
+            <fileDesc>
+              <titleStmt><title>Grounded Reading</title></titleStmt>
+              <publicationStmt><p>Test</p></publicationStmt>
+              <sourceDesc><p>Test</p></sourceDesc>
+            </fileDesc>
+            <profileDesc>
+              <abstract><div><p coords="1,50,160,360,80">This abstract explains the complete paper.</p></div></abstract>
+            </profileDesc>
+          </teiHeader>
+          <facsimile><surface n="1" ulx="0" uly="0" lrx="500" lry="700" /></facsimile>
+          <text><body><div n="2"><head>Introduction</head><p>Body text.</p></div></body></text>
+        </TEI>"""
+
+        segments = grobid_tei_to_segments("source:paper:grounded", tei)
+
+        self.assertEqual(
+            [(row.kind, row.text) for row in segments],
+            [
+                ("title", "Grounded Reading"),
+                ("heading", "Abstract"),
+                ("paragraph", "This abstract explains the complete paper."),
+                ("heading", "Introduction"),
+                ("paragraph", "Body text."),
+            ],
+        )
+        self.assertEqual(segments[0].page, 1)
+        self.assertEqual(segments[1].section_path, ["Abstract"])
+        self.assertEqual(segments[2].page, 1)
+        self.assertEqual(segments[2].rects[0]["page"], 1)
+        self.assertEqual(segments[3].page, 2)
 
     def test_grobid_tei_to_segments_includes_head_caption_and_formula_coordinates(self) -> None:
         tei = """<TEI xmlns="http://www.tei-c.org/ns/1.0">

@@ -27,6 +27,14 @@ dependencies = [
     "mcp>=1.0",
 ]
 
+[project.optional-dependencies]
+local-translation = [
+    "ctranslate2>=4.5",
+    "sentencepiece>=0.2",
+    "transformers>=4.45,<5",
+    "huggingface_hub>=0.24",
+]
+
 [project.scripts]
 nblane = "nblane.cli:main"
 nblane-mcp = "nblane.mcp_server:main"

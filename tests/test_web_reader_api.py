@@ -40,7 +40,7 @@ from nblane.core.research_sources import (
     load_research_sources,
     save_research_sources,
 )
-from nblane.web_reader_api import _is_local_paper_library_embed, app
+from nblane.web_reader_api import _is_local_paper_library_embed, _reader_settings, app
 
 PDF_BYTES = b"""%PDF-1.4
 1 0 obj
@@ -59,6 +59,31 @@ trailer
 
 
 class TestWebReaderApi(unittest.TestCase):
+    def test_reader_profile_defaults_are_used_only_when_paper_has_no_state(self) -> None:
+        payload = {"reader_state": {}, "context_window": {"total_pages": 12}}
+        defaults = {
+            "research": {
+                "reader": {
+                    "default_mode": "compare",
+                    "default_side_panel": "open",
+                    "default_target_lang": "en",
+                    "compare_split_ratio": 62,
+                }
+            }
+        }
+        with patch("nblane.web_reader_api.load_web_preferences", return_value=defaults):
+            settings = _reader_settings(payload, 1, "zh", Path("/tmp/alice"))
+        self.assertEqual(settings["reader_mode"], "compare")
+        self.assertEqual(settings["side_panel_collapsed"], False)
+        self.assertEqual(settings["target_lang"], "en")
+        self.assertEqual(settings["compare_split_ratio"], 62)
+
+        payload["reader_state"] = {"reader_mode": "pdf", "target_lang": "ja"}
+        with patch("nblane.web_reader_api.load_web_preferences", return_value=defaults):
+            settings = _reader_settings(payload, 1, "zh", Path("/tmp/alice"))
+        self.assertEqual(settings["reader_mode"], "pdf")
+        self.assertEqual(settings["target_lang"], "ja")
+
     def _profile(self, root: Path) -> Path:
         profile = root / "alice"
         profile.mkdir()
@@ -141,12 +166,38 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(payload.json()["settings"]["overscan_pages"], "auto")
         self.assertEqual(payload.json()["settings"]["render_cache_max_pages"], "auto")
         self.assertEqual(payload.json()["settings"]["reader_mode"], "pdf")
-        self.assertEqual(payload.json()["settings"]["translation_layout"], "overlay")
+        self.assertEqual(payload.json()["settings"]["translation_layout"], "flow")
         self.assertIn("outline", payload.json())
         self.assertFalse(payload.json()["settings"]["debug_overlay_enabled"])
         self.assertFalse(payload.json()["settings"]["full_translation_context"])
         self.assertEqual(payload.json()["settings"]["active_left_tab"], "outline")
         self.assertEqual(payload.json()["settings"]["translation_overflow_policy"], "fixed-expand")
+
+    def test_reader_language_can_be_selected_per_request(self) -> None:
+        source_id = "source:paper:grounded"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            token = mint_reader_token("local", "alice", source_id)
+            view = client.get(
+                f"/reader/view/{quote(source_id, safe='')}?token={quote(token, safe='')}&ui_lang=zh"
+            )
+            payload = client.get(
+                f"/reader/api/{quote(source_id, safe='')}/payload?reader_token={quote(token, safe='')}&ui_lang=zh"
+            )
+
+        self.assertEqual(view.status_code, 200)
+        self.assertIn('uiLang: "zh"', view.text)
+        self.assertEqual(payload.status_code, 200)
+        self.assertEqual(payload.json()["ui"]["translate_full_paper"], "全文翻译")
+        self.assertEqual(payload.json()["ui"]["ask_paper"], "提问")
 
     def test_payload_uses_current_page_window_for_reader_context(self) -> None:
         source_id = "source:paper:grounded"
@@ -549,8 +600,9 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn("touch-action: none;", response.text)
         self.assertNotIn("width: 18px;", response.text)
         self.assertNotIn("Math.max(280, Math.min(560, panelWidth))", response.text)
-        self.assertIn("Analyze Paper", response.text)
-        self.assertIn('data-action="analyzePaper"', response.text)
+        self.assertNotIn('<button class="pr-button primary" data-action="analyzePaper">', response.text)
+        self.assertIn('data-action="deepRead"', response.text)
+        self.assertIn("Save position", response.text)
         self.assertIn('tabButton("translation"', response.text)
         self.assertIn('tabButton("review"', response.text)
         # Notes panel chips (color dot + tag chips + quote/note rendering)
@@ -761,6 +813,33 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(reader_token.status_code, 200)
         self.assertIn("/reader/view/source%3Apaper%3Agrounded", reader_token.json()["reader_url"])
         self.assertEqual(forbidden.status_code, 403)
+
+    def test_paper_library_api_handoff_refreshes_cookie_for_long_flows(self) -> None:
+        """A valid API handoff establishes a durable sidecar session."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.dict(
+                os.environ,
+                {
+                    "NBLANE_AUTH_FILE": str(self._auth_file(root)),
+                    "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                    "NBLANE_RESEARCH_ASSET_ROOT": str(root / "assets"),
+                },
+                clear=False,
+            ):
+                profile = self._profile(root)
+                client = self._client(profile)
+                handoff = mint_auth_handoff_token("alice")
+                first = client.get(
+                    f"/api/research/alice/paper-library?auth_handoff={quote(handoff, safe='')}"
+                )
+                second = client.get("/api/research/alice/paper-library")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertIn(AUTH_SESSION_COOKIE_NAME, first.headers.get("set-cookie", ""))
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()["payload"]["metrics"]["papers"], 1)
 
     def test_paper_library_search_and_import_require_pdf_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(

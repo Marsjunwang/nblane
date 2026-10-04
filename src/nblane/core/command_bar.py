@@ -6,8 +6,8 @@ parser. This module owns the two decisions around that parse:
 
 - :func:`resolve_command_text` — what happens on submit. Write intents
   (``kanban.add`` / ``evidence.capture``) become a pending-confirmation
-  payload and write NOTHING; read-only intents (``navigate`` /
-  ``review.weekly_summary``) resolve to a page; anything else resolves to
+  payload and write NOTHING; read-only ``navigate`` intents resolve to a
+  page; anything else resolves to
   the inline help hint.
 - :func:`apply_kanban_add_intent` — the confirmed ``kanban.add`` write:
   re-read the board from disk, append one :class:`KanbanTask`, and persist
@@ -37,14 +37,11 @@ from nblane.core.models import KanbanTask
 
 KIND_KANBAN_ADD = "kanban.add"
 KIND_EVIDENCE_CAPTURE = "evidence.capture"
-KIND_REVIEW_WEEKLY = "review.weekly_summary"
 KIND_NAVIGATE = "navigate"
 KIND_UNKNOWN = "unknown"
 
 # Kinds that mutate profile files and therefore require the confirmation card.
 CONFIRM_KINDS = (KIND_KANBAN_ADD, KIND_EVIDENCE_CAPTURE)
-
-REVIEW_PAGE = "pages/8_Review.py"
 
 # Intent columns are the short display names; kanban.md sections differ.
 _COLUMN_TO_SECTION = {
@@ -120,8 +117,6 @@ def resolve_command_text(text: str, *, today: date | None = None) -> dict[str, A
         }
     if intent.kind == KIND_NAVIGATE and intent.page:
         return {"outcome": "navigate", "page": intent.page}
-    if intent.kind == KIND_REVIEW_WEEKLY:
-        return {"outcome": "navigate", "page": REVIEW_PAGE}
     return {"outcome": "help", "raw": intent.raw}
 
 
@@ -185,9 +180,7 @@ __all__ = [
     "KIND_EVIDENCE_CAPTURE",
     "KIND_KANBAN_ADD",
     "KIND_NAVIGATE",
-    "KIND_REVIEW_WEEKLY",
     "KIND_UNKNOWN",
-    "REVIEW_PAGE",
     "apply_kanban_add_intent",
     "intent_needs_confirmation",
     "kanban_task_from_intent",

@@ -76,7 +76,7 @@ PAPER_ANNOTATION_KINDS = ("highlight", "note", "question")
 PAPER_ANNOTATION_STATUSES = ("active", "deleted")
 PAPER_TRANSLATION_STATUSES = ("translated", "missing", "stale", "failed")
 PAPER_TRANSLATION_SCOPES = ("segment", "page", "selection", "layout", "structure")
-PAPER_STRUCTURE_VERSION = "v4"
+PAPER_STRUCTURE_VERSION = "v6"
 PAPER_STRUCTURE_TRANSLATION_KINDS = ("title", "heading", "paragraph", "caption")
 PAPER_STRUCTURE_BODY_EXCLUDED_KINDS = (
     "authors",

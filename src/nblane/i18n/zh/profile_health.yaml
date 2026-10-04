@@ -8,12 +8,9 @@ page_help_body: |-
   1. 发布、生成输出或信任 profile context 前，先把这里当作只读预检。
   2. 错误是阻断项；警告通常需要审阅；信息项用于解释上下文质量。
   3. 按建议跳到 owner 页面修复，不在本页直接编辑数据。
-  4. 需要把近期 activity 整理成 evidence、next action 或草稿时，打开 Review。
   5. 修改证据、技能树、项目或公开层后，再回本页复查。
 
   Health 不写文件，只指出应由哪个页面负责修复。
-review_link: 打开 Review
-review_link_help: 复盘候选在 Review 页面生成；Health 保持只读。
 errors: 错误
 warnings: 警告
 info: 信息

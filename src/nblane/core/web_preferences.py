@@ -25,6 +25,12 @@ _AI_BACKENDS = {"llm", "codex"}
 _LANGUAGES = {"en", "zh"}
 _REPLY_LANGUAGES = {"en", "zh", "auto"}
 _GRANULARITIES = {"milestone", "checklist", "implementation"}
+_READER_MODES = {"pdf", "translation", "compare"}
+_READER_SCALE_MODES = {"fit-width", "fit-page", "actual"}
+_READER_PANEL_MODES = {"collapsed", "open"}
+_READER_TABS = {"notes", "translation", "review"}
+_READER_LEFT_TABS = {"outline", "thumbnails"}
+_READER_TRANSLATION_LAYOUTS = {"flow", "overlay"}
 AI_ACTION_DEFAULT_BACKENDS: dict[str, str] = {
     "research.paper_search_codex": "codex",
     "research.paper_translate": "llm",
@@ -125,6 +131,8 @@ def normalize_web_preferences(
         if isinstance(source.get("project_board"), dict)
         else {}
     )
+    research = source.get("research") if isinstance(source.get("research"), dict) else {}
+    reader = research.get("reader") if isinstance(research.get("reader"), dict) else {}
     timeline_range = (
         project_board.get("timeline_range")
         if isinstance(project_board.get("timeline_range"), dict)
@@ -170,6 +178,9 @@ def normalize_web_preferences(
                 "start": _iso_date(timeline_range.get("start")),
                 "end": _iso_date(timeline_range.get("end")),
             },
+        },
+        "research": {
+            "reader": _normalize_reader_preferences(reader),
         },
     }
 
@@ -295,6 +306,41 @@ def _strip_secret_keys(value: Any) -> Any:
 
 def _clean_text(value: object) -> str:
     return str(value or "").strip()
+
+
+def _choice(value: object, allowed: set[str], default: str) -> str:
+    clean = _clean_text(value).lower()
+    return clean if clean in allowed else default
+
+
+def _bounded_int(value: object, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value) if value is not None and str(value).strip() else default
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _normalize_reader_preferences(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize profile defaults used when a paper has no saved reader state."""
+
+    return {
+        "default_mode": _choice(raw.get("default_mode"), _READER_MODES, "pdf"),
+        "default_scale": _choice(raw.get("default_scale"), _READER_SCALE_MODES, "fit-width"),
+        "default_side_panel": _choice(raw.get("default_side_panel"), _READER_PANEL_MODES, "collapsed"),
+        "default_active_tab": _choice(raw.get("default_active_tab"), _READER_TABS, "notes"),
+        "default_left_rail": _choice(raw.get("default_left_rail"), _READER_PANEL_MODES, "open"),
+        "default_left_tab": _choice(raw.get("default_left_tab"), _READER_LEFT_TABS, "outline"),
+        "default_translation_source": _clean_bool(raw.get("default_translation_source"), default=True),
+        "default_target_lang": _clean_text(raw.get("default_target_lang"))[:16] or "zh",
+        "default_translation_layout": _choice(
+            raw.get("default_translation_layout"), _READER_TRANSLATION_LAYOUTS, "flow"
+        ),
+        "compare_split_ratio": _bounded_int(
+            raw.get("compare_split_ratio"), default=50, minimum=20, maximum=80
+        ),
+        "panel_width": _bounded_int(raw.get("panel_width"), default=340, minimum=260, maximum=520),
+    }
 
 
 def _clean_bool(value: object, *, default: bool) -> bool:

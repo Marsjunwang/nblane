@@ -1024,7 +1024,73 @@ def pymupdf_available() -> bool:
 
 
 
-def _segments_from_page_text(source_id: str, pages: list[PaperPage]) -> list[PaperSegment]:
+def _segments_from_page_text(
+    source_id: str,
+    pages: list[PaperPage],
+    *,
+    profile: str | Path | None = None,
+) -> list[PaperSegment]:
+    """Build fallback segments, preferring the positioned PDF layout when available.
+
+    ``paper-segments`` is retained for compatibility with older translations and
+    exports, but a page-sized segment is too coarse for Reader interactions.  A
+    local PDF can already provide line geometry through PyMuPDF, so use the same
+    layout/structure heuristics as the Reader before falling back to page text.
+    The legacy page-text path remains available for tests, blank PDFs, and
+    environments without a usable PDF asset.
+    """
+
+    if profile is not None:
+        try:
+            layout_units = build_paper_layout_units(profile, source_id)
+            if layout_units:
+                candidates = _paper_structure_candidates_from_layout(layout_units, source_id)
+                structure_units = _paper_structure_units_from_candidates(source_id, candidates)
+                structure_units = _paper_structure_merge_cross_page_continuations(structure_units)
+                structure_units = _paper_structure_reassign_order_and_sections(structure_units)
+                # Segments are the compatibility projection of the canonical
+                # reading units.  Keep only text that belongs in the normal
+                # Reader flow; table cells, symbols, and figure labels remain
+                # available in paper-structure for geometry/debugging.
+                projected = [
+                    unit
+                    for unit in structure_units
+                    if unit.kind in PAPER_STRUCTURE_TRANSLATION_KINDS and _clean_text(unit.text)
+                ]
+                if projected:
+                    slug = source_slug(source_id)
+                    occurrences: dict[tuple[int, str], int] = {}
+                    identifiers: list[str] = []
+                    for unit in projected:
+                        digest = (unit.text_hash or text_hash(unit.text)).removeprefix("sha256:")[:16]
+                        key = (unit.page_start, digest)
+                        occurrences[key] = occurrences.get(key, 0) + 1
+                        identifiers.append(f"seg:{slug}:layout:{unit.page_start}:{digest}:{occurrences[key]}")
+                    return [
+                        PaperSegment(
+                            segment_id=identifiers[index - 1],
+                            source_id=source_id,
+                            page=unit.page_start,
+                            order=index,
+                            text=unit.text,
+                            section_path=list(unit.section_path),
+                            kind=unit.kind,
+                            text_hash=unit.text_hash or text_hash(unit.text),
+                            locator=unit.locator,
+                            rects=copy.deepcopy(unit.rects),
+                            metadata={
+                                "fallback_backend": "pymupdf_layout",
+                                "structure_unit_id": unit.unit_id,
+                            },
+                        )
+                        for index, unit in enumerate(projected, start=1)
+                    ]
+        except Exception:
+            # Keep the old page-text fallback as the final compatibility path.
+            # Extraction diagnostics are recorded by the caller; a malformed
+            # layout result must never prevent a PDF from being readable.
+            pass
+
     segments: list[PaperSegment] = []
     order = 0
     slug = source_slug(source_id)
@@ -1201,7 +1267,7 @@ def extract_paper_segments(
     pages = load_paper_pages(profile, source_id)
     if not pages:
         pages = extract_paper_pages(profile, source_id, backend="auto")
-    segments = _segments_from_page_text(source_id, pages)
+    segments = _segments_from_page_text(source_id, pages, profile=profile)
     save_paper_segments(profile, source_id, segments)
     if not warnings and not notices:
         notices.append("GROBID 当前不可用或未返回可用段落，已自动切换到文本降级方案。")
@@ -1210,7 +1276,23 @@ def extract_paper_segments(
         "structured_extracted_at": _now(),
         "structured_extraction_warnings": warnings,
         "structured_extraction_notices": notices,
+        "fallback_layout_version": PAPER_STRUCTURE_VERSION,
+        "fallback_layout_pdf_sha256": _paper_pdf_fingerprint(_source_by_id(profile, source_id)[1]),
     }
+    if segments:
+        metadata["fallback_structure_quality"] = {
+            "segments": len(segments),
+            "positioned_segments": sum(bool(segment.rects) for segment in segments),
+            "paragraph_segments": sum(segment.kind == "paragraph" for segment in segments),
+            "heading_segments": sum(segment.kind in {"title", "heading"} for segment in segments),
+            "caption_segments": sum(segment.kind == "caption" for segment in segments),
+            "max_segment_chars": max(len(segment.text) for segment in segments),
+            "avg_segment_chars": round(sum(len(segment.text) for segment in segments) / len(segments), 1),
+            "layout_projection": any(
+                _clean_text(segment.metadata.get("fallback_backend")) == "pymupdf_layout"
+                for segment in segments
+            ),
+        }
     if grobid_failure:
         metadata["grobid_last_error"] = grobid_failure
         metadata["grobid_last_error_detail"] = grobid_failure_detail
@@ -1252,6 +1334,18 @@ def _reader_preparation_label(status: str, structure_backend: str = "") -> str:
     return "PDF ready"
 
 
+def _fallback_layout_needs_upgrade(metadata: dict[str, object]) -> bool:
+    """Identify legacy fallback artifacts, including a completed blank-PDF attempt."""
+
+    if _clean_text(metadata.get("structure_backend")) != "pymupdf_fallback":
+        return False
+    fingerprint = _clean_text(metadata.get("pdf_sha256") or metadata.get("pdf_asset_ref"))
+    return not (
+        metadata.get("fallback_layout_version") == PAPER_STRUCTURE_VERSION
+        and metadata.get("fallback_layout_pdf_sha256") == fingerprint
+    )
+
+
 def _reader_preparation_summary(
     source: ResearchSource,
     pages: list[PaperPage],
@@ -1262,7 +1356,10 @@ def _reader_preparation_summary(
     marker = _clean_text(metadata.get("reading_artifacts_pdf_sha256"))
     pdf_changed = bool(marker and pdf_fingerprint and marker != pdf_fingerprint)
     has_pdf = _paper_has_pdf(source)
-    needs_prepare = bool(has_pdf and (not pages or not segments or pdf_changed))
+    needs_prepare = bool(has_pdf and (
+        not pages or not segments or pdf_changed
+        or (pymupdf_available() and _fallback_layout_needs_upgrade(metadata))
+    ))
     structure_backend = _clean_text(metadata.get("structure_backend"))
     status = _clean_text(metadata.get("reading_artifacts_status")) or ""
     if not has_pdf:
@@ -1360,6 +1457,15 @@ def ensure_paper_reading_artifacts(
     marker = _clean_text(source_metadata.get("reading_artifacts_pdf_sha256"))
     pdf_changed = bool(marker and pdf_fingerprint and marker != pdf_fingerprint)
     current_structure_backend = _clean_text(source_metadata.get("structure_backend"))
+    try:
+        local_pdf_available = paper_pdf_asset_path(profile, source_id).exists()
+    except (FileNotFoundError, ValueError):
+        local_pdf_available = False
+    fallback_layout_upgrade_needed = bool(
+        local_pdf_available
+        and pymupdf_available()
+        and _fallback_layout_needs_upgrade(source_metadata)
+    )
     recent_grobid_failure = _metadata_has_recent_grobid_failure(source_metadata, pdf_fingerprint)
     if (
         recent_grobid_failure
@@ -1385,7 +1491,9 @@ def ensure_paper_reading_artifacts(
     needs_segments = (
         not segments
         or pdf_changed
-        or bool(prefer_grobid and current_structure_backend != "grobid" and not skip_recent_grobid_failure)
+        or bool(prefer_grobid and _pdf_backend() != "pymupdf" and current_structure_backend != "grobid" and not skip_recent_grobid_failure)
+        or fallback_layout_upgrade_needed
+        or force_grobid
     )
     warnings: list[str] = []
 
@@ -1398,7 +1506,7 @@ def ensure_paper_reading_artifacts(
 
     _, source = _source_by_id(profile, source_id)
     source_metadata = dict(source.metadata or {})
-    if skip_recent_grobid_failure and not needs_pages:
+    if skip_recent_grobid_failure and not needs_pages and not needs_segments:
         emit_progress(
             "fallback_ready",
             "Using current fallback text; recent GROBID failure was not retried.",
@@ -1406,7 +1514,8 @@ def ensure_paper_reading_artifacts(
             saved=len(segments),
         )
     if needs_segments:
-        segment_backend = "grobid" if prefer_grobid else "fallback"
+        use_grobid = prefer_grobid and _pdf_backend() != "pymupdf" and not skip_recent_grobid_failure
+        segment_backend = "grobid" if use_grobid else "fallback"
         segment_label = "Saving fallback text..."
         if segment_backend == "grobid":
             segment_label = (
@@ -1856,14 +1965,19 @@ def _tei_first_descendant(node: ET.Element, local_name: str) -> ET.Element | Non
 
 
 def grobid_tei_to_segments(source_id: str, tei_xml: str) -> list[PaperSegment]:
-    """Convert a small useful subset of GROBID TEI to paper segments."""
+    """Convert GROBID TEI front matter and body into ordered paper segments.
+
+    GROBID stores the article title and abstract outside ``text/body``.  The
+    Reader previously walked only ``body``, which made an otherwise successful
+    full-text extraction start at Introduction.  Keep the durable segment
+    format unchanged while including the translatable front matter before the
+    body flow.
+    """
 
     if not _clean_text(tei_xml):
         return []
     root = ET.fromstring(tei_xml)
     body = _tei_first_descendant(root, "body")
-    if body is None:
-        return []
     page_models = _tei_page_models(root)
     segments: list[PaperSegment] = []
     order = 0
@@ -1946,7 +2060,46 @@ def grobid_tei_to_segments(source_id: str, tei_xml: str) -> list[PaperSegment]:
             elif local == "formula":
                 append_segment(child, kind="formula", section_path=section_path, page_hint=page_hint)
 
-    walk_container(body, [])
+    tei_header = _tei_first_descendant(root, "teiheader")
+    if tei_header is not None:
+        title_stmt = _tei_first_descendant(tei_header, "titlestmt")
+        title = _tei_first_descendant(title_stmt, "title") if title_stmt is not None else None
+        if title is not None and _tei_text(title):
+            append_segment(title, kind="title", section_path=[], page_hint=1)
+
+        abstract = _tei_first_descendant(tei_header, "abstract")
+        if abstract is not None and _tei_text(abstract):
+            abstract_page = _grobid_first_page_hint(abstract, page_models) or 1
+            append_segment(
+                abstract,
+                kind="heading",
+                section_path=["Abstract"],
+                text="Abstract",
+                page_hint=abstract_page,
+            )
+            abstract_paragraphs = [
+                node
+                for node in abstract.iter()
+                if node is not abstract and _tei_local_name(node) == "p" and _tei_text(node)
+            ]
+            if abstract_paragraphs:
+                for paragraph in abstract_paragraphs:
+                    append_segment(
+                        paragraph,
+                        kind="paragraph",
+                        section_path=["Abstract"],
+                        page_hint=abstract_page,
+                    )
+            else:
+                append_segment(
+                    abstract,
+                    kind="paragraph",
+                    section_path=["Abstract"],
+                    page_hint=abstract_page,
+                )
+
+    if body is not None:
+        walk_container(body, [])
     return segments
 
 
@@ -3426,6 +3579,8 @@ def _pdf_page_text_layer_payload(pdf_page: object, page_number: int) -> dict[str
             line_span_parts: list[tuple[str, tuple[float, float, float, float], float]] = []
             line_bboxes: list[tuple[float, float, float, float]] = []
             max_font_size = 0.0
+            bold_chars = 0
+            total_chars = 0
             span_indexes: list[int] = []
             for span in line.get("spans", []) or []:
                 if not isinstance(span, dict):
@@ -3438,6 +3593,9 @@ def _pdf_page_text_layer_payload(pdf_page: object, page_number: int) -> dict[str
                     continue
                 x0, y0, x1, y1 = span_bbox
                 font_size = float(span.get("size") or max(1.0, y1 - y0))
+                total_chars += len(body.strip())
+                if int(span.get("flags") or 0) & 16:
+                    bold_chars += len(body.strip())
                 span_indexes.append(len(spans))
                 spans.append(
                     {
@@ -3447,6 +3605,7 @@ def _pdf_page_text_layer_payload(pdf_page: object, page_number: int) -> dict[str
                         "w": x1 - x0,
                         "h": y1 - y0,
                         "font_size": font_size,
+                        "bold": bool(int(span.get("flags") or 0) & 16),
                         "block": block_index,
                         "line": line_index,
                         "dir": direction,
@@ -3474,6 +3633,7 @@ def _pdf_page_text_layer_payload(pdf_page: object, page_number: int) -> dict[str
                     "w": line_rect["w"],
                     "h": line_rect["h"],
                     "font_size": max_font_size or float(line_rect["h"] or 0),
+                    "bold": bool(total_chars and bold_chars / total_chars >= 0.75),
                     "block": block_index,
                     "line": line_index,
                     "span_indexes": span_indexes,
@@ -3646,7 +3806,10 @@ def _front_matter_layout_kind(
         "corresponding",
         "equal contribution",
     )
-    looks_affiliation = any(marker in lower for marker in affiliation_markers) or bool(
+    looks_affiliation = any(
+        re.search(rf"\b{re.escape(marker)}\b", lower)
+        for marker in affiliation_markers
+    ) or bool(
         re.search(r"@\w|\.edu\b|\.ac\.", lower)
     )
     nameish_words = re.findall(r"[A-Z][A-Za-z.'-]+", clean)
@@ -3789,7 +3952,7 @@ def _layout_unit_from_candidate(candidate: dict[str, object], order: int) -> dic
         "translatable": translatable,
         "display_source": preserve_source,
     }
-    for key in ("table_id", "row", "col", "row_span", "col_span", "rotation", "dir", "font_size", "line_count"):
+    for key in ("table_id", "row", "col", "row_span", "col_span", "rotation", "dir", "font_size", "line_count", "bold"):
         if key in candidate:
             unit[key] = candidate[key]
     return unit
@@ -3866,6 +4029,12 @@ def _same_layout_paragraph(previous: dict[str, object], current: dict[str, objec
     cur_text = _clean_text(current.get("text"))
     if not prev_text or not cur_text:
         return False
+    # A short bold section line often shares a PDF block with normal prose.
+    # Keep that boundary instead of absorbing the heading into its paragraph.
+    if bool(previous.get("bold")) != bool(current.get("bold")):
+        bold_line = previous if previous.get("bold") else current
+        if len(_clean_text(bold_line.get("text"))) <= 120:
+            return False
     if _layout_text_is_formula(prev_text, float(previous.get("font_size") or 0)) or _layout_text_is_formula(
         cur_text,
         float(current.get("font_size") or 0),
@@ -3960,6 +4129,53 @@ def _layout_candidates_from_text_layer(
                 continue
             font_size = max((float(row.get("font_size") or 0) for row in group), default=0.0)
             inside_image = any(_rect_overlap_ratio(rect, image_rect) > 0.55 for image_rect in image_rects)
+            abstract_match = re.match(r"^abstract\s*:\s*", text, flags=re.IGNORECASE)
+            if page == 1 and abstract_match and not inside_image:
+                # Many publisher PDFs put ``Abstract:`` directly in front of
+                # the first sentence instead of giving it a separate line.
+                # Split the semantic label from the body before front-matter
+                # classification, while retaining the block rect for both
+                # anchors so the reader can still jump to the source.
+                body_text = text[abstract_match.end() :].strip()
+                if body_text:
+                    heading_rect = _rect_from_layer_line(group[0]) or copy.deepcopy(rect)
+                    label_spans = [
+                        span for span_index in group[0].get("span_indexes") or []
+                        if isinstance(span_index, int)
+                        and 0 <= span_index < len(layer.get("spans") or [])
+                        and isinstance(span := layer["spans"][span_index], dict)
+                        and re.fullmatch(r"abstract\s*:", str(span.get("text") or "").strip(), flags=re.IGNORECASE)
+                    ]
+                    if label_spans:
+                        label_span = label_spans[0]
+                        heading_rect = _rect_payload(
+                            (label_span["x"], label_span["y"],
+                             float(label_span["x"]) + float(label_span["w"]),
+                             float(label_span["y"]) + float(label_span["h"])),
+                            page_width=float(rect["page_width"]), page_height=float(rect["page_height"]),
+                        ) or heading_rect
+                    candidates.append(
+                        {
+                            "page": page,
+                            "source_text": "Abstract",
+                            "kind": "heading",
+                            "rects": [heading_rect],
+                            "translatable": True,
+                            "preserve_source": False,
+                            "sort_y": heading_rect["y"],
+                            "sort_x": heading_rect["x"],
+                            "font_size": font_size,
+                            "line_count": 1,
+                            "rotation": group[0].get("rotation", 0),
+                            "dir": copy.deepcopy(group[0].get("dir") or [1.0, 0.0]),
+                        }
+                    )
+                    text = body_text
+                    forced_kind = "paragraph"
+                else:
+                    forced_kind = "heading"
+            else:
+                forced_kind = ""
             is_formula = _layout_text_is_formula(text, font_size)
             translatable = _layout_text_is_translatable(text) and not inside_image and not is_formula
             if is_formula:
@@ -3970,14 +4186,19 @@ def _layout_candidates_from_text_layer(
                 if not translatable and re.search(r"[A-Za-z\u4e00-\u9fff]", text):
                     if not inside_image:
                         continue
-                kind = "figure_label" if inside_image else _layout_kind(text, font_size, symbol=not translatable)
-                kind = _front_matter_layout_kind(
-                    page=page,
-                    text=text,
-                    rect=rect,
-                    font_size=font_size,
-                    current_kind=kind,
+                kind = forced_kind or (
+                    "figure_label"
+                    if inside_image
+                    else _layout_kind(text, font_size, symbol=not translatable)
                 )
+                if not forced_kind:
+                    kind = _front_matter_layout_kind(
+                        page=page,
+                        text=text,
+                        rect=rect,
+                        font_size=font_size,
+                        current_kind=kind,
+                    )
                 preserve_source = (not translatable) and not inside_image
                 if kind in {"authors", "affiliation"}:
                     translatable = False
@@ -3993,6 +4214,7 @@ def _layout_candidates_from_text_layer(
                     "sort_y": rect["y"],
                     "sort_x": rect["x"],
                     "font_size": font_size,
+                    "bold": all(bool(row.get("bold")) for row in group),
                     "line_count": len(group),
                     "rotation": group[0].get("rotation", 0),
                     "dir": copy.deepcopy(group[0].get("dir") or [1.0, 0.0]),
@@ -4239,7 +4461,10 @@ def _paper_structure_front_matter_kind(
         "corresponding",
         "equal contribution",
     )
-    if any(marker in lower for marker in affiliation_markers) or re.search(r"@\w|\.edu\b|\.ac\.", lower):
+    if any(
+        re.search(rf"\b{re.escape(marker)}\b", lower)
+        for marker in affiliation_markers
+    ) or re.search(r"@\w|\.edu\b|\.ac\.", lower):
         return "affiliation"
     nameish_words = re.findall(r"[A-Z][A-Za-z.'-]+", clean)
     mostly_names = len(nameish_words) >= 2 and len(clean.split()) <= max(12, len(nameish_words) + 4)
@@ -4260,6 +4485,11 @@ def _paper_structure_kind_for_layout(unit: dict[str, object], *, seen_title: boo
     except (TypeError, ValueError):
         font_size = 0.0
     rect = _paper_structure_primary_rect(unit)
+    if unit.get("bold") and font_size >= 9.5:
+        if re.fullmatch(r"\d+(?:\.\d+)*\.?", text):
+            return "heading_marker"
+        if layout_kind in {"paragraph", "heading"} and len(text) <= 120 and not text.endswith((".", ",", ";")):
+            return "heading"
     front_kind = _paper_structure_front_matter_kind(
         page=page,
         text=text,
@@ -4270,7 +4500,18 @@ def _paper_structure_kind_for_layout(unit: dict[str, object], *, seen_title: boo
     )
     if front_kind != layout_kind:
         return front_kind
-    return _paper_structure_heading_kind(text, page=page, font_size=font_size, layout_kind=layout_kind)
+    kind = _paper_structure_heading_kind(text, page=page, font_size=font_size, layout_kind=layout_kind)
+    # Small numbered labels inside diagrams are not section headings.
+    if kind == "heading" and 0 < font_size < 8:
+        return "figure_label"
+    return kind
+
+
+def _paper_structure_is_keyword_line(text: object) -> bool:
+    """Return True for front-matter keyword lines that should not inherit Abstract."""
+
+    clean = " ".join(_clean_text(text).split()).lower()
+    return clean.startswith(("keywords:", "key words:", "index terms:"))
 
 
 def _paper_structure_candidate_looks_like_table_cell(candidate: dict[str, object]) -> bool:
@@ -4279,6 +4520,16 @@ def _paper_structure_candidate_looks_like_table_cell(candidate: dict[str, object
         return False
     text = " ".join(_clean_text(candidate.get("text")).split())
     if not text:
+        return False
+    normalized = text.lower().strip(" .:")
+    # Structural labels are short by design and can sit in dense layouts, but
+    # they are not table cells.  Protect common headings before the geometric
+    # table heuristic is allowed to reclassify them.
+    if (
+        kind in {"heading", "heading_marker"}
+        or normalized in _COMMON_OUTLINE_HEADINGS
+        or normalized.startswith(("appendix", "references", "acknowledg"))
+    ):
         return False
     if re.match(r"^(fig(?:ure)?\.?|table|algorithm)\s*\d+", text, flags=re.IGNORECASE):
         return False
@@ -4547,6 +4798,7 @@ def _paper_structure_apply_inferred_table_cells(candidates: list[dict[str, objec
 
 def _paper_structure_sort_key_factory(candidates: list[dict[str, object]]):
     page_has_columns: dict[int, bool] = {}
+    spanning_y: dict[int, list[float]] = {}
     for page in {int(row.get("page_start") or 0) for row in candidates}:
         page_rows = [row for row in candidates if int(row.get("page_start") or 0) == page]
         centers: list[float] = []
@@ -4561,14 +4813,20 @@ def _paper_structure_sort_key_factory(candidates: list[dict[str, object]]):
                 page_width = max(page_width, float(rect.get("page_width") or 0))
             except (TypeError, ValueError):
                 continue
-            if page_width and width < page_width * 0.58 and row.get("kind") not in {"title", "authors", "affiliation"}:
+            if (
+                page_width and width < page_width * 0.58
+                and row.get("kind") in {"paragraph", "heading", "caption"}
+            ):
                 centers.append(x + width / 2)
+            if page_width and width >= page_width * 0.62 and row.get("kind") in {"paragraph", "heading", "caption", "title"}:
+                spanning_y.setdefault(page, []).append(float(rect.get("y") or 0))
         if page_width and centers:
             left = [value for value in centers if value < page_width * 0.46]
             right = [value for value in centers if value > page_width * 0.54]
             page_has_columns[page] = len(left) >= 2 and len(right) >= 2
+    spanning_y = {page: sorted(set(values)) for page, values in spanning_y.items()}
 
-    def key(row: dict[str, object]) -> tuple[float, float, float, float, str]:
+    def key(row: dict[str, object]) -> tuple[object, ...]:
         page = int(row.get("page_start") or 0)
         rect = _paper_structure_primary_rect(row) or {}
         try:
@@ -4581,10 +4839,23 @@ def _paper_structure_sort_key_factory(candidates: list[dict[str, object]]):
             x = y = width = page_width = y_pct = 0.0
         kind = _clean_text(row.get("kind"))
         is_front = page == 1 and y_pct <= 0.34 and kind in {"title", "authors", "affiliation"}
-        if page_has_columns.get(page) and not is_front and page_width and width < page_width * 0.62:
-            column = 0 if x + width / 2 < page_width / 2 else 1
-            return (page, 1, column, y, _clean_text(row.get("unit_id")))
-        return (page, 0 if is_front else 2, y, x, _clean_text(row.get("unit_id")))
+        if page_has_columns.get(page) and not is_front and page_width:
+            separators = spanning_y.get(page, [])
+            # Full-width headings/captions divide the page into reading bands.
+            # Read left then right within a band, instead of placing every
+            # spanning heading after both columns.
+            band = 2 * sum(value < y - 3 for value in separators)
+            if width >= page_width * 0.62:
+                band += 1
+                column = 0
+            else:
+                column = 0 if x + width / 2 < page_width / 2 else 1
+            return (page, 1, band, column, round(y / 3.0), x, y, _clean_text(row.get("unit_id")))
+        # PDF text spans on the same visual baseline often differ by a fraction
+        # of a point.  Group that jitter before ordering by x so labels such as
+        # ``Encoder:`` precede their indented first line.
+        y_band = round(y / 3.0)
+        return (page, 0 if is_front else 1, 0, 0, y_band, x, y, _clean_text(row.get("unit_id")))
 
     return key
 
@@ -4650,6 +4921,7 @@ def _paper_structure_candidates_from_layout(layout_units: list[dict[str, object]
                 "sort_x": float((_paper_structure_primary_rect(raw) or {}).get("x") or raw.get("sort_x") or 0),
                 "sort_y": float((_paper_structure_primary_rect(raw) or {}).get("y") or raw.get("sort_y") or 0),
                 "font_size": raw.get("font_size"),
+                "bold": raw.get("bold"),
                 "line_count": raw.get("line_count"),
                 "metadata": {
                     key: copy.deepcopy(raw.get(key))
@@ -4726,8 +4998,48 @@ def _paper_structure_caption_continuation(left: dict[str, object], right: dict[s
         return False
     if _clean_text(right.get("kind")) in {"title", "heading", "caption", "authors", "affiliation", "table_cell", "figure_label", "symbol"}:
         return False
+    left_metadata = _clean_mapping(left.get("metadata"))
+    if bool(left_metadata.get("grobid_boundary_after")):
+        return False
+    left_text = _clean_text(left.get("text"))
+    right_text = _clean_text(right.get("text"))
+    # A caption can be followed very closely by the article body.  When the
+    # caption already forms a complete sentence, do not absorb a substantial
+    # prose block merely because the PDF boxes are adjacent.
+    if (
+        re.search(r"[.!?。！？][\"')\]]?$", left_text)
+        and len(right_text.split()) >= 12
+        and re.match(r"^[A-Z]", right_text)
+    ):
+        return False
     gap = _paper_structure_vertical_gap(left, right)
     return -3 <= gap <= 24 and _paper_structure_same_column(left, right)
+
+
+def _paper_structure_inline_label_continuation(left: dict[str, object], right: dict[str, object]) -> bool:
+    """Return True for an indented first line following a short inline label."""
+
+    left_text = _clean_text(left.get("text"))
+    if not left_text.endswith(":") or len(left_text.split()) > 4:
+        return False
+    left_rect = _paper_structure_primary_rect(left)
+    right_rect = _paper_structure_primary_rect(right)
+    if left_rect is None or right_rect is None:
+        return False
+    try:
+        left_x = float(left_rect.get("x") or 0)
+        left_y = float(left_rect.get("y") or 0)
+        left_w = float(left_rect.get("w") or 0)
+        left_h = float(left_rect.get("h") or 0)
+        right_x = float(right_rect.get("x") or 0)
+        right_y = float(right_rect.get("y") or 0)
+        right_h = float(right_rect.get("h") or 0)
+        page_width = max(float(left_rect.get("page_width") or 0), float(right_rect.get("page_width") or 0), 1.0)
+    except (TypeError, ValueError):
+        return False
+    same_baseline = abs((left_y + left_h) - (right_y + right_h)) <= max(3.0, max(left_h, right_h) * 0.35)
+    horizontal_gap = right_x - (left_x + left_w)
+    return same_baseline and -2.0 <= horizontal_gap <= max(18.0, page_width * 0.035)
 
 
 def _paper_structure_paragraph_continuation(left: dict[str, object], right: dict[str, object]) -> bool:
@@ -4735,6 +5047,8 @@ def _paper_structure_paragraph_continuation(left: dict[str, object], right: dict
         return False
     if _clean_text(left.get("kind")) != "paragraph" or _clean_text(right.get("kind")) != "paragraph":
         return False
+    if _paper_structure_inline_label_continuation(left, right):
+        return True
     if not _paper_structure_same_column(left, right):
         return False
     gap = _paper_structure_vertical_gap(left, right)
@@ -4754,49 +5068,8 @@ def _paper_structure_paragraph_continuation(left: dict[str, object], right: dict
 
 
 def _paper_structure_unit_sort_key_factory(units: list[PaperStructureUnit]):
-    page_has_columns: dict[int, bool] = {}
-    for page in {int(unit.page_start or 0) for unit in units}:
-        centers: list[float] = []
-        page_width = 0.0
-        for unit in units:
-            if int(unit.page_start or 0) != page or unit.kind not in {"paragraph", "heading", "caption"}:
-                continue
-            rect = _paper_structure_primary_rect(unit.to_dict())
-            if rect is None:
-                continue
-            try:
-                width = float(rect.get("w") or 0)
-                x = float(rect.get("x") or 0)
-                page_width = max(page_width, float(rect.get("page_width") or 0))
-            except (TypeError, ValueError):
-                continue
-            if page_width and width < page_width * 0.58:
-                centers.append(x + width / 2)
-        if page_width and centers:
-            left = [value for value in centers if value < page_width * 0.46]
-            right = [value for value in centers if value > page_width * 0.54]
-            page_has_columns[page] = len(left) >= 2 and len(right) >= 2
-
-    def key(unit: PaperStructureUnit) -> tuple[float, float, float, float, str]:
-        rect = _paper_structure_primary_rect(unit.to_dict()) or {}
-        try:
-            page = int(unit.page_start or 0)
-            x = float(rect.get("x") or 0)
-            y = float(rect.get("y") or 0)
-            width = float(rect.get("w") or 0)
-            page_width = float(rect.get("page_width") or 0)
-            y_pct = float(rect.get("y_pct") or 0)
-        except (TypeError, ValueError):
-            page = int(unit.page_start or 0)
-            x = y = width = page_width = y_pct = 0.0
-        is_front = page == 1 and y_pct <= 0.34 and unit.kind in {"title", "authors", "affiliation"}
-        lane = 0 if is_front else 1
-        if page_has_columns.get(page) and page_width and width < page_width * 0.62 and not is_front:
-            column = 0 if x + width / 2 < page_width / 2 else 1
-            return (page, lane, column, y, unit.unit_id)
-        return (page, lane, 2, y, unit.unit_id)
-
-    return key
+    key_for_row = _paper_structure_sort_key_factory([unit.to_dict() for unit in units])
+    return lambda unit: key_for_row(unit.to_dict())
 
 
 def _paper_structure_reassign_order_and_sections(units: list[PaperStructureUnit]) -> list[PaperStructureUnit]:
@@ -4806,10 +5079,11 @@ def _paper_structure_reassign_order_and_sections(units: list[PaperStructureUnit]
     for order, unit in enumerate(sorted_units, start=1):
         unit.order = order
         if unit.kind == "heading":
-            current_section = [" ".join(unit.text.split())]
+            grobid_section = _clean_list(unit.metadata.get("grobid_section_path"))
+            current_section = grobid_section or [" ".join(unit.text.split())]
             unit.section_path = list(current_section)
         elif unit.kind == "paragraph":
-            unit.section_path = list(unit.section_path or current_section)
+            unit.section_path = [] if _paper_structure_is_keyword_line(unit.text) else list(unit.section_path or current_section)
         elif unit.kind == "caption":
             if current_section:
                 unit.metadata.setdefault("near_section_path", list(current_section))
@@ -4905,13 +5179,12 @@ def _paper_structure_units_from_candidates(source_id: str, candidates: list[dict
                 continue
             if same_page and prev_kind == "heading_marker" and kind in {"paragraph", "heading"}:
                 title = _join_pdf_lines_as_text([_clean_text(previous.get("text")), _clean_text(candidate.get("text"))])
-                if _paper_structure_heading_kind(
+                if candidate.get("bold") or _paper_structure_heading_kind(
                     title,
                     page=int(candidate.get("page_start") or 0),
                     font_size=float(candidate.get("font_size") or 0),
                     layout_kind="paragraph",
                 ) == "heading":
-                    previous["text"] = title
                     merged[-1] = _paper_structure_merge_pair(previous, candidate, kind="heading")
                     continue
             if prev_kind == "caption" and _paper_structure_caption_continuation(previous, candidate):
@@ -4941,6 +5214,8 @@ def _paper_structure_units_from_candidates(source_id: str, candidates: list[dict
         if kind == "heading":
             current_section = [" ".join(text.split())]
         section_path = list(current_section) if kind == "paragraph" else ([] if kind in {"title", "authors", "affiliation", "caption", "figure", "table"} else list(current_section))
+        if kind == "paragraph" and _paper_structure_is_keyword_line(text):
+            section_path = []
         rects = _clean_rect_list(row.get("rects"))
         translatable = kind in PAPER_STRUCTURE_TRANSLATION_KINDS and bool(row.get("translatable", True))
         display_source = kind in {"authors", "affiliation"} or bool(row.get("display_source", False))
@@ -5059,6 +5334,77 @@ def _paper_structure_match_ratio(left: str, right: str) -> float:
     return difflib.SequenceMatcher(None, clean_left[:900], clean_right[:900]).ratio()
 
 
+def _paper_structure_apply_grobid_candidate_hints(
+    candidates: list[dict[str, object]],
+    segments: list[PaperSegment],
+) -> list[dict[str, object]]:
+    """Apply exact GROBID semantic boundaries without replacing PDF geometry."""
+
+    if not candidates or not segments:
+        return candidates
+    heading_by_text: dict[str, list[PaperSegment]] = {}
+    caption_by_text: dict[str, list[PaperSegment]] = {}
+    for segment in segments:
+        normalized = _compact_pdf_search_text(segment.text)
+        if not normalized:
+            continue
+        if segment.kind == "heading":
+            heading_by_text.setdefault(normalized, []).append(segment)
+        elif segment.kind == "caption":
+            caption_by_text.setdefault(normalized, []).append(segment)
+
+    out = [copy.deepcopy(candidate) for candidate in candidates]
+    for index, candidate in enumerate(out):
+        normalized = _compact_pdf_search_text(candidate.get("text"))
+        if not normalized:
+            continue
+        page = int(candidate.get("page_start") or 0)
+        heading_matches = [
+            segment
+            for segment in heading_by_text.get(normalized, [])
+            if not segment.page or not page or abs(int(segment.page) - page) <= 1
+        ]
+        if len(heading_matches) == 1:
+            segment = heading_matches[0]
+            candidate["kind"] = "heading"
+            candidate["translatable"] = True
+            candidate["display_source"] = False
+            metadata = _clean_mapping(candidate.get("metadata"))
+            metadata["grobid_segment_id"] = segment.segment_id
+            metadata["grobid_section_path"] = list(segment.section_path)
+            candidate["metadata"] = metadata
+            if index > 0:
+                previous = out[index - 1]
+                marker_text = _clean_text(previous.get("text"))
+                same_page = int(previous.get("page_start") or 0) == page
+                previous_rect = _paper_structure_primary_rect(previous)
+                current_rect = _paper_structure_primary_rect(candidate)
+                same_line = False
+                if previous_rect is not None and current_rect is not None:
+                    try:
+                        same_line = abs(float(previous_rect.get("y") or 0) - float(current_rect.get("y") or 0)) <= 3.0
+                    except (TypeError, ValueError):
+                        same_line = False
+                if same_page and same_line and re.fullmatch(r"\d+(?:\.\d+)*\.?", marker_text):
+                    previous["kind"] = "heading_marker"
+                    previous["translatable"] = False
+                    previous["display_source"] = False
+            continue
+        caption_matches = [
+            segment
+            for segment in caption_by_text.get(normalized, [])
+            if not segment.page or not page or abs(int(segment.page) - page) <= 1
+        ]
+        if len(caption_matches) == 1:
+            segment = caption_matches[0]
+            candidate["kind"] = "caption"
+            metadata = _clean_mapping(candidate.get("metadata"))
+            metadata["grobid_segment_id"] = segment.segment_id
+            metadata["grobid_boundary_after"] = True
+            candidate["metadata"] = metadata
+    return out
+
+
 def _paper_structure_apply_grobid_alignment(
     units: list[PaperStructureUnit],
     segments: list[PaperSegment],
@@ -5076,11 +5422,26 @@ def _paper_structure_apply_grobid_alignment(
     current_section: list[str] = []
     for unit in units:
         if unit.kind == "heading":
-            current_section = [" ".join(unit.text.split())]
+            normalized_heading = _compact_pdf_search_text(re.sub(r"^\d+(?:\.\d+)*\.?\s*", "", unit.text))
+            heading_matches = [
+                segment
+                for segment in segments
+                if segment.kind == "heading"
+                and _compact_pdf_search_text(segment.text) == normalized_heading
+                and (not segment.page or not unit.page_start or abs(int(segment.page) - int(unit.page_start)) <= 1)
+            ]
+            if len(heading_matches) == 1 and heading_matches[0].section_path:
+                current_section = list(heading_matches[0].section_path)
+            else:
+                current_section = [" ".join(unit.text.split())]
             unit.section_path = list(current_section)
             out.append(unit)
             continue
         if unit.kind != "paragraph":
+            out.append(unit)
+            continue
+        if _paper_structure_is_keyword_line(unit.text):
+            unit.section_path = []
             out.append(unit)
             continue
         best: tuple[float, PaperSegment] | None = None
@@ -5093,7 +5454,7 @@ def _paper_structure_apply_grobid_alignment(
         if best is not None:
             unit.section_path = list(best[1].section_path)
             current_section = list(unit.section_path)
-        elif current_section and not unit.section_path:
+        elif current_section:
             unit.section_path = list(current_section)
         out.append(unit)
     return out
@@ -5141,19 +5502,41 @@ def build_paper_structure_units(
 ) -> list[PaperStructureUnit]:
     """Build cached, layout-grounded paper structure units for Reader translation."""
 
+    segments = load_paper_segments(profile, source_id)
+    _, source = _source_by_id(profile, source_id)
+    signature_payload = {
+        "pdf": _paper_pdf_fingerprint(source),
+        "segments": [segment.to_dict() for segment in segments],
+    }
+    input_signature = text_hash(json.dumps(signature_payload, ensure_ascii=False, sort_keys=True))
+    cached = load_paper_structure_units(profile, source_id)
     if not force:
-        cached = load_paper_structure_units(profile, source_id)
-        if cached and all(unit.metadata.get("structure_version") == PAPER_STRUCTURE_VERSION for unit in cached):
+        if cached and all(
+            unit.metadata.get("structure_version") == PAPER_STRUCTURE_VERSION
+            and unit.metadata.get("structure_input_signature") == input_signature
+            for unit in cached
+        ):
             return cached
     layout_units = build_paper_layout_units(profile, source_id)
     if not layout_units:
-        return []
+        # Existing located structures remain readable if the PDF engine or
+        # asset is temporarily unavailable. Never replace them with emptiness.
+        return cached
+    # Local fallback segments project this very layout. Feeding them back as
+    # GROBID hints creates a second segmentation pass and unstable boundaries.
+    semantic_segments = [
+        segment for segment in segments
+        if segment.metadata.get("fallback_backend") != "pymupdf_layout"
+    ]
     candidates = _paper_structure_candidates_from_layout(layout_units, source_id)
+    candidates = _paper_structure_apply_grobid_candidate_hints(candidates, semantic_segments)
     units = _paper_structure_units_from_candidates(source_id, candidates)
-    units = _paper_structure_apply_grobid_alignment(units, load_paper_segments(profile, source_id))
+    units = _paper_structure_apply_grobid_alignment(units, semantic_segments)
     units = _paper_structure_merge_cross_page_continuations(units)
     units = _paper_structure_reassign_order_and_sections(units)
     units = _paper_structure_apply_llm_repair_hook(units)
+    for unit in units:
+        unit.metadata["structure_input_signature"] = input_signature
     if units:
         save_paper_structure_units(profile, source_id, units)
     return units
@@ -5200,6 +5583,45 @@ def reader_translation_structure_units(
         )
         rows.append(row)
     return sorted(rows, key=lambda row: (int(row.get("page") or 0), int(row.get("order") or 0), _clean_text(row.get("unit_id"))))
+
+
+def paper_structure_translation_readiness(
+    units: list[PaperStructureUnit | dict],
+) -> dict[str, object]:
+    """Report whether a canonical structure is safe for full-paper translation."""
+
+    rows = reader_translation_structure_units(units)
+    translatable = [row for row in rows if bool(row.get("translatable", True))]
+    blockers: list[str] = []
+    warnings: list[str] = []
+    ids = [_clean_text(row.get("scope_ref") or row.get("unit_id")) for row in rows]
+    if not rows:
+        blockers.append("paper_structure_missing")
+    if not translatable:
+        blockers.append("paper_structure_has_no_translatable_text")
+    if any(int(row.get("page") or 0) <= 0 for row in translatable):
+        blockers.append("paper_structure_has_unlocated_text")
+    if any(not row.get("rects") for row in translatable):
+        blockers.append("paper_structure_has_unpositioned_text")
+    if any(not scope_ref for scope_ref in ids) or len(set(ids)) != len(ids):
+        blockers.append("paper_structure_has_unstable_ids")
+    if rows and not any(_clean_text(row.get("kind")) == "title" for row in rows if int(row.get("page") or 0) == 1):
+        warnings.append("paper_structure_title_missing")
+    if rows and not any(
+        _paper_reference_section_label(row.get("source_text")) == "abstract"
+        or any(_paper_reference_section_label(part) == "abstract" for part in _clean_list(row.get("section_path")))
+        for row in rows
+    ):
+        warnings.append("paper_structure_abstract_missing")
+    return {
+        "ready": not blockers,
+        "status": "ready" if not blockers else "incomplete",
+        "units": len(rows),
+        "translatable_units": len(translatable),
+        "positioned_units": sum(bool(row.get("rects")) for row in translatable),
+        "blockers": blockers,
+        "warnings": warnings,
+    }
 
 
 def _paper_structure_unit_is_translation_noise(unit: PaperStructureUnit) -> bool:
@@ -5289,6 +5711,27 @@ def build_translation_units(
             and _clean_text(row.get("source_hash"))
             and translation_text_from_row(row)
         }
+        # Older GROBID segments and current PDF structure can differ only in
+        # whitespace around citations or punctuation.  Reuse such translations
+        # only when the normalized full text is unique on both sides; contained
+        # text and fuzzy matching are deliberately excluded.
+        legacy_by_normalized: dict[str, list[dict[str, object]]] = {}
+        for row in translations:
+            if _clean_text(row.get("target_lang") or "zh") != target_lang:
+                continue
+            if _clean_text(row.get("scope_type")) not in {"layout", "segment", "page"}:
+                continue
+            if not translation_text_from_row(row):
+                continue
+            normalized = _compact_pdf_search_text(row.get("source_text"))
+            if len(normalized) < 24:
+                continue
+            legacy_by_normalized.setdefault(normalized, []).append(row)
+        structure_normalized_counts: dict[str, int] = {}
+        for row in layout_rows:
+            normalized = _compact_pdf_search_text(row.get("source_text") or row.get("text"))
+            if len(normalized) >= 24:
+                structure_normalized_counts[normalized] = structure_normalized_counts.get(normalized, 0) + 1
         for raw_unit in sorted(layout_rows, key=lambda row: (int(row.get("page") or 0), int(row.get("order") or 0), _clean_text(row.get("unit_id")))):
             scope_ref = _clean_text(raw_unit.get("scope_ref") or raw_unit.get("unit_id"))
             source_text = _clean_text(raw_unit.get("source_text") or raw_unit.get("text"))
@@ -5299,6 +5742,15 @@ def build_translation_units(
             translation = layout_translations.get((scope_type, scope_ref))
             if translation is None and scope_type == "structure":
                 translation = legacy_by_hash.get(source_hash)
+            if translation is None and scope_type == "structure":
+                normalized = _compact_pdf_search_text(source_text)
+                candidates = legacy_by_normalized.get(normalized, [])
+                if (
+                    len(normalized) >= 24
+                    and structure_normalized_counts.get(normalized) == 1
+                    and len(candidates) == 1
+                ):
+                    translation = candidates[0]
             translatable = bool(raw_unit.get("translatable", True))
             display_source = bool(raw_unit.get("display_source", not translatable))
             translated_text = translation_text_from_row(translation or {})
@@ -5452,7 +5904,7 @@ def build_reader_payload(
     if include_page_previews:
         for page_number in context_pages:
             try:
-                preview_rows.append(render_paper_page_preview(profile, source_id, page_number, max_width=1100))
+                preview_rows.append(render_paper_page_preview(profile, source_id, page_number, max_width=1800))
             except Exception:
                 continue
     all_structure_units = build_paper_structure_units(profile, source_id)
@@ -5471,6 +5923,7 @@ def build_reader_payload(
             or any(page_number in context_page_set for page_number in range(unit.page_start, unit.page_end + 1))
         ]
     )
+    structure_readiness = paper_structure_translation_readiness(all_structure_units)
     structure_scope_refs = {
         _clean_text(row.get("scope_ref") or row.get("unit_id"))
         for row in reader_structure_units
@@ -5493,15 +5946,25 @@ def build_reader_payload(
     )
     reader_preparation = _reader_preparation_summary(source, all_pages, all_segments)
     has_paged_segments = any(segment.page > 0 for segment in all_segments)
-    segments = [
-        segment.to_dict()
-        for segment in all_segments
-        if segment.page in context_page_set
-        or (not has_paged_segments and segment.page <= 0)
-    ]
+    # Unlocated legacy segments must not masquerade as page-one content.  They
+    # remain durable for compatibility and diagnostics, but only positioned
+    # canonical structure units belong in a normal paged Reader projection.
+    segments: list[dict[str, object]] = []
+    for segment in all_segments:
+        if segment.page in context_page_set:
+            row = segment.to_dict()
+        elif not has_paged_segments and segment.page <= 0:
+            row = segment.to_dict()
+        else:
+            continue
+        segments.append(row)
     segment_ids = {str(row.get("segment_id") or "") for row in segments}
     segment_pages = {str(row.get("segment_id") or ""): int(row.get("page") or 0) for row in segments}
     current_translation_rows = load_paper_translations(profile, source_id)
+    # The positioned structure is the sole source of reading order, page
+    # ownership, and PDF geometry.  Translation cache coverage must never pick
+    # an older segment graph.  build_translation_units can still reuse an old
+    # translation by an exact source hash without changing the projection.
     prefer_structure_units = bool(reader_structure_units)
     prefer_layout_units = bool(reader_layout_units) and not prefer_structure_units
     translations: list[dict[str, object]] = []
@@ -5526,11 +5989,14 @@ def build_reader_payload(
         elif scope_type == "selection":
             include_row = row_page in context_page_set or row_page <= 0
         elif scope_type == "segment":
-            include_row = False if prefer_layout_units else row_page in context_page_set or bool(row.segment_id and row.segment_id in segment_ids)
+            include_row = (
+                (not prefer_structure_units and not prefer_layout_units)
+                and (row_page in context_page_set or bool(row.segment_id and row.segment_id in segment_ids))
+            )
         if include_row and has_translated_text:
             translations.append({**row.to_dict(), "page": row_page})
     page_context_rows = [page_row for page_row in all_pages if page_row.page in context_page_set]
-    positioned_units = reader_structure_units if prefer_structure_units else reader_layout_units
+    positioned_units = reader_structure_units if prefer_structure_units else reader_layout_units if prefer_layout_units else []
     prefer_positioned_units = prefer_structure_units or prefer_layout_units
     unit_pages = [] if prefer_positioned_units else page_context_rows
     unit_segments = [] if prefer_positioned_units else segments
@@ -5593,6 +6059,7 @@ def build_reader_payload(
         "translations": translations,
         "translation_units": translation_units,
         "translation_summary": translation_summary,
+        "translation_readiness": structure_readiness,
         "translation_revision": _translation_revision(profile, source_id, target_lang),
         "compare_split_ratio": _metadata_int(metadata, "compare_split_ratio", 50, minimum=20, maximum=80),
         "panel_width": _metadata_int(metadata, "panel_width", 340, minimum=280, maximum=560),
@@ -6069,7 +6536,7 @@ def translate_full_paper(
     mode: str = "missing_or_stale",
     batch_size: int | None = None,
     *,
-    scope_strategy: str = "segment",
+    scope_strategy: str = "structure",
     include_references: bool | None = None,
     ai_profile: str | None = None,
     require_review: bool = True,
@@ -6085,9 +6552,15 @@ def translate_full_paper(
 
     clean_lang = _clean_text(target_lang) or "zh"
     clean_mode = _clean_text(mode).lower() or "missing_or_stale"
-    clean_scope_strategy = _clean_text(scope_strategy).lower() or "segment"
+    clean_scope_strategy = _clean_text(scope_strategy).lower() or "structure"
     if clean_scope_strategy not in {"auto", "segment", "page", "layout", "structure"}:
-        clean_scope_strategy = "auto"
+        clean_scope_strategy = "structure"
+    # Full-paper translation is defined over the canonical positioned
+    # structure.  Legacy segment/page modes remain available only when callers
+    # request them explicitly; ``auto`` must not silently switch the document
+    # graph underneath the Reader.
+    if clean_scope_strategy == "auto":
+        clean_scope_strategy = "structure"
     if clean_mode not in {"all", "missing", "stale", "missing_or_stale"}:
         raise ValueError(f"Unknown full-paper translation mode: {mode}")
     requested_batch_size = _positive_int(batch_size)
@@ -6106,6 +6579,19 @@ def translate_full_paper(
         if clean_scope_strategy in {"auto", "structure"}
         else []
     )
+    if clean_scope_strategy == "structure" and not structure_units:
+        raise ValueError(
+            "Full-paper translation requires a completed positioned paper structure. "
+            "Run paper extraction successfully before translating."
+        )
+    if clean_scope_strategy == "structure":
+        readiness = paper_structure_translation_readiness(build_paper_structure_units(profile, source_id))
+        if not bool(readiness.get("ready")):
+            blockers = ", ".join(str(item) for item in readiness.get("blockers") or [])
+            raise ValueError(
+                "Full-paper translation requires a completed positioned paper structure"
+                + (f": {blockers}" if blockers else ".")
+            )
     layout_units = (
         reader_translation_layout_units(build_paper_layout_units(profile, source_id))
         if not structure_units and clean_scope_strategy in {"auto", "layout"}
@@ -8551,6 +9037,7 @@ __all__ = [
     "paper_rows",
     "paper_source_badges",
     "paper_source_diagnostics",
+    "paper_structure_translation_readiness",
     "position_paper_library_node",
     "process_grobid_fulltext",
     "purge_paper_library_node",

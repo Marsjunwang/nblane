@@ -1,9 +1,9 @@
 ---
-
-## status: draft
+status: draft
 owner: product
-last_verified: 2026-09-15
+last_verified: 2026-10-03
 source_of_truth: true
+---
 
 # Paper Reading Studio 开发文档
 
@@ -13,38 +13,208 @@ AI 行为、第三方库选择、后端抽取策略和测试计划。它是后�
 
 ## 1. 目标
 
-Research 当前已有 Source Inbox、Reading Room、Claims & Citations、
-Synthesis Drafts 和 Connectors，但论文阅读仍停留在“导入 source + 粘贴
-excerpt + 生成草稿”的形态。目标是打通完整论文阅读闭环：
+Research 论文阅读先形成一个独立、可回溯的阅读闭环：
 
 ```text
-按主题搜索论文
-  -> 选择导入
+论文导入
   -> PDF 私有保存
-  -> PDF 高亮阅读
-  -> 原文 / 中文翻译对齐
-  -> 批注 / 摘录 / chunk
-  -> AI 总结 / 解释 / 问答 / 深读
-  -> research claim / citation
-  -> BibTeX / Markdown 引用导出
-  -> Evidence Review / Output Studio 上游
+  -> 页面与结构化抽取
+  -> 中文摘要 / 论文导读
+  -> 逐段阅读或原文对照
+  -> 翻译、解释、笔记、引用
+  -> 阅读材料整理
 ```
+
+本阶段的产品边界是“读懂论文并留下可回到原文的研究材料”。论文阅读暂时不进入
+能力证据闭环：不创建 Claim，不创建 Evidence，不修改 skill status，也不提供
+`Promote to Evidence` 入口。
 
 核心原则：
 
 - `Paper Source` 说明读了什么。
-- `Annotation / Chunk` 说明哪里值得引用。
-- `Research Claim` 说明这篇论文支撑了什么判断。
-- 论文阅读产生的 `Evidence` 默认是非常弱的 evidence：它证明“我读过、
-摘录过、理解过、引用过某篇论文”，但不直接证明“我做成了某个项目结果”。
-- 论文阅读产生的 `Research Claim` 更适合成为 blog 读后感、文献综述、
-learning note、项目背景分析的素材；只有经过 Evidence Review / Claim Studio
-重新审查、连接到真实 project / goal / skill 事实后，才可能成为更强的
-accepted claim。
-- `Evidence / Accepted Claim / Output` 才进入对外表达；其中读论文 evidence
-在公开表达里应该被标记为阅读/引用来源，而不是成果证明。
-- PDF 原件不进 Git；批注、翻译、摘要、claim、citation 进 profile，便于迁移。
-- AI 只产出 candidate；用户接受后才写 Research facts。
+- `Annotation / Note` 说明用户记下了什么。
+- `Chunk / Citation` 说明哪里可以回到原文或用于引用。
+- 翻译、摘要、AI 导读都必须绑定 source、segment、页码或 locator。
+- AI 导读只产生待核对的阅读材料；用户确认后才保存为笔记或引用材料。
+- 论文阅读材料不是项目成果证明，也不自动改变目标、项目或技能状态。
+- PDF 原件不进 Git；批注、翻译、摘要、分析、引用和阅读状态进 profile，便于迁移。
+- Reader 复用现有 PDF.js、GROBID、PyMuPDF、AI Gateway 和文件优先存储，不引入数据库。
+
+## 1.1 原文—译文对照实施约束（2026-10-02）
+
+当前 Reader 曾把“已有旧段落翻译”作为选择阅读结构的依据，导致旧 GROBID
+segment 覆盖带 PDF 坐标的新结构；无页码 segment 又被临时放入第一页。结果是摘要
+缺失、附录标题和表格误入第一页、原文翻页后译文仍停留在旧页。对照栏的滚动锁还
+依赖左右页面的滚动比例，而流式中文与 PDF 原文高度不同，无法稳定对应。
+
+本轮实施按下列顺序收束：
+
+1. **完整解析**：GROBID TEI 转换同时读取标题、摘要和正文；解析质量明确区分
+   `ready` 与 `incomplete`。只有完整结构允许发起全文翻译。
+2. **唯一结构投影**：`paper-structure` 是 Reader 阅读顺序、页码、坐标和翻译单元的
+   唯一事实源。旧 segment 可以保留用于兼容和诊断，但不能覆盖当前结构。
+3. **旧译文安全复用**：通过相同 source hash 或唯一的规范化全文匹配，把旧 segment
+   译文只读映射到当前结构；无法唯一匹配的译文不进入正常阅读流，也不修改旧数据。
+4. **移除伪页码**：未知页码内容不再作为第一页展示。正常逐页阅读流中的可翻译单元
+   必须有真实页码、稳定顺序和原文坐标。
+5. **按页译文**：对照模式只呈现当前页附近内容；仅译文模式保持全文连续阅读，但按
+   `page -> order` 分页，不跨页合并同名章节或统一 `Captions` 大桶。
+6. **段落锚点同步**：滚动锁改成 `structure_unit_id + PDF rects` 驱动的语义同步。
+   原文滚动时，将视口参考线处的原文段落与同 ID 译文对齐；译文点击或滚动可以反向
+   定位原文。滚动比例只允许作为同一页内部、缺少段落锚点时的降级。
+7. **对应关系可见**：当前原文矩形和译文卡使用同色高亮，并显示页码和页内段落序号；
+   右栏页头显示当前页，不再用“页 1-15”掩盖当前对应关系。
+8. **闭环验收**：浏览器测试覆盖摘要进入翻译流、第三页双向跟随、长短译文不累积
+   漂移、无坐标旧内容不进入第一页，以及翻译缓存映射后的刷新和重开恢复。
+
+现有 profile 论文文件不批量重写。兼容通过读取投影完成；版本过期的本地派生解析结果
+在打开 Reader 时按需升级，手动重试仍可显式触发。BabelDOC / PDFMathTranslate 的版式保持双语 PDF 可作为后续可选能力，
+本轮不直接引入其 AGPL 代码或替换现有 PDF.js Reader。
+
+### 1.1.1 实施结果与验收记录
+
+上述约束已于 2026-10-02 落入 Reader 主链路：
+
+- GROBID TEI 抽取覆盖标题、Abstract 与正文；全文翻译会检查 canonical structure
+  的页码、稳定 ID 和 PDF 坐标，结构不完整时拒绝启动。
+- `paper-structure` 已升级到 `v6`。打开旧论文时只按需重建派生结构缓存，不批量
+  改写 PDF、旧 segment、翻译、笔记或批注。
+- 结构生成使用 GROBID 的标题、caption 和章节边界作为语义提示，同时保留
+  PyMuPDF 的页码与矩形。已修复 Figure caption 吞正文、章节标题被误判为表格、
+  `Encoder:` / `Decoder:` 与首行顺序颠倒，以及短尾词被拆成独立段落的问题。
+- Reader 始终投影 canonical structure；旧译文只有在 source hash 相同，或双方均
+  唯一的规范化全文精确匹配时复用。未知页码的旧内容不会进入第一页。
+- 研究台和 SPA Reader 顶部的翻译进度也按 canonical structure 计算，不能再用旧
+  segment 数量显示“已全部翻译”，而页内仍存在缺失或 stale 单元。
+- 对照模式采用按页流式译文。译文卡包含页码与页内序号；“跟随原文”通过
+  `structure_unit_id + rects` 双向同步，页面比例只在缺少锚点时降级使用。
+- 默认翻译布局为 `flow`；`overlay` 仍可通过显式环境配置启用，供版式译文实验使用。
+
+### 1.1.2 下一待办：把快速分析收束到论文概览页
+
+这是接下来第一个产品待办，目标是消除“阅读器”和“阅读前判断”混在同一排工具栏造成的认知负担。
+
+- **论文概览页**是单篇论文的起始页，负责标题、作者、Abstract、摘要翻译、PDF 状态、快速分析结果和继续阅读入口；它不是全局 Home，也不是研究台列表页。
+- “分析论文”改名为“快速分析”，主要回答“这篇论文做了什么、是否值得继续读”，结果在论文概览页直接展示，并可从 Reader 的 Review 面板查看。
+- 快速分析结果包括 TL;DR、关键贡献、方法概览、实验概览、局限、评分、项目相关性和阅读建议；结果必须保留 page/segment 引用，能够跳回 PDF。
+- Reader 顶部移除“分析论文”主按钮，保留“全文翻译”和阅读相关操作；Reader 内仍可在 Review 面板查看已有快速分析。
+- “深读”改名为“深度研读”。论文概览页和 Reader Review 面板都可以启动它；Reader 顶部不再把深度研读作为与 PDF、对照、翻译同级的主要阅读控制。
+- “保存进度”改名为“保存位置”。它只保存页码、阅读模式、缩放、面板布局、当前翻译锚点和最近可见页，不保存翻译、分析、深读、笔记或标注内容。页码和阅读布局应以自动保存为主，手动按钮用于明确记录当前阅读位置。
+- 快速分析与深度研读共用论文分析文件但不重复渲染同一份 TL;DR。概览页按“快速判断 → 打开 Reader → 深度研读”组织，Reader 按“阅读 → 标注/笔记 → Review”组织。
+
+验收条件：
+
+1. 从 Paper Library 或 Research 进入论文时先看到论文概览，而不是直接面对一排 AI 操作按钮。
+2. 快速分析完成后，概览页能直接展示结果；没有结果时显示未开始或待生成状态。
+3. Reader Review 能查看已有快速分析，并能启动深度研读；顶部不再显示“分析论文”。
+4. Reader 的“保存位置”恢复上次页码和阅读模式，但不会被误认为保存了翻译或 AI 结果。
+5. 快速分析和深度研读的结果可以共存，页面能明确显示生成时间、覆盖范围和状态。
+
+### 1.1.3 第二待办：修复 PDF 清晰度与降级渲染可见性
+
+当前验收发现，PDF 原件是带文本层的矢量 PDF，但 Reader 的部分页面仍停留在
+`pr-canvas pending-fallback` 与 `pr-page-preview visible` 状态，实际显示的是 PyMuPDF
+生成的 PNG 页面预览。预览接口当前使用 `max_width=1100`，整页显示时基本可读，放大或
+截图后会出现文字变软，因此需要把“原始 PDF.js 渲染”和“页面预览降级”分开验收。
+
+- 先记录 PDF.js `getDocument`、`page.render`、worker、Range 请求和超时的真实错误，不能只显示 `Fallback text ready`。
+- 正常 PDF 优先使用 PDF.js canvas；成功后必须移除 `pending-fallback`，隐藏预览图片，并在页面状态中标记为原始 PDF 渲染。
+- 只有 PDF.js 明确失败、超时或 PDF 没有可用渲染能力时才使用 PNG fallback；fallback 要显示“页面预览降级”状态。
+- fallback 预览不再固定为 1100 像素，按当前阅读宽度和设备像素比生成，至少覆盖 1.5 倍放大；不改变 PDF 原件和文件存储。
+- 验收时同时检查 canvas 像素尺寸、CSS 显示尺寸、`devicePixelRatio`、页面状态和实际截图；在适应宽度、1:1、1.5x/2x 放大下文字都应保持可读。
+- 如果 PDF.js 仍无法渲染，再单独处理 sidecar 的 PDF 认证/Range/worker 问题，不能把提高 PNG 尺寸当成根本修复。
+
+验收条件：
+
+1. 带文本层的普通 PDF 页面最终状态为 PDF.js canvas，`pending-fallback` 不存在。
+2. PDF.js 失败时页面明确显示降级原因和重试入口，不能静默使用低分辨率图片。
+3. 1.5x/2x 放大时文字边缘不会因为 1100 像素预览而明显模糊。
+4. 文本层、段落定位、翻译高亮和 PDF canvas 使用同一页面尺寸，不因提高分辨率产生偏移。
+
+### 1.1.4 第三待办：统一双击翻译语义并降低原文高亮遮挡
+
+当前 PDF text layer 同时存在两套双击路径：纯 PDF 模式会保留浏览器双击选词并触发单词快速翻译；
+对照/仅译文模式的 `dblclick` 又会按坐标直接命中结构化段落并打开段落翻译。两条路径可能先后触发，
+造成单词气泡与段落气泡互相覆盖，也让用户无法预测同一个双击动作的结果。
+
+统一交互规则：
+
+- **单击正文段落**：打开该段落的翻译气泡；已有缓存时直接显示，没有缓存时显示“翻译此段”。
+- **双击英文单词**：保留浏览器原生选词，并显示单词词典释义或本地快速翻译；不再因阅读模式不同而改成整段翻译。
+- **拖选句子或多词**：显示选区工具条，由用户点击“翻译选区”；不会自动把一个词的译文套到整段。
+- **点击翻译流中的段落卡片**：定位 PDF 对应矩形并打开段落翻译气泡。
+- **Esc**：关闭当前气泡和选区工具条。
+
+同一待办同时修复当前定位框的视觉遮挡：截图中的绿色实心填充覆盖了过多原文字形，
+不适合长段落阅读。新的视觉规则是：
+
+- 当前段落以细金色/青绿色边框和极低透明度底色表示，正文保持清晰可读。
+- 普通 hover 只显示边框，不改变大面积背景。
+- 锁定的当前锚点可以增加外圈或左侧短标记，不继续提高填充不透明度。
+- 翻译卡和 PDF 原文使用同一锚点颜色，但不使用相同的实心遮罩；焦点状态必须能在浅色 PDF 上辨认，也不能依赖颜色 alone。
+- 选区高亮与段落定位高亮分开：选区用于用户操作，段落框用于同步定位，不能互相覆盖。
+
+实现时需要处理双击的两次 `mouseup`、段落单击延迟确认和选区状态清理，避免出现“先显示单词、
+再被段落翻译覆盖”的闪烁。段落框验收需要同时检查原文可读性、键盘焦点、缩放和对照滚动同步。
+
+验收条件：
+
+1. 所有阅读模式下，单击段落、双击单词、拖选句子的语义一致。
+2. 双击一个英文单词只显示单词翻译；不会打开整段翻译，也不会产生两次翻译请求。
+3. 拖选长句后不会复用单词译文，选区工具条只对当前精确文本生效。
+4. 当前段落边框可见但不压住原文；长段落、深色文字和参考文献仍然清晰。
+5. 段落定位、选区高亮、译文卡高亮三者状态可区分，并能在 1:1、适应宽度和放大模式下保持一致。
+
+翻译入口按作用域分开，避免研究台、Reader 和右侧面板重复执行同一件事：
+
+- Reader 工具栏的“全文翻译”处理整篇 canonical structure 的缺失或过期单元，适合
+  后台批量完成；它会切换到仅译文模式并显示整体进度。
+- Reader 右侧翻译面板只保留四类状态计数、实际生成后端和“翻译当前可见页”入口。
+  后者只处理当前 PDF 视口内的页，适合先读先译；段落队列和无范围的全局重试不再在
+  右侧重复出现。
+- 中间翻译阅读流是逐段操作的唯一位置。缺失、过期或失败的段落在原文对应卡片上
+  执行“翻译”或“重新翻译此段”，并可点击卡片回到 PDF 锚点。
+- “隐藏原文”不再作为右侧全局按钮。对照模式的原文始终是左侧 PDF；仅译文模式的
+  源文摘录是否显示属于阅读布局设置，不作为批量翻译操作。
+
+翻译后端边界保持明确：
+
+- 选区翻译先走缓存和本地词典，命中即返回；未命中时调用论文翻译 action。
+- 在配置了 CPU OPUS-MT/Marian 模型时，论文翻译 action 默认选择本地翻译后端，
+  全文、可见页和段落翻译使用同一后端契约，但作用域不同。
+- 未配置本地模型或用户在 AI 设置中指定 `direct_llm` 时，论文翻译 action 调用
+  OpenAI-compatible LLM；这条路径适合需要上下文和更高质量的整段翻译，代价是延迟
+  和网络/额度依赖更高。
+- Reader 面板显示已保存译文的生成来源（本地 CPU、AI 模型或缓存/词典），避免把
+  “全文翻译”误解成本地模型和远程模型的两个独立数据系统。
+
+自动化验收覆盖：
+
+- GROBID 标题与 Abstract 进入结构；
+- caption 与后续正文保持独立；
+- 同基线标签和正文恢复正确阅读顺序；
+- 第 1 页 Abstract、第 3 页段落双向定位、第 4 页按页跟随；
+- 旧译文安全复用与未知页码隔离；
+- 翻译缓存刷新、Reader 重开和 PDF 矩形高亮。
+
+真实论文《Attention Is All You Need》的端口验收结果：canonical structure 包含
+169 个可翻译单元，全部具有 PDF 定位矩形，结构质量检查无 blocker；第 3 页的
+Figure 1、Model Architecture、Encoder and Decoder Stacks、Attention 已恢复为可辨识的
+图题、正文和章节结构。
+
+论文阅读的三种能力不是三个同级页面：
+
+```text
+论文概览 / AI 导读
+        -> 逐段阅读
+        <-> 原文对照
+```
+
+- **论文概览 / AI 导读**：回答“这篇论文做了什么，是否值得继续读”。
+- **逐段阅读**：回答“这一段英文具体是什么意思”。
+- **原文对照**：回答“中文和原文如何对应，译文是否需要核对”。
+
+笔记、局部解释和引用操作贯穿三者；Claim 和 Evidence 暂不显示。
 
 ## 2. 产品形态
 
@@ -59,72 +229,71 @@ Research
     Collections
     Work Queue
   Reader
-  Claims & Citations
+  Reading Materials
   Synthesis / Export
   Inbox & Connectors
 ```
 
 ### 2.1 Overview
 
-首屏回答“当前有哪些论文需要处理”：
-
-- papers total
-- reading / annotated / candidate ready / archived 数量
-- ready research claims / promoted research claims
-- private / public sources 数量
-- 最近阅读论文
-- 需要处理的 AI candidates
-- citation 断链、private publish risk、stale translation warning
-
-这些指标不是装饰性统计，而是论文阅读工作流的导航器：
-
-
-| 指标                        | 含义                                                                                                                         | 主要用途                              |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| papers total              | 当前 profile 中 `kind: paper` 的 source 总数，不包含普通网页、书籍、访谈、博客等非论文 source。                                                        | 给用户资料库规模感。                        |
-| reading                   | 正在阅读中的论文，通常已经导入或打开过 Reader，但还没有完成批注、整理或归档。                                                                                 | 帮用户继续未完成阅读。                       |
-| annotated                 | 已产生高亮、批注、摘录或 chunk 的论文。                                                                                                    | 找出“已经读出东西，但还没沉淀”的论文。              |
-| candidate ready           | 已有可审核 AI / research candidate 的论文，例如 claim candidate、citation candidate、source guide、summary、evidence promotion candidate。 | 把用户带到人工审核队列。                      |
-| archived                  | 阶段性处理完或暂时不再处理的论文。归档不删除 PDF、批注、claim 或 citation。                                                                            | 控制主阅读队列噪音。                        |
-| ready research claims     | Research 层已经准备好审核或复用的 source-aware claims。                                                                                 | 用于读后感、文献综述、blog draft、项目背景分析的素材池。 |
-| promoted research claims  | 已从 Research 层提升到 Evidence Review / Claim Studio / Output Studio 上游的 claims。                                                | 表示该论文观点已经进入更正式的证据或表达链路。           |
-| private / public sources  | 按 `visibility` 统计 private 和 public paper sources。                                                                          | 判断哪些材料能用于公开输出，哪些只能私下使用。           |
-| 最近阅读论文                    | 最近打开、批注、翻译、总结或编辑过的论文。                                                                                                      | 一键回到上次阅读位置。                       |
-| 需要处理的 AI candidates       | AI 生成但尚未接受/丢弃的候选项。AI 输出不自动成为事实。                                                                                            | 防止 AI 结果散落在各处无人审核。                |
-| citation 断链               | citation 指向的 source、chunk、annotation、quote 不存在或校验失败。                                                                       | 确保引用能追溯回原文。                       |
-| private publish risk      | 准备公开的 output / claim / citation 引用了 private source。                                                                        | 阻止把私有材料误带进公开输出。                   |
-| stale translation warning | 翻译保存时的 `source_hash` 和当前 segment hash 不一致。                                                                                 | 提醒重新翻译或人工确认原文/中文是否仍然对应。           |
-
-
-Overview 推荐分成三块：
+研究台首页首先回答“现在该读什么、上次读到哪里、下一步是什么”，而不是重复完整
+Paper Library。建议分成三个区域：
 
 ```text
-Reading Pipeline
-  papers total / reading / annotated / candidate ready / archived / 最近阅读论文
-
-Review Queue
-  ready research claims / promoted research claims / AI candidates
-
-Integrity & Publish Safety
-  private-public sources / citation 断链 / private publish risk / stale translation warning
+继续阅读
+待处理队列
+论文库入口
 ```
 
-证据强度提示：
+研究台需要展示：
 
-- `annotated` 和 `candidate ready` 不等于项目 evidence 已经成立。
-- 从论文阅读生成的 evidence 主要证明阅读行为、引用依据和理解过程，是弱证据。
-- Blog 读后感可以直接消费 ready/promoted research claims，但 resume bullet、
-public project proof、goal progress 不应该只依赖论文阅读 evidence。
-- 如果一个 claim 要支撑项目能力或目标进展，必须再连接真实 project evidence，
-例如代码提交、实验结果、上线记录、用户反馈、项目复盘等。
+- 最近阅读论文和上次页码；
+- 缺 PDF 的论文；
+- 翻译未完成或已经 stale 的论文；
+- 尚未生成论文导读的论文；
+- 有笔记但还没有整理的论文；
+- 最近完成或归档的论文。
 
-Overview 不提供复杂编辑表单，只提供进入主流程的快捷入口：
+论文卡片的状态分开显示，不用一个 `status` 代表所有事实：
 
-- Find papers in Library
-- Open Library
-- Continue reading
-- Review claims
-- Export citations
+```text
+Reading · PDF ready
+Translation 42 / 119
+AI guide ready
+Notes 6 · Citations 3
+Last read: p. 5
+```
+
+推荐的状态维度：
+
+| 维度 | 示例 |
+| --- | --- |
+| 来源状态 | `inbox` / `reading` / `archived` |
+| PDF 状态 | `missing` / `ready` / `failed` |
+| 抽取状态 | `pending` / `ready` / `fallback` / `failed` |
+| 翻译状态 | `not_started` / `partial` / `translated` / `stale` |
+| 导读状态 | `not_started` / `running` / `ready` / `needs_review` / `failed` |
+| 阅读状态 | `unread` / `reading` / `annotated` / `organized` |
+
+主动作根据状态变化：
+
+| 当前状态 | 主动作 |
+| --- | --- |
+| 没有 PDF | 获取 PDF / 上传 PDF |
+| 有 PDF、未阅读 | 开始阅读 |
+| 已读到一半 | 继续阅读第 N 页 |
+| 翻译未完成 | 补齐翻译 |
+| 没有导读 | 生成论文导读 |
+| 有笔记未整理 | 整理阅读材料 |
+| 已归档 | 查看论文 |
+
+Research、Paper Library、Reader 的职责保持清晰：
+
+- **Research**：继续阅读、待处理队列、最近活动和阅读结果状态。
+- **Paper Library**：导入、搜索、主题树、标签、批量整理、归档和 PDF 资产管理。
+- **Reader**：单篇论文的 PDF 阅读、翻译、导读、对照、笔记和引用。
+
+研究台不重复 Paper Library 的完整树管理；Reader 也不承担 token、连接器或批量导入配置。
 
 ### 2.2 Paper Search
 
@@ -290,13 +459,13 @@ doi
 
 - `Open Reader`
 - `Move in Library Tree`
-- `Analyze Paper`，在用户需要结构化阅读报告、深度阅读计划或项目相关性分析时触发。
+- `Generate Paper Guide`，在用户需要结构化论文导读、深度阅读计划或项目相关性分析时触发。
 
 ### 2.3 Paper Library
 
 Paper Library 是论文资料库，也是 **Paper Search 和 Reader 之间的桥梁**。
 它应该首先是一个 **主题树**，而不是一组状态列表：用户按主题、问题域和研究方向
-组织论文；`inbox / reading / annotated / candidate ready / archived` 这些只是
+组织论文；`inbox / reading / annotated / archived` 这些只是
 论文属性和筛选条件，不应该决定论文在资料库里的位置。
 
 核心原则：
@@ -332,7 +501,8 @@ Paper Library
     Inbox
     Reading
     Annotated
-    Candidate Ready
+    Needs Translation
+    Needs Guide
     Archived
     Discarded
   Other Sources
@@ -370,13 +540,13 @@ UI 上应避免把 smart views 做成和主题树平级的“真实文件夹”�
 
 | 维度 | 示例 | 是否影响树位置 |
 | --- | --- | --- |
-| status | inbox / reading / annotated / candidate_ready / archived / discarded | 否，只用于筛选和队列。 |
+| status | inbox / reading / annotated / archived / discarded | 否，只用于筛选和队列。 |
 | tags | memory、perception、benchmark、survey | 否，只用于横向检索。 |
 | project_refs | 某个项目 case id | 否，只说明论文和项目相关。 |
 | goal_refs | 某个目标 id | 否，只说明论文服务哪个目标。 |
 | PDF asset | `papers/<sha>-title.pdf` | 否，只是外置文件引用。 |
 | extraction state | PyMuPDF / GROBID / needs extraction | 否，只是处理状态。 |
-| reading state | annotations、chunks、translations、claims、citations | 否，只是阅读沉淀状态。 |
+| reading state | annotations、notes、chunks、translations、analysis、citations | 否，只是阅读沉淀状态。 |
 | library_node_refs | `paper-node:vla-memory` | 是，决定论文在树上的位置。 |
 
 这能避免资料库变成很多互相冲突的“状态文件夹”。例如同一篇论文可以同时：
@@ -386,7 +556,7 @@ UI 上应避免把 smart views 做成和主题树平级的“真实文件夹”�
 - 带有 `perception` tag。
 - 关联 `project:vla-memory-module`。
 - 有 PDF asset。
-- 有 12 条 annotations 和 3 条 claim candidates。
+- 有 12 条 annotations、3 条 citations，且仍有部分翻译待处理。
 
 #### 2.3.3 Search -> Library Tree -> Reader 桥接
 
@@ -431,7 +601,7 @@ suggested_library_nodes:
 用户必须确认位置后才写入 `library_node_refs`。模型不能静默重排资料库。
 
 Reader 写入 annotations、chunks、translations、analysis 后，Library 负责重新计算
-derived state，例如 `annotated`、`candidate ready`、`stale translation`、
+derived state，例如 `annotated`、`needs translation`、`needs guide`、`stale translation`、
 `citation risk`，但这些仍然只是筛选属性，不改变树位置。
 
 #### 2.3.4 树节点设计
@@ -495,7 +665,8 @@ Smart Views 是系统筛选，不是存储结构：
 | Unsorted Inbox | 没有 `library_node_refs` 或显式待分类的 paper。 | 接住 Paper Search 临时导入结果。 |
 | Reading | `status=reading`。 | 继续阅读。 |
 | Annotated | 有 annotation / chunk / note 的 paper。 | 找出已经读出内容但还没沉淀的论文。 |
-| Candidate Ready | 有 AI / research candidates 等待处理的 paper。 | 进入审核队列。 |
+| Needs Translation | 有缺失或 stale 翻译的 paper。 | 进入翻译队列。 |
+| Needs Guide | 没有论文导读或导读需要重新核对的 paper。 | 进入导读队列。 |
 | Archived | `status=archived`。 | 已阶段性处理完的论文。 |
 | Discarded | `status=discarded`。 | 明确不再阅读的论文。 |
 | Other Sources | 非 paper 的 research sources。 | 避免网页、repo、书籍混入论文树。 |
@@ -518,7 +689,7 @@ Reading
 - has PDF
 - annotations count
 - chunks count
-- claims count
+- notes count
 - citations count
 - last read
 
@@ -531,8 +702,8 @@ Reading
 | status | 管理状态：inbox / reading / archived / discarded 等。这是属性。 |
 | has PDF | 是否已有本地 PDF asset；没有 PDF 时 Reader 进入 metadata/text fallback。 |
 | annotations count | 用户产生的高亮和批注数量，表示阅读深度。 |
-| chunks count | 可引用摘录数量，表示是否可进入 claim/citation 工作流。 |
-| claims count | research claims 数量，表示是否可用于读后感、文献综述或 Evidence Review 上游。 |
+| chunks count | 可复用摘录数量，表示阅读材料是否已经结构化。 |
+| notes count | 用户笔记和高亮数量，表示阅读沉淀深度。 |
 | citations count | citations 数量，表示引用材料是否已经结构化。 |
 | last read | 最近阅读或编辑时间，用于继续阅读。 |
 
@@ -545,7 +716,7 @@ Reading
 - `Stale translation`
 - `Citation broken`
 - `Private source`
-- `AI candidates`
+- `Guide pending`
 - `Duplicate risk`
 
 这些 badge 应该可点击进入对应的修复动作，例如选择树位置、重新抽取、重新翻译、
@@ -583,9 +754,9 @@ Reason:
 - storage：PDF asset ref、sha256、page count、extraction backend、last extracted。
 - organization：tags、project_refs、goal_refs、priority。
 - reading status：last read page、annotations、chunks、translations、analysis。
-- synthesis status：research claims、citations、promoted status、exports。
+- reading materials：notes、chunks、citations、analysis、exports。
 - risks：private publish risk、citation 断链、stale translation、duplicate conflict。
-- actions：Open Reader、Move in Tree、Run extraction、Analyze Paper、Archive、Discard。
+- actions：Open Reader、Move in Tree、Run extraction、Generate Paper Guide、Archive、Discard。
 
 这个 drawer 是“整理站”，Reader 是“阅读现场”。不要把批注编辑、长翻译和大段 AI
 问答塞进 Library。
@@ -605,7 +776,7 @@ Reason:
 | 动作 | 含义 |
 | --- | --- |
 | move to node | 把所选论文放到指定树节点；只改 `library_node_refs`，不移动 PDF 文件。 |
-| archive | 把所选论文状态改为 `archived`，保留树位置、PDF、批注、翻译、claims、citations。 |
+| archive | 把所选论文状态改为 `archived`，保留树位置、PDF、批注、翻译、notes、chunks、citations。 |
 | discard | 把所选论文状态改为 `discarded`，表示不再阅读；默认仍保留 source 和 asset refs，避免误删。 |
 | add tags | 给所选论文增加 tags，用于横向检索。 |
 | set status | 批量设置 inbox / reading / archived / discarded 等管理状态。 |
@@ -622,225 +793,250 @@ Reason:
 
 ### 2.4 Reader
 
-Reader 是核心体验，目标接近 Zotero PDF Reader 的“页面内高亮、批注、note
-可回到原文位置”，但保持 nblane 的 candidate-first 写入边界。
-它需要同时支持两类读者：
+Reader 是单篇论文的阅读现场。它保持 PDF 原文的白纸可读性，外层导航、目录、AI
+面板和状态栏使用 nblane 的深色石雕星空语言。
 
-- 快速扫读者：想快速知道论文讲什么、值不值得继续读。
-- 深度阅读者：需要中英文对照、批注、引用、claim、和项目相关性分析。
-
-推荐布局：
+Reader 的用户入口和产品外壳属于 SPA。当前实现采用渐进式集成：
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│ Toolbar: Paper / page / zoom / search / highlight / AI mode │
-├──────────────┬─────────────────────────────┬────────────────┤
-│ Paper list   │ PDF.js page viewer          │ Notes          │
-│ TOC          │ text selection              │ Translation    │
-│ Page thumbs  │ highlights / anchors        │ AI             │
-│ Sections     │                             │ Claims         │
-└──────────────┴─────────────────────────────┴────────────────┘
+SPA ResearchPage
+  -> SPA PaperReaderPage
+     -> Reader sidecar iframe（过渡承载）
+        -> PDF.js / Reader API
 ```
 
-中间 PDF 区：
+这意味着用户从研究台进入论文、看到标题和阅读状态、返回列表以及恢复深链，都发生在
+SPA 路由中；现阶段 PDF.js 画布和部分阅读交互仍由 FastAPI sidecar 提供。iframe 是
+兼容现有 PDF 渲染和 Reader API 的过渡方案，不是最终的产品页面。SPA 和 sidecar 不能
+各自维护一套阅读状态，页码、模式、章节、锚点、翻译任务和阅读进度必须由同一组
+Reader API 和 URL 状态驱动。
 
-- PDF.js 渲染 PDF 页面。
-- 支持 page jump、zoom、text search。
-- 支持文字选择、rects、高亮颜色。
-- 高亮不写回 PDF 文件，只写 `research/annotations/*.jsonl`。
-- 点击 annotation / chunk / citation 可以跳回页码和高亮位置。
+目标状态是把 Reader UI 逐步迁移为 SPA 原生 React 页面：
 
-右栏 tabs：
+- SPA 原生负责目录、PDF 阅读区、逐段翻译、原文对照、笔记和 AI 导读。
+- FastAPI sidecar 只保留 PDF 文件流、页面预览、text layer / segment payload、翻译与
+  AI task、annotations、notes、chunks、citations 和 progress API。
+- 旧的 sidecar HTML 保留为兼容入口和故障降级路径，不能继续扩展为第二套主界面。
 
-- `Notes`
-  - 当前论文批注列表。
-  - 支持新建 note、编辑 note、按 tag/filter 展示。
-- `Translation`
-  - 原文段落与中文翻译对齐。
-  - 支持 translate selection / page / section / paper / all missing。
-- `AI`
-  - Explain selection
-  - Ask paper
-  - Source guide
-  - Codex deep read
-- `Claims`
-  - 当前论文的 claim candidates。
-  - 当前论文已保存 research claims / citations。
-
-选择文本后的浮动工具条：
-
-- Highlight
-- Annotate
-- Translate
-- Explain
-- Create Chunk
-- Create Citation
-- Ask AI about this
-
-组件不可用或没有 PDF 时，Reader 降级为 Streamlit 文本模式：
-
-- page text list
-- segment list
-- annotation list
-- translate/analyze buttons
-
-#### 2.4.1 中英文对照和全文翻译
-
-Reader 必须支持中英文对照和全文翻译，但实现方式不是把整篇论文一次性发给模型。
-全文翻译是一个“分段、缓存、可追溯”的阅读能力：
+Reader 不是三个互相独立的页面，而是一个共享阅读会话中的两个主视图和一个导读层：
 
 ```text
-PDF / GROBID TEI
-  -> pages
-  -> sections
-  -> segments
-  -> batch translation
-  -> translations JSONL
-  -> bilingual aligned reader
+论文概览 / AI 导读
+        -> 逐段阅读
+        <-> 原文对照
 ```
 
-支持的翻译粒度：
+共享状态包括：
 
-| 功能 | 作用 | 适合场景 |
-| --- | --- | --- |
-| Translate selection | 只翻译当前选中的一句或一段。 | 精读某个难句、公式解释附近文字、定义句。 |
-| Translate paragraph / segment | 翻译当前结构化段落。 | 中英文逐段对照阅读。 |
-| Translate page | 翻译当前页的所有 segments。 | 按页推进阅读。 |
-| Translate section | 翻译 Introduction / Method / Experiments 等章节。 | 重点读某一节。 |
-| Translate paper | 为整篇论文创建翻译任务。 | 准备完整中文对照阅读。 |
-| Translate all missing | 只翻译还没有翻译或已经 stale 的 segments。 | 增量补全，不浪费 token。 |
+- 当前页、章节和 segment；
+- 当前选区和原文定位；
+- 当前翻译锚点；
+- 阅读模式和滚动位置；
+- 笔记面板状态；
+- 上次阅读进度。
 
-中英文对照 UI：
+URL 可以恢复关键上下文，例如：
 
-- 左侧保持 PDF 原文或 extracted text。
-- 右侧显示中文翻译，按 segment 对齐。
-- 每个中文段落显示 locator，例如 `p. 3 § Method`。
-- 鼠标 hover 原文段落时，高亮对应中文。
-- 点击中文段落时，PDF 跳回对应页码和 rect。
-- 翻译旁显示状态：`translated`、`missing`、`stale`、`failed`。
-- stale 翻译不覆盖旧内容，但提示用户重新翻译。
+```text
+?mode=translation&page=3&anchor=segment-42
+?mode=summary&section=method
+?mode=compare&page=5&anchor=segment-88
+```
 
-全文翻译的边界：
+#### 2.4.1 论文概览 / AI 导读
 
-- 不把整篇论文一次性发给模型。
-- 不把完整翻译写入 Agent Activity。
-- 不覆盖原文。
-- 不修改 PDF 文件。
-- 每条翻译必须绑定 `segment_id` 和 `source_hash`。
-- GROBID 结构化抽取可用时，优先按 section / paragraph 对齐。
-- GROBID 不可用时，退化为 PyMuPDF page text / heuristic segment 对齐。
+打开新论文时先显示中文摘要和结构化导读；已经读过的论文优先显示“继续阅读第 N 页”。
 
-这样读者可以先全文机器翻译建立整体理解，再回到 PDF 原文逐段核对。系统要始终让用户
-知道“这段中文对应哪一段原文”，避免翻译变成不可追溯的独立文本。
+导读包含：
 
-#### 2.4.2 Reader 功能清单
+- 一句话结论；
+- 研究问题；
+- 核心方法；
+- 主要发现；
+- 局限与风险；
+- 与当前项目或目标的关系；
+- 推荐先读的章节。
 
-Reader 面向读者提供这些核心功能：
+每条内容都应该能跳回页码、章节、segment 或原文高亮。导读不是普通聊天窗口，
+也不把没有依据的内容显示成确定结论。
+
+导读状态明确区分：
+
+```text
+未生成 / 生成中 / 已完成 / 部分完成 / 待核对 / 失败
+```
+
+没有可靠结构化结果时显示“未评估”或“需要人工核对”，不把 fallback 结果显示成零分。
+
+#### 2.4.2 逐段阅读
+
+逐段阅读是主要的中文精读视图。它优先保证段落完整、译文可读和原文可追溯，
+不强行把中文塞回英文 PDF 的原始文字框。
+
+桌面端布局：
+
+```text
+┌──────────────┬──────────────────────────┬───────────────┐
+│ 目录 / 页面    │ 原文段落 + 中文译文        │ 笔记 / 导读     │
+│              │                          │               │
+│              │ 原文段落                  │               │
+│              │ 中文译文                  │               │
+└──────────────┴──────────────────────────┴───────────────┘
+```
+
+支持：
+
+- 摘要、当前章节、当前页和全文翻译；
+- 只翻译缺失或 stale 的段落；
+- 翻译完成度和失败原因；
+- 原文与译文同步高亮；
+- 点击译文跳回 PDF 页码和 rect；
+- 选区翻译、解释、做笔记和创建引用。
+
+移动端采用原文在上、译文在下的单栏布局，不强行使用三栏。
+
+#### 2.4.3 原文对照
+
+原文对照用于核对译文、页面结构、图表、公式和实验结果，不作为所有用户的默认视图。
+
+```text
+┌──────────────────────────┬──────────────────────────┐
+│ PDF 原文页面              │ 对应中文页面              │
+│ 原始双栏、图表、公式       │ 可伸缩的结构化中文排版     │
+└──────────────────────────┴──────────────────────────┘
+```
+
+支持：
+
+- 页码和滚动同步；
+- 原文段落和译文段落共同高亮；
+- 点击任一侧跳到另一侧；
+- 页面缩放；
+- 图表、公式和参考文献保留原文；
+- 中文过长时从 overlay 自动降级为 flow 布局。
+
+overlay 只适合短标题、摘要和简单正文。正文、长中文段落、多栏不确定区域和复杂表格
+优先采用可伸缩排版或段落对照，不为了保持位置把文字缩到不可读。
+
+#### 2.4.4 段落翻译和选区操作
+
+PDF 原文仍然是主要阅读对象。用户可以点击结构化段落，也可以拖选精确文本。
+
+交互规则：
+
+- 已有缓存译文时，点击段落直接显示译文气泡；
+- 没有缓存时，先显示“翻译此段”操作，不自动消耗 AI 请求；
+- 拖选文字时显示翻译、解释、笔记和引用工具条；
+- 双击和三击保留浏览器原生选词行为；
+- `Esc` 关闭气泡；键盘焦点可以用 `Enter` 打开段落操作；
+- 桌面端气泡使用绝对定位，不增加 PDF 横向宽度；
+- 气泡避开当前段落，空间不足时回退到右侧面板；
+- 移动端使用底部抽屉；
+- 识别不到可靠坐标时提示用户拖选文字，不猜测段落。
+
+气泡默认显示中文译文，原文折叠显示；同时显示页码、章节、翻译状态和保存操作。
+
+#### 2.4.5 笔记、Chunk 和 Citation
+
+笔记贯穿论文概览、逐段阅读和原文对照。选区工具条只提供阅读材料操作：
+
+```text
+翻译 | 解释 | 做笔记 | 创建引用 | 加入 Chunk
+```
+
+本阶段不提供：
+
+```text
+创建 Claim | Promote to Evidence | 关联技能 | 修改 Evidence
+```
+
+保存的阅读材料继续绑定：
+
+```text
+source_id
+segment_id
+page
+locator
+rects
+selected_text
+translated_text
+note
+```
+
+点击笔记、Chunk 或 Citation 必须能够回到 PDF 原文位置。
+
+#### 2.4.6 Reader 功能清单
 
 | 功能 | 读者收益 |
 | --- | --- |
-| PDF 阅读 | 不离开 nblane 就能打开论文，保留页码、缩放、搜索和阅读位置。 |
+| PDF 阅读 | 保留页码、缩放、搜索和阅读位置。 |
 | TOC / sections | 快速跳到 Abstract、Introduction、Method、Experiments、Conclusion。 |
 | 页面缩略图 | 快速定位图表、实验结果和附录。 |
-| 文本搜索 | 在全文中查关键词，例如 `memory`、`benchmark`、`ablation`。 |
-| 中英文对照 | 英文原文和中文翻译并排，降低阅读门槛。 |
-| 全文翻译 | 对整篇论文创建增量翻译缓存，后续打开不需要重新翻。 |
-| 选区解释 | 对难句、术语、公式附近文本进行局部解释。 |
-| 高亮批注 | 把重要句子变成可回溯 annotation。 |
-| Chunk 创建 | 把可引用段落沉淀为 research chunk。 |
-| Citation 创建 | 从选区或 chunk 生成带 locator 的 citation。 |
-| Ask Paper | 针对当前论文问答，答案必须带 segment / chunk / annotation refs。 |
-| Analyze Paper | 生成结构化阅读报告、评分、项目相关性和下一步阅读建议。 |
-| Claim candidate | 从阅读内容生成 research claim candidate，用于读后感、文献综述或 blog。 |
-| Jump back | 从 annotation / chunk / citation / translation 跳回 PDF 原文位置。 |
+| 论文导读 | 先判断论文做了什么以及是否值得深入。 |
+| 逐段翻译 | 逐段阅读中文内容，译文可回到原文。 |
+| 原文对照 | 核对英文、译文、版面、公式和图表。 |
+| 选区解释 | 解释术语、难句和公式上下文。 |
+| 高亮批注 | 把重要句子保存为可回溯笔记。 |
+| Chunk 创建 | 保存可复用的原文片段。 |
+| Citation 创建 | 从选区或 Chunk 生成带 locator 的引用材料。 |
+| Ask Paper | 围绕当前论文提问，回答必须带来源 refs。 |
+| Jump back | 从导读、笔记、Chunk、Citation 或译文回到 PDF。 |
 
-#### 2.4.3 如何方便读者
-
-Reader 的体验目标是减少论文阅读中的上下文切换：
-
-- 不用在浏览器、PDF 阅读器、翻译工具、笔记软件之间来回复制。
-- 不用担心“这段中文翻译对应原文哪里”，因为每条翻译都有 segment 和页码。
-- 不用读完后重新整理引用，选区可以直接变成 annotation / chunk / citation。
-- 不用把 AI 总结当成事实，所有 AI 输出都必须带来源 refs，用户接受后才沉淀。
-- 不用每次从头读，Library 和 Reader 会记录 last read、阅读状态、批注数量和翻译状态。
-- 不用把论文阅读误当成强 evidence；Reader 产出的 claim 更适合 blog 读后感、
-  literature memo 和项目背景分析。
-
-推荐的实际阅读路径：
+#### 2.4.7 阅读路径
 
 ```text
-Open Reader
-  -> Analyze Paper
-  -> Translate abstract / introduction
-  -> Ask Paper: 这篇论文和我的项目有什么关系？
-  -> 高亮关键贡献和限制
-  -> Translate Method / Experiments
-  -> Create chunks / citations
-  -> Generate claim candidates
-  -> Export reading note 或 blog 读后感素材
+打开论文
+  -> 中文摘要 / 论文导读
+  -> 逐段阅读或直接打开原文
+  -> 点击段落翻译，或拖选文本
+  -> 保存笔记 / Chunk / Citation
+  -> 需要核对时切换原文对照
+  -> 保存阅读进度
 ```
 
-深读路径：
+论文阅读不自动产生 Claim 或 Evidence。
 
-```text
-Open Reader
-  -> Translate paper / all missing
-  -> Analyze Paper
-  -> Section-by-section review
-  -> Compare with same tree node papers
-  -> Create literature memo
-```
+### 2.5 Claims & Evidence 边界
 
-### 2.5 Claims & Citations
+论文阅读阶段暂时屏蔽 Claim 和 Evidence。
 
-Claims & Citations 保留为独立小页面，但主入口来自 Reader 的 selection、
-annotation 和 chunk。
+这是产品入口和写入行为的限制，不是删除现有历史数据或兼容字段。已有
+`research/claims.yaml`、`claim_refs` 和 Evidence 相关 API 暂时保留，
+Reader 本阶段不展示、不创建、不更新这些数据。
 
-分三个小 tab：
+Reader 不显示：
 
-- Chunks
-- Claims
-- Citations
+- Claims tab；
+- claim candidate；
+- `Promote to Evidence`；
+- Evidence Review 入口；
+- 技能关联和项目成果证明。
 
-Claim card 显示：
+论文阅读仍保留 Citation，因为 Citation 是可回到论文原文的研究材料，不等于 Evidence。
 
-- text
-- status：draft / ready / promoted / dismissed
-- source_refs
-- chunk_refs
-- citation_refs
-- confidence
-- warnings
-
-Citation card 显示：
-
-- quote
-- locator
-- chunk
-- bibliography
-- quote validation status
-
-`Promote to Evidence candidate` 继续走现有
-`research_claim_to_evidence_candidate()`。论文阅读不能直接写 accepted public
-claim。
+未来如果重新开启 Claim，需要另行定义从阅读材料到 Claim 的审核流程；本阶段不提前
+写入 `research/claims.yaml`，也不调用 `research_claim_to_evidence_candidate()`。
 
 ### 2.6 Synthesis / Export
 
-这个小页面负责把论文阅读结果变成可复用材料：
+本阶段只处理阅读材料，不处理 Claim 或 Evidence promotion。
 
-- 从 selected claims/chunks/citations 生成 reading note。
-- 从某个 tree node / subtree 中多篇论文生成 literature memo。
-- 从 promoted research claims 生成 blog candidate。
-- 导出引用：
-  - BibTeX
-  - Markdown bibliography / quote list
+支持：
 
-导出默认只提供 copy / download。只有用户点击 `Save export` 才写：
+- 从已选笔记、Chunk 和 Citation 生成 reading note；
+- 导出 BibTeX；
+- 导出 Markdown bibliography / quote list；
+- 复制或下载阅读材料。
+
+只有用户点击 `Save export` 才写入：
 
 ```text
 research/exports/<timestamp>.bib
 research/exports/<timestamp>.md
 ```
+
+多篇论文 literature memo、Claim Studio、Evidence Review 和 Output Studio 上游连接后置，
+不阻塞单篇论文阅读闭环。
 
 ### 2.7 Inbox & Connectors
 
@@ -1045,12 +1241,19 @@ citation_refs: []
 
 ## 4. 第三方库和后端策略
 
-### 4.1 默认前端：FastAPI sidecar + PDF.js
+### 4.1 当前过渡前端：SPA 外壳 + FastAPI sidecar + PDF.js
 
-PDF Reader 的主入口是 FastAPI sidecar 提供的 `/reader/view/{source_id}`。
-`research_paper_reader_component` 的静态 Streamlit runtime 已停用，仅保留
-`events.py` 作为事件常量契约。前端 PDF 渲染由 sidecar 模板加载 bundled PDF.js
-资产完成。
+SPA 的 `/research` 和 `/research/papers/:source_id/reader` 是用户可见的主入口。
+`PaperReaderPage` 负责标题、返回、阅读状态、URL 深链、错误反馈和 sidecar 生命周期；
+当前 PDF 阅读画布由 FastAPI sidecar 的 `/reader/view/{source_id}` 通过 iframe 承载。
+`research_paper_reader_component` 的静态 Streamlit runtime 已停用，仅保留 `events.py`
+作为事件常量契约。前端 PDF 渲染由 sidecar 模板加载 bundled PDF.js 资产完成。
+
+近期不重写 PDF.js，也不让 SPA 和 sidecar 分别实现翻译、批注或进度保存。先把 SPA 作为
+唯一产品外壳，再以同一套 API 和 URL 契约逐步替换 iframe 内的 UI。
+
+目标前端：SPA 原生 Reader + Reader API。sidecar 只作为 PDF/结构化数据和任务 API 服务，
+并在原生 Reader 尚未覆盖的情况下保留兼容降级入口。
 
 职责：
 
@@ -1154,7 +1357,23 @@ NBLANE_RESEARCH_PDF_BACKEND=grobid
   - references
   - coordinates
   - BibTeX metadata
-- GROBID 不可用或返回错误时，回退 PyMuPDF page text / heuristic segments。
+- GROBID 不可用或返回错误时，优先使用 PyMuPDF text layer 的版面/列/段落启发式生成带
+  rect 的段落级 segments；只有 PDF 没有可用 text layer 时才回退到 page text segments。
+  旧的 page-sized segments 仅作为兼容性最后 fallback，不作为 Reader 的主要阅读结构。
+- 本地结构缓存版本为 `v6`。缓存签名包含 PDF 指纹和 segment 内容；PDF 或 GROBID
+  语义输入发生变化时重建，重复打开直接复用缓存。暂时无法读取 PDF 时保留已保存结构，
+  包括显式强制重建失败的情况，避免清空原本可读的目录和段落。
+- Reader 检测到旧本地 fallback 时，通过现有后台准备任务按需重建页级派生解析；
+  `pymupdf` 模式不探测 GROBID，GROBID 冷却期内也只做本地升级。PDF 原件、笔记、批注
+  和翻译文件保留；旧译文仍按内容唯一匹配复用，匹配不了的译文不能绑定到新段落。
+- 抽取 metadata 的 `fallback_structure_quality` 记录正文、标题、caption、坐标覆盖、
+  段落平均/最大长度等指标。坐标覆盖说明可定位，不代表学术语义已经人工核验；
+  全文翻译仍以 canonical structure 的 `translation_readiness` 检查为准。
+- 双栏页面按跨栏标题分区，在每个区内先读左栏再读右栏；标题不能排到整页正文之后。
+  内联 `Abstract:` 分为标题与正文；加粗编号章节与正文分开，低字号图内编号不进入目录。
+- 验收先打开含 Abstract 的第一页，再点击第三页章节目录、切换原文对照、点击译文卡
+  确认原文矩形高亮，最后刷新重开确认结果一致。只有文本层缺失的扫描 PDF 才需要另行
+  引入 OCR；本轮没有新增 Docling/MinerU 依赖。
 - GROBID error 要转成用户可读 warning，不阻塞 PDF 导入，但 Library 应显示
   `GROBID unavailable` / `Needs structured extraction` badge。
 
@@ -1189,8 +1408,8 @@ NBLANE_RESEARCH_PDF_BACKEND=grobid
 - 国内环境拉 Docker Hub 可能失败，可先配置 Docker registry mirror，再拉
   `grobid/grobid:0.9.0-crf`。
 - GROBID 服务不可用时，Reader 仍能工作，但结构化抽取会显示
-  `GROBID unavailable` / `Needs structured extraction`，并回退到 PyMuPDF page text /
-  heuristic segments。
+  `GROBID unavailable` / `Needs structured extraction`，并回退到 PyMuPDF 带坐标段落；
+  page text 只保留为无可用版面结果时的最后回退。
 
 常用维护命令：
 
@@ -1233,6 +1452,8 @@ pypdf 不作为 v1 主路径默认后端。它可以保留为测试 fixture 或�
 | PyMuPDF               | 默认本地 PDF 抽取、坐标、图片、表格、LLM-ready extraction                      | 默认依赖；部署方需要接受 AGPL 或使用 commercial license | [https://pymupdf.io/pymupdf](https://pymupdf.io/pymupdf)                                                                                      |
 | GROBID                | 默认学术 PDF header / reference / full-text / coordinates / TEI 结构化抽取 | 默认结构化服务，Apache-2.0                         | [https://grobid.readthedocs.io/](https://grobid.readthedocs.io/) / [https://github.com/grobidOrg/grobid](https://github.com/grobidOrg/grobid) |
 | pypdf                 | 极简 fallback / fixture metadata / page text 基础抽取                   | 非主路径 fallback，BSD-3-Clause                   | [https://pypdf.readthedocs.io/](https://pypdf.readthedocs.io/)                                                                                |
+| Zotero PDF Reader     | 交互参考：页内高亮、批注跳回原文、阅读位置                         | 不作为运行时依赖；只借鉴交互                                     | [https://www.zotero.org/support/pdf_reader](https://www.zotero.org/support/pdf_reader)                                                        |
+| Hypothesis            | 交互参考：文本锚点、PDF 批注和稳定定位                             | 不作为运行时依赖；只借鉴 selector / anchor 设计                  | [https://web.hypothes.is/help/annotations/](https://web.hypothes.is/help/annotations/)                                                        |
 
 
 依赖合入原则：
@@ -1247,28 +1468,30 @@ pypdf 不作为 v1 主路径默认后端。它可以保留为测试 fixture 或�
 
 ### 5.1 AI Actions
 
-所有论文 AI 都走 AI Gateway，不在页面直接调用 `llm.chat`。
+所有论文 AI 都走 AI Gateway，不在页面直接调用 provider SDK 或 `llm.chat`。
 
-新增 actions：
+本阶段 actions：
 
 - `research.paper_search_codex`
 - `research.paper_translate`
 - `research.paper_explain_selection`
 - `research.paper_source_guide`
 - `research.paper_qa`
-- `research.paper_claim_extract`
 - `research.paper_deep_read_codex`
 - `research.paper_compare_codex`
 
+暂时不启用：
+
+- `research.paper_claim_extract`
+- 任何 `research_claim_to_evidence_candidate` 路径。
+
 不变量：
 
-- 论文阅读类 AI prompt 只能使用传入的 source metadata、segments、chunks、
-  annotations。
-- Paper Search 类 AI / Codex prompt 可以使用 web search / provider search，
-  但输出必须带可检查的 URL / DOI / provider refs。
-- 输出必须包含 `cited_segment_refs`、`cited_chunk_refs` 或 `cited_annotation_refs`。
-- 没有依据时必须返回 warning，不能编造答案。
-- AI run metadata 不保存完整 PDF 文本、完整翻译或完整 prompt。
+- 论文阅读类 AI prompt 只能使用传入的 source metadata、segments、chunks、annotations。
+- 输出必须包含 `cited_segment_refs`、`cited_chunk_refs` 或 `cited_annotation_refs`；没有依据时返回 warning。
+- AI 导读的每个重要条目应保存 page/segment refs，方便跳回 PDF。
+- AI 运行 metadata 不保存完整 PDF 文本、完整翻译或完整 prompt。
+- 翻译和导读都只是阅读材料，不修改 skill、goal、project 或 evidence。
 
 ### 5.2 长文本翻译
 
@@ -1285,43 +1508,6 @@ PDF
   -> aligned UI
 ```
 
-翻译输入：
-
-```json
-{
-  "source": {"id": "...", "title": "...", "authors": []},
-  "target_lang": "zh",
-  "segments": [
-    {
-      "segment_id": "seg:...",
-      "page": 3,
-      "locator": "p. 3 § Method",
-      "text_hash": "sha256:...",
-      "text": "..."
-    }
-  ],
-  "glossary_hint": {
-    "memory encoder": "记忆编码器"
-  }
-}
-```
-
-AI 输出：
-
-```json
-{
-  "translations": [
-    {
-      "segment_id": "seg:...",
-      "source_hash": "sha256:...",
-      "translated_text": "...",
-      "glossary": {},
-      "warnings": []
-    }
-  ]
-}
-```
-
 保存前校验：
 
 - 输出 segment 数不能超过输入 segment。
@@ -1330,120 +1516,62 @@ AI 输出：
 - hash 不匹配时标记 stale，不覆盖旧翻译。
 - 单 batch 失败不影响其他 batch。
 
-UI 对齐：
+### 5.3 论文导读
 
-- 默认左原文、右中文。
-- PDF 页 hover 某段时，高亮右侧中文。
-- 中文段落点击可跳回 PDF 页。
-- 支持 translate selection / page / section / all missing。
+`Source Guide` 生成结构化论文导读，而不是默认生成聊天回答或审稿评分：
 
-### 5.3 AI 阅读要点总结
-
-`Source Guide` 生成结构化阅读报告：
-
-- one-sentence takeaway
-- TL;DR
-- problem / motivation
-- main contributions
-- method / architecture
-- datasets / experiment setup
-- results / metrics
-- limitations
-- useful definitions / terms
-- key equations / figures to inspect
-- open questions for my project
-- candidate claims
-- candidate citations
+- one-sentence takeaway；
+- TL;DR；
+- problem / motivation；
+- main contributions；
+- method / architecture；
+- datasets / experiment setup；
+- results / metrics；
+- limitations；
+- useful definitions / terms；
+- key equations / figures to inspect；
+- open questions for my project；
+- reading plan。
 
 长论文使用 map-reduce：
 
 1. 按 section 生成 section summaries。
-2. 保存 accepted summaries 到 `research/analysis/<source>.yaml`。
-3. whole-paper synthesis 只读 section summaries + key segments。
-4. 每条 conclusion 必须带 refs。
+2. whole-paper synthesis 只读取 section summaries 和 key segments。
+3. 每条重要结论保存 page/segment refs。
+4. 没有可靠依据时标记 `needs_review`，不显示成确定事实或零分。
 
 用户操作：
 
-- `Accept as note` -> 写 `research/notes/<source>.md`
-- `Accept as claim candidate` -> 写 `research/claims.yaml`
-- `Create citations` -> 写 `research/citations.yaml`
+- `Save as note` -> 写入 `research/notes/<source>.md`；
+- `Create citations` -> 写入 `research/citations.yaml`；
+- `Jump to source` -> 回到 PDF 页码、segment 或 rect。
+
+本阶段不生成 claim，也不提供 evidence promotion。
 
 ### 5.4 AI 问答
 
 v1 不引入向量数据库，使用本地 retrieval：
 
-- query token overlap
-- section title boost
-- chunk / annotation boost
-- current page boost
-- recent reading boost
+- query token overlap；
+- section title boost；
+- chunk / annotation boost；
+- current page boost；
+- recent reading boost。
 
-流程：
+回答必须带 segment、chunk 或 annotation refs。refs 为空时，UI 只显示 warning，
+不把结果渲染为可信结论。
 
-```text
-question
-  -> retrieve top K segments/chunks
-  -> AI answer with citations
-  -> user clicks cited refs
-  -> jump to PDF page / segment / annotation
-```
+### 5.5 Codex Paper Search and Long-Task Guide
 
-回答格式：
-
-```json
-{
-  "answer": "...",
-  "cited_segment_refs": [],
-  "cited_chunk_refs": [],
-  "cited_annotation_refs": [],
-  "warnings": []
-}
-```
-
-如果 refs 为空，UI 不显示为可信回答，只显示 warning。
-
-### 5.5 Codex Paper Search and Analyze Paper
-
-Codex 不用于每次小段翻译。Codex 用于更强的搜索和长任务：
-
-- Paper Search：根据 topic / project / goal 使用 web search 和 provider search
-  找论文、检查链接、去重、返回导入候选。
-- Analyze Paper long read：通读全文 segments，生成结构化阅读报告。
-- Compare Papers：比较某个 tree node / subtree 中多篇论文的方法、假设、结果、缺口。
-- Project Fit：结合 current goal / project refs 判断论文对当前项目的价值。
-- Code Link：如果论文关联 GitHub repo，分析论文方法与代码实现对应关系。
-- Next Reading Plan：根据已读论文和 gap 推荐下一批搜索 query。
-
-Codex 默认使用部署级 / 终端同款 Web Codex：
-
-- 使用 service-level `CODEX_HOME`（本地通常是 `~/.codex`，云上可用 `NBLANE_CODEX_HOME` 指向持久化目录）。
-- 只读 `codex exec`。
-- 不给 Codex 访问 PDF asset root 全目录。
-- Paper Search 场景只传 search context bundle：
-  - user query
-  - provider filters
-  - current project / goal / library tree hint
-  - already imported DOI / arXiv / Semantic Scholar ids
-- Analyze Paper 场景只传当前 source 的必要 context bundle：
-  - source metadata
-  - selected segments
-  - chunks
-  - annotations
-  - user question
-- Codex Search 输出必须是结构化候选列表，并且不能自动导入。页面必须要求用户确认。
-
-Agent Activity 瘦身：
-
-- 成功只记录 action、source_id、summary、output refs。
-- 失败记录短错误摘要和 activity item id。
-- 不把整篇论文、全文翻译、完整 prompt 存入 `agent-activity.yaml`。
+Codex 用于论文搜索、链接检查和长任务论文导读，不用于每次小段翻译。
+论文阅读本阶段不使用 Codex 生成 Claim 或 Evidence。
 
 ## 6. Core API 设计
 
 新增模块建议：
 
 ```text
-src/nblane/core/research_papers.py
+src/nblane/core/research_papers/
 ```
 
 主要 helper：
@@ -1523,8 +1651,10 @@ Sidecar 前端通过 mutation/task endpoint 发送 event：
 - `translate_section`
 - `translate_paper`
 - `translate_all_missing`
-- `analyze_selection`
+- `explain_selection`
 - `ask_paper`
+- `generate_review_card`
+- `save_progress`
 - `create_citation_from_annotation`
 - `jump_to_chunk`
 - `set_reader_state`
@@ -1539,123 +1669,125 @@ FastAPI/core handler 负责：
 
 ## 8. 实施阶段
 
-### Phase 1: Core and Search
+开发顺序围绕单篇论文阅读闭环，不先扩展 Claim、Evidence 或多论文综合。
 
-- 新增 `research_papers.py`。
-- 增加 PyMuPDF dependency。
-- 实现 asset root、PDF import、download、sha256、page count、page text、
-  coordinates fallback。
-- 扩展 arXiv / Semantic Scholar search result。
-- 实现 Codex-first Paper Search UI，支持 topic search、provider search、
-  URL/DOI import、PDF upload。
-- 实现 provider API + LLM normalization fallback。
-- 实现 link check、duplicate preview、YAML preview。
-- 实现 BibTeX / Markdown export。
+### Phase 0: 产品契约和边界冻结
+
+- 更新 Research / Paper Library / Reader 的职责说明。
+- 冻结多维状态：source、PDF、extraction、translation、guide、reading。
+- 隐藏 Claims tab、Claim candidate、Evidence promotion 和技能关联入口。
+- 保留 Notes、Annotations、Chunks、Citations。
+- 定义 Reader URL 状态：`mode`、`page`、`section`、`anchor`。
 
 验收：
 
-- 能用 Codex 按主题搜论文，并返回可检查链接的结构化候选。
-- Codex 不可用时，能回退到 arXiv / Semantic Scholar provider search。
-- 能选择导入 metadata。
-- 能粘贴 URL / DOI 导入 metadata。
-- 能上传 / 下载 OA PDF 到 external asset root。
-- PDF 不进入 profile Git。
-- 能用 PyMuPDF 抽取 page text、page count 和基础坐标信息。
+- 页面上没有 Claim / Evidence 操作。
+- 论文阅读不会修改 evidence-pool、skill-tree 或项目状态。
+- 刷新和返回可以恢复阅读模式和页码。
 
-### Phase 2: GROBID Default Structured Extraction
+### Phase 1: Research 研究台重组
 
-- 增加 GROBID REST adapter。
-- 默认部署配置 `NBLANE_GROBID_URL`。
-- 实现 header/fulltext/reference/coordinate extraction。
-- TEI -> segments/chunks/citations。
-- GROBID 失败回退 PyMuPDF page text / heuristic segments。
-- 文档更新部署方式。
+- 将 ResearchPage 改成“继续阅读 / 待处理队列 / 论文库入口”。
+- 论文卡片展示 PDF、抽取、翻译、导读、笔记、引用和上次阅读状态。
+- 根据状态显示开始阅读、继续阅读、补齐翻译、生成导读等主动作。
+- Paper Library 保留导入、搜索、主题树、标签和批量整理。
+- Reader 只负责单篇论文阅读现场。
 
 验收：
 
-- 默认配置 GROBID 时，source metadata 更完整。
-- segments 有 section_path / locator / rects。
-- references 可生成 BibTeX / citations。
-- GROBID unavailable 时仍能用 PyMuPDF 打开和阅读 PDF，并显示结构化抽取降级 warning。
+- 研究台不重复 Paper Library 的完整管理界面。
+- 用户打开研究台能直接找到下一步动作。
+- 缺 PDF 的论文不会显示 PDF ready 或进入 Reader。
 
-### Phase 3: PDF Reader Component
+### Phase 2: SPA Reader 外壳和两种主视图
 
-- 新增 React component。
-- PDF.js 渲染。
-- selection / highlight / annotation events。
-- translation aligned panel。
-- fallback text mode。
-- build/package data。
-
-验收：
-
-- 能打开 PDF。
-- 能选择文本高亮。
-- 能保存 annotation。
-- 能点击 annotation 跳页。
-- 能从选区生成 chunk。
-
-### Phase 4: AI Reading
-
-- 新增 AI actions。
-- 实现 segment batch translation。
-- 实现 source guide map-reduce。
-- 实现 paper QA local retrieval + grounded answer。
-- 实现 claim/citation candidates preview/apply。
-- 实现 Codex Paper Search activity 记录和 Analyze Paper preview。
+- 以 `ResearchPage` 和 `PaperReaderPage` 作为唯一用户入口。
+- 短期保留 FastAPI sidecar、PDF.js 和 Reader API，通过 `SidecarFrame` 承载现有阅读画布。
+- 统一 SPA 与 sidecar 的导航、返回、标题、加载、错误反馈和状态栏。
+- 让 URL 统一承载 `source_id`、`mode`、`page`、`section`、`anchor`，刷新和分享链接能恢复
+  同一论文的阅读上下文。
+- Reader 外层采用石雕星空风格，PDF 正文保持白纸高对比。
+- 在现有 API 上实现“逐段阅读”和“原文对照”两个主视图，不重复建设数据写入逻辑。
+- 目录、缩略图、搜索、页码、缩放和阅读进度在过渡期也必须回传到同一套 Reader 状态。
+- 为后续 SPA 原生迁移拆出 PDF viewport、segment layer、translation popover、notes panel
+  和 guide panel 的前端边界。
 
 验收：
 
-- 长文翻译按 segment 对齐。
-- AI 总结每条重要结论带 refs。
-- 问答无依据时不编造。
-- Codex 只读 context bundle，不写大 payload 到 Activity。
+- 从 SPA ResearchPage 进入 PaperReaderPage 后，用户能看到论文标题、PDF/抽取/翻译/导读状态
+  和明确的加载或失败反馈。
+- iframe 内 PDF 页面仍然可读，外层视觉、返回和状态栏与 SPA 一致。
+- 刷新 `?mode=translation&page=3&anchor=segment-42` 能恢复相同论文、模式、页码和锚点。
+- 逐段阅读和原文对照有明确用途差异；桌面端双栏，移动端单栏降级。
+- Reader API 或 iframe 加载失败时，SPA 显示可操作的错误状态和返回/重试入口。
 
-### Phase 5: Polish and Public Boundary
+### Phase 3: 段落翻译、选区翻译和阅读材料
 
-- Paper Library 批量整理。
-- Library Tree 管理 UI。
-- Synthesis / Export 完整化。
-- Public validation 增强。
-- 文档同步。
+- 使用现有 segment、rects 和 source hash 实现段落命中。
+- 已缓存译文单击直接显示气泡。
+- 未缓存段落先显示“翻译此段”操作。
+- 拖选文字显示翻译、解释、笔记和引用工具条。
+- 气泡不增加 PDF 横向宽度，空间不足时回退到侧栏或移动端底部抽屉。
+- 保存笔记、Chunk 和 Citation，全部保留原文定位。
+- 不显示 Claim 和 Evidence 操作。
 
 验收：
 
-- private paper source 不能发布。
-- unpromoted research claim 不能发布。
-- citation/chunk 断链阻断发布。
-- promoted research claim + public source + valid citation 可以通过。
+- 点击段落可以翻译并回到原文定位。
+- 选区翻译不会误触发段落点击。
+- 笔记刷新后仍可跳回同一页和同一段。
+- 坐标不可靠时提示拖选，不猜测段落。
 
-## 9. Subagent 分工
+### Phase 4: 论文概览和 AI 导读
 
-可以合理使用 subagent 并行：
+- 首屏显示中文摘要、快速分析结果和继续阅读位置。
+- 将 Analyze Paper 对用户命名为“快速分析”，将 Deep read 对用户命名为“深度研读”；Review 是结果承载区域，不再作为第三个 AI 动作。
+- 导读按研究问题、方法、结果、局限和阅读计划组织。
+- 每项重要结论带 page/segment refs，可跳回 PDF。
+- 无可靠结果显示“待核对”或“未评估”，不显示误导性的零分。
+- 允许保存为 reading note 或 citation，不写 Claim/Evidence。
 
-- Core Worker
-  - `research_papers.py`
-  - PDF asset root
-  - PyMuPDF extraction
-  - GROBID adapter
-  - export formatter
-- Frontend Worker
-  - `src/nblane/web_reader_api/templates/index.html`
-  - PDF.js viewer / left rail / translation flow
-  - annotation event schema
-  - sidecar template contract tests
-- Research UI Worker
-  - `pages/7_Research.py` 小页面重排
-  - Paper Search / Library / Reader / Export UI
-  - fallback text mode
-- AI Worker
-  - AI Gateway actions
-  - Codex paper search
-  - translation batching
-  - source guide
-  - QA retrieval
-  - Codex deep read
-- Docs/Test Worker
-  - docs 同步
-  - tests 扩展
-  - deployment asset root 说明
+验收：
+
+- AI 导读中的依据可以跳回原文。
+- 导读生成中、失败和待核对状态清晰可见。
+- 没有来源的回答不会显示成确定结论。
+
+### Phase 5: 任务恢复、抽取降级和跨页联动
+
+- 翻译、抽取和导读显示阶段、进度、失败原因和重试入口。
+- 页面刷新后重新计算已保存结果，不重复生成已有翻译。
+- 服务重启后，已保存的翻译和导读不被误报为未完成。
+- 显示 GROBID ready、PyMuPDF fallback、无坐标等抽取状态。
+- Research、Reader、Paper Library 的缓存失效范围统一。
+
+验收：
+
+- 长任务不会让页面永久卡在 loading。
+- 失败任务可以单独重试。
+- 缺失资产、抽取失败和翻译失败有可操作提示。
+
+### Phase 6: SPA 原生迁移、视觉、移动端和端到端验收
+
+- 统一深色工作台、白色论文页、金色定位标记和状态颜色。
+- 在 API 和 URL 契约稳定后，把目录、阅读区、段落翻译、对照、笔记和 AI 导读逐步迁入
+  SPA 原生组件；每次迁移只替换一块 UI，不同时重做 PDF 渲染、后端任务和数据文件。
+- 保留 sidecar HTML 作为兼容入口，直到 SPA 原生 Reader 覆盖主阅读路径。
+- 完成桌面、窄屏、键盘导航和减少动效支持。
+- 验收开发环境 `Attention Is All You Need` 完整阅读路径。
+- 检查 SPA、Reader sidecar、PDF asset root、iframe 到原生页面的登录 handoff 和状态兼容。
+- 更新部署和用户文档。
+
+## 9. 开发范围说明
+
+本阶段按顺序实现，不把多个研究域同时拆成并行大改：
+
+- 先稳定 ResearchPage、Reader 外壳和单篇论文阅读闭环。
+- Core 继续通过现有 `research_papers`、`reader_actions` 和文件写入模块工作。
+- 当前前端主路径是 SPA 页面加 `src/nblane/web_reader_api/templates/index.html` 的 sidecar
+  过渡组合；目标是迁移到 SPA 原生 Reader，期间保持 URL、API 和状态兼容。
+- 不新建数据库，不迁移现有 PDF、translation、annotation、analysis 文件。
+- 不把 Claim、Evidence、技能关联和公开成果作为本阶段交付内容。
 
 ## 10. Test Plan
 
@@ -1699,20 +1831,17 @@ FastAPI/core handler 负责：
 ### Workspace
 
 - 扩展 `tests/test_research_workspace.py`
-  - annotation -> chunk -> claim -> citation -> evidence candidate。
+  - annotation -> chunk -> citation round-trip。
   - quote 在 chunk 中可校验通过。
   - quote 不匹配时保存 warning。
   - archived source 保留 PDF/annotations/chunks。
   - library node refs 断链产生诊断。
+  - Reader 不会写入 claims 或 evidence。
 
 ### Public / Output
 
-- 扩展 `tests/test_public_site.py`
-  - private paper source 阻断 publish。
-  - unpromoted research claim 阻断 publish。
-  - dangling citation/chunk 阻断 publish。
-  - promoted research claim + public source + valid citation 通过。
-  - unsafe quote/path/token 失败。
+本阶段不测试论文阅读到 Claim/Evidence 的 promotion；保留现有公共发布测试，
+确保论文阅读新增的 notes、translations、analysis 和 citations 不会绕过公共边界。
 
 ### Frontend
 
@@ -1724,19 +1853,26 @@ PDF Reader 不再构建 `research_paper_reader_component/frontend`。前端主�
 JS tests：
 
 - selection payload schema。
-- rect normalization。
+- rect normalization 和 segment 命中。
+- 段落点击、气泡打开/关闭和选区操作互不误触发。
 - annotation create/update/delete events。
 - translation event carries segment/page/source hash。
 - translate paper / all missing event 不直接携带全文，只携带 source_id、scope、stale/missing selector。
-- citation click emits jump event。
+- citation、note、translation click 都能发出 jump event。
+- Claims/Evidence 控件不渲染。
 
 Playwright smoke：
 
+- `ResearchPage -> PaperReaderPage -> sidecar iframe` 主路径可打开并显示加载、失败和重试状态。
+- 从 ResearchPage 点击“继续阅读”后，PaperReaderPage 的 source、页码和模式与 API 一致。
+- `?mode=translation&page=3&anchor=segment-42` 深链刷新后恢复同一阅读位置；原生 SPA Reader
+  迁移后继续兼容同一 URL。
+- Reader iframe 暂时不可用时，SPA 不会永久卡在 loading，能显示返回或重试入口。
 - 打开 fixture PDF。
 - 选择文本并高亮。
 - 创建 annotation。
 - 点击 annotation 跳页。
-- 触发 translate/analyze event。
+- 触发 translate/generate-guide event。
 - 触发 translate paper 后生成分段任务状态，而不是阻塞 UI。
 
 ### Full Run
@@ -1751,8 +1887,9 @@ PYTHONPATH=src .venv/bin/python -m unittest \
   tests.test_public_site
 
 PYTHONPATH=src .venv/bin/python -m py_compile \
-  pages/7_Research.py \
-  src/nblane/core/research_papers.py
+  src/nblane/web_api/routes_v1.py \
+  src/nblane/core/research_papers/__init__.py \
+  src/nblane/core/reader_actions.py
 
 git diff --check
 ```
@@ -1762,12 +1899,12 @@ git diff --check
 - v1 做 PDF 高亮阅读器，但不做 OCR、公式结构化识别、表格完整复原、
   Zotero 双向同步、多人实时协作。
 - PDF 二进制必须外置到 `NBLANE_RESEARCH_ASSET_ROOT`，不进入 profile Git。
-- 批注、翻译、page text、segments、chunks、claims、citations、阅读笔记是轻量研究事实，可进入 profile 文件。
+- 批注、翻译、page text、segments、chunks、citations、analysis 和阅读笔记是轻量研究事实，可进入 profile 文件。
+- 本阶段论文阅读不创建 Claim、不创建 Evidence、不修改 skill/goal/project 状态。
 - Paper Search v1 推荐 Codex-first；Codex 不可用时回退 arXiv +
   Semantic Scholar provider search，再由 LLM 做轻量归一化。
 - GROBID 是默认结构化抽取服务，Apache-2.0，适合学术 PDF 的结构化抽取。
 - PyMuPDF 是默认本地 PDF backend；部署方需要接受 AGPL 或使用 commercial license。
 - pypdf 不作为主路径默认后端，只保留为极简 fallback / fixture 选项。
-- Codex 是论文搜索、链接检查和长任务 deep-reading agent，不是普通 selection 翻译器。
-- Research claim 继续是 source-aware claim；公开表达仍走 Evidence Review /
-  Claim Studio / Output Studio。
+- Codex 是论文搜索、链接检查和长任务论文导读 agent，不是普通 selection 翻译器。
+- Claims、Evidence Review、技能关联、项目成果证明和多论文综合后置。

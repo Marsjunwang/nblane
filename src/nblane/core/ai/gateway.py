@@ -19,6 +19,7 @@ from nblane.core.web_preferences import (
     AI_ACTION_DEFAULT_BACKENDS,
     load_web_preferences,
 )
+from nblane.core.ai.local_translation import LOCAL_TRANSLATION_BACKEND, is_available as local_translation_available
 
 
 PAPER_TRANSLATION_MODEL_TIMEOUT_SECONDS_DEFAULT = 180.0
@@ -104,6 +105,18 @@ def run_ai_action(
             run_id=new_run_id(request.action),
             error=f"backend_error: {exc}",
         )
+    if (
+        not result.ok
+        and result.backend == LOCAL_TRANSLATION_BACKEND
+        and request.action == "research.paper_translate"
+    ):
+        # Local translation is an acceleration path. Keep the existing LLM as
+        # the quality fallback when a model is missing or cannot handle input.
+        fallback = registry.get("direct_llm")
+        if fallback is not None:
+            local_error = result.error
+            result = fallback.run(request, spec)
+            result.warnings.insert(0, f"Local translation unavailable ({local_error}); used {result.backend}.")
     if (
         not result.ok
         and request.preferred_backend is None
@@ -264,6 +277,8 @@ def translate_paper_segments(
         },
         model=model,
     )
+    if not preferred_backend and local_translation_available():
+        preferred_backend = LOCAL_TRANSLATION_BACKEND
     return run_ai_action(
         "research.paper_translate",
         body,
@@ -437,6 +452,7 @@ def deep_read_paper_codex(
     context_refs: list[str] | None = None,
     payload: dict[str, Any] | None = None,
     require_review: bool = True,
+    cancel_callback: Callable[[], bool] | None = None,
 ) -> AIActionResult:
     """Typed helper for ``research.paper_deep_read_codex``."""
 
@@ -455,6 +471,7 @@ def deep_read_paper_codex(
         context_refs=context_refs or [source_id],
         preferred_backend=preferred_backend,
         require_review=require_review,
+        cancel_callback=cancel_callback,
     )
 
 

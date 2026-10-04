@@ -20,7 +20,6 @@ describe('crystallize read-model invalidation', () => {
       ['profiles', 'alice', 'home'],
       ['profiles', 'alice', 'project-board'],
       ['profiles', 'alice', 'projects-board'],
-      ['profiles', 'alice', 'review'],
       ['profiles', 'alice', 'crystallize-candidates'],
     ]);
   });

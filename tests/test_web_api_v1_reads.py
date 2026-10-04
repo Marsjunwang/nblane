@@ -358,6 +358,36 @@ class TestProfileReads(unittest.TestCase):
         self.assertIn("target_owner", summary)
         self.assertIn("candidate_type", summary)
 
+    def test_ai_exceptions_aggregates_persistent_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _write_profile(root)
+            (profile / "ai-runs.yaml").write_text(
+                yaml.safe_dump(
+                    {
+                        "profile": "alice",
+                        "runs": [
+                            {
+                                "id": "run-failed",
+                                "action": "research.paper_qa",
+                                "ok": False,
+                                "error": "provider unavailable",
+                                "created": "2026-09-18T13:00:00+00:00",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            client = self._client(root)
+            response = client.get("/api/v1/profiles/alice/ai-exceptions")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["profile"], "alice")
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["items"][0]["source"], "AI 调用")
+        self.assertEqual(payload["items"][0]["href"], "/p/alice/research")
+
     def test_activity_status_kind_and_limit_filters(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

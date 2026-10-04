@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
@@ -71,40 +71,27 @@ afterEach(() => {
 });
 
 describe('ResearchPage', () => {
-  it('renders the research summary counters and recent sources', async () => {
+  it('renders a reading desk and links to the standalone library', async () => {
     renderPage();
 
     expect(await screen.findByText('alice · 研究台')).toBeInTheDocument();
-    // Summary badges.
-    expect(screen.getByText('来源 3')).toBeInTheDocument();
-    expect(screen.getByText('进行中 2')).toBeInTheDocument();
-    expect(screen.getByText('断言 1')).toBeInTheDocument();
-    expect(screen.getByText('引用 1')).toBeInTheDocument();
-    expect(screen.getByText('paper: 2')).toBeInTheDocument();
-    // Recent source rows, newest first.
-    expect(screen.getByText('grasp tooling post')).toBeInTheDocument();
-    const linked = screen.getByRole('link', { name: 'SLAM survey' });
-    expect(linked).toHaveAttribute('href', 'https://example.org/slam');
-    // Sidecar workspace link points at the paper library with the profile.
-    const workspace = screen.getByRole('link', { name: /新标签打开/ });
+    expect(screen.getByText('继续阅读')).toBeInTheDocument();
+    expect(screen.getByText('论文总数')).toBeInTheDocument();
+    expect(screen.queryByText('断言 1')).toBeNull();
+    expect(screen.queryByText('引用 1')).toBeNull();
+    const workspace = screen.getByRole('link', { name: /打开论文库/ });
     expect(workspace).toHaveAttribute(
       'href',
       'http://127.0.0.1:8502/paper-library?profile=alice',
     );
   });
 
-  it('embeds the paper library workspace on toggle (fireEvent)', async () => {
+  it('keeps the paper library outside the reading desk', async () => {
     renderPage();
     await screen.findByText('alice · 研究台');
 
     expect(screen.queryByTestId('sidecar-frame')).toBeNull();
-    fireEvent.click(screen.getByText('嵌入显示'));
-    expect(screen.getByTestId('sidecar-frame')).toHaveAttribute(
-      'src',
-      'http://127.0.0.1:8502/paper-library?profile=alice',
-    );
-    fireEvent.click(screen.getByText('收起嵌入'));
-    expect(screen.queryByTestId('sidecar-frame')).toBeNull();
+    expect(screen.queryByText('嵌入显示')).toBeNull();
   });
 
   it('shows an empty-state hint when the inbox has no sources', async () => {
@@ -114,8 +101,6 @@ describe('ResearchPage', () => {
       sources: [],
     });
 
-    expect(
-      await screen.findByText(/研究收件箱还没有来源/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/队列为空/)).toBeInTheDocument();
   });
 });

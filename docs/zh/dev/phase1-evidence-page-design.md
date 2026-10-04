@@ -51,7 +51,7 @@ source_of_truth: 本文档是 Phase 1(证据域)的设计定案;全局计划见�
    - 结晶向导的 LLM patch 顺手生成技能建议,确认即关联;
    - 写入只有一侧(技能节点的 `evidence_refs`),反向现算(`evidence_usage_index`),UI 双向展示。
 4. **Claims 封存**:消费者(简历/公开页/拓片铭文)未建成前不迁移;Phase 5 输出层重建时复活(可更名"成就")。
-5. **Risks 并入证据页「待补强」阶段**(expert 技能+陈旧/薄弱证据);Profile Health 解散:数据卫生→Settings「档案维护」;体检报告→openclaw 周回顾主动推送。
+5. **Risks 并入证据页「待补强」阶段**(expert 技能+陈旧/薄弱证据);Profile Health 解散:数据卫生→Settings「档案维护」;体检报告→openclaw OpenClaw 周总结主动推送。
 
 ## 与后续 Phase 的契约(防止返工)
 

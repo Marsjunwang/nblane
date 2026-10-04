@@ -36,6 +36,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from nblane.core import gap
@@ -215,7 +216,58 @@ def read_job(job_id: str) -> dict[str, Any] | None:
         }
 
 
-def create_job(profile: str, kind: str, job_input: dict[str, Any]) -> dict[str, Any]:
+def _scope_key(value: str | Path | None) -> str:
+    """Normalize a profile directory identity for process-local jobs."""
+
+    if value is None:
+        return ""
+    try:
+        return str(Path(value).resolve())
+    except (OSError, RuntimeError, TypeError):
+        return _clean(value)
+
+
+def failed_jobs(
+    profile: str,
+    *,
+    profile_scope: str | Path | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return recent failed jobs for one profile.
+
+    Jobs are intentionally process-local, so this is a best-effort source for
+    the profile's AI exception projection. Persistent AI run failures come
+    from ``ai-runs.yaml`` instead.
+    """
+
+    clean_profile = _clean(profile)
+    clean_scope = _scope_key(profile_scope)
+    now = time.time()
+    with _LOCK:
+        _prune_jobs()
+        for job_id in list(_JOBS):
+            _mark_timeout_locked(job_id, now)
+        rows = [
+            _snapshot(job)
+            for job in _JOBS.values()
+            if _clean(job.get("profile")) == clean_profile
+            and (
+                not clean_scope
+                or _clean(job.get("_profile_scope")) == clean_scope
+            )
+            and job.get("status") == "failed"
+        ]
+    rows.sort(key=lambda item: float(item.get("finished_at") or item.get("created_at") or 0), reverse=True)
+    return rows[: max(1, min(int(limit), 200))]
+
+
+def create_job(
+    profile: str,
+    kind: str,
+    job_input: dict[str, Any],
+    *,
+    profile_scope: str | Path | None = None,
+) -> dict[str, Any]:
     """Validate, register, and start a job; return its initial snapshot.
 
     The worker runs in a daemon thread. Raises :class:`UnknownJobKindError`
@@ -237,6 +289,10 @@ def create_job(profile: str, kind: str, job_input: dict[str, Any]) -> dict[str, 
     job: dict[str, Any] = {
         "job_id": job_id,
         "profile": _clean(profile),
+        # Keep the data-root identity internal. Profile names are not globally
+        # unique across test/dev roots, while the worker payload still uses
+        # the public profile name expected by existing runners.
+        "_profile_scope": _scope_key(profile_scope),
         "kind": clean_kind,
         "status": "queued",
         "phase": "queued",

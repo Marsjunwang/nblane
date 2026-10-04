@@ -45,12 +45,12 @@ UI 应围绕成长闭环拆成以下功能域。每个功能域只负责自己�
 | Dashboard         | 只读聚合，读取 profile / goal / kanban / evidence / public                                        | 60 秒内知道当前状态和下一步                                               | 首页                               |
 | Goal & Plan       | 规划中：`goals.yaml` 或 project refs                                                            | 设定 4-8 周阶段目标、目标技能、目标输出和验收证据                                   | 新 Goal 页；短期可放首页                  |
 | Profile Context   | `SKILL.md`，读取 goal / skill-tree / kanban generated blocks                                  | 维护长期自我画像、North Star、研究品味和 Agent 可复用上下文                        | 首页高级区；未来 Profile Context 页       |
-| Capture Inbox     | `inbox.yaml`、`learning-log.yaml`、`activity-log.yaml`、Done tasks                            | 捕获链接、笔记、学习、打卡、项目进展，等待整理                                       | 全局入口 / 首页 / 看板；未来独立 Inbox        |
+| OpenClaw Memory   | OpenClaw 情境记忆                                                                            | 保存“记住这件事”、临时想法和对话偏好；不再把不确定输入转成 nblane 待办                  | OpenClaw；不设 nblane 一级 Inbox            |
 | Execution         | `kanban.md`、规划中：`project-board.yaml`                                                       | 管理本周任务、子任务、阻塞、完成记录和 check-in；看板 AI 可在 LLM / Codex 间切换          | 看板                               |
 | Evidence          | `evidence-pool.yaml`、`claims.yaml`、`skill-tree.yaml` 的 `evidence_refs`                    | 审核 evidence、判断强弱、生成/刷新 public claim、关联 skill、准备公开输出        | Evidence Review；技能树                 |
 | Skill Map         | `skill-tree.yaml`、`schemas/*.yaml`                                                         | 浏览和编辑能力状态、备注、证据引用                                             | 技能树                              |
 | Gap & Next Action | gap result、AI candidate，不直接作为事实源                                                           | 用目标/任务对照 skill tree，生成短板解释和下一步行动                              | 差距分析                             |
-| Agent Activity    | context preview、MCP 状态、agent runs、AI/Agent candidates、writeback queue      | 审阅 Codex / Claude Code / OpenCode 等 Agent 的远程执行、patch、写回和越权风险 | Agent Activity                   |
+| AI Exceptions     | AI run / job / agent task / writeback failures                                               | 只处理失败、冲突、权限错误、超时和需要恢复的 AI 操作                                 | 全局顶栏警报入口；右侧异常抽屉              |
 | Research          | 规划中：`research/sources.yaml`、chunks、claims、drafts、connectors                                | 搜集外部资料、收藏、最新论文、repo，支持阅读、翻译、claim/citation/synthesis          | 未来 Research 页                    |
 | Output Studio     | `public-profile.yaml`、`resume-source.yaml`、`blog/`、`projects.yaml`、`outputs.yaml`、`media/` | 从 evidence 生成博客、简历、项目页、公开站                                    | Public Site                      |
 | Team Pool         | `teams/<id>/team.yaml`、`product-pool.yaml`                                                 | 团队共享问题、项目、证据、方法、决策                                            | 团队视图                             |
@@ -276,26 +276,23 @@ Goal privacy：
 - 不做泛泛聊天；回答应绑定 goal、task、skill 或 evidence。
 - 未配置 AI 时仍提供规则分析和清晰空状态。
 
-### 4.7 Agent Activity / Writeback Review
+### 4.7 AI Exceptions
 
-Agent Activity 是 Agent OS 的透明度和审阅入口，不是新的泛聊天页。
+AI Exceptions 是跨所有 AI 来源的异常入口，不是活动流，也不是第二个审批箱。
 
 页面职责：
 
-- 展示当前 profile / goal 的 context 预览状态。
-- 展示 MCP 连接、可用 resources / tools、最近外部 Agent 访问概况。
-- 汇总看板、差距分析、技能树、Public Site 等页面产生的 AI/Agent candidates。
-- 审阅 Codex / Claude Code / OpenCode / Cursor 等外部 Agent 的 run：任务、状态、触达文件、diff、日志摘要、关联 goal / kanban task。
-- 审阅最近的 AI patch、候选写回、失败写回和审批队列。
-- 支持远程完善项目的最小闭环：从 Project Board / CLI handoff 领取任务，Agent 执行，用户审阅 patch，合并后回到 Done -> evidence；Kanban 页面本身不再直接启动改项目的 Codex/OpenCode handoff。
-- 帮助用户判断 Agent 最近做了什么、准备写什么、是否越权。
+- 汇总普通 LLM、研究 AI、看板 AI、异步 AI Job、OpenClaw、Codex/OpenCode 等外部 Agent 的失败。
+- 展示模型不可用、输出解析失败、超时、文件冲突、权限错误和写回失败。
+- 从顶栏警报图标打开右侧抽屉，只显示需要用户介入的异常。
+- 从异常跳回产生问题的页面，执行重试、重新确认或人工恢复。
 
 边界：
 
-- Agent Activity 默认不直接生成新的业务内容；它负责透明度、审阅和跳转。
-- 所有写回仍由各 owner 页面执行，或通过统一候选 / 预览 / 确认流程执行。
-- Agent run 的输出不能绕过 git diff / preview / 人工确认，尤其是代码、profile、evidence、public 文件。
-- 不做泛泛聊天；对话型能力应绑定 goal、task、evidence、output 或具体 patch。
+- 普通 AI 回答和页面内已经处理完成的结果留在原页面，不进入全局异常入口。
+- 用户在 OpenClaw 对话中确认并成功执行的动作不再创建新的待处理记录。
+- 成功写回的技术历史由原文件、Git 和各领域日志保留，不转化为用户待办。
+- 旧 `/activity` 路由和 `agent-activity.yaml` 继续兼容历史数据，但不再作为产品主导航。
 
 ### 4.8 Research Workspace
 
@@ -562,7 +559,7 @@ Goal
 - GapResult 已记录 source provenance 和 goal context 使用状态；展示和 CLI / LLM 格式化会显示来源，但不改变原有匹配结果结构。
 - Public Site / Output Studio 的 Blog front matter 已支持 `related_claims`；可从 accepted claims 生成 Blog 候选/草稿、project update 草稿和 resume bullet 候选，并在发布校验中检查 claim id、accepted 状态和 supporting evidence refs。
 - Review 已拆为独立页面：基于周 / 阶段窗口生成 evidence、next action、public draft 候选；Health 保持只读体检。
-- Agent Activity / Writeback Review 已有骨架：`agent-activity.yaml` 记录跨页面 candidate / patch / writeback 的 pending、applied、failed、dismissed 状态，Review 来源的 pending 候选可在 Activity 页应用；Activity 页可按 source page 分组，并支持从看板错误跳转高亮具体条目；Codex 配置入口统一迁移到侧边栏 **AI / LLM -> 配置 Codex** 大弹窗，可编辑部署级 Web Codex home 下的 `config.toml`、该 home 下的 `auth.json` 登录状态，以及当前 profile 的 `codex.yaml` 非密钥偏好。
+- AI Exceptions 已提供 profile 级聚合：从 `ai-runs.yaml`、失败 Agent task、失败异步 Job 和失败写回读取异常；SPA 顶栏只在有异常时显示警报数量，点击打开右侧异常抽屉并跳回来源页面。旧 `agent-activity.yaml` 和 `/activity` 路由保留兼容，不再作为主导航入口。
 
 ### 6.6 P4 当前落地状态
 

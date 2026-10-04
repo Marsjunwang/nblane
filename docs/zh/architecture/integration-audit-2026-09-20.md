@@ -287,9 +287,8 @@ Inbox 页已完整落地（`InboxPage.tsx` 423 行 + 4 mutation + 测试）。
 - **空 ETag 必然 412**：新增 `client.ts` 的 `ifMatch(etag)`——etag 为空
   串时整体省略 If-Match header；`hooks.ts` 全部 26 处 mutation 请求构造
   改走该辅助函数。
-- **成功横幅不消散**：EvidenceReviewPage 在选择变更 / 搜索 / 状态筛选时
-  `mutation.reset()`；ReviewPage CandidateTab 在新选择与窗口切换时
-  reset save/apply mutation。
+- **成功横幅不消散**：Evidence 在选择变更 / 搜索 / 状态筛选时
+  `mutation.reset()`。
 - **导航路径编码**：`AppLayout.tsx` 导航 basePath 对 profile 名补
   `encodeURIComponent`（与 ProfilesPage 一致），新增 AppLayout 测试锁定。
 
@@ -512,7 +511,7 @@ Minor 7 项 + web_api Minor 6 项；原始条目保留在上文作为审查当�
      message 取前 5 条 `loc: msg`；HTTPException 路径（`{"detail"}`
      登录/reader 等既有断言）不受影响。
   9. `routes_v1.py` 合并残留的重复 import 块（experience/goals/
-     kanban_archive/kanban_io/kanban_merge/llm/models/growth_review
+     kanban_archive/kanban_io/kanban_merge/llm/models
      共 18 行）已删除。
   10. project task 创建（`add_profile_project_task`）：非空
       `milestone_id` 必须存在于 `case.milestones`，否则 422
@@ -638,7 +637,7 @@ Minor 7 项 + web_api Minor 6 项；原始条目保留在上文作为审查当�
   pending 项保持可用。后端判定逻辑未动（行为本正确）。回归：
   `ActivityPage.test.tsx` fixture 改为真实 Review 项形状并新增「非
   Review 项隐藏应用按钮」用例；e2e 覆盖双向——AI Gateway pending 项
-  无「应用」按钮 + 看板 Done 卡 → 周回顾保存候选 → 活动页 apply
+  无「应用」按钮；明确证据经证据页审核后入池 → 活动页 apply
   全链路成功。
 
 ## 七·六、修复记录（体验官 UX 批次：首页 iOS 化 + sidecar URL，2026-09-20）
@@ -650,7 +649,7 @@ Minor 7 项 + web_api Minor 6 项；原始条目保留在上文作为审查当�
 `web_ui/static/` 的 diff 即本轮构建产物）。
 
 - **P1-1 首页快捷入口条与侧边导航重复已删除**：HomePage 顶部「看板/技能树/
-  目标/证据评审/周回顾/研究台/输出工作室」七个按钮与左侧 16 项导航完全
+  目标/证据评审/研究台/输出工作室」按钮与左侧导航完全
   重复，整组移除（`HomePage.tsx` 的 `QUICK_LINKS`）。
 - **P1-2 首页 3D 星系 iframe「refused to connect」已修复（sidecar URL
   根因在启动脚本，不在端点）**：现象为隔离实例（18502/18503/18504）里
@@ -790,7 +789,7 @@ Minor 7 项 + web_api Minor 6 项；原始条目保留在上文作为审查当�
   evidence-review 批量接受用例直接吃沙箱 needs_review 队列的「第一行」，
   从不自种——队列是消耗品，全套每跑一轮少一行，本批多次全套回归把种子
   池跑空后该用例必挂（等不到任何行）。修复：新增
-  `seedNeedsReviewEvidence`（kanban 建卡→标记完成→周回顾保存→活动应用
+  `seedNeedsReviewEvidence`（kanban 建卡→标记完成→证据页审核→活动应用
   的真实链路，与文件内 full-chain 用例同路径），用例改为接受自己种下的
   唯一标题行——既免池耗依赖，也不再误收其他 spec/运行的遗留行。
   - **隔离沙箱有活 LLM**（`dev-web.sh` 的 web-api 会话 source 仓库
@@ -881,12 +880,11 @@ Minor 7 项 + web_api Minor 6 项；原始条目保留在上文作为审查当�
     等滑动过渡）；抽屉 14 个 profile 页项逐一点击断言 URL 与收合，加
     头部「助手」与「档案列表」共 16 个可点入口；看板跳转后标题在、
     抽屉收合、文档无横向溢出。
-  - **宽表格五页**（5 条）：证据/证据评审/周回顾/项目看板/研究台——
+  - **宽表格四页**（4 条）：证据/证据评审/项目看板/研究台——
     断言 `Table.ScrollContainer` 存在、其 viewport scrollWidth >
     clientWidth（375px 下五页 minWidth 420–1000 全部成立）且
     scrollLeft 真可滚动，同时 documentElement/body scrollWidth ≤
-    视口宽 + 2px（不破版）。周回顾用 API 种一张今日 Done 卡保证
-    近 30 天窗口证据候选非空；项目看板 API 种案例+任务后开详情
+    视口宽 + 2px（不破版）。项目看板 API 种案例+任务后开详情
     任务 Tab；证据评审队列是消耗品，表格/空态两分支都断言不溢出
     （空态分支留 annotation）。
   - **看板触屏**（2 条）：真触屏拖拽走通——`context.request` API

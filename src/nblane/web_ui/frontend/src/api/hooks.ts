@@ -10,6 +10,7 @@ import type {
   ActivityItem,
   ActivityItemDetail,
   ActivityListResponse,
+  AIExceptionsResponse,
   AssistantStatus,
   CheckinCreateRequest,
   CheckinDeleteResponse,
@@ -92,11 +93,7 @@ import type {
   PublicBuildResult,
   PublicBuildResultResponse,
   ResearchResponse,
-  ReviewApplyRequest,
-  ReviewApplyResponse,
-  ReviewResponse,
-  ReviewSaveRequest,
-  ReviewSaveResponse,
+  ResearchReaderResponse,
   SkillNodePatchRequest,
   SkillNodePatchResponse,
   SkillTreeResponse,
@@ -112,7 +109,6 @@ import type {
   StudioResponse,
   StudioResult,
   StudioValidationResponse,
-  WeeklyReviewResult,
   WorkshopStatus,
   CodexSettings,
   CodexSettingsPatch,
@@ -866,6 +862,20 @@ export interface ActivityFilters {
   kind: string;
 }
 
+/** Unresolved failures from all profile-scoped AI surfaces. */
+export function useAIExceptions(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'ai-exceptions'],
+    queryFn: () =>
+      apiGet<AIExceptionsResponse>(
+        `/profiles/${encodeURIComponent(profile)}/ai-exceptions?limit=50`,
+      ),
+    enabled: profile.length > 0,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+}
+
 function activityBase(profile: string): string {
   return `/profiles/${encodeURIComponent(profile)}/activity`;
 }
@@ -1164,7 +1174,6 @@ const CRYSTALLIZE_READ_MODEL_KEYS = [
   'home',
   'project-board',
   'projects-board',
-  'review',
   'crystallize-candidates',
 ] as const;
 
@@ -1185,7 +1194,7 @@ function useInvalidateEvidenceReview(profile: string) {
     queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'evidence'] });
     queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'evidence-stages'] });
     // Evidence grading/linking changes derived growth and project projections.
-    for (const key of ['skill-tree', 'starmap', 'home', 'project-board', 'projects-board', 'review']) {
+    for (const key of ['skill-tree', 'starmap', 'home', 'project-board', 'projects-board']) {
       queryClient.invalidateQueries({ queryKey: ['profiles', profile, key] });
     }
   };
@@ -1556,62 +1565,6 @@ export function useCreateJob(profile: string) {
   return useMutation({
     mutationFn: (body: JobCreateRequest) =>
       apiPost<JobCreateResponse>(`/profiles/${encodeURIComponent(profile)}/jobs`, body),
-  });
-}
-
-function reviewBase(profile: string): string {
-  return `/profiles/${encodeURIComponent(profile)}/review`;
-}
-
-/** Weekly review fetch that captures the review-source ETag for If-Match. */
-export function useWeeklyReview(profile: string, window: { start: string; end: string }) {
-  return useQuery({
-    queryKey: ['profiles', profile, 'review', window],
-    queryFn: async (): Promise<WeeklyReviewResult> => {
-      const params = new URLSearchParams({ start: window.start, end: window.end });
-      const { data, headers } = await apiGetWithHeaders<ReviewResponse>(
-        `${reviewBase(profile)}?${params.toString()}`,
-      );
-      return { data, etag: headers.get('ETag') ?? '' };
-    },
-    enabled: profile.length > 0,
-  });
-}
-
-function useInvalidateReview(profile: string) {
-  const queryClient = useQueryClient();
-  return (includeOwners: boolean) => {
-    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'activity'] });
-    if (includeOwners) {
-      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'review'] });
-      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'kanban'] });
-      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'evidence'] });
-      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'evidence-review'] });
-    }
-  };
-}
-
-/** Save selected candidates as pending Agent Activity items. */
-export function useReviewSaveCandidates(profile: string) {
-  const invalidate = useInvalidateReview(profile);
-  return useMutation({
-    mutationFn: ({ body, etag }: { body: ReviewSaveRequest; etag: string }) =>
-      apiPost<ReviewSaveResponse>(`${reviewBase(profile)}/save`, body, {
-        headers: ifMatch(etag),
-      }),
-    onSuccess: () => invalidate(false),
-  });
-}
-
-/** Apply selected candidates to their owner files (pool/kanban/blog). */
-export function useReviewApplyCandidates(profile: string) {
-  const invalidate = useInvalidateReview(profile);
-  return useMutation({
-    mutationFn: ({ body, etag }: { body: ReviewApplyRequest; etag: string }) =>
-      apiPost<ReviewApplyResponse>(`${reviewBase(profile)}/apply`, body, {
-        headers: ifMatch(etag),
-      }),
-    onSuccess: () => invalidate(true),
   });
 }
 
@@ -2060,5 +2013,13 @@ export function useResearch(profile: string) {
     queryFn: () =>
       apiGet<ResearchResponse>(`/profiles/${encodeURIComponent(profile)}/research`),
     enabled: profile.length > 0,
+  });
+}
+
+export function useResearchReader(profile: string, sourceId: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'research', 'papers', sourceId, 'reader'],
+    queryFn: () => apiGet<ResearchReaderResponse>(`/profiles/${encodeURIComponent(profile)}/research/papers/${encodeURIComponent(sourceId)}/reader`),
+    enabled: profile.length > 0 && sourceId.length > 0,
   });
 }

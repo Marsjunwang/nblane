@@ -22,7 +22,6 @@ const PAGES = [
   ["Inbox", `/p/${PROFILE}/inbox`],
   ["Evidence", `/p/${PROFILE}/evidence`],
   ["EvidenceReview", `/p/${PROFILE}/evidence-review`],
-  ["Review", `/p/${PROFILE}/review`],
   ["ProjectBoard", `/p/${PROFILE}/project-board`],
   ["Studio", `/p/${PROFILE}/studio`],
   ["Research", `/p/${PROFILE}/research`],

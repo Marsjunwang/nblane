@@ -30,6 +30,7 @@ from nblane.core.paper_library_workspace import (
     handle_paper_library_event,
 )
 from nblane.core.profile_io import list_profiles, profile_dir
+from nblane.core.web_preferences import load_web_preferences
 from nblane.core import ai_stream_tasks
 from nblane.core.blog_workspace import (
     build_blog_workspace_payload,
@@ -177,6 +178,13 @@ async def paper_library_embed_cors(request: Request, call_next):
     if cors_headers and request.method.upper() == "OPTIONS":
         return Response(status_code=204, headers=cors_headers)
     response = await call_next(request)
+    # A Paper Library page carries a short-lived handoff token because an
+    # embedded sidecar iframe may not retain the bootstrap cookie. API calls
+    # can be the first authenticated request that actually reaches the
+    # browser, so exchange the valid handoff on that response as well. This
+    # keeps long-running search/import flows authenticated after the 60-second
+    # URL token expires.
+    _apply_handoff_cookie(response, request)
     for key, value in cors_headers.items():
         response.headers[key] = value
     return response
@@ -508,27 +516,57 @@ def _clean_text(value: object) -> str:
     return str(value or "").strip()
 
 
-def _reader_ui() -> dict[str, str]:
-    """Return Reader UI copy for the current deployment language."""
+def _reader_ui(ui_lang: str | None = None) -> dict[str, str]:
+    """Return Reader UI copy for an explicit or deployment language.
 
-    if llm_client.ui_language() != "zh":
+    The SPA can be rendered in a different process from this sidecar. Accept
+    the language as request context so an English sidecar default does not
+    leak into an otherwise Chinese SPA.
+    """
+
+    requested_lang = str(ui_lang or "").strip().lower()
+    language = requested_lang if requested_lang in {"zh", "en"} else llm_client.ui_language()
+    if language != "zh":
         return {
+            "notes_context_title": "Notes and highlights",
+            "notes_context_copy": "Keep the passages and questions you want to return to.",
+            "translation_context_title": "Read with translation",
+            "translation_context_copy": "Translate a paragraph, then compare it with the original page.",
+            "review_context_title": "Reading recap",
+            "review_context_copy": "Turn the paper into a short map of methods, results, limits, and open questions.",
+            "page_context_meta": "Current page {page}",
             "reader_workflow_hint": (
-                "Reader writes stay candidate-first: translate, annotate, cite, then review before promotion."
+                "Your reading position and notes are saved with this paper."
             ),
             "translate_full_paper_help": (
                 "Translate missing or stale structure/layout units for the whole paper. "
                 "Existing current translations are reused."
             ),
+            "translate_visible_pages": "Translate visible page",
+            "translation_panel_hint": (
+                "Paragraph actions live in the reading flow; this panel only shows progress "
+                "and starts a visible-page batch."
+            ),
+            "translation_backend_local": "Local CPU translator",
+            "translation_backend_ai": "AI model translator",
+            "translation_backend_cache": "Cache / dictionary",
+            "translation_backend_unknown": "Not started",
             "connector_scope_hint": (
                 "Connectors live in Research > Inbox & Connectors; Reader consumes imported sources."
             ),
         }
     return {
+        "notes_context_title": "笔记与高亮",
+        "notes_context_copy": "保留值得回看的原文、问题和思路。",
+        "translation_context_title": "带着译文阅读",
+        "translation_context_copy": "点击段落翻译，再回到原文页面核对语义。",
+        "review_context_title": "阅读复盘",
+        "review_context_copy": "把论文整理成方法、结果、局限和待追问的阅读地图。",
+        "page_context_meta": "当前第 {page} 页",
         "annotations": "标注",
         "notes": "笔记",
         "translation": "翻译",
-        "review": "审阅",
+        "review": "复盘",
         "figures": "图表",
         "ai": "审阅",
         "claims": "断言",
@@ -542,7 +580,13 @@ def _reader_ui() -> dict[str, str]:
         "translate_full_paper_help": (
             "为整篇论文缺失或过期的结构/版面单元生成译文，已是最新的译文会复用。"
         ),
-        "translate_visible_pages": "翻译可见页",
+        "translation_structure_incomplete": "请先完成论文结构解析，再进行全文翻译。",
+        "translate_visible_pages": "翻译当前可见页",
+        "translation_panel_hint": "逐段操作都在中间阅读流完成；这里仅显示进度并启动当前可见页批量翻译。",
+        "translation_backend_local": "本地 CPU 翻译",
+        "translation_backend_ai": "AI 模型翻译",
+        "translation_backend_cache": "缓存 / 词典",
+        "translation_backend_unknown": "尚未开始",
         "explain_selection": "解释",
         "ask_paper": "提问",
         "ask_followup": "追问",
@@ -551,10 +595,10 @@ def _reader_ui() -> dict[str, str]:
         "qa_context_pages": "页码",
         "qa_context_segments": "段落数",
         "qa_thinking": "思考中...",
-        "save_progress": "保存进度",
-        "review_card": "分析论文",
-        "analyze_paper": "分析论文",
-        "deep_read": "深读",
+        "save_progress": "保存位置",
+        "review_card": "快速分析",
+        "analyze_paper": "快速分析",
+        "deep_read": "深度研读",
         "deep_read_empty": "暂无可靠深读发现。",
         "deep_section_takeaway": "一句话结论",
         "deep_section_findings": "关键发现",
@@ -578,6 +622,7 @@ def _reader_ui() -> dict[str, str]:
         "mode_pdf": "PDF",
         "mode_compare": "对照",
         "mode_translation": "仅译文",
+        "compare_lock_scroll": "跟随原文",
         "search": "搜索",
         "page": "页",
         "previous_page": "上一页",
@@ -614,7 +659,7 @@ def _reader_ui() -> dict[str, str]:
         "translating_visible_pages": "正在翻译可见页...",
         "translating_full_paper": "正在翻译全文...",
         "reviewing_paper": "正在分析论文...",
-        "deep_reading": "正在深读论文...",
+        "deep_reading": "正在深度研读论文...",
         "answering": "正在回答...",
         "answered": "已回答。",
         "missing": "缺失",
@@ -624,6 +669,7 @@ def _reader_ui() -> dict[str, str]:
         "saved": "已保存",
         "ask_selection": "带选区提问",
         "retry": "重试",
+        "retry_translation_unit": "重新翻译此段",
         "edit": "编辑",
         "cancel": "取消",
         "close": "关闭",
@@ -635,9 +681,7 @@ def _reader_ui() -> dict[str, str]:
         "current_page": "当前页",
         "translate": "翻译",
         "selection_single_page": "多页选区暂时只捕获第一页。",
-        "reader_workflow_hint": (
-            "Reader 写入保持候选优先：先翻译、标注、引用，再审阅后推进。"
-        ),
+        "reader_workflow_hint": "阅读位置与笔记会自动保存。",
         "connector_scope_hint": (
             "连接器在研究工作台的「收件箱与连接器」中配置；Reader 只消费已导入的来源。"
         ),
@@ -821,41 +865,73 @@ def _paper_library_reply_language(profile_path: Path, body: dict[str, object], q
     return llm_client.reply_language(text=query)
 
 
-def _reader_settings(payload: dict[str, object], page: int, target_lang: str) -> dict[str, object]:
+def _reader_settings(
+    payload: dict[str, object], page: int, target_lang: str, profile_path: Path | None = None
+) -> dict[str, object]:
     reader_state = payload.get("reader_state") if isinstance(payload.get("reader_state"), dict) else {}
     context_window = payload.get("context_window") if isinstance(payload.get("context_window"), dict) else {}
+    profile_defaults: dict[str, object] = {}
+    if profile_path is not None:
+        try:
+            prefs = load_web_preferences(profile_path)
+            research = prefs.get("research") if isinstance(prefs.get("research"), dict) else {}
+            profile_defaults = research.get("reader") if isinstance(research.get("reader"), dict) else {}
+        except (OSError, ValueError, TypeError):
+            profile_defaults = {}
+
+    def state_or_default(key: str, default_key: str, fallback: object) -> object:
+        value = reader_state.get(key)
+        if value is not None and value != "":
+            return value
+        return profile_defaults.get(default_key, fallback)
+
     overscan_pages = os.getenv("NBLANE_READER_OVERSCAN_PAGES", "auto").strip() or "auto"
     render_cache_max_pages = os.getenv("NBLANE_READER_RENDER_CACHE_MAX_PAGES", "auto").strip() or "auto"
-    translation_layout = os.getenv("NBLANE_READER_TRANSLATION_LAYOUT", "overlay").strip().lower() or "overlay"
+    translation_layout = os.getenv("NBLANE_READER_TRANSLATION_LAYOUT", "flow").strip().lower() or "flow"
     if translation_layout not in {"flow", "overlay"}:
-        translation_layout = "overlay"
+        translation_layout = "flow"
+    side_panel_collapsed = (
+        reader_state["side_panel_collapsed"]
+        if "side_panel_collapsed" in reader_state
+        else profile_defaults.get("default_side_panel", "collapsed") == "collapsed"
+    )
     return {
         "page": reader_state.get("last_read_page") or page,
         "initial_page": reader_state.get("last_read_page") or page,
         "page_count": context_window.get("total_pages") or 1,
         "context_window": context_window,
         "view_mode": "continuous",
-        "reader_mode": reader_state.get("reader_mode") or "pdf",
-        "scale_mode": reader_state.get("scale_mode") or "fit-width",
-        "active_tab": reader_state.get("active_tab") or "notes",
-        "target_lang": reader_state.get("target_lang") or target_lang or "zh",
-        "compare_split_ratio": reader_state.get("compare_split_ratio") or payload.get("compare_split_ratio") or 50,
-        "panel_width": reader_state.get("panel_width") or payload.get("panel_width") or 340,
+        "reader_mode": state_or_default("reader_mode", "default_mode", "pdf"),
+        "scale_mode": state_or_default("scale_mode", "default_scale", "fit-width"),
+        "active_tab": state_or_default("active_tab", "default_active_tab", "notes"),
+        "target_lang": state_or_default("target_lang", "default_target_lang", target_lang or "zh"),
+        "compare_split_ratio": state_or_default(
+            "compare_split_ratio", "compare_split_ratio", payload.get("compare_split_ratio") or 50
+        ),
+        "panel_width": state_or_default("panel_width", "panel_width", payload.get("panel_width") or 340),
         "overscan_pages": overscan_pages,
         "auto_save_progress": False,
         "emit_passive_events": False,
-        "side_panel_default": "collapsed" if reader_state.get("side_panel_collapsed", True) else "open",
-        "side_panel_collapsed": reader_state.get("side_panel_collapsed", True),
+        "side_panel_default": "collapsed" if side_panel_collapsed else "open",
+        "side_panel_collapsed": side_panel_collapsed,
         "focus_annotation_id": reader_state.get("focused_annotation_id") or "",
         "focus_chunk_id": reader_state.get("focused_chunk_id") or "",
-        "left_rail_collapsed": reader_state.get("left_rail_collapsed", False),
-        "active_left_tab": reader_state.get("active_left_tab") or "outline",
-        "translation_source_visible": reader_state.get("translation_source_visible", True),
+        "left_rail_collapsed": (
+            reader_state["left_rail_collapsed"]
+            if "left_rail_collapsed" in reader_state
+            else profile_defaults.get("default_left_rail", "open") == "collapsed"
+        ),
+        "active_left_tab": state_or_default("active_left_tab", "default_left_tab", "outline"),
+        "translation_source_visible": (
+            reader_state["translation_source_visible"]
+            if "translation_source_visible" in reader_state
+            else profile_defaults.get("default_translation_source", True)
+        ),
         "active_translation_anchor": reader_state.get("active_translation_anchor") or "",
         "height_mode": "viewport",
         "render_cache": True,
         "render_cache_max_pages": render_cache_max_pages,
-        "translation_layout": translation_layout,
+        "translation_layout": profile_defaults.get("default_translation_layout", translation_layout),
         "translation_overflow_policy": "fixed-expand",
         "debug_overlay_enabled": os.getenv("NBLANE_READER_DEBUG_OVERLAY", "").strip().lower() in {"1", "true", "yes", "on"},
         "translation_dock_default": "selection",
@@ -883,6 +959,7 @@ def _payload_for_context(
     ctx: ReaderActionContext,
     page: int | None = None,
     *,
+    ui_lang: str | None = None,
     requested_pages: set[int] | None = None,
     full_translation: bool = False,
     full_document: bool | None = None,
@@ -920,8 +997,8 @@ def _payload_for_context(
     )
     payload["page_previews"] = []
     payload["pdf_base64"] = ""
-    payload["ui"] = _reader_ui()
-    payload["settings"] = _reader_settings(payload, current_page, target_lang)
+    payload["ui"] = _reader_ui(ui_lang)
+    payload["settings"] = _reader_settings(payload, current_page, target_lang, ctx.profile_path)
     payload["settings"]["full_translation_context"] = bool(full_translation)
     payload["settings"]["full_document_payload"] = bool(full_document)
     payload["events_contract_version"] = 1
@@ -950,15 +1027,24 @@ def _payload_etag(payload: dict[str, object], *, target_lang: str) -> str:
         len(payload.get("translations") or []),
         len(payload.get("translation_units") or []),
         len(payload.get("annotations") or []),
+        len(payload.get("chunks") or []),
+        len(payload.get("citations") or []),
         len(payload.get("page_models") or []),
         int((payload.get("settings") or {}).get("page_count") or 0),
     )
     last_touched = ""
-    for row in payload.get("translations") or []:
-        if isinstance(row, dict):
-            value = str(row.get("created") or row.get("updated") or "")
-            if value > last_touched:
-                last_touched = value
+    changed_rows = (
+        payload.get("translations") or [],
+        payload.get("annotations") or [],
+        payload.get("chunks") or [],
+        payload.get("citations") or [],
+    )
+    for rows in changed_rows:
+        for row in rows:
+            if isinstance(row, dict):
+                value = str(row.get("created") or row.get("updated") or "")
+                if value > last_touched:
+                    last_touched = value
     analysis = payload.get("analysis") if isinstance(payload.get("analysis"), dict) else {}
     try:
         analysis_marker = hashlib.sha1(
@@ -2527,6 +2613,7 @@ def _range_response(path: Path, range_header: str | None) -> Response:
 
 @app.get(f"{READER_PREFIX}/view/{{source_id}}")
 async def reader_view(request: Request, source_id: str, token: str = ""):
+    ui_lang = request.query_params.get("ui_lang", "")
     if token:
         claims = _claims_from_token(token, source_id)
         response = TEMPLATES.TemplateResponse(
@@ -2536,6 +2623,7 @@ async def reader_view(request: Request, source_id: str, token: str = ""):
                 "source_id_json": json.dumps(source_id, ensure_ascii=False),
                 "reader_prefix_json": json.dumps(READER_PREFIX),
                 "reader_token_json": json.dumps(token),
+                "reader_ui_lang_json": json.dumps(ui_lang, ensure_ascii=False),
             },
         )
         response.set_cookie(
@@ -2556,6 +2644,7 @@ async def reader_view(request: Request, source_id: str, token: str = ""):
             "source_id_json": json.dumps(source_id, ensure_ascii=False),
             "reader_prefix_json": json.dumps(READER_PREFIX),
             "reader_token_json": json.dumps(""),
+            "reader_ui_lang_json": json.dumps(ui_lang, ensure_ascii=False),
         },
     )
 
@@ -2613,6 +2702,7 @@ async def reader_payload(request: Request, source_id: str, page: int | None = No
     payload = _payload_for_context(
         ctx,
         page=page,
+        ui_lang=request.query_params.get("ui_lang"),
         requested_pages=_query_pages(request),
         full_translation=full_translation,
         full_document=full_document,
@@ -2632,7 +2722,7 @@ async def reader_payload(request: Request, source_id: str, page: int | None = No
 async def reader_page_preview(request: Request, source_id: str, page: int):
     ctx = _request_context(request, source_id)
     return JSONResponse(
-        render_paper_page_preview(ctx.profile_path, source_id, max(1, page), max_width=1100),
+        render_paper_page_preview(ctx.profile_path, source_id, max(1, page), max_width=1800),
         headers={"Cache-Control": "private, max-age=86400"},
     )
 

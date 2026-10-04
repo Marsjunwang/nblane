@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 from dataclasses import dataclass, field, replace
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -47,40 +47,17 @@ class ReviewApplyResult:
     output_path: Path | None = None
 
 
-def review_window_default(today: date | None = None) -> tuple[date, date]:
-    """Return current natural week Monday -> today."""
-    current = today or date.today()
-    return current - timedelta(days=current.weekday()), current
-
-
-def review_window_for_preset(
-    preset: str,
-    *,
-    today: date | None = None,
-) -> tuple[date, date]:
-    """Return date range for a Review preset."""
-    current = today or date.today()
-    clean = str(preset or "").strip()
-    if clean == "previous_week":
-        this_monday = current - timedelta(days=current.weekday())
-        start = this_monday - timedelta(days=7)
-        return start, start + timedelta(days=6)
-    if clean == "last_30_days":
-        return current - timedelta(days=29), current
-    return review_window_default(current)
+def _clean_text(value: object) -> str:
+    return str(value or "").strip()
 
 
 def normalize_review_window(start: str | date, end: str | date) -> tuple[date, date]:
-    """Normalize a start/end pair and swap reversed windows."""
+    """Normalize a candidate source date pair and swap reversed windows."""
     start_date = start if isinstance(start, date) else date.fromisoformat(str(start)[:10])
     end_date = end if isinstance(end, date) else date.fromisoformat(str(end)[:10])
     if start_date > end_date:
         return end_date, start_date
     return start_date, end_date
-
-
-def _clean_text(value: object) -> str:
-    return str(value or "").strip()
 
 
 def _clean_string_list(value: object) -> list[str]:
@@ -294,44 +271,6 @@ def activity_item_from_review_candidate(
         "preview": preview,
         "warnings": list(warnings or []),
     }
-
-
-def save_review_candidates_to_activity(
-    profile: str,
-    start: str | date,
-    end: str | date,
-    candidate_type: str,
-    candidates: list[dict[str, Any]],
-    *,
-    expected_snapshot: FileSnapshot | None = None,
-) -> list[dict[str, Any]]:
-    """Persist selected Review candidates as pending Activity items.
-
-    *expected_snapshot* (request-start fingerprint of agent-activity.yaml)
-    is checked inside the write lock on the first append; a mismatch raises
-    ``file_state.FileConflictError`` so the caller can answer 412 instead
-    of overwriting a concurrent queue edit.
-    """
-    stored: list[dict[str, Any]] = []
-    snapshot = expected_snapshot
-    for candidate in candidates:
-        item = activity_item_from_review_candidate(
-            profile,
-            start,
-            end,
-            candidate_type,
-            candidate,
-        )
-        stored.append(
-            agent_activity.append_activity_item(
-                profile, item, expected_snapshot=snapshot
-            )
-        )
-        # The first append consumed the request-start snapshot; later
-        # appends re-read under the lock and must not re-check it (the
-        # file legitimately changed — by this loop's own writes).
-        snapshot = None
-    return stored
 
 
 def _mark_done_crystallized(
@@ -882,7 +821,5 @@ __all__ = [
     "review_candidate_id",
     "review_evidence_patch",
     "review_kanban_task",
-    "review_window_default",
-    "review_window_for_preset",
-    "save_review_candidates_to_activity",
+    "normalize_review_window",
 ]

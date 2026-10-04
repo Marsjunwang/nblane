@@ -2682,19 +2682,12 @@ def _navigation_pages() -> dict[str, list[st.Page]]:
                 icon=":material/history:",
             ),
         ],
-        ui["sidebar_nav_review_group"]: [
-            st.Page(
-                "pages/8_Review.py",
-                title=ui["sidebar_nav_review"],
-                icon=":material/rate_review:",
-            ),
+        ui["sidebar_nav_system_group"]: [
             st.Page(
                 "pages/5_Profile_Health.py",
                 title=ui["sidebar_nav_health"],
                 icon=":material/health_and_safety:",
             ),
-        ],
-        ui["sidebar_nav_system_group"]: [
             st.Page(
                 "pages/12_Settings.py",
                 title=ui.get("sidebar_nav_settings", "Settings"),
