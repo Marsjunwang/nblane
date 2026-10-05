@@ -47,7 +47,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from nblane.core import agent_activity, agent_tasks, file_state, gap, inbox
-from nblane.core import career_workspace, content_workspace, git_backup
+from nblane.core import career_workspace, content_ai, content_workspace, git_backup, visual_candidate_store
 from nblane.core.resume_extract import extract_resume_text
 from nblane.core.ai.exceptions import collect_profile_exceptions
 from nblane.core import chronicle as chronicle_core
@@ -380,6 +380,9 @@ from nblane.web_api.schemas import (
     CareerResumeUpdateRequest,
     CareerUploadResponse,
     CareerWorkspaceResponse,
+    ContentAIStatusResponse,
+    ContentCoverCandidateRequest,
+    ContentCoverPromoteResponse,
     ContentMediaModel,
     ContentMediaUploadResponse,
     ContentWorkspaceResponse,
@@ -8366,6 +8369,76 @@ def publish_profile_content_blog(
     if_match: str | None = Header(default=None),
 ) -> StudioPostMutationResponse | JSONResponse:
     return publish_profile_studio_post(name, slug, response, body, if_match)
+
+
+@router.get(
+    "/profiles/{name}/content/ai/status",
+    response_model=ContentAIStatusResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_content_ai_status(name: str) -> ContentAIStatusResponse:
+    """Which content-AI features are configured (no network calls).
+
+    The editor uses this to disable buttons with an explanation instead of
+    letting a job fail. The AI itself runs as jobs (``content-rewrite`` /
+    ``content-meta`` / ``content-cover``) via ``POST .../jobs``.
+    """
+    _resolve_profile(name)
+    return ContentAIStatusResponse(
+        text=content_ai.llm_available(),
+        cover=content_ai.cover_available(),
+    )
+
+
+@router.get(
+    "/profiles/{name}/content/cover-candidates/file",
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_content_cover_candidate(name: str, path: str = Query(...)) -> FileResponse:
+    """Serve one staged cover candidate image (path must stay in the store)."""
+    pdir = _resolve_profile(name)
+    try:
+        target = visual_candidate_store.candidate_file_path(pdir.name, path)
+    except FileNotFoundError as exc:
+        raise ApiError(404, "cover_candidate_not_found", "Unknown cover candidate") from exc
+    if not target.is_file():
+        raise ApiError(404, "cover_candidate_not_found", "Unknown cover candidate")
+    return FileResponse(target)
+
+
+@router.post(
+    "/profiles/{name}/content/blog/{slug:path}/cover-candidates/promote",
+    response_model=ContentCoverPromoteResponse,
+    responses=STUDIO_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def promote_profile_content_cover(name: str, slug: str, body: ContentCoverCandidateRequest) -> ContentCoverPromoteResponse:
+    """Move a cover candidate into the post's media folder.
+
+    Like media upload, the post file itself is not rewritten: the editor puts
+    the returned path into its ``cover`` field and the next save persists it.
+    """
+    pdir = _resolve_profile(name)
+    post = _load_studio_post(pdir, slug)
+    try:
+        row = content_ai.promote_cover(pdir.name, post.slug, body.candidate_path)
+    except content_ai.ContentAIError as exc:
+        raise ApiError(404, exc.code, exc.message) from exc
+    except PublicSiteError as exc:
+        raise ApiError(422, "cover_promote_failed", str(exc)) from exc
+    return ContentCoverPromoteResponse(path=row["path"])
+
+
+@router.post(
+    "/profiles/{name}/content/cover-candidates/discard",
+    responses=STUDIO_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def discard_profile_content_cover(name: str, body: ContentCoverCandidateRequest) -> dict[str, bool]:
+    pdir = _resolve_profile(name)
+    return {"ok": True, "removed": content_ai.discard_cover(pdir.name, body.candidate_path)}
 
 
 # --- Career workspace --------------------------------------------------------

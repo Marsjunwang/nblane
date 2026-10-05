@@ -546,6 +546,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/content/ai/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Content Ai Status
+         * @description Which content-AI features are configured (no network calls).
+         *
+         *     The editor uses this to disable buttons with an explanation instead of
+         *     letting a job fail. The AI itself runs as jobs (``content-rewrite`` /
+         *     ``content-meta`` / ``content-cover``) via ``POST .../jobs``.
+         */
+        get: operations["get_profile_content_ai_status_api_v1_profiles__name__content_ai_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/content/blog": {
         parameters: {
             query?: never;
@@ -610,6 +634,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/content/blog/{slug}/cover-candidates/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote Profile Content Cover
+         * @description Move a cover candidate into the post's media folder.
+         *
+         *     Like media upload, the post file itself is not rewritten: the editor puts
+         *     the returned path into its ``cover`` field and the next save persists it.
+         */
+        post: operations["promote_profile_content_cover_api_v1_profiles__name__content_blog__slug__cover_candidates_promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/content/blog/{slug}/media": {
         parameters: {
             query?: never;
@@ -663,6 +710,43 @@ export interface paths {
         put?: never;
         /** Publish Profile Content Blog */
         post: operations["publish_profile_content_blog_api_v1_profiles__name__content_blog__slug__publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/content/cover-candidates/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discard Profile Content Cover */
+        post: operations["discard_profile_content_cover_api_v1_profiles__name__content_cover_candidates_discard_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/content/cover-candidates/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Content Cover Candidate
+         * @description Serve one staged cover candidate image (path must stay in the store).
+         */
+        get: operations["get_profile_content_cover_candidate_api_v1_profiles__name__content_cover_candidates_file_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3708,6 +3792,37 @@ export interface components {
             version: string;
         };
         /**
+         * ContentAIStatusResponse
+         * @description Configured content-AI features (text = LLM, cover = image provider).
+         */
+        ContentAIStatusResponse: {
+            /**
+             * Cover
+             * @default false
+             */
+            cover: boolean;
+            /**
+             * Text
+             * @default false
+             */
+            text: boolean;
+        };
+        /** ContentCoverCandidateRequest */
+        ContentCoverCandidateRequest: {
+            /** Candidate Path */
+            candidate_path: string;
+        };
+        /** ContentCoverPromoteResponse */
+        ContentCoverPromoteResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Path */
+            path: string;
+        };
+        /**
          * ContentMediaModel
          * @description One file in a post's media directory (profile-relative path).
          */
@@ -5945,7 +6060,11 @@ export interface components {
          *     ``input`` is validated per kind: ``gap-analysis`` takes ``{task: str}``
          *     (1–2000 non-blank chars), ``studio-jd-match`` takes ``{resume_md,
          *     jd_text}`` (both non-blank, ≤ 50000 chars each) and
-         *     ``project-suggest-refs`` takes ``{case_id: str}`` (non-blank).
+         *     ``project-suggest-refs`` takes ``{case_id: str}`` (non-blank);
+         *     content-workspace AI kinds ``content-rewrite`` (``{operation, selection,
+         *     title?, context?, instruction?}``), ``content-meta`` (``{title, summary,
+         *     tags, body}``) and ``content-cover`` (``{slug, brief?, style?, title?,
+         *     summary?, tags?, body?}``) return candidates only and never write posts.
          *     Validation failures answer 422 with the kind's error code
          *     (``empty_task`` / ``invalid_jd_match_request`` / ``empty_case_id`` /
          *     ``invalid_job_input``).
@@ -10538,6 +10657,64 @@ export interface operations {
             };
         };
     };
+    get_profile_content_ai_status_api_v1_profiles__name__content_ai_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentAIStatusResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_profile_content_blog_api_v1_profiles__name__content_blog_post: {
         parameters: {
             query?: never;
@@ -10769,6 +10946,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StudioValidationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile or blog post not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the studio source files. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    promote_profile_content_cover_api_v1_profiles__name__content_blog__slug__cover_candidates_promote_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentCoverCandidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentCoverPromoteResponse"];
                 };
             };
             /** @description Invalid profile name. */
@@ -11094,6 +11343,139 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    discard_profile_content_cover_api_v1_profiles__name__content_cover_candidates_discard_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentCoverCandidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile or blog post not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the studio source files. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_profile_content_cover_candidate_api_v1_profiles__name__content_cover_candidates_file_get: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

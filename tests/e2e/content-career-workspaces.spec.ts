@@ -95,6 +95,91 @@ test.describe("SPA content and career workspaces", () => {
     await expect(page).not.toHaveURL(new RegExp(encodeURIComponent(title.split(" ")[1])));
   });
 
+  test("AI cover, meta suggestions and rewrite are candidates until accepted (stubbed jobs)", async ({ page }) => {
+    // Stub the job endpoints so the test never calls the LLM or the paid
+    // image provider: POST /jobs returns a job id per kind, and the SSE
+    // stream answers with a canned done frame.
+    const results: Record<string, unknown> = {
+      "content-rewrite": { operation: "polish", original: "", text: "AI 润色后的第一段。" },
+      "content-meta": { titles: ["AI 标题一"], summaries: ["AI 摘要一。"], tags: ["机器人"] },
+    };
+    let coverCandidate = "";
+    await page.route("**/api/v1/profiles/*/content/ai/status", (route) =>
+      route.fulfill({ json: { text: true, cover: true } }),
+    );
+    await page.route("**/api/v1/profiles/*/jobs", async (route) => {
+      const body = route.request().postDataJSON() as { kind: string; input: Record<string, unknown> };
+      if (body.kind === "content-cover") {
+        // Stage a real candidate file through the upload route is not possible;
+        // reuse a 1x1 PNG served by the fulfill below instead.
+        coverCandidate = "blog/.candidates/cover-e2e/generated-cover-e2e.png";
+        results["content-cover"] = {
+          slug: body.input.slug,
+          candidates: [{ candidate_path: coverCandidate, filename: "generated-cover-e2e.png", provider: "stub", model: "stub" }],
+        };
+      }
+      await route.fulfill({ status: 202, json: { ok: true, job_id: `job-${body.kind}`, job: { job_id: `job-${body.kind}` } } });
+    });
+    await page.route("**/api/v1/profiles/*/jobs/*/stream", (route) => {
+      const kind = route.request().url().split("/jobs/job-")[1].split("/")[0];
+      const frame = JSON.stringify({ ok: true, job: { status: "done" }, result: results[kind] });
+      return route.fulfill({
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+        body: `event: done\ndata: ${frame}\n\n`,
+      });
+    });
+    await page.route("**/content/cover-candidates/file*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        body: Buffer.from(
+          "89504e470d0a1a0a0000000d4948445200000001000000010806000000" +
+            "1f15c4890000000d49444154789c63000100000500010d0a2db40000000049454e44ae426082",
+          "hex",
+        ),
+      }),
+    );
+    await page.route("**/cover-candidates/promote", (route) =>
+      route.fulfill({ json: { ok: true, path: "media/blog/e2e/generated-cover-e2e.png" } }),
+    );
+
+    await page.goto(`${SPA_BASE_URL}/p/${encodeURIComponent(SPA_E2E_PROFILE)}/content`);
+    await page.getByTestId("content-create").click();
+    await page.getByTestId("content-new-title").fill(`AI 验收 ${Date.now()}`);
+    await page.getByTestId("content-create-confirm").click();
+    await expect(page.locator(".bn-editor")).toBeVisible();
+    await page.keyboard.type("第一段原文，需要润色。");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("第二段保持不变。");
+
+    // Rewrite: select paragraph 1 → toolbar AI → 润色 → diff → accept.
+    await page.locator('.bn-editor [data-content-type="paragraph"]').first().click({ clickCount: 3 });
+    await page.locator(".nb-ai-toolbar-button").click();
+    await page.getByRole("menuitem", { name: "润色" }).click();
+    await expect(page.getByTestId("content-ai-diff")).toContainText("AI 润色后的第一段。");
+    await page.getByTestId("content-ai-accept").click();
+    await expect(page.locator(".bn-editor")).toContainText("AI 润色后的第一段。");
+    await expect(page.locator(".bn-editor")).toContainText("第二段保持不变。");
+    await expect(page.locator(".bn-editor")).not.toContainText("需要润色");
+
+    // Meta: suggestions apply only when clicked.
+    await page.getByTestId("content-settings-toggle").click();
+    const settings = page.getByTestId("content-properties");
+    await settings.getByTestId("content-ai-meta-run").click();
+    await expect(settings.getByLabel("摘要")).toHaveValue("");
+    await settings.getByTestId("content-ai-summary").first().click();
+    await expect(settings.getByLabel("摘要")).toHaveValue("AI 摘要一。");
+    await settings.getByTestId("content-ai-tag").first().click();
+
+    // Cover: candidate shown; 用作封面 sets the draft cover.
+    await page.getByTestId("content-ai-cover-run").click();
+    await expect(page.getByTestId("content-ai-cover-candidate")).toHaveCount(1);
+    await page.getByTestId("content-ai-cover-use").click();
+    await expect(page.getByTestId("content-ai-cover-candidate")).toHaveCount(0);
+    await expect(page.getByAltText("封面预览")).toBeVisible();
+  });
+
   test("matches a JD and saves an explicitly named tailored draft", async ({ page }) => {
     await page.goto(`${SPA_BASE_URL}/p/${encodeURIComponent(SPA_E2E_PROFILE)}/career`);
     await expect(page.getByTestId("career-workspace")).toBeVisible();

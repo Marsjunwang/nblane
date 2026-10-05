@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nblane.core import gap
+from nblane.core import content_ai, gap
 from nblane.core import jd_match
 from nblane.core import llm as llm_client
 from nblane.core import profile_io, project_suggest
@@ -49,6 +49,9 @@ KIND_GAP_ANALYSIS = "gap-analysis"
 KIND_STUDIO_JD_MATCH = "studio-jd-match"
 KIND_PROJECT_SUGGEST_REFS = "project-suggest-refs"
 KIND_EVIDENCE_CRYSTALLIZE = "evidence-crystallize"
+KIND_CONTENT_REWRITE = "content-rewrite"
+KIND_CONTENT_META = "content-meta"
+KIND_CONTENT_COVER = "content-cover"
 
 FINAL_STATUSES = ("done", "failed")
 
@@ -744,4 +747,118 @@ _KINDS[KIND_EVIDENCE_CRYSTALLIZE] = JobKind(
     timeout_message=(
         "AI 草稿超时(120 秒未完成);请重试,或改用规则草稿(立等可取)。"
     ),
+)
+
+
+# --- Content workspace AI (blog editor; candidates only, never writes posts) --
+
+
+def _content_ai_call(fn: Callable[[], Any]) -> Any:
+    """Map ``ContentAIError`` onto the job error contract."""
+    try:
+        return fn()
+    except content_ai.ContentAIError as exc:
+        raise JobFailedError(exc.code, exc.message) from exc
+
+
+def _validate_content_slug(job_input: dict[str, Any]) -> str:
+    slug = _clean(job_input.get("slug"))
+    if not slug:
+        raise JobInputError("invalid_content_ai_request", "slug is required.")
+    return slug
+
+
+def _validate_content_rewrite_input(job_input: dict[str, Any]) -> dict[str, Any]:
+    operation = _clean(job_input.get("operation")).lower()
+    if operation not in content_ai.REWRITE_OPERATIONS:
+        raise JobInputError(
+            "invalid_content_ai_request",
+            f"operation must be one of: {', '.join(content_ai.REWRITE_OPERATIONS)}.",
+        )
+    selection = str(job_input.get("selection") or "")
+    if not selection.strip():
+        raise JobInputError("invalid_content_ai_request", "请先选中要改写的文字。")
+    if len(selection) > content_ai.SELECTION_MAX_CHARS:
+        raise JobInputError(
+            "invalid_content_ai_request",
+            f"选中内容过长（上限 {content_ai.SELECTION_MAX_CHARS} 字），请分段改写。",
+        )
+    return {
+        "operation": operation,
+        "selection": selection,
+        "title": _clean(job_input.get("title"))[:300],
+        "context": str(job_input.get("context") or "")[:4000],
+        "instruction": _clean(job_input.get("instruction"))[:500],
+    }
+
+
+def _run_content_rewrite(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
+    report(phase="generating", message="AI 正在改写选中内容。")
+    return _content_ai_call(lambda: content_ai.rewrite_selection(**job_input))
+
+
+def _validate_content_meta_input(job_input: dict[str, Any]) -> dict[str, Any]:
+    body = str(job_input.get("body") or "")
+    tags = job_input.get("tags") if isinstance(job_input.get("tags"), list) else []
+    return {
+        "title": _clean(job_input.get("title"))[:300],
+        "summary": _clean(job_input.get("summary"))[:1000],
+        "tags": [_clean(tag)[:40] for tag in tags if _clean(tag)][:12],
+        "body": body[:200_000],
+    }
+
+
+def _run_content_meta(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
+    report(phase="generating", message="AI 正在阅读全文并生成建议。")
+    return _content_ai_call(lambda: content_ai.suggest_meta(**job_input))
+
+
+def _validate_content_cover_input(job_input: dict[str, Any]) -> dict[str, Any]:
+    slug = _validate_content_slug(job_input)
+    tags = job_input.get("tags") if isinstance(job_input.get("tags"), list) else None
+    return {
+        "slug": slug,
+        "brief": _clean(job_input.get("brief"))[:500],
+        "style": _clean(job_input.get("style"))[:200],
+        "title": _clean(job_input.get("title"))[:300] if "title" in job_input else None,
+        "summary": _clean(job_input.get("summary"))[:1000] if "summary" in job_input else None,
+        "tags": [_clean(tag)[:40] for tag in tags if _clean(tag)][:12] if tags is not None else None,
+        "body": str(job_input.get("body") or "")[:200_000] if "body" in job_input else None,
+    }
+
+
+def _run_content_cover(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
+    report(phase="generating", message="正在生成封面（约 30–90 秒）。")
+    slug = job_input.pop("slug")
+    rows = _content_ai_call(
+        lambda: content_ai.generate_cover_candidates(profile, slug, **job_input)
+    )
+    return {"slug": slug, "candidates": rows}
+
+
+_KINDS[KIND_CONTENT_REWRITE] = JobKind(
+    name=KIND_CONTENT_REWRITE,
+    validate=_validate_content_rewrite_input,
+    run=_run_content_rewrite,
+    queued_message="Queued selection rewrite.",
+    timeout_seconds=120,
+    timeout_message="AI 改写超时（120 秒），请重试或缩短选中内容。",
+)
+
+_KINDS[KIND_CONTENT_META] = JobKind(
+    name=KIND_CONTENT_META,
+    validate=_validate_content_meta_input,
+    run=_run_content_meta,
+    queued_message="Queued title/summary suggestions.",
+    timeout_seconds=120,
+    timeout_message="AI 建议超时（120 秒），请重试。",
+)
+
+_KINDS[KIND_CONTENT_COVER] = JobKind(
+    name=KIND_CONTENT_COVER,
+    validate=_validate_content_cover_input,
+    run=_run_content_cover,
+    queued_message="Queued cover generation.",
+    timeout_seconds=300,
+    timeout_message="封面生成超时（5 分钟），请重试。",
 )

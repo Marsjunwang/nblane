@@ -295,16 +295,25 @@ def build_blog_visual_prompt(
     config = current_config()
     if clean_type == "cover":
         recommended = size or str(config["default_cover_size"])
+        # The title/summary describe the *topic*; image models tend to typeset
+        # any quoted title verbatim, so frame them as subject matter and
+        # repeat the no-text rule. The page renders the real title in HTML.
         positive = (
-            "Editorial cover image for a public technical blog post. "
+            "Editorial cover illustration for a public technical blog post. "
+            "A purely visual scene. Do not embed title text in the image: no letters, "
+            "words, captions, titles, labels, logos or numbers anywhere. "
             "Use a strong, inspectable subject, layered depth, and generous negative space "
-            "for an HTML/CSS title overlay. Do not embed title text in the image. "
-            f"Blog title: {safe_title or 'untitled post'}. "
-            f"Summary: {safe_summary or _context_excerpt(safe_body, 260)}. "
-            f"Tags: {tags_text or 'general technical writing'}. "
+            "where the page will overlay its own HTML title. "
+            f"Depict the topic of the article (do not write it): {safe_title or 'a technical article'}. "
+            f"Topic details: {safe_summary or _context_excerpt(safe_body, 260)}. "
+            f"Themes: {tags_text or 'general technical writing'}. "
             f"User visual brief: {safe_prompt}."
         )
-        negative = "embedded text, watermark, logo, misspelled words, tiny text, clutter, low contrast"
+        negative = (
+            "text, title, letters, words, characters, Chinese characters, captions, "
+            "typography, watermark, logo, signature, numbers, misspelled words, "
+            "tiny text, clutter, low contrast"
+        )
         rationale = "Cover art should support the article header while leaving the title to HTML."
     elif clean_type == "flowchart":
         recommended = size or str(config["default_diagram_size"])

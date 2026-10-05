@@ -1335,6 +1335,56 @@
     "title": "CodexStatusResponse",
     "type": "object"
    },
+   "ContentAIStatusResponse": {
+    "description": "Configured content-AI features (text = LLM, cover = image provider).",
+    "properties": {
+     "cover": {
+      "default": false,
+      "title": "Cover",
+      "type": "boolean"
+     },
+     "text": {
+      "default": false,
+      "title": "Text",
+      "type": "boolean"
+     }
+    },
+    "title": "ContentAIStatusResponse",
+    "type": "object"
+   },
+   "ContentCoverCandidateRequest": {
+    "properties": {
+     "candidate_path": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Candidate Path",
+      "type": "string"
+     }
+    },
+    "required": [
+     "candidate_path"
+    ],
+    "title": "ContentCoverCandidateRequest",
+    "type": "object"
+   },
+   "ContentCoverPromoteResponse": {
+    "properties": {
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "path": {
+      "title": "Path",
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "title": "ContentCoverPromoteResponse",
+    "type": "object"
+   },
    "ContentMediaModel": {
     "description": "One file in a post's media directory (profile-relative path).",
     "properties": {
@@ -4415,7 +4465,7 @@
     "type": "object"
    },
    "JobCreateRequest": {
-    "description": "Generic async-job creation body (dispatched by ``kind``).\n\n``input`` is validated per kind: ``gap-analysis`` takes ``{task: str}``\n(1–2000 non-blank chars), ``studio-jd-match`` takes ``{resume_md,\njd_text}`` (both non-blank, ≤ 50000 chars each) and\n``project-suggest-refs`` takes ``{case_id: str}`` (non-blank).\nValidation failures answer 422 with the kind's error code\n(``empty_task`` / ``invalid_jd_match_request`` / ``empty_case_id`` /\n``invalid_job_input``).",
+    "description": "Generic async-job creation body (dispatched by ``kind``).\n\n``input`` is validated per kind: ``gap-analysis`` takes ``{task: str}``\n(1–2000 non-blank chars), ``studio-jd-match`` takes ``{resume_md,\njd_text}`` (both non-blank, ≤ 50000 chars each) and\n``project-suggest-refs`` takes ``{case_id: str}`` (non-blank);\ncontent-workspace AI kinds ``content-rewrite`` (``{operation, selection,\ntitle?, context?, instruction?}``), ``content-meta`` (``{title, summary,\ntags, body}``) and ``content-cover`` (``{slug, brief?, style?, title?,\nsummary?, tags?, body?}``) return candidates only and never write posts.\nValidation failures answer 422 with the kind's error code\n(``empty_task`` / ``invalid_jd_match_request`` / ``empty_case_id`` /\n``invalid_job_input``).",
     "properties": {
      "input": {
       "additionalProperties": true,
@@ -11228,6 +11278,76 @@
     "summary": "Get Profile Content"
    }
   },
+  "/api/v1/profiles/{name}/content/ai/status": {
+   "get": {
+    "description": "Which content-AI features are configured (no network calls).\n\nThe editor uses this to disable buttons with an explanation instead of\nletting a job fail. The AI itself runs as jobs (``content-rewrite`` /\n``content-meta`` / ``content-cover``) via ``POST .../jobs``.",
+    "operationId": "get_profile_content_ai_status_api_v1_profiles__name__content_ai_status_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentAIStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Content Ai Status"
+   }
+  },
   "/api/v1/profiles/{name}/content/blog": {
    "post": {
     "description": "Create a blog directly from the content workspace.",
@@ -11638,6 +11758,105 @@
      }
     },
     "summary": "Check Profile Content Blog"
+   }
+  },
+  "/api/v1/profiles/{name}/content/blog/{slug}/cover-candidates/promote": {
+   "post": {
+    "description": "Move a cover candidate into the post's media folder.\n\nLike media upload, the post file itself is not rewritten: the editor puts\nthe returned path into its ``cover`` field and the next save persists it.",
+    "operationId": "promote_profile_content_cover_api_v1_profiles__name__content_blog__slug__cover_candidates_promote_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ContentCoverCandidateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentCoverPromoteResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or blog post not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the studio source files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable."
+     }
+    },
+    "summary": "Promote Profile Content Cover"
    }
   },
   "/api/v1/profiles/{name}/content/blog/{slug}/media": {
@@ -12069,6 +12288,176 @@
      }
     },
     "summary": "Publish Profile Content Blog"
+   }
+  },
+  "/api/v1/profiles/{name}/content/cover-candidates/discard": {
+   "post": {
+    "operationId": "discard_profile_content_cover_api_v1_profiles__name__content_cover_candidates_discard_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ContentCoverCandidateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": {
+          "type": "boolean"
+         },
+         "title": "Response Discard Profile Content Cover Api V1 Profiles  Name  Content Cover Candidates Discard Post",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or blog post not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the studio source files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable."
+     }
+    },
+    "summary": "Discard Profile Content Cover"
+   }
+  },
+  "/api/v1/profiles/{name}/content/cover-candidates/file": {
+   "get": {
+    "description": "Serve one staged cover candidate image (path must stay in the store).",
+    "operationId": "get_profile_content_cover_candidate_api_v1_profiles__name__content_cover_candidates_file_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "path",
+      "required": true,
+      "schema": {
+       "title": "Path",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Content Cover Candidate"
    }
   },
   "/api/v1/profiles/{name}/content/media-file/{media_path}": {

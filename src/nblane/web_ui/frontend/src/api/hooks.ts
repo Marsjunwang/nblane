@@ -110,6 +110,7 @@ import type {
   StudioResponse,
   StudioResult,
   StudioValidationResponse,
+  ContentAIStatus,
   ContentMedia,
   ContentMediaUploadResponse,
   ContentWorkspaceResponse,
@@ -1961,6 +1962,40 @@ export function useUploadContentMedia(profile: string) {
     },
     onSuccess: (_result, { slug }) =>
       void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content', 'media', slug] }),
+  });
+}
+
+/** Which content-AI features are configured on the server. */
+export function useContentAIStatus(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'content', 'ai-status'],
+    queryFn: () => apiGet<ContentAIStatus>(`/profiles/${encodeURIComponent(profile)}/content/ai/status`),
+    enabled: profile.length > 0,
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Browser URL of one staged cover candidate image. */
+export function contentCoverCandidateUrl(profile: string, candidatePath: string): string {
+  const params = new URLSearchParams({ path: candidatePath });
+  return `${apiBase()}/profiles/${encodeURIComponent(profile)}/content/cover-candidates/file?${params}`;
+}
+
+export function usePromoteCoverCandidate(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ slug, candidatePath }: { slug: string; candidatePath: string }) =>
+      apiPost<{ ok: boolean; path: string }>(`${contentBlogPath(profile, slug)}/cover-candidates/promote`, {
+        candidate_path: candidatePath,
+      }),
+    onSuccess: (_result, { slug }) =>
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content', 'media', slug] }),
+  });
+}
+
+export function discardCoverCandidate(profile: string, candidatePath: string): Promise<unknown> {
+  return apiPost(`/profiles/${encodeURIComponent(profile)}/content/cover-candidates/discard`, {
+    candidate_path: candidatePath,
   });
 }
 

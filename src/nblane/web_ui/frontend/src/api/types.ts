@@ -390,6 +390,31 @@ export type ContentWorkspaceResponse = Schemas['ContentWorkspaceResponse'];
 /** ContentMediaModel from web_api/schemas.py (one post media file). */
 export type ContentMedia = Schemas['ContentMediaModel'];
 
+/** ContentAIStatusResponse from web_api/schemas.py (configured AI features). */
+export type ContentAIStatus = Schemas['ContentAIStatusResponse'];
+
+/** Result payloads of the content-* job kinds (web_api/jobs.py). */
+export interface ContentRewriteResult {
+  operation: string;
+  original: string;
+  text: string;
+}
+export interface ContentMetaResult {
+  titles: string[];
+  summaries: string[];
+  tags: string[];
+}
+export interface ContentCoverCandidate {
+  candidate_path: string;
+  filename: string;
+  provider: string;
+  model: string;
+}
+export interface ContentCoverResult {
+  slug: string;
+  candidates: ContentCoverCandidate[];
+}
+
 /** ContentMediaUploadResponse from web_api/schemas.py. */
 export type ContentMediaUploadResponse = Schemas['ContentMediaUploadResponse'];
 export interface CareerDraft { id: string; target: string; path: string; markdown: string; }

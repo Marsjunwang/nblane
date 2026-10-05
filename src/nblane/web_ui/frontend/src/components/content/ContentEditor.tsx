@@ -63,8 +63,13 @@ import {
   useSaveContentPost,
   useUploadContentMedia,
 } from '../../api/hooks';
-import type { ContentMedia, StudioValidationResponse } from '../../api/types';
-import { BlockNoteBlogEditor, type BlockNoteBlogEditorHandle, type EditorBlocks } from '../BlockNoteBlogEditor';
+import type { ContentMedia, ContentRewriteResult, StudioValidationResponse } from '../../api/types';
+import {
+  BlockNoteBlogEditor,
+  type AIRewriteRequest,
+  type BlockNoteBlogEditorHandle,
+  type EditorBlocks,
+} from '../BlockNoteBlogEditor';
 import { isConflictError } from '../ConflictAlert';
 import {
   STATUS_COLORS,
@@ -81,9 +86,13 @@ import {
   type PostDraft,
   wordCount,
 } from './contentDraft';
+import { AICoverGenerator } from './AICoverGenerator';
+import { AIMetaSuggestions } from './AIMetaSuggestions';
+import { AIRewriteDialog, type RewriteState } from './AIRewriteDialog';
+import { runContentJob, type ContentJobHandle } from './contentJobs';
 import { OutlinePanel } from './OutlinePanel';
 import { PostSwitcher } from './PostSwitcher';
-import { useContentWorkspace } from '../../api/hooks';
+import { useContentAIStatus, useContentWorkspace } from '../../api/hooks';
 
 type EditorMode = 'visual' | 'source' | 'preview';
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
@@ -185,6 +194,8 @@ function PostSettings({
   media,
   mediaLoading,
   uploading,
+  aiText,
+  aiCover,
   onEdit,
   onUpload,
   onInsert,
@@ -195,6 +206,8 @@ function PostSettings({
   media: ContentMedia[];
   mediaLoading: boolean;
   uploading: boolean;
+  aiText: boolean;
+  aiCover: boolean;
   onEdit: (patch: Partial<PostDraft>) => void;
   onUpload: (file: File | null) => void;
   onInsert: (item: ContentMedia) => void;
@@ -214,6 +227,7 @@ function PostSettings({
       </Tabs.List>
       <Tabs.Panel value="post" pt="md">
         <Stack gap="md">
+          <AIMetaSuggestions profile={profile} enabled={aiText} draft={draft} onApply={onEdit} />
           <Textarea
             label="摘要"
             description="发布必填；显示在博客列表和分享卡片上"
@@ -241,6 +255,13 @@ function PostSettings({
               <CloseButton size="sm" pos="absolute" top={6} right={6} aria-label="移除封面" onClick={() => onEdit({ cover: '' })} />
             </Box>
           )}
+          <AICoverGenerator
+            profile={profile}
+            slug={slug}
+            enabled={aiCover}
+            draft={draft}
+            onUseCover={(path) => onEdit({ cover: path })}
+          />
           {!published && (
             <Select
               label="可见性"
@@ -288,6 +309,8 @@ function PostSettings({
 
 function PublishDialog({
   opened,
+  profile,
+  aiText,
   draft,
   result,
   checking,
@@ -300,6 +323,8 @@ function PublishDialog({
   onConfirm,
 }: {
   opened: boolean;
+  profile: string;
+  aiText: boolean;
   draft: PostDraft;
   result: StudioValidationResponse | null;
   checking: boolean;
@@ -361,6 +386,15 @@ function PublishDialog({
             data-autofocus
           />
         )}
+        {needsSummary && (
+          <AIMetaSuggestions
+            profile={profile}
+            enabled={aiText}
+            draft={draft}
+            compact
+            onApply={(patch) => patch.summary && onEditSummary(patch.summary)}
+          />
+        )}
         <Group justify="space-between">
           <Button variant="subtle" leftSection={<IconRefresh size={14} />} onClick={onRecheck} loading={checking}>
             重新检查
@@ -398,6 +432,9 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const detail = useContentPost(profile, slug);
   const media = useContentPostMedia(profile, slug);
   const workspace = useContentWorkspace(profile);
+  const aiStatus = useContentAIStatus(profile);
+  const aiText = aiStatus.data?.text ?? false;
+  const aiCover = aiStatus.data?.cover ?? false;
   const save = useSaveContentPost(profile);
   const check = useCheckContentPost(profile);
   const publish = usePublishContentPost(profile);
@@ -420,6 +457,9 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [activeHeading, setActiveHeading] = useState('');
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [rewrite, setRewrite] = useState<(RewriteState & { request: AIRewriteRequest }) | null>(null);
+  const [rewriteView, setRewriteView] = useState<'diff' | 'edit'>('diff');
+  const rewriteJobRef = useRef<ContentJobHandle<ContentRewriteResult> | null>(null);
 
   // Refs mirror the latest state for timers, unload handlers and async saves.
   const draftRef = useRef<PostDraft | null>(null);
@@ -663,6 +703,57 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
 
   const onOutlineChange = useCallback((blocks: EditorBlocks) => setOutline(outlineFromBlocks(blocks)), []);
 
+  const startRewrite = useCallback(
+    (request: AIRewriteRequest) => {
+      rewriteJobRef.current?.cancel();
+      setRewriteView('diff');
+      setRewrite({ request, operation: request.operation, original: request.selection, status: 'running' });
+      const job = runContentJob<ContentRewriteResult>(
+        profile,
+        'content-rewrite',
+        {
+          operation: request.operation,
+          selection: request.selection,
+          context: request.context,
+          title: draftRef.current?.title ?? '',
+        },
+        (message) => setRewrite((current) => (current ? { ...current, progress: message } : current)),
+      );
+      rewriteJobRef.current = job;
+      job.result
+        .then((result) =>
+          setRewrite((current) => (current?.request === request ? { ...current, status: 'done', text: result.text } : current)),
+        )
+        .catch((error: unknown) =>
+          setRewrite((current) =>
+            current?.request === request ? { ...current, status: 'error', error: errorText(error) } : current,
+          ),
+        );
+    },
+    [profile],
+  );
+
+  const closeRewrite = () => {
+    rewriteJobRef.current?.cancel();
+    rewriteJobRef.current = null;
+    setRewrite(null);
+  };
+
+  const acceptRewrite = () => {
+    if (!rewrite?.text) return;
+    const ok = editorRef.current?.replaceCapturedSelection(rewrite.text) ?? false;
+    if (!ok) {
+      notifications.show({
+        color: 'yellow',
+        title: '未替换',
+        message: '选中的原文在 AI 处理期间被修改了。请重新选中后再试。',
+      });
+    }
+    closeRewrite();
+  };
+
+  useEffect(() => () => rewriteJobRef.current?.cancel(), []);
+
   const jumpToHeading = (id: string) => {
     if (mode !== 'visual') setMode('visual');
     window.setTimeout(() => editorRef.current?.scrollToBlock(id), mode === 'visual' ? 0 : 80);
@@ -735,6 +826,8 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
       media={media.data ?? []}
       mediaLoading={media.isPending}
       uploading={upload.isPending}
+      aiText={aiText}
+      aiCover={aiCover}
       onEdit={edit}
       onUpload={uploadFromPanel}
       onInsert={(item) => insertSnippet(mediaSnippet(item.kind, item.path, item.name))}
@@ -1012,6 +1105,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
             onChange={(value) => edit({ body: value.markdown, blocksJson: value.blocksJson })}
             onOutlineChange={onOutlineChange}
             onActiveHeadingChange={setActiveHeading}
+            onAIRewrite={aiText ? startRewrite : undefined}
           />
         </Box>
       )}
@@ -1091,6 +1185,8 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
 
       <PublishDialog
         opened={publishOpen}
+        profile={profile}
+        aiText={aiText}
         draft={draft}
         result={checked?.result ?? null}
         checking={check.isPending}
@@ -1101,6 +1197,16 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
         onRecheck={runCheck}
         onEditSummary={(value) => edit({ summary: value })}
         onConfirm={() => void confirmPublish()}
+      />
+
+      <AIRewriteDialog
+        state={rewrite}
+        view={rewriteView}
+        onViewChange={setRewriteView}
+        onEditCandidate={(text) => setRewrite((current) => (current ? { ...current, text } : current))}
+        onAccept={acceptRewrite}
+        onRetry={() => rewrite && startRewrite(rewrite.request)}
+        onClose={closeRewrite}
       />
 
       <PostSwitcher

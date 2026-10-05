@@ -934,7 +934,11 @@ class JobCreateRequest(BaseModel):
     ``input`` is validated per kind: ``gap-analysis`` takes ``{task: str}``
     (1–2000 non-blank chars), ``studio-jd-match`` takes ``{resume_md,
     jd_text}`` (both non-blank, ≤ 50000 chars each) and
-    ``project-suggest-refs`` takes ``{case_id: str}`` (non-blank).
+    ``project-suggest-refs`` takes ``{case_id: str}`` (non-blank);
+    content-workspace AI kinds ``content-rewrite`` (``{operation, selection,
+    title?, context?, instruction?}``), ``content-meta`` (``{title, summary,
+    tags, body}``) and ``content-cover`` (``{slug, brief?, style?, title?,
+    summary?, tags?, body?}``) return candidates only and never write posts.
     Validation failures answer 422 with the kind's error code
     (``empty_task`` / ``invalid_jd_match_request`` / ``empty_case_id`` /
     ``invalid_job_input``).
@@ -2341,6 +2345,22 @@ class ContentMediaUploadResponse(BaseModel):
     kind: str
     size: int = 0
     snippet: str = ""
+
+
+class ContentAIStatusResponse(BaseModel):
+    """Configured content-AI features (text = LLM, cover = image provider)."""
+
+    text: bool = False
+    cover: bool = False
+
+
+class ContentCoverCandidateRequest(BaseModel):
+    candidate_path: str = Field(min_length=1, max_length=500)
+
+
+class ContentCoverPromoteResponse(BaseModel):
+    ok: bool = True
+    path: str
 
 
 class ContentWorkspaceResponse(BaseModel):

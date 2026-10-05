@@ -2,13 +2,18 @@ import { filterSuggestionItems } from '@blocknote/core';
 import { zh } from '@blocknote/core/locales';
 import { BlockNoteView } from '@blocknote/mantine';
 import {
+  FormattingToolbar,
+  FormattingToolbarController,
   getDefaultReactSlashMenuItems,
+  getFormattingToolbarItems,
   SuggestionMenuController,
+  useComponentsContext,
   useCreateBlockNote,
 } from '@blocknote/react';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import { Alert, Textarea } from '@mantine/core';
+import { IconSparkles } from '@tabler/icons-react';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 
 import {
@@ -40,7 +45,30 @@ export interface BlockNoteBlogEditorHandle {
   focusStart: () => void;
   /** Scroll a heading block into view and place the caret in it. */
   scrollToBlock: (id: string) => void;
+  /**
+   * Replace the selection captured by the last AI rewrite request with
+   * *markdown*. Returns false when that text changed meanwhile (nothing is
+   * written then).
+   */
+  replaceCapturedSelection: (markdown: string) => boolean;
 }
+
+/** One selection rewrite request raised from the formatting toolbar. */
+export interface AIRewriteRequest {
+  operation: string;
+  /** Selected passage as Markdown (formatting preserved). */
+  selection: string;
+  /** Neighbouring paragraphs, for the model's context only. */
+  context: string;
+}
+
+export const AI_REWRITE_MENU: Array<{ operation: string; label: string }> = [
+  { operation: 'polish', label: '润色' },
+  { operation: 'shorten', label: '精简' },
+  { operation: 'expand', label: '扩写' },
+  { operation: 'tone', label: '调整为专业语气' },
+  { operation: 'translate', label: '翻译' },
+];
 
 export interface BlockNoteBlogEditorProps {
   /** Initial content. The editor is uncontrolled: remount (key) to reload. */
@@ -59,6 +87,8 @@ export interface BlockNoteBlogEditorProps {
   onOutlineChange?: (blocks: EditorBlocks) => void;
   /** data-id of the heading nearest the caret, for outline highlighting. */
   onActiveHeadingChange?: (id: string) => void;
+  /** Show the toolbar AI menu; called with the selected passage. */
+  onAIRewrite?: (request: AIRewriteRequest) => void;
 }
 
 const SLASH_LABELS = {
@@ -88,6 +118,34 @@ function topLevelBlockId(blocks: EditorBlocks, id: string): string {
   return hit ? String(hit.id) : id;
 }
 
+/** "AI" dropdown appended to BlockNote's formatting toolbar. */
+function AIRewriteMenu({ onPick }: { onPick: (operation: string) => void }) {
+  const Components = useComponentsContext();
+  if (!Components) return null;
+  const { Menu, Toolbar } = Components.Generic;
+  return (
+    <Menu.Root position="bottom-start">
+      <Menu.Trigger>
+        <Toolbar.Button
+          mainTooltip="AI 改写选中内容"
+          icon={<IconSparkles size={16} />}
+          label="AI"
+          className="nb-ai-toolbar-button"
+        >
+          AI
+        </Toolbar.Button>
+      </Menu.Trigger>
+      <Menu.Dropdown className="bn-menu-dropdown">
+        {AI_REWRITE_MENU.map((item) => (
+          <Menu.Item key={item.operation} onClick={() => onPick(item.operation)}>
+            {item.label}
+          </Menu.Item>
+        ))}
+      </Menu.Dropdown>
+    </Menu.Root>
+  );
+}
+
 export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNoteBlogEditorProps>(
   function BlockNoteBlogEditor(
     {
@@ -101,6 +159,7 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
       onChange,
       onOutlineChange,
       onActiveHeadingChange,
+      onAIRewrite,
     },
     ref,
   ) {
@@ -114,6 +173,10 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
     onOutlineRef.current = onOutlineChange;
     const onActiveHeadingRef = useRef(onActiveHeadingChange);
     onActiveHeadingRef.current = onActiveHeadingChange;
+    const onAIRewriteRef = useRef(onAIRewrite);
+    onAIRewriteRef.current = onAIRewrite;
+    // ProseMirror range + plain text of the selection sent to the AI.
+    const capturedRef = useRef<{ from: number; to: number; text: string } | null>(null);
 
     const editor = useCreateBlockNote({
       schema: blogSchema as never,
@@ -198,6 +261,17 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
           if (first) editor.setTextCursorPosition(first, 'start');
           editor.focus();
         },
+        replaceCapturedSelection: (markdown: string) => {
+          const captured = capturedRef.current;
+          if (!captured || sourceMode) return false;
+          const doc = editor.prosemirrorState.doc;
+          if (captured.to > doc.content.size) return false;
+          if (doc.textBetween(captured.from, captured.to, '\n\n') !== captured.text) return false;
+          editor._tiptapEditor.commands.setTextSelection({ from: captured.from, to: captured.to });
+          editor.pasteMarkdown(markdown.trim());
+          capturedRef.current = null;
+          return true;
+        },
         scrollToBlock: (id: string) => {
           if (sourceMode || !id) return;
           const node = document.querySelector(`[data-id="${CSS.escape(id)}"]`);
@@ -238,6 +312,36 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
         onActiveHeadingRef.current?.(activeHeading);
       });
     }, [editor, sourceMode]);
+
+    const requestAIRewrite = useCallback(
+      (operation: string) => {
+        const { from, to } = editor.prosemirrorState.selection;
+        if (from === to) return;
+        const cut = editor.getSelectionCutBlocks();
+        const selection = (editor.blocksToMarkdownLossy(cut.blocks as never) || editor.getSelectedText()).trim();
+        if (!selection) return;
+        capturedRef.current = { from, to, text: editor.prosemirrorState.doc.textBetween(from, to, '\n\n') };
+        // Two top-level neighbours on each side give the model the local thread.
+        const top = editor.document as unknown as EditorBlocks;
+        const firstId = topLevelBlockId(top, String(cut.blocks[0]?.id ?? ''));
+        const lastId = topLevelBlockId(top, String(cut.blocks[cut.blocks.length - 1]?.id ?? ''));
+        const start = Math.max(0, top.findIndex((block) => block.id === firstId) - 2);
+        const endIndex = top.findIndex((block) => block.id === lastId);
+        const end = endIndex < 0 ? start : Math.min(top.length, endIndex + 3);
+        const context = editor.blocksToMarkdownLossy(top.slice(start, end) as never);
+        onAIRewriteRef.current?.({ operation, selection, context });
+      },
+      [editor],
+    );
+
+    const aiToolbar = useCallback(
+      () => (
+        <FormattingToolbar>
+          {[...getFormattingToolbarItems(), <AIRewriteMenu key="nb-ai" onPick={requestAIRewrite} />]}
+        </FormattingToolbar>
+      ),
+      [requestAIRewrite],
+    );
 
     const getSlashItems = useCallback(
       async (query: string) =>
@@ -288,6 +392,7 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
             editable={!readOnly}
             theme="dark"
             slashMenu={false}
+            formattingToolbar={!onAIRewrite}
             onChange={() => {
               if (hydratingRef.current) return;
               onChangeRef.current({
@@ -297,6 +402,7 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
             }}
           >
             <SuggestionMenuController triggerCharacter="/" getItems={getSlashItems} />
+            {onAIRewrite && <FormattingToolbarController formattingToolbar={aiToolbar} />}
           </BlockNoteView>
         )}
       </div>
