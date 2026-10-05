@@ -41,6 +41,12 @@ source_of_truth: true
 | [issues.md](project/issues.md) | 当前问题、风险与待处理项 |
 | [decisions.md](project/decisions.md) | 关键产品/架构决策 |
 
+### Development
+
+| 文档 | 作用 |
+|------|------|
+| [public-output-workspaces-design.md](dev/public-output-workspaces-design.md) | 内容工作台、求职工作台与公开站点的产品边界、数据契约和开发计划 |
+
 ### Architecture
 
 | 文档 | 作用 |

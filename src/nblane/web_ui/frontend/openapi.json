@@ -655,6 +655,238 @@
     "title": "AssistantStatusResponse",
     "type": "object"
    },
+   "Body_upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post": {
+    "properties": {
+     "file": {
+      "contentMediaType": "application/octet-stream",
+      "title": "File",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file"
+    ],
+    "title": "Body_upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post",
+    "type": "object"
+   },
+   "Body_upload_profile_content_blog_media_api_v1_profiles__name__content_blog__slug__media_post": {
+    "properties": {
+     "file": {
+      "contentMediaType": "application/octet-stream",
+      "title": "File",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file"
+    ],
+    "title": "Body_upload_profile_content_blog_media_api_v1_profiles__name__content_blog__slug__media_post",
+    "type": "object"
+   },
+   "CareerDraftModel": {
+    "properties": {
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "markdown": {
+      "default": "",
+      "title": "Markdown",
+      "type": "string"
+     },
+     "path": {
+      "default": "",
+      "title": "Path",
+      "type": "string"
+     },
+     "target": {
+      "default": "",
+      "title": "Target",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "CareerDraftModel",
+    "type": "object"
+   },
+   "CareerDraftRequest": {
+    "properties": {
+     "markdown": {
+      "maxLength": 200000,
+      "minLength": 1,
+      "title": "Markdown",
+      "type": "string"
+     },
+     "overwrite": {
+      "default": false,
+      "title": "Overwrite",
+      "type": "boolean"
+     },
+     "target": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Target",
+      "type": "string"
+     }
+    },
+    "required": [
+     "target",
+     "markdown"
+    ],
+    "title": "CareerDraftRequest",
+    "type": "object"
+   },
+   "CareerExportResponse": {
+    "properties": {
+     "html_path": {
+      "title": "Html Path",
+      "type": "string"
+     },
+     "markdown_path": {
+      "title": "Markdown Path",
+      "type": "string"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "version_id": {
+      "title": "Version Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "version_id",
+     "markdown_path",
+     "html_path"
+    ],
+    "title": "CareerExportResponse",
+    "type": "object"
+   },
+   "CareerMatchRequest": {
+    "properties": {
+     "jd_text": {
+      "default": "",
+      "maxLength": 50000,
+      "title": "Jd Text",
+      "type": "string"
+     },
+     "resume_md": {
+      "default": "",
+      "maxLength": 50000,
+      "title": "Resume Md",
+      "type": "string"
+     }
+    },
+    "title": "CareerMatchRequest",
+    "type": "object"
+   },
+   "CareerMatchResponse": {
+    "properties": {
+     "analysis": {
+      "additionalProperties": true,
+      "title": "Analysis",
+      "type": "object"
+     },
+     "job_id": {
+      "title": "Job Id",
+      "type": "string"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "job_id"
+    ],
+    "title": "CareerMatchResponse",
+    "type": "object"
+   },
+   "CareerResumeUpdateRequest": {
+    "description": "Structured resume replacement; unknown fields are preserved.",
+    "properties": {
+     "resume": {
+      "additionalProperties": true,
+      "title": "Resume",
+      "type": "object"
+     }
+    },
+    "title": "CareerResumeUpdateRequest",
+    "type": "object"
+   },
+   "CareerUploadResponse": {
+    "properties": {
+     "error": {
+      "default": "",
+      "title": "Error",
+      "type": "string"
+     },
+     "filename": {
+      "default": "",
+      "title": "Filename",
+      "type": "string"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "save_options": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Save Options",
+      "type": "array"
+     },
+     "text": {
+      "default": "",
+      "title": "Text",
+      "type": "string"
+     }
+    },
+    "title": "CareerUploadResponse",
+    "type": "object"
+   },
+   "CareerWorkspaceResponse": {
+    "properties": {
+     "drafts": {
+      "items": {
+       "$ref": "#/components/schemas/CareerDraftModel"
+      },
+      "title": "Drafts",
+      "type": "array"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "resume": {
+      "additionalProperties": true,
+      "title": "Resume",
+      "type": "object"
+     },
+     "resume_etag": {
+      "default": "",
+      "title": "Resume Etag",
+      "type": "string"
+     },
+     "resume_markdown": {
+      "default": "",
+      "title": "Resume Markdown",
+      "type": "string"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "CareerWorkspaceResponse",
+    "type": "object"
+   },
    "CheckinCreateRequest": {
     "description": "Body for POST .../checkins (append one habit check-in).\n\n``habit`` accepts a habit id or title (resolved like the core helpers);\n``project_id`` is an alternative entry point that resolves through the\nhabit<->project link. ``date`` defaults to today; ``count`` must be\ngreater than zero. ``plan_id`` optionally binds the check-in to an\nactive habit plan of the same habit; the backend then derives and\nstores the plan-relative ``week_number`` (clients never send it).",
     "properties": {
@@ -1101,6 +1333,101 @@
      }
     },
     "title": "CodexStatusResponse",
+    "type": "object"
+   },
+   "ContentMediaModel": {
+    "description": "One file in a post's media directory (profile-relative path).",
+    "properties": {
+     "cover": {
+      "default": false,
+      "title": "Cover",
+      "type": "boolean"
+     },
+     "kind": {
+      "default": "",
+      "title": "Kind",
+      "type": "string"
+     },
+     "name": {
+      "default": "",
+      "title": "Name",
+      "type": "string"
+     },
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
+     "referenced": {
+      "default": false,
+      "title": "Referenced",
+      "type": "boolean"
+     },
+     "size": {
+      "default": 0,
+      "title": "Size",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "title": "ContentMediaModel",
+    "type": "object"
+   },
+   "ContentMediaUploadResponse": {
+    "properties": {
+     "kind": {
+      "title": "Kind",
+      "type": "string"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
+     "size": {
+      "default": 0,
+      "title": "Size",
+      "type": "integer"
+     },
+     "snippet": {
+      "default": "",
+      "title": "Snippet",
+      "type": "string"
+     }
+    },
+    "required": [
+     "path",
+     "kind"
+    ],
+    "title": "ContentMediaUploadResponse",
+    "type": "object"
+   },
+   "ContentWorkspaceResponse": {
+    "properties": {
+     "posts": {
+      "items": {
+       "$ref": "#/components/schemas/StudioPostModel"
+      },
+      "title": "Posts",
+      "type": "array"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "summary": {
+      "$ref": "#/components/schemas/StudioSummaryModel"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "ContentWorkspaceResponse",
     "type": "object"
    },
    "CrystallizeApplyRequest": {
@@ -8228,6 +8555,14 @@
    "StudioPostDetailModel": {
     "description": "One public blog post, editor view (meta + Markdown body).\n\n``meta`` carries the full front matter for round-trip fidelity (editor\nfields are whitelisted on save; unknown keys survive untouched).\n``has_math`` mirrors the Streamlit math-safe rule: bodies containing\nLaTeX stay on the Markdown source editor.",
     "properties": {
+     "blocks_json": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "title": "Blocks Json",
+      "type": "array"
+     },
      "body": {
       "default": "",
       "title": "Body",
@@ -8423,6 +8758,21 @@
    "StudioPostSaveRequest": {
     "description": "Body for the blog save (``None`` fields keep the current value).",
     "properties": {
+     "blocks_json": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Blocks Json"
+     },
      "body": {
       "anyOf": [
        {
@@ -9562,6 +9912,959 @@
     "summary": "Dismiss Profile Ai Exceptions"
    }
   },
+  "/api/v1/profiles/{name}/career": {
+   "get": {
+    "operationId": "get_profile_career_api_v1_profiles__name__career_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerWorkspaceResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Career"
+   }
+  },
+  "/api/v1/profiles/{name}/career/match": {
+   "post": {
+    "operationId": "match_profile_career_api_v1_profiles__name__career_match_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CareerMatchRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerMatchResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Match Profile Career"
+   }
+  },
+  "/api/v1/profiles/{name}/career/match/{job_id}": {
+   "get": {
+    "operationId": "get_profile_career_match_api_v1_profiles__name__career_match__job_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "job_id",
+      "required": true,
+      "schema": {
+       "title": "Job Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerMatchResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Career Match"
+   }
+  },
+  "/api/v1/profiles/{name}/career/match/{job_id}/events": {
+   "get": {
+    "operationId": "get_profile_career_match_events_api_v1_profiles__name__career_match__job_id__events_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "job_id",
+      "required": true,
+      "schema": {
+       "title": "Job Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Get Profile Career Match Events Api V1 Profiles  Name  Career Match  Job Id  Events Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Career Match Events"
+   }
+  },
+  "/api/v1/profiles/{name}/career/resume": {
+   "get": {
+    "operationId": "get_profile_career_resume_api_v1_profiles__name__career_resume_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerWorkspaceResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Career Resume"
+   },
+   "put": {
+    "operationId": "update_profile_career_resume_api_v1_profiles__name__career_resume_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CareerResumeUpdateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerWorkspaceResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Precondition Failed"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Update Profile Career Resume"
+   }
+  },
+  "/api/v1/profiles/{name}/career/resume/parse": {
+   "post": {
+    "operationId": "parse_profile_career_resume_api_v1_profiles__name__career_resume_parse_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "filename",
+      "required": false,
+      "schema": {
+       "default": "resume.txt",
+       "title": "Filename",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "content",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Content",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerUploadResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Parse Profile Career Resume"
+   }
+  },
+  "/api/v1/profiles/{name}/career/resume/upload": {
+   "post": {
+    "operationId": "upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerUploadResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Upload Profile Career Resume"
+   }
+  },
+  "/api/v1/profiles/{name}/career/versions": {
+   "get": {
+    "operationId": "list_profile_career_versions_api_v1_profiles__name__career_versions_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/CareerDraftModel"
+         },
+         "title": "Response List Profile Career Versions Api V1 Profiles  Name  Career Versions Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "List Profile Career Versions"
+   },
+   "post": {
+    "operationId": "create_profile_career_version_api_v1_profiles__name__career_versions_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CareerDraftRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerDraftModel"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Create Profile Career Version"
+   }
+  },
+  "/api/v1/profiles/{name}/career/versions/{version_id}": {
+   "get": {
+    "operationId": "get_profile_career_version_api_v1_profiles__name__career_versions__version_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "version_id",
+      "required": true,
+      "schema": {
+       "title": "Version Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerDraftModel"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Career Version"
+   }
+  },
+  "/api/v1/profiles/{name}/career/versions/{version_id}/export": {
+   "post": {
+    "description": "Render a reviewed tailored Markdown draft to portable HTML + Markdown.",
+    "operationId": "export_profile_career_version_api_v1_profiles__name__career_versions__version_id__export_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "version_id",
+      "required": true,
+      "schema": {
+       "title": "Version Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerExportResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Export Profile Career Version"
+   }
+  },
   "/api/v1/profiles/{name}/checkins": {
    "post": {
     "description": "Append one habit check-in to the activity log (agent-facing hook).\n\n``habit`` accepts a habit id or title (core resolution); ``project_id``\nis an alternative that resolves through the habit<->project name link.\n``date`` defaults to today and must be an ISO date when given.\n``plan_id`` optionally binds the check-in to an active habit plan of the\nsame habit (422 when the plan is unknown, belongs to another habit, is\nnot active, or the date falls outside the plan window); the backend\nderives and stores the plan-relative ``week_number`` and\n``day_number``. The write\ngoes through ``core.activity_log.add_activity_checkin`` under the\nactivity-log write lock. Honors ``If-Match`` (412 on mismatch, fresh\nETag in the header).",
@@ -9853,6 +11156,986 @@
      }
     },
     "summary": "Get Profile Chronicle"
+   }
+  },
+  "/api/v1/profiles/{name}/content": {
+   "get": {
+    "description": "Content-only projection; it never loads evidence or claims.",
+    "operationId": "get_profile_content_api_v1_profiles__name__content_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentWorkspaceResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Content"
+   }
+  },
+  "/api/v1/profiles/{name}/content/blog": {
+   "post": {
+    "description": "Create a blog directly from the content workspace.",
+    "operationId": "create_profile_content_blog_api_v1_profiles__name__content_blog_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/StudioPostCreateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StudioPostMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or blog post not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the studio source files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable."
+     }
+    },
+    "summary": "Create Profile Content Blog"
+   }
+  },
+  "/api/v1/profiles/{name}/content/blog/{slug}": {
+   "get": {
+    "operationId": "get_profile_content_blog_api_v1_profiles__name__content_blog__slug__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StudioPostDetailModel"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Content Blog"
+   },
+   "put": {
+    "description": "Conflict-safe save that cannot flip a post to ``published``.\n\nPublishing must go through ``.../publish`` so the readiness gate runs;\na plain save that asks for ``published`` on an unpublished post is 422.",
+    "operationId": "save_profile_content_blog_api_v1_profiles__name__content_blog__slug__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/StudioPostSaveRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StudioPostMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or blog post not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the studio source files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable."
+     }
+    },
+    "summary": "Save Profile Content Blog"
+   }
+  },
+  "/api/v1/profiles/{name}/content/blog/{slug}/check": {
+   "post": {
+    "operationId": "check_profile_content_blog_api_v1_profiles__name__content_blog__slug__check_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/StudioPostSaveRequest"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StudioValidationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or blog post not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the studio source files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable."
+     }
+    },
+    "summary": "Check Profile Content Blog"
+   }
+  },
+  "/api/v1/profiles/{name}/content/blog/{slug}/media": {
+   "get": {
+    "operationId": "list_profile_content_blog_media_api_v1_profiles__name__content_blog__slug__media_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ContentMediaModel"
+         },
+         "title": "Response List Profile Content Blog Media Api V1 Profiles  Name  Content Blog  Slug  Media Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "List Profile Content Blog Media"
+   },
+   "post": {
+    "description": "Store one media file for a post without touching the post itself.\n\nThe editor inserts the returned snippet into its own document and the\nnext save persists it; writing the post here would race the editor's\nunsaved state and bump its ETag underneath it.",
+    "operationId": "upload_profile_content_blog_media_api_v1_profiles__name__content_blog__slug__media_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "kind",
+      "required": false,
+      "schema": {
+       "default": "image",
+       "title": "Kind",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "alt",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Alt",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "caption",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Caption",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_upload_profile_content_blog_media_api_v1_profiles__name__content_blog__slug__media_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentMediaUploadResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or blog post not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the studio source files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable."
+     }
+    },
+    "summary": "Upload Profile Content Blog Media"
+   }
+  },
+  "/api/v1/profiles/{name}/content/blog/{slug}/media/{media_path}": {
+   "delete": {
+    "operationId": "delete_profile_content_blog_media_api_v1_profiles__name__content_blog__slug__media__media_path__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "media_path",
+      "required": true,
+      "schema": {
+       "title": "Media Path",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": {
+          "type": "boolean"
+         },
+         "title": "Response Delete Profile Content Blog Media Api V1 Profiles  Name  Content Blog  Slug  Media  Media Path  Delete",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or blog post not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the studio source files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable."
+     }
+    },
+    "summary": "Delete Profile Content Blog Media"
+   }
+  },
+  "/api/v1/profiles/{name}/content/blog/{slug}/publish": {
+   "post": {
+    "operationId": "publish_profile_content_blog_api_v1_profiles__name__content_blog__slug__publish_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/StudioPostSaveRequest"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StudioPostMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or blog post not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the studio source files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable."
+     }
+    },
+    "summary": "Publish Profile Content Blog"
+   }
+  },
+  "/api/v1/profiles/{name}/content/media-file/{media_path}": {
+   "get": {
+    "description": "Serve one file under ``media/`` so the SPA editor can show images.\n\nBlog bodies reference media as profile-relative ``media/...`` paths; the\neditor resolves them to this URL. Anything outside ``media/`` is 404.",
+    "operationId": "get_profile_content_media_file_api_v1_profiles__name__content_media_file__media_path__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "media_path",
+      "required": true,
+      "schema": {
+       "title": "Media Path",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Content Media File"
    }
   },
   "/api/v1/profiles/{name}/crystallize/apply": {

@@ -336,7 +336,9 @@ export type ProjectSuggestRefsResponse = Schemas['ProjectSuggestRefsResponse'];
 export type StudioPost = Schemas['StudioPostModel'];
 
 /** StudioPostDetailModel from web_api/schemas.py (editor view). */
-export type StudioPostDetail = Schemas['StudioPostDetailModel'];
+export type StudioPostDetail = Schemas['StudioPostDetailModel'] & {
+  blocks_json?: Array<Record<string, unknown>>;
+};
 
 /** StudioSourceOptionModel from web_api/schemas.py ({id, label} picker row). */
 export type StudioSourceOption = Schemas['StudioSourceOptionModel'];
@@ -357,7 +359,9 @@ export type StudioInitResponse = Schemas['StudioInitResponse'];
 export type StudioPostCreateRequest = Schemas['StudioPostCreateRequest'];
 
 /** StudioPostSaveRequest from web_api/schemas.py (None fields keep values). */
-export type StudioPostSaveRequest = Schemas['StudioPostSaveRequest'];
+export type StudioPostSaveRequest = Schemas['StudioPostSaveRequest'] & {
+  blocks_json?: Array<Record<string, unknown>>;
+};
 
 /** StudioValidationResponse from web_api/schemas.py (publish check). */
 export type StudioValidationResponse = Schemas['StudioValidationResponse'];
@@ -379,6 +383,34 @@ export type StudioJdMatchRequest = Schemas['StudioJdMatchRequest'];
 
 /** StudioJdMatchResponse from web_api/schemas.py. */
 export type StudioJdMatchResponse = Schemas['StudioJdMatchResponse'];
+
+/** ContentWorkspaceResponse from web_api/schemas.py (blog list only). */
+export type ContentWorkspaceResponse = Schemas['ContentWorkspaceResponse'];
+
+/** ContentMediaModel from web_api/schemas.py (one post media file). */
+export type ContentMedia = Schemas['ContentMediaModel'];
+
+/** ContentMediaUploadResponse from web_api/schemas.py. */
+export type ContentMediaUploadResponse = Schemas['ContentMediaUploadResponse'];
+export interface CareerDraft { id: string; target: string; path: string; markdown: string; }
+export interface CareerWorkspaceResponse {
+  profile: string;
+  resume: Record<string, unknown>;
+  resume_markdown: string;
+  resume_etag: string;
+  drafts: CareerDraft[];
+}
+export interface CareerUploadResponse {
+  ok: boolean; filename: string; text: string; error: string; save_options: string[];
+}
+export interface CareerMatchResponse {
+  ok: boolean; job_id: string; analysis: {
+    score: number; summary: string; key_requirements: string[]; covered: string[];
+    gaps: string[]; keyword_suggestions: string[]; strengthen: string[];
+    de_emphasize: string[]; interview_questions: string[];
+  };
+}
+export interface CareerExportResponse { ok: boolean; version_id: string; markdown_path: string; html_path: string; }
 
 /** PublicBuildValidationModel from web_api/schemas.py (public-layer check). */
 export type PublicBuildValidation = Schemas['PublicBuildValidationModel'];

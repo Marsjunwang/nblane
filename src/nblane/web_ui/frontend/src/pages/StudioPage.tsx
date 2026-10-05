@@ -814,7 +814,7 @@ export function StudioPage() {
   if (studio.isError || !studio.data) {
     return (
       <Alert color="red" title="加载失败">
-        {studio.error?.message ?? '无法加载输出工作室。'}
+        {studio.error?.message ?? '无法加载兼容内容编辑页。'}
       </Alert>
     );
   }
@@ -824,7 +824,7 @@ export function StudioPage() {
 
   return (
     <Stack gap="md">
-      <Title order={2}>{name} · 输出工作室</Title>
+      <Title order={2}>{name} · 兼容内容编辑页</Title>
       <Text size="sm" c="dimmed">
         从证据、断言与研究来源生成可追溯公开输出。
       </Text>

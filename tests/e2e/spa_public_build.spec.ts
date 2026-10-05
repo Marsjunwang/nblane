@@ -41,7 +41,7 @@ test.describe("SPA Public Build (公开构建)", () => {
     // Drafts section and the by-design notes card render.
     await expect(page.getByTestId("draft-list")).toBeVisible();
     await expect(page.getByTestId("build-notes")).toContainText("同步");
-    await expect(page.getByTestId("build-notes")).toContainText("输出工作室");
+    await expect(page.getByTestId("build-notes")).toContainText("内容工作台");
 
     // 触发构建: dev 档案 visibility=private → 必须开「包含草稿」预览模式。
     await page.getByRole("switch", { name: /包含草稿/ }).click();

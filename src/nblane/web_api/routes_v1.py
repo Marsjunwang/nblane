@@ -42,11 +42,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi import APIRouter, Depends, File, Header, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from nblane.core import agent_activity, agent_tasks, file_state, gap, inbox
+from nblane.core import career_workspace, content_workspace
+from nblane.core.resume_extract import extract_resume_text
 from nblane.core.ai.exceptions import collect_profile_exceptions
 from nblane.core import chronicle as chronicle_core
 from nblane.core import north_star as north_star_core
@@ -111,10 +113,12 @@ from nblane.core.public_site import (
     PUBLISH_STATUSES,
     RESUME_SOURCE_FILENAME,
     PublicSiteError,
+    add_blog_media_bytes,
     blog_candidate_from_claims,
     blog_candidate_from_evidence,
     build_public_site,
     create_blog_draft,
+    delete_blog_media,
     draft_blog_from_claims,
     draft_blog_from_evidence,
     draft_project_update_from_claims,
@@ -130,6 +134,7 @@ from nblane.core.public_site import (
     publish_blog_text,
     render_public_site_pages,
     render_public_site_preview,
+    generate_resume_files,
     resume_bullet_candidates_from_claims,
     save_blog_post,
     validate_blog_text_for_publish,
@@ -367,6 +372,17 @@ from nblane.web_api.schemas import (
     StudioInitResponse,
     StudioJdMatchRequest,
     StudioJdMatchResponse,
+    CareerDraftModel,
+    CareerDraftRequest,
+    CareerExportResponse,
+    CareerMatchRequest,
+    CareerMatchResponse,
+    CareerResumeUpdateRequest,
+    CareerUploadResponse,
+    CareerWorkspaceResponse,
+    ContentMediaModel,
+    ContentMediaUploadResponse,
+    ContentWorkspaceResponse,
     StudioOptionsModel,
     StudioPostCreateRequest,
     StudioPostDetailModel,
@@ -7451,6 +7467,7 @@ def _studio_post_detail(post) -> StudioPostDetailModel:
             post.meta.get("related_research_claims")
         ),
         related_citations=_string_list(post.meta.get("related_citations")),
+        blocks_json=[dict(block) for block in (post.blocks_json or [])],
     )
 
 
@@ -7770,6 +7787,7 @@ def save_profile_studio_post(
             post.slug,
             meta,
             text_body,
+            blocks_json=body.blocks_json,
             expected_snapshot=file_state.snapshot_file(post.path),
             expected_sidecar_snapshot=(
                 file_state.snapshot_file(post.sidecar_path)
@@ -7867,6 +7885,7 @@ def publish_profile_studio_post(
             post.slug,
             meta,
             text_body,
+            blocks_json=body.blocks_json if body is not None else post.blocks_json,
             expected_snapshot=file_state.snapshot_file(post.path),
             expected_sidecar_snapshot=(
                 file_state.snapshot_file(post.sidecar_path)
@@ -8113,6 +8132,424 @@ def analyze_profile_studio_jd_match(
     if analysis.startswith(("LLM error:", "AI features")):
         raise ApiError(422, "studio_jd_match_failed", analysis)
     return StudioJdMatchResponse(ok=True, analysis=analysis)
+
+
+# --- Content workspace -------------------------------------------------------
+#
+# Route order matters: ``{slug:path}`` is greedy, so the more specific
+# ``.../media`` GET must be registered before the bare post GET or it is
+# swallowed as a slug ending in "/media".
+
+
+def _content_media_model(row: dict[str, Any]) -> ContentMediaModel:
+    return ContentMediaModel(**row)
+
+
+@router.get(
+    "/profiles/{name}/content",
+    response_model=ContentWorkspaceResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_content(name: str, response: Response) -> ContentWorkspaceResponse:
+    """Content-only projection; it never loads evidence or claims."""
+    pdir = _resolve_profile(name)
+    data = content_workspace.overview(pdir.name)
+    response.headers["ETag"] = _studio_etag(pdir)
+    return ContentWorkspaceResponse(
+        profile=pdir.name,
+        posts=[StudioPostModel(**post) for post in data["posts"]],
+        summary=StudioSummaryModel(**data["summary"]),
+    )
+
+
+@router.get(
+    "/profiles/{name}/content/media-file/{media_path:path}",
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_content_media_file(name: str, media_path: str) -> FileResponse:
+    """Serve one file under ``media/`` so the SPA editor can show images.
+
+    Blog bodies reference media as profile-relative ``media/...`` paths; the
+    editor resolves them to this URL. Anything outside ``media/`` is 404.
+    """
+    pdir = _resolve_profile(name)
+    target = content_workspace.media_file(pdir.name, media_path)
+    if target is None:
+        raise ApiError(404, "content_media_not_found", "Unknown media file")
+    return FileResponse(target)
+
+
+@router.get(
+    "/profiles/{name}/content/blog/{slug:path}/media",
+    response_model=list[ContentMediaModel],
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def list_profile_content_blog_media(name: str, slug: str) -> list[ContentMediaModel]:
+    pdir = _resolve_profile(name)
+    post = _load_studio_post(pdir, slug)
+    return [_content_media_model(row) for row in content_workspace.post_media(pdir.name, post)]
+
+
+@router.get(
+    "/profiles/{name}/content/blog/{slug:path}",
+    response_model=StudioPostDetailModel,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_content_blog(name: str, slug: str, response: Response) -> StudioPostDetailModel:
+    pdir = _resolve_profile(name)
+    post = _load_studio_post(pdir, slug)
+    response.headers["ETag"] = _studio_post_etag(post)
+    return _studio_post_detail(post)
+
+
+@router.post(
+    "/profiles/{name}/content/blog/{slug:path}/media",
+    response_model=ContentMediaUploadResponse,
+    responses=STUDIO_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+async def upload_profile_content_blog_media(
+    name: str,
+    slug: str,
+    file: UploadFile = File(...),
+    kind: str = Query(default="image"),
+    alt: str = Query(default=""),
+    caption: str = Query(default=""),
+) -> ContentMediaUploadResponse:
+    """Store one media file for a post without touching the post itself.
+
+    The editor inserts the returned snippet into its own document and the
+    next save persists it; writing the post here would race the editor's
+    unsaved state and bump its ETag underneath it.
+    """
+    pdir = _resolve_profile(name)
+    post = _load_studio_post(pdir, slug)
+    try:
+        result = add_blog_media_bytes(
+            pdir.name,
+            post.slug,
+            data=await file.read(),
+            filename=file.filename or "upload",
+            kind=kind,
+            alt=alt,
+            caption=caption,
+            cover=False,
+            append=False,
+        )
+    except PublicSiteError as exc:
+        raise ApiError(422, "content_media_upload_failed", str(exc)) from exc
+    return ContentMediaUploadResponse(
+        path=result.relative_path,
+        kind=kind.strip().lower(),
+        size=result.path.stat().st_size,
+        snippet=result.snippet,
+    )
+
+
+@router.delete(
+    "/profiles/{name}/content/blog/{slug:path}/media/{media_path:path}",
+    responses=STUDIO_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def delete_profile_content_blog_media(name: str, slug: str, media_path: str) -> dict[str, bool]:
+    pdir = _resolve_profile(name)
+    post = _load_studio_post(pdir, slug)
+    try:
+        delete_blog_media(pdir.name, post.slug, media_path)
+    except PublicSiteError as exc:
+        raise ApiError(422, "content_media_delete_failed", str(exc)) from exc
+    return {"ok": True}
+
+
+@router.post(
+    "/profiles/{name}/content/blog",
+    response_model=StudioPostMutationResponse,
+    status_code=201,
+    responses=STUDIO_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def create_profile_content_blog(
+    name: str,
+    body: StudioPostCreateRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> StudioPostMutationResponse | JSONResponse:
+    """Create a blog directly from the content workspace."""
+    pdir = _resolve_profile(name)
+    if not _public_build_initialized(pdir):
+        init_public_layer(pdir.name)
+    etag = _studio_etag(pdir)
+    if not _if_match_satisfied(if_match, etag):
+        return _studio_error(412, "etag_mismatch", "Content changed; reload before creating.", etag)
+    if not body.title.strip():
+        raise ApiError(422, "invalid_blog_post", "Blog post title must not be blank.")
+    try:
+        path = create_blog_draft(
+            pdir.name,
+            title=body.title.strip(),
+            body=body.body,
+            tags=body.tags,
+            summary=body.summary,
+        )
+    except PublicSiteError as exc:
+        raise ApiError(422, "content_create_failed", str(exc)) from exc
+    post = parse_blog_post(path)
+    response.headers["ETag"] = _studio_post_etag(post)
+    return StudioPostMutationResponse(ok=True, post=_studio_post_detail(post), changed_paths=[str(path)])
+
+
+@router.put(
+    "/profiles/{name}/content/blog/{slug:path}",
+    response_model=StudioPostMutationResponse,
+    responses=STUDIO_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def save_profile_content_blog(
+    name: str,
+    slug: str,
+    body: StudioPostSaveRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> StudioPostMutationResponse | JSONResponse:
+    """Conflict-safe save that cannot flip a post to ``published``.
+
+    Publishing must go through ``.../publish`` so the readiness gate runs;
+    a plain save that asks for ``published`` on an unpublished post is 422.
+    """
+    pdir = _resolve_profile(name)
+    post = _load_studio_post(pdir, slug)
+    if (
+        body.status is not None
+        and body.status.strip() == "published"
+        and post.status != "published"
+    ):
+        raise ApiError(
+            422,
+            "publish_requires_check",
+            "Use publish to set a post to published; saving cannot skip the publish check.",
+        )
+    return save_profile_studio_post(name, slug, body, response, if_match)
+
+
+@router.post(
+    "/profiles/{name}/content/blog/{slug:path}/check",
+    response_model=StudioValidationResponse,
+    responses=STUDIO_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def check_profile_content_blog(name: str, slug: str, body: StudioPostSaveRequest | None = None) -> StudioValidationResponse:
+    return check_profile_studio_post(name, slug, body)
+
+
+@router.post(
+    "/profiles/{name}/content/blog/{slug:path}/publish",
+    response_model=StudioPostMutationResponse,
+    responses=STUDIO_MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def publish_profile_content_blog(
+    name: str,
+    slug: str,
+    response: Response,
+    body: StudioPostSaveRequest | None = None,
+    if_match: str | None = Header(default=None),
+) -> StudioPostMutationResponse | JSONResponse:
+    return publish_profile_studio_post(name, slug, response, body, if_match)
+
+
+# --- Career workspace --------------------------------------------------------
+
+
+_CAREER_MATCHES: dict[str, dict[str, Any]] = {}
+
+
+@router.get(
+    "/profiles/{name}/career",
+    response_model=CareerWorkspaceResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_career(name: str, response: Response) -> CareerWorkspaceResponse:
+    pdir = _resolve_profile(name)
+    if not _public_build_initialized(pdir):
+        init_public_layer(pdir.name)
+    data = career_workspace.overview(pdir.name)
+    response.headers["ETag"] = data["resume_etag"]
+    return CareerWorkspaceResponse(
+        profile=pdir.name,
+        resume=data["resume"],
+        resume_markdown=data["resume_markdown"],
+        resume_etag=data["resume_etag"],
+        drafts=[CareerDraftModel(**row) for row in data["drafts"]],
+    )
+
+
+@router.get(
+    "/profiles/{name}/career/resume",
+    response_model=CareerWorkspaceResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_career_resume(name: str, response: Response) -> CareerWorkspaceResponse:
+    return get_profile_career(name, response)
+
+
+@router.put(
+    "/profiles/{name}/career/resume",
+    response_model=CareerWorkspaceResponse,
+    responses={**ERROR_RESPONSES, 412: {"model": ErrorResponse}},
+    dependencies=PROFILE_DEPENDENCY,
+)
+def update_profile_career_resume(
+    name: str,
+    body: CareerResumeUpdateRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+) -> CareerWorkspaceResponse | JSONResponse:
+    pdir = _resolve_profile(name)
+    current = career_workspace.resume_etag(pdir.name)
+    if not _if_match_satisfied(if_match, current):
+        return _studio_error(412, "etag_mismatch", "Resume changed; reload before saving.", current)
+    try:
+        career_workspace.update_resume(pdir.name, body.resume, expected_etag=current)
+    except ValueError as exc:
+        return _studio_error(412, "etag_mismatch", str(exc), career_workspace.resume_etag(pdir.name))
+    return get_profile_career(name, response)
+
+
+@router.post(
+    "/profiles/{name}/career/resume/upload",
+    response_model=CareerUploadResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+async def upload_profile_career_resume(name: str, file: UploadFile = File(...)) -> CareerUploadResponse:
+    filename = file.filename or "resume.txt"
+    text, error = extract_resume_text(filename, await file.read())
+    return CareerUploadResponse(filename=filename, text=text, error=error)
+
+
+@router.post(
+    "/profiles/{name}/career/resume/parse",
+    response_model=CareerUploadResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def parse_profile_career_resume(name: str, filename: str = "resume.txt", content: str = "") -> CareerUploadResponse:
+    text, error = extract_resume_text(filename, content.encode("utf-8"))
+    return CareerUploadResponse(filename=filename, text=text, error=error)
+
+
+@router.post(
+    "/profiles/{name}/career/match",
+    response_model=CareerMatchResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def match_profile_career(name: str, body: CareerMatchRequest) -> CareerMatchResponse:
+    resume_md = body.resume_md.strip()
+    jd_text = body.jd_text.strip()
+    if not resume_md or not jd_text:
+        raise ApiError(422, "invalid_career_match_request", "Both resume_md and jd_text are required.")
+    job_id = uuid.uuid4().hex
+    analysis = career_workspace.match(resume_md, jd_text)
+    _CAREER_MATCHES[job_id] = {"profile": name, "analysis": analysis, "created_at": datetime.now(timezone.utc).isoformat()}
+    return CareerMatchResponse(job_id=job_id, analysis=analysis)
+
+
+@router.get(
+    "/profiles/{name}/career/match/{job_id}",
+    response_model=CareerMatchResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_career_match(name: str, job_id: str) -> CareerMatchResponse:
+    item = _CAREER_MATCHES.get(job_id)
+    if not item or item.get("profile") != name:
+        raise ApiError(404, "career_match_not_found", "Match job not found.")
+    return CareerMatchResponse(job_id=job_id, analysis=item["analysis"])
+
+
+@router.get(
+    "/profiles/{name}/career/match/{job_id}/events",
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_career_match_events(name: str, job_id: str) -> dict[str, Any]:
+    item = _CAREER_MATCHES.get(job_id)
+    if not item or item.get("profile") != name:
+        raise ApiError(404, "career_match_not_found", "Match job not found.")
+    return {"job_id": job_id, "events": [{"phase": "done", "message": "匹配分析完成"}]}
+
+
+@router.get(
+    "/profiles/{name}/career/versions",
+    response_model=list[CareerDraftModel],
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def list_profile_career_versions(name: str) -> list[CareerDraftModel]:
+    return [CareerDraftModel(**row) for row in career_workspace.overview(name)["drafts"]]
+
+
+@router.post(
+    "/profiles/{name}/career/versions",
+    response_model=CareerDraftModel,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def create_profile_career_version(name: str, body: CareerDraftRequest) -> CareerDraftModel:
+    try:
+        return CareerDraftModel(**career_workspace.save_draft(name, body.target, body.markdown, overwrite=body.overwrite))
+    except FileExistsError as exc:
+        raise ApiError(409, "career_draft_exists", str(exc)) from exc
+    except ValueError as exc:
+        raise ApiError(422, "invalid_career_draft", str(exc)) from exc
+
+
+@router.get(
+    "/profiles/{name}/career/versions/{version_id}",
+    response_model=CareerDraftModel,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_career_version(name: str, version_id: str) -> CareerDraftModel:
+    for row in career_workspace.overview(name)["drafts"]:
+        if row["id"] == version_id:
+            return CareerDraftModel(**row)
+    raise ApiError(404, "career_draft_not_found", "Resume draft not found.")
+
+
+@router.post(
+    "/profiles/{name}/career/versions/{version_id}/export",
+    response_model=CareerExportResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def export_profile_career_version(name: str, version_id: str) -> CareerExportResponse:
+    """Render a reviewed tailored Markdown draft to portable HTML + Markdown."""
+    row = next(
+        (item for item in career_workspace.overview(name)["drafts"] if item["id"] == version_id),
+        None,
+    )
+    if row is None:
+        raise ApiError(404, "career_draft_not_found", "Resume draft not found.")
+    md_path = Path(row["path"])
+    html_path, exported_md = generate_resume_files(
+        name,
+        out_path=md_path.with_suffix(".html"),
+        target=version_id,
+        markdown_text=row["markdown"],
+    )
+    return CareerExportResponse(
+        version_id=version_id,
+        markdown_path=str(exported_md),
+        html_path=str(html_path),
+    )
 
 
 # --- Public Build (M5): validate / build / publish the static public site -----

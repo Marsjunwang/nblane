@@ -2220,6 +2220,7 @@ class StudioPostDetailModel(StudioPostModel):
     related_sources: list[str] = Field(default_factory=list)
     related_research_claims: list[str] = Field(default_factory=list)
     related_citations: list[str] = Field(default_factory=list)
+    blocks_json: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class StudioPostCreateRequest(BaseModel):
@@ -2247,6 +2248,7 @@ class StudioPostSaveRequest(BaseModel):
     related_research_claims: list[str] | None = None
     related_citations: list[str] | None = None
     body: str | None = Field(default=None, max_length=200_000)
+    blocks_json: list[dict[str, Any]] | None = None
 
 
 class StudioValidationResponse(BaseModel):
@@ -2317,6 +2319,87 @@ class StudioJdMatchResponse(BaseModel):
 
     ok: bool = True
     analysis: str
+
+
+# --- Content / Career workspaces -------------------------------------------
+
+
+class ContentMediaModel(BaseModel):
+    """One file in a post's media directory (profile-relative path)."""
+
+    path: str
+    name: str = ""
+    size: int = 0
+    kind: str = ""
+    referenced: bool = False
+    cover: bool = False
+
+
+class ContentMediaUploadResponse(BaseModel):
+    ok: bool = True
+    path: str
+    kind: str
+    size: int = 0
+    snippet: str = ""
+
+
+class ContentWorkspaceResponse(BaseModel):
+    profile: str
+    posts: list[StudioPostModel] = Field(default_factory=list)
+    summary: StudioSummaryModel = Field(default_factory=StudioSummaryModel)
+
+
+class CareerResumeUpdateRequest(BaseModel):
+    """Structured resume replacement; unknown fields are preserved."""
+
+    resume: dict[str, Any] = Field(default_factory=dict)
+
+
+class CareerUploadResponse(BaseModel):
+    ok: bool = True
+    filename: str = ""
+    text: str = ""
+    error: str = ""
+    save_options: list[str] = Field(default_factory=lambda: ["主简历", "新的简历草稿", "仅本次匹配"])
+
+
+class CareerMatchRequest(BaseModel):
+    resume_md: str = Field(default="", max_length=50_000)
+    jd_text: str = Field(default="", max_length=50_000)
+
+
+class CareerMatchResponse(BaseModel):
+    ok: bool = True
+    job_id: str
+    analysis: dict[str, Any] = Field(default_factory=dict)
+
+
+class CareerDraftModel(BaseModel):
+    id: str
+    target: str = ""
+    path: str = ""
+    markdown: str = ""
+
+
+class CareerWorkspaceResponse(BaseModel):
+    profile: str
+    resume: dict[str, Any] = Field(default_factory=dict)
+    resume_markdown: str = ""
+    resume_etag: str = ""
+    drafts: list[CareerDraftModel] = Field(default_factory=list)
+
+
+class CareerDraftRequest(BaseModel):
+    target: str = Field(min_length=1, max_length=120)
+    markdown: str = Field(min_length=1, max_length=200_000)
+    overwrite: bool = False
+
+
+class CareerExportResponse(BaseModel):
+    ok: bool = True
+    version_id: str
+    markdown_path: str
+    html_path: str
 
 
 # --- Public Build (M5): validate / build / publish-and-build the static site --

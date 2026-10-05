@@ -31,7 +31,8 @@ const NAV_ITEMS = [
   { label: '技能树', path: 'skill-tree', icon: IconBinaryTree2 },
   { label: '证据', path: 'evidence', icon: IconCertificate },
   { label: '研究台', path: 'research', icon: IconBook2 },
-  { label: '输出工作室', path: 'studio', icon: IconWriting },
+  { label: '内容工作台', path: 'content', icon: IconWriting },
+  { label: '求职工作台', path: 'career', icon: IconUser },
   { label: '公开构建', path: 'public-build', icon: IconRocket },
 ];
 

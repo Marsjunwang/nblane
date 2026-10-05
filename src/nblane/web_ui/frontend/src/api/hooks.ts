@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 
-import { ApiError, apiDelete, apiDeleteWithHeaders, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, apiPut, ifMatch } from './client';
+import { ApiError, apiDelete, apiDeleteWithHeaders, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, apiPostForm, apiPut, apiPutWithHeaders, ifMatch } from './client';
 import type {
   ActivityApplyResponse,
   ActivityDismissResponse,
@@ -110,6 +110,13 @@ import type {
   StudioResponse,
   StudioResult,
   StudioValidationResponse,
+  ContentMedia,
+  ContentMediaUploadResponse,
+  ContentWorkspaceResponse,
+  CareerWorkspaceResponse,
+  CareerMatchResponse,
+  CareerDraft,
+  CareerExportResponse,
   WorkshopStatus,
   CodexSettings,
   CodexSettingsPatch,
@@ -1812,6 +1819,178 @@ export function useStudio(profile: string) {
       return { data, etag: headers.get('ETag') ?? '' };
     },
     enabled: profile.length > 0,
+  });
+}
+
+/** Content workspace projection (blog list only; never evidence/claims). */
+export function useContentWorkspace(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'content'],
+    queryFn: () => apiGetWithHeaders<ContentWorkspaceResponse>(`/profiles/${encodeURIComponent(profile)}/content`),
+    enabled: profile.length > 0,
+  });
+}
+
+function contentBlogPath(profile: string, slug: string): string {
+  const encoded = slug.split('/').map(encodeURIComponent).join('/');
+  return `/profiles/${encodeURIComponent(profile)}/content/blog/${encoded}`;
+}
+
+/**
+ * Browser URL for a profile-relative media path (``media/blog/<slug>/x.png``).
+ * Absolute URLs and data URIs pass through unchanged.
+ */
+export function contentMediaUrl(profile: string, path: string): string {
+  const clean = path.trim();
+  if (!clean || /^([a-z][a-z0-9+.-]*:|\/\/)/i.test(clean)) return clean;
+  const encoded = clean.replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
+  return `/api/v1/profiles/${encodeURIComponent(profile)}/content/media-file/${encoded}`;
+}
+
+function useInvalidateContentList(profile: string) {
+  const queryClient = useQueryClient();
+  // exact: refreshing the list must not refetch the open post's detail query,
+  // or the editor would see a "new" server copy right after its own save.
+  return () => void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content'], exact: true });
+}
+
+export function useContentPost(profile: string, slug: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'content', 'post', slug],
+    queryFn: async (): Promise<StudioPostResult> => {
+      const { data, headers } = await apiGetWithHeaders<StudioPostDetail>(contentBlogPath(profile, slug));
+      return { post: data, etag: headers.get('ETag') ?? '' };
+    },
+    enabled: profile.length > 0 && slug.length > 0,
+    staleTime: Infinity,
+  });
+}
+
+/** Mutation result for content writes: the fresh post plus its new ETag. */
+export interface ContentPostWriteResult {
+  post: StudioPostDetail;
+  etag: string;
+}
+
+export function useCreateContentPost(profile: string) {
+  const invalidate = useInvalidateContentList(profile);
+  return useMutation({
+    mutationFn: async ({ body, etag }: { body: StudioPostCreateRequest; etag: string }): Promise<ContentPostWriteResult> => {
+      const { data, headers } = await apiPostWithHeaders<StudioPostMutationResponse>(
+        `/profiles/${encodeURIComponent(profile)}/content/blog`,
+        body,
+        { headers: ifMatch(etag) },
+      );
+      return { post: data.post, etag: headers.get('ETag') ?? '' };
+    },
+    onSuccess: invalidate,
+  });
+}
+
+export function useSaveContentPost(profile: string) {
+  const invalidate = useInvalidateContentList(profile);
+  return useMutation({
+    mutationFn: async ({ slug, body, etag }: { slug: string; body: StudioPostSaveRequest; etag: string }): Promise<ContentPostWriteResult> => {
+      const { data, headers } = await apiPutWithHeaders<StudioPostMutationResponse>(contentBlogPath(profile, slug), body, {
+        headers: ifMatch(etag),
+      });
+      return { post: data.post, etag: headers.get('ETag') ?? '' };
+    },
+    onSuccess: invalidate,
+  });
+}
+
+export function useCheckContentPost(profile: string) {
+  return useMutation({
+    mutationFn: ({ slug, body }: { slug: string; body: StudioPostSaveRequest }) =>
+      apiPost<StudioValidationResponse>(`${contentBlogPath(profile, slug)}/check`, body),
+  });
+}
+
+export function usePublishContentPost(profile: string) {
+  const invalidate = useInvalidateContentList(profile);
+  return useMutation({
+    mutationFn: async ({ slug, body, etag }: { slug: string; body?: StudioPostSaveRequest; etag: string }): Promise<ContentPostWriteResult> => {
+      const { data, headers } = await apiPostWithHeaders<StudioPostMutationResponse>(`${contentBlogPath(profile, slug)}/publish`, body, {
+        headers: ifMatch(etag),
+      });
+      return { post: data.post, etag: headers.get('ETag') ?? '' };
+    },
+    onSuccess: invalidate,
+  });
+}
+
+/** One post's media directory (files only; the editor loads them by URL). */
+export function useContentPostMedia(profile: string, slug: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'content', 'media', slug],
+    queryFn: () => apiGet<ContentMedia[]>(`${contentBlogPath(profile, slug)}/media`),
+    enabled: profile.length > 0 && slug.length > 0,
+  });
+}
+
+/** Store a media file for a post; the post itself is not rewritten. */
+export function useUploadContentMedia(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ slug, file }: { slug: string; file: File }) => {
+      const kind = file.type.startsWith('video/') ? 'video' : 'image';
+      const form = new FormData();
+      form.append('file', file);
+      return apiPostForm<ContentMediaUploadResponse>(
+        `${contentBlogPath(profile, slug)}/media?${new URLSearchParams({ kind })}`,
+        form,
+      );
+    },
+    onSuccess: (_result, { slug }) =>
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content', 'media', slug] }),
+  });
+}
+
+/** Career workspace projection and resume source. */
+export function useCareerWorkspace(profile: string) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'career'],
+    queryFn: () => apiGetWithHeaders<CareerWorkspaceResponse>(`/profiles/${encodeURIComponent(profile)}/career`),
+    enabled: profile.length > 0,
+  });
+}
+
+export function useCareerResumeSave(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ resume, etag }: { resume: Record<string, unknown>; etag: string }) =>
+      apiPutWithHeaders<CareerWorkspaceResponse>(
+        `/profiles/${encodeURIComponent(profile)}/career/resume`,
+        { resume },
+        { headers: ifMatch(etag) },
+      ),
+    onSuccess: (result) => queryClient.setQueryData(['profiles', profile, 'career'], result),
+  });
+}
+
+export function useCareerMatch(profile: string) {
+  return useMutation({
+    mutationFn: (body: { resume_md: string; jd_text: string }) =>
+      apiPost<CareerMatchResponse>(`/profiles/${encodeURIComponent(profile)}/career/match`, body),
+  });
+}
+
+export function useCareerDraftSave(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { target: string; markdown: string; overwrite?: boolean }) =>
+      apiPost<CareerDraft>(`/profiles/${encodeURIComponent(profile)}/career/versions`, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'career'] }),
+  });
+}
+
+export function useCareerDraftExport(profile: string) {
+  return useMutation({
+    mutationFn: (versionId: string) =>
+      apiPost<CareerExportResponse>(
+        `/profiles/${encodeURIComponent(profile)}/career/versions/${encodeURIComponent(versionId)}/export`,
+      ),
   });
 }
 

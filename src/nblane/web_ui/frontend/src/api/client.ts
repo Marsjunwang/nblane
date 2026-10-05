@@ -129,6 +129,39 @@ export function apiPut<T>(path: string, body?: unknown, init?: RequestInit): Pro
   });
 }
 
+/** PUT that also exposes response headers (fresh ETag after a mutation). */
+export function apiPutWithHeaders<T>(
+  path: string,
+  body?: unknown,
+  init?: RequestInit,
+): Promise<{ data: T; headers: Headers }> {
+  return requestWithHeaders<T>(path, {
+    ...init,
+    method: 'PUT',
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+/**
+ * Multipart POST (file uploads). Same cookie/401/error handling as the JSON
+ * helpers, but the browser must set the multipart Content-Type boundary.
+ */
+export async function apiPostForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    body: form,
+  });
+  if (!res.ok) {
+    if (res.status === 401) {
+      unauthorizedHandler?.();
+    }
+    const { message, code } = await errorMessage(res);
+    throw new ApiError(res.status, message, code);
+  }
+  return (await res.json()) as T;
+}
+
 /** POST that also exposes response headers (fresh ETag after a mutation). */
 export function apiPostWithHeaders<T>(
   path: string,

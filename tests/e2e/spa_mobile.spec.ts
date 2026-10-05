@@ -147,12 +147,13 @@ test.describe("SPA mobile 375px — 导航", () => {
     await expectNavbarCollapsed(page);
     await burger.tap();
     await expect(page.getByRole("link", { name: "项目", exact: true })).toBeVisible();
+    const navbar = page.locator('[class*="mantine-AppShell-navbar"]');
+    await expect(navbar.getByRole("link", { name: "输出工作室", exact: true })).toHaveCount(0);
     await expectNavbarOpen(page);
     await burger.tap();
     await expectNavbarCollapsed(page);
 
-    // Click through every drawer entry: 10 profile pages + 档案列表, plus the
-    // header 助手 entry (12 clickable entries total on mobile). The 目标 page
+    // Click through every drawer entry. The 目标 page
     // was absorbed by the home starmap 星表 (home-editing slice, 2026-09-23);
     // the 健康 page dissolved into 证据「待补强」(2026-09-24, /health redirects);
     // the 差距分析 page was retired into 占卜 (2026-09-24, /gap APIs kept).
@@ -161,25 +162,22 @@ test.describe("SPA mobile 375px — 导航", () => {
       { label: "项目", url: spa("projects") },
       { label: "技能树", url: spa("skill-tree") },
       { label: "证据", url: spa("evidence") },
-      { label: "输出工作室", url: spa("studio") },
+      { label: "内容工作台", url: spa("content") },
+      { label: "求职工作台", url: spa("career") },
       { label: "公开构建", url: spa("public-build") },
       { label: "研究台", url: spa("research") },
-      { label: "收件箱", url: spa("inbox") },
-      { label: "代理活动", url: spa("activity") },
     ];
     for (const item of drawerItems) {
       if ((await navbarRightEdge(page)) <= 0) {
         await burger.tap();
         await expectNavbarOpen(page);
       }
-      await page.getByRole("link", { name: item.label, exact: true }).click();
+      await navbar.getByRole("link", { name: item.label, exact: true }).click();
       await expect(page, `menu entry ${item.label} should navigate`).toHaveURL(item.url);
       // Wait for the slide-out to finish before the next iteration decides
       // whether the burger needs another tap.
       await expectNavbarCollapsed(page);
     }
-
-    // The header 助手 entry stays reachable on mobile (12th entry).
     await page.getByRole("link", { name: "助手" }).click();
     await expect(page).toHaveURL(`${SPA_BASE_URL}/assistant`);
 

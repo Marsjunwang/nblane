@@ -9,6 +9,7 @@ import {
   List,
   Loader,
   Select,
+  SimpleGrid,
   Stack,
   Switch,
   Table,
@@ -39,6 +40,13 @@ import {
 } from '../api/hooks';
 import type { PublicBuildResponse, PublicBuildState } from '../api/types';
 
+const PUBLIC_CARD_STYLE = {
+  background: '#ffffff',
+  borderColor: '#d9d6cc',
+  color: '#263348',
+  boxShadow: '0 2px 10px rgba(38, 51, 72, 0.06)',
+} as const;
+
 function formatKb(size: number): string {
   return `${(size / 1024).toFixed(1)} KB`;
 }
@@ -55,7 +63,7 @@ function StatusCard({ data }: { data: PublicBuildResponse }) {
   const validation = data.validation;
   const build = data.build;
   return (
-    <Card withBorder radius="md" data-testid="build-status">
+    <Card withBorder radius="md" style={PUBLIC_CARD_STYLE} data-testid="build-status">
       <Stack gap="sm">
         <Group gap="sm" wrap="wrap">
           <Title order={3}>状态总览</Title>
@@ -149,7 +157,7 @@ function BuildCard({
     });
 
   return (
-    <Card withBorder radius="md" data-testid="build-card">
+    <Card withBorder radius="md" style={PUBLIC_CARD_STYLE} data-testid="build-card">
       <Stack gap="sm">
         <Group gap="sm">
           <IconBuildingStore size={16} />
@@ -216,7 +224,7 @@ function PublishCard({
     );
 
   return (
-    <Card withBorder radius="md" data-testid="publish-card">
+    <Card withBorder radius="md" style={PUBLIC_CARD_STYLE} data-testid="publish-card">
       <Stack gap="sm">
         <Group gap="sm">
           <IconUpload size={16} />
@@ -279,7 +287,7 @@ function PublishCard({
 
 function ArtifactsCard({ build, profile }: { build: PublicBuildState; profile: string }) {
   return (
-    <Card withBorder radius="md" data-testid="artifacts-card">
+    <Card withBorder radius="md" style={PUBLIC_CARD_STYLE} data-testid="artifacts-card">
       <Stack gap="sm">
         <Group gap="sm">
           <IconExternalLink size={16} />
@@ -366,7 +374,7 @@ function PreviewCard({
   }, [pages, selected]);
 
   return (
-    <Card withBorder radius="md" data-testid="preview-card">
+    <Card withBorder radius="md" style={PUBLIC_CARD_STYLE} data-testid="preview-card">
       <Stack gap="sm">
         <Group gap="sm">
           <IconEye size={16} />
@@ -500,30 +508,38 @@ export function PublicBuildPage() {
   }
 
   return (
-    <Stack gap="md">
+    <Stack gap="lg" data-testid="public-build-page" style={{ maxWidth: 1500, margin: '0 auto', width: '100%', background: '#f6f7f3', color: '#263348', padding: 'clamp(16px, 2vw, 32px)', borderRadius: 12 }}>
       <Stack gap={4}>
-        <Title order={2}>{name} · 公开构建</Title>
+        <Group justify="space-between" align="flex-end" wrap="wrap">
+          <div><Title order={2}>{name} · 公开站点</Title>
         <Text size="sm" c="dimmed">
-          校验、预览并构建静态公开站点；本页是发布闸门，不负责生成新内容。
+          准备内容、检查预览、选择发布，再构建个人静态站点。
         </Text>
+          </div>
+          <Badge variant="light" color="blue">发布控制台</Badge>
+        </Group>
       </Stack>
 
       <StatusCard data={data} />
-      <BuildCard
-        etag={etag}
-        includeDrafts={includeDrafts}
-        onIncludeDraftsChange={setIncludeDrafts}
-        baseUrl={baseUrl}
-        onBaseUrlChange={setBaseUrl}
-      />
-      <PublishCard
-        data={data}
-        etag={etag}
-        includeDrafts={includeDrafts}
-        baseUrl={baseUrl}
-      />
-      <ArtifactsCard build={data.build} profile={name} />
-      <PreviewCard profile={name} includeDrafts={includeDrafts} />
+      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
+        <BuildCard
+          etag={etag}
+          includeDrafts={includeDrafts}
+          onIncludeDraftsChange={setIncludeDrafts}
+          baseUrl={baseUrl}
+          onBaseUrlChange={setBaseUrl}
+        />
+        <PublishCard
+          data={data}
+          etag={etag}
+          includeDrafts={includeDrafts}
+          baseUrl={baseUrl}
+        />
+      </SimpleGrid>
+      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
+        <PreviewCard profile={name} includeDrafts={includeDrafts} />
+        <ArtifactsCard build={data.build} profile={name} />
+      </SimpleGrid>
 
       <Alert color="blue" title="说明" data-testid="build-notes">
         <List size="sm">
@@ -533,7 +549,7 @@ export function PublicBuildPage() {
             SPA 为路径安全不开放）。
           </List.Item>
           <List.Item>部署到生产由外部脚本 / Caddy 完成，本页不发布任何内容。</List.Item>
-          <List.Item>AI 内容生成在「输出工作室」；博客单篇编辑与发布也在那里。</List.Item>
+          <List.Item>博客内容请在内容工作台完成编辑；本页只负责预览、发布和静态构建。</List.Item>
         </List>
       </Alert>
     </Stack>

@@ -1,8 +1,11 @@
+import { Center, Loader } from '@mantine/core';
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom';
 
 import { RequireAuth } from './auth/RequireAuth';
 import { AppLayout } from './components/AppLayout';
 import { ActivityPage } from './pages/ActivityPage';
+import { CareerWorkspacePage } from './pages/CareerWorkspacePage';
 import { AssistantPage } from './pages/AssistantPage';
 import { EvidencePage, EvidenceReviewRedirect, HealthRedirect } from './pages/EvidencePage';
 import { HomePage } from './pages/HomePage';
@@ -18,6 +21,13 @@ import { SettingsPage } from './pages/SettingsPage';
 import { SkillTreePage } from './pages/SkillTreePage';
 import { StudioPage } from './pages/StudioPage';
 import { WorkshopPage } from './pages/WorkshopPage';
+
+// The blog editor pulls in BlockNote/KaTeX/Mermaid; keep it out of the
+// main bundle so other pages do not pay for it.
+const ContentWorkspacePage = lazy(() =>
+  import('./pages/ContentWorkspacePage').then((m) => ({ default: m.ContentWorkspacePage })),
+);
+
 
 /** /goals → /home(目标管理由星图星表吸收,旧链接保留 query 串不破坏)。 */
 function GoalsRedirect() {
@@ -64,6 +74,8 @@ export function App() {
           <Route path="/p/:name/project-board" element={<ProjectBoardRedirect />} />
           <Route path="/p/:name/projects" element={<ProjectsPage />} />
           <Route path="/p/:name/studio" element={<StudioPage />} />
+          <Route path="/p/:name/content" element={<Suspense fallback={<Center py="xl"><Loader /></Center>}><ContentWorkspacePage /></Suspense>} />
+          <Route path="/p/:name/career" element={<CareerWorkspacePage />} />
           <Route path="/p/:name/public-build" element={<PublicBuildPage />} />
           <Route path="/p/:name/research" element={<ResearchPage />} />
           <Route path="/p/:name/research/papers/:sourceId" element={<PaperReaderPage />} />
