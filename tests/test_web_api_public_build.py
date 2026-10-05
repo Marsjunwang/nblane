@@ -1,12 +1,11 @@
-"""Tests for the Public Build slice (validate / build / publish-and-build).
+"""Tests for the public-site console API (``/profiles/{name}/public-site``).
 
-Covers the overview read (init gate, validation, drafts, output-dir state,
-ETag header), the synchronous static-site build (validation/visibility/base
--URL 422 gates, If-Match 412 contract, server-pinned output directory), the
-publish-and-build flow (per-slug publish gate, partial-publish semantics),
-the traversal-guarded artifact download endpoint, and the in-memory site
-preview (page list JSON + per-page HTML). Builds land under the patched
-``routes_v1.REPO_ROOT`` tmp dir — never the real ``dist/``.
+Covers the overview (init gate, intro from the master resume, post rows
+with their public/live state, works, Chinese validation messages, live
+diff), the settings switches, per-post public toggles, the works list
+(If-Match 412), work media upload, deploy (never includes drafts, keeps the
+previous build) + rollback, and the in-memory preview. Deploys land under
+the patched ``routes_v1.REPO_ROOT`` tmp dir — never the real ``dist/``.
 """
 
 from __future__ import annotations
@@ -172,385 +171,320 @@ class PublicBuildTestBase(unittest.TestCase):
             patcher.start()
         return TestClient(app)
 
-    @staticmethod
-    def _overview_etag(client: TestClient) -> str:
-        response = client.get("/api/v1/profiles/alice/public-build")
-        assert response.status_code == 200
-        return response.headers["ETag"]
 
 
-class TestPublicBuildGet(PublicBuildTestBase):
-    """GET /public-build: init gate, validation, drafts, build state, ETag."""
-
-    def test_get_overview_initialized(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root)
-            client = self._client(root)
-            response = client.get("/api/v1/profiles/alice/public-build")
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.headers["ETag"].startswith('W/"'))
-        payload = response.json()
-        self.assertEqual(payload["profile"], "alice")
-        self.assertTrue(payload["initialized"])
-        self.assertTrue(payload["validation"]["ok"])
-        self.assertEqual(payload["validation"]["errors"], [])
-        drafts = {draft["slug"]: draft for draft in payload["drafts"]}
-        self.assertEqual(sorted(drafts), ["hello", "ready"])
-        self.assertEqual(drafts["ready"]["title"], "Ready post")
-        build = payload["build"]
-        self.assertFalse(build["exists"])
-        self.assertEqual(build["total_files"], 0)
-        self.assertTrue(build["output_dir"].endswith("dist/public/alice"))
-
-    def test_get_overview_uninitialized(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root, public_layer=False)
-            client = self._client(root)
-            response = client.get("/api/v1/profiles/alice/public-build")
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertFalse(payload["initialized"])
-        self.assertIsNone(payload["validation"])
-        self.assertEqual(payload["drafts"], [])
-
-    def test_get_unknown_profile_404(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root)
-            client = self._client(root)
-            response = client.get("/api/v1/profiles/nobody/public-build")
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json()["code"], "profile_not_found")
+BASE = "/api/v1/profiles/alice/public-site"
 
 
-class TestPublicBuildBuild(PublicBuildTestBase):
-    """POST /public-build/build: gates, 412 contract, pinned output dir."""
+def _write(path: Path, data: dict) -> None:
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
-    def test_build_success_include_drafts(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root)
-            client = self._client(root)
-            etag = self._overview_etag(client)
-            response = client.post(
-                "/api/v1/profiles/alice/public-build/build",
-                json={"include_drafts": True, "base_url": ""},
-                headers={"If-Match": etag},
-            )
-            self.assertEqual(response.status_code, 200)
-            self.assertTrue(response.headers["ETag"].startswith('W/"'))
-            payload = response.json()
-            self.assertTrue(payload["ok"])
-            self.assertEqual(payload["published"], [])
-            self.assertIn("index.html", payload["pages"])
-            self.assertGreater(payload["page_count"], 0)
-            output_dir = root / "dist" / "public" / "alice"
-            self.assertEqual(payload["output_dir"], str(output_dir.resolve()))
-            self.assertTrue((output_dir / "index.html").is_file())
-            self.assertTrue((output_dir / "assets" / "site.css").is_file())
-            # The overview now reflects the built output.
-            overview = client.get("/api/v1/profiles/alice/public-build").json()
-            self.assertTrue(overview["build"]["exists"])
-            self.assertTrue(overview["build"]["built_at"])
-            artifact_paths = {a["path"] for a in overview["build"]["artifacts"]}
-            self.assertIn("index.html", artifact_paths)
 
-    def test_build_success_public_visibility(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root, visibility="public")
-            client = self._client(root)
-            response = client.post(
-                "/api/v1/profiles/alice/public-build/build",
-                json={"include_drafts": False, "base_url": "https://example.com/site"},
-            )
-            self.assertEqual(response.status_code, 200)
-            output_dir = root / "dist" / "public" / "alice"
-            self.assertTrue((output_dir / "sitemap.xml").is_file())
-            sitemap = (output_dir / "sitemap.xml").read_text(encoding="utf-8")
-            self.assertIn("https://example.com/site", sitemap)
+def _read(path: Path) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
-    def test_build_private_without_drafts_blocked(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root, visibility="private")
-            client = self._client(root)
-            response = client.post(
-                "/api/v1/profiles/alice/public-build/build",
-                json={"include_drafts": False, "base_url": ""},
-            )
-            self.assertEqual(response.status_code, 422)
-            self.assertEqual(response.json()["code"], "public_build_blocked")
-            self.assertIn("visibility", response.json()["message"])
-            self.assertFalse((root / "dist").exists())
 
-    def test_build_validation_blocked(self) -> None:
+class TestPublicSiteOverview(PublicBuildTestBase):
+    def test_overview_initialized(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             profile = _template_profile(root)
-            (profile / "public-profile.yaml").write_text(
-                yaml.safe_dump({"profile": "alice", "visibility": "private"}),
-                encoding="utf-8",
-            )
+            resume = _read(profile / "resume-source.yaml")
+            resume["basics"].update({"title": "Robot engineer", "phone": "13800000000"})
+            resume["summary"] = "Builds robots."
+            _write(profile / "resume-source.yaml", resume)
             client = self._client(root)
-            response = client.post(
-                "/api/v1/profiles/alice/public-build/build",
-                json={"include_drafts": True, "base_url": ""},
-            )
-            self.assertEqual(response.status_code, 422)
-            self.assertEqual(response.json()["code"], "public_build_blocked")
-            self.assertIn("public_name", response.json()["message"])
-            self.assertFalse((root / "dist").exists())
+            response = client.get(BASE)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["initialized"])
+        self.assertEqual(payload["visibility"], "private")
+        self.assertFalse(payload["settings"]["show_phone"])
+        self.assertFalse(payload["settings"]["show_projects"])
+        self.assertEqual(payload["intro"]["title"], "Robot engineer")
+        self.assertEqual(payload["intro"]["summary"], "Builds robots.")
+        self.assertTrue(payload["intro"]["has_resume"])
+        posts = {row["slug"]: row for row in payload["posts"]}
+        self.assertEqual(sorted(posts), ["hello", "ready"])
+        self.assertFalse(posts["ready"]["public"])
+        self.assertFalse(posts["ready"]["live"])
+        self.assertEqual(payload["projects_count"], 1)
+        live = payload["live"]
+        self.assertFalse(live["exists"])
+        self.assertFalse(live["has_previous"])
+        self.assertTrue(live["output_dir"].endswith("dist/public/alice"))
+        self.assertIn("index.html", [row["path"] for row in live["added"]])
 
-    def test_build_invalid_base_url(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root)
-            client = self._client(root)
-            response = client.post(
-                "/api/v1/profiles/alice/public-build/build",
-                json={"include_drafts": True, "base_url": "not-a-url"},
-            )
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(response.json()["code"], "public_build_blocked")
-        self.assertIn("base-url", response.json()["message"])
-
-    def test_build_etag_mismatch_412(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root)
-            client = self._client(root)
-            response = client.post(
-                "/api/v1/profiles/alice/public-build/build",
-                json={"include_drafts": True, "base_url": ""},
-                headers={"If-Match": 'W/"stale"'},
-            )
-        self.assertEqual(response.status_code, 412)
-        self.assertEqual(response.json()["code"], "etag_mismatch")
-        self.assertTrue(response.headers["ETag"].startswith('W/"'))
-
-    def test_build_uninitialized_422(self) -> None:
+    def test_overview_uninitialized(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _template_profile(root, public_layer=False)
+            response = self._client(root).get(BASE)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["initialized"])
+        self.assertIsNone(response.json()["live"])
+
+    def test_unknown_profile_404(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            response = self._client(root).get("/api/v1/profiles/nobody/public-site")
+        self.assertEqual(response.status_code, 404)
+
+    def test_validation_errors_are_chinese(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            _write(profile / "outputs.yaml", {"outputs": [{"id": "w1", "status": "published"}]})
+            payload = self._client(root).get(BASE).json()
+        self.assertTrue(payload["errors"])
+        self.assertTrue(any("作品「w1」" in e and "缺少必填字段" in e for e in payload["errors"]), payload["errors"])
+
+
+class TestPublicSiteSettingsAndPosts(PublicBuildTestBase):
+    def test_settings_merge_keeps_other_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            response = client.patch(
+                f"{BASE}/settings",
+                json={"show_email": True, "visibility": "public", "base_url": "https://example.com/"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            payload = response.json()
+            self.assertTrue(payload["settings"]["show_email"])
+            self.assertFalse(payload["settings"]["show_phone"])
+            self.assertEqual(payload["settings"]["base_url"], "https://example.com")
+            self.assertEqual(payload["visibility"], "public")
+            data = _read(profile / "public-profile.yaml")
+            self.assertEqual(data["public_name"], "alice")
+            self.assertTrue(data["site"]["show_email"])
+
+    def test_settings_invalid_base_url_422(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            response = self._client(root).patch(f"{BASE}/settings", json={"base_url": "ftp://x"})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["code"], "invalid_base_url")
+
+    def test_post_toggle_publishes_and_unpublishes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            response = client.put(f"{BASE}/posts/ready", json={"public": True})
+            self.assertEqual(response.status_code, 200, response.text)
+            posts = {row["slug"]: row for row in response.json()["posts"]}
+            self.assertTrue(posts["ready"]["public"])
+            self.assertIn("status: published", (profile / "blog" / "ready.md").read_text(encoding="utf-8"))
+            response = client.put(f"{BASE}/posts/ready", json={"public": False})
+            posts = {row["slug"]: row for row in response.json()["posts"]}
+            self.assertFalse(posts["ready"]["public"])
+            self.assertIn("status: draft", (profile / "blog" / "ready.md").read_text(encoding="utf-8"))
+
+    def test_post_toggle_blocked_by_publish_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            response = self._client(root).put(f"{BASE}/posts/hello", json={"public": True})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["code"], "post_not_publishable")
+        self.assertIn("这篇还不能公开", response.json()["message"])
+
+    def test_post_toggle_unknown_404(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            response = self._client(root).put(f"{BASE}/posts/ghost", json={"public": True})
+        self.assertEqual(response.status_code, 404)
+
+    def test_library_private_post_is_reported_and_toggled_public(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            text = (profile / "blog" / "ready.md").read_text(encoding="utf-8")
+            (profile / "blog" / "ready.md").write_text(
+                text.replace("status: draft", "status: published"), encoding="utf-8"
+            )
+            _write(
+                profile / "public-library.yaml",
+                {
+                    "version": 1,
+                    "profile": "alice",
+                    "nodes": [
+                        {"id": "root", "type": "root", "title": "Public Library"},
+                        {"id": "post_ready", "type": "post", "title": "Ready post", "parent_id": "root",
+                         "visibility": "private", "ref": "blog/ready.md"},
+                    ],
+                },
+            )
+            client = self._client(root)
+            posts = {row["slug"]: row for row in client.get(BASE).json()["posts"]}
+            self.assertTrue(posts["ready"]["library_hidden"])
+            self.assertFalse(posts["ready"]["public"])
+            response = client.put(f"{BASE}/posts/ready", json={"public": True})
+            posts = {row["slug"]: row for row in response.json()["posts"]}
+            self.assertTrue(posts["ready"]["public"])
+            nodes = _read(profile / "public-library.yaml")["nodes"]
+            self.assertEqual(nodes[1]["visibility"], "public")
+
+
+class TestPublicSiteWorks(PublicBuildTestBase):
+    WORK = {
+        "title": "Grasp demo",
+        "type": "video",
+        "year": "2026",
+        "video": "https://www.bilibili.com/video/BV1xx411c7mD",
+        "links": [{"label": "论文", "url": "https://arxiv.org/abs/1"}],
+        "status": "published",
+    }
+
+    def test_works_save_assigns_ids_and_writes_yaml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
+            client = self._client(root)
+            etag = client.get(BASE).json()["works_etag"]
+            response = client.put(f"{BASE}/works", json={"works": [self.WORK]}, headers={"If-Match": etag})
+            self.assertEqual(response.status_code, 200, response.text)
+            works = response.json()["works"]
+            self.assertEqual(len(works), 1)
+            self.assertTrue(works[0]["id"])
+            self.assertEqual(works[0]["links"], [{"label": "论文", "url": "https://arxiv.org/abs/1"}])
+            row = _read(profile / "outputs.yaml")["outputs"][0]
+            self.assertEqual(row["links"], {"论文": "https://arxiv.org/abs/1"})
+            self.assertEqual(row["video"], self.WORK["video"])
+
+    def test_works_stale_etag_412(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            response = self._client(root).put(
+                f"{BASE}/works", json={"works": [self.WORK]}, headers={"If-Match": '"stale"'}
+            )
+        self.assertEqual(response.status_code, 412)
+
+    def test_works_require_title(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            response = self._client(root).put(f"{BASE}/works", json={"works": [{"title": " "}]})
+        self.assertEqual(response.status_code, 422)
+
+    def test_work_media_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _template_profile(root)
             client = self._client(root)
             response = client.post(
-                "/api/v1/profiles/alice/public-build/build",
-                json={"include_drafts": True, "base_url": ""},
+                f"{BASE}/works/media", files={"file": ("cover.png", b"\x89PNG fake", "image/png")}
             )
+            self.assertEqual(response.status_code, 200, response.text)
+            rel = response.json()["path"]
+            self.assertTrue(rel.startswith("media/works/cover-"))
+            self.assertTrue((profile / rel).is_file())
+            bad = client.post(f"{BASE}/works/media", files={"file": ("x.exe", b"MZ", "application/octet-stream")})
+            self.assertEqual(bad.status_code, 422)
+
+
+class TestPublicSiteDeploy(PublicBuildTestBase):
+    def _public(self, root: Path) -> Path:
+        profile = _template_profile(root, visibility="public")
+        text = (profile / "blog" / "ready.md").read_text(encoding="utf-8")
+        (profile / "blog" / "ready.md").write_text(text.replace("status: draft", "status: published"), encoding="utf-8")
+        return profile
+
+    def test_deploy_builds_published_only_and_keeps_previous(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._public(root)
+            client = self._client(root)
+            response = client.post(f"{BASE}/deploy")
+            self.assertEqual(response.status_code, 200, response.text)
+            live = root / "dist" / "public" / "alice"
+            self.assertTrue((live / "blog" / "ready" / "index.html").is_file())
+            self.assertFalse((live / "blog" / "hello").exists())
+            self.assertFalse((live / "projects").exists())
+            overview = client.get(BASE).json()
+            self.assertTrue(overview["live"]["exists"])
+            self.assertTrue(overview["live"]["in_sync"], overview["live"])
+            posts = {row["slug"]: row for row in overview["posts"]}
+            self.assertTrue(posts["ready"]["live"])
+            # A second deploy keeps the first one for rollback.
+            client.put(f"{BASE}/posts/ready", json={"public": False})
+            self.assertFalse(client.get(BASE).json()["live"]["in_sync"])
+            self.assertEqual(client.post(f"{BASE}/deploy").status_code, 200)
+            self.assertFalse((live / "blog" / "ready").exists())
+            self.assertTrue(client.get(BASE).json()["live"]["has_previous"])
+            self.assertEqual(client.post(f"{BASE}/rollback").status_code, 200)
+            self.assertTrue((live / "blog" / "ready" / "index.html").is_file())
+
+    def test_deploy_private_site_blocked_in_chinese(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root)
+            client = self._client(root)
+            # The overview reports the private gate before the deploy button.
+            self.assertTrue(any("网站公开" in e for e in client.get(BASE).json()["errors"]))
+            response = client.post(f"{BASE}/deploy")
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(response.json()["code"], "deploy_blocked")
+            self.assertIn("网站公开", response.json()["message"])
+            self.assertFalse((root / "dist").exists())
+
+    def test_rollback_without_previous_409(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._public(root)
+            response = self._client(root).post(f"{BASE}/rollback")
+        self.assertEqual(response.status_code, 409)
+
+    def test_deploy_uninitialized_422(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _template_profile(root, public_layer=False)
+            response = self._client(root).post(f"{BASE}/deploy")
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["code"], "public_layer_not_initialized")
 
 
-class TestPublicBuildPublishAndBuild(PublicBuildTestBase):
-    """POST /public-build/publish-and-build: per-slug gate, then build."""
-
-    def test_publish_and_build_success(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _template_profile(root)
-            client = self._client(root)
-            etag = self._overview_etag(client)
-            response = client.post(
-                "/api/v1/profiles/alice/public-build/publish-and-build",
-                json={"slugs": ["ready"], "include_drafts": True, "base_url": ""},
-                headers={"If-Match": etag},
-            )
-            self.assertEqual(response.status_code, 200)
-            payload = response.json()
-            self.assertEqual(payload["published"], ["ready"])
-            text = (profile / "blog" / "ready.md").read_text(encoding="utf-8")
-            self.assertIn("status: published", text)
-            self.assertTrue((root / "dist" / "public" / "alice" / "index.html").is_file())
-            overview = client.get("/api/v1/profiles/alice/public-build").json()
-            self.assertEqual(
-                [draft["slug"] for draft in overview["drafts"]], ["hello"]
-            )
-
-    def test_publish_and_build_empty_slugs_422(self) -> None:
+class TestPublicSitePreview(PublicBuildTestBase):
+    def test_preview_defaults_to_live_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _template_profile(root)
             client = self._client(root)
-            response = client.post(
-                "/api/v1/profiles/alice/public-build/publish-and-build",
-                json={"slugs": [], "include_drafts": True, "base_url": ""},
-            )
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(response.json()["code"], "invalid_public_publish")
+            live_pages = {row["path"] for row in client.get(f"{BASE}/preview").json()["pages"]}
+            draft_pages = {
+                row["path"]
+                for row in client.get(f"{BASE}/preview", params={"include_drafts": True}).json()["pages"]
+            }
+        self.assertIn("index.html", live_pages)
+        self.assertNotIn("blog/ready/index.html", live_pages)
+        self.assertIn("blog/ready/index.html", draft_pages)
 
-    def test_publish_and_build_blocked_slug_422(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _template_profile(root)
-            client = self._client(root)
-            response = client.post(
-                "/api/v1/profiles/alice/public-build/publish-and-build",
-                json={"slugs": ["hello"], "include_drafts": True, "base_url": ""},
-            )
-            self.assertEqual(response.status_code, 422)
-            self.assertEqual(response.json()["code"], "public_publish_failed")
-            self.assertIn("hello", response.json()["message"])
-            # The failed slug stays a draft and nothing is built.
-            text = (profile / "blog" / "hello.md").read_text(encoding="utf-8")
-            self.assertIn("status: draft", text)
-            self.assertFalse((root / "dist").exists())
-
-    def test_publish_and_build_unknown_slug_422(self) -> None:
+    def test_preview_page_html_and_unknown_404(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _template_profile(root)
             client = self._client(root)
-            response = client.post(
-                "/api/v1/profiles/alice/public-build/publish-and-build",
-                json={"slugs": ["ghost"], "include_drafts": True, "base_url": ""},
-            )
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(response.json()["code"], "public_publish_failed")
-        self.assertIn("ghost", response.json()["message"])
-
-    def test_publish_and_build_etag_mismatch_412(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _template_profile(root)
-            client = self._client(root)
-            response = client.post(
-                "/api/v1/profiles/alice/public-build/publish-and-build",
-                json={"slugs": ["ready"], "include_drafts": True, "base_url": ""},
-                headers={"If-Match": 'W/"stale"'},
-            )
-            self.assertEqual(response.status_code, 412)
-            self.assertEqual(response.json()["code"], "etag_mismatch")
-            text = (profile / "blog" / "ready.md").read_text(encoding="utf-8")
-            self.assertIn("status: draft", text)
-
-
-class TestPublicBuildArtifacts(PublicBuildTestBase):
-    """GET /public-build/artifacts/{path}: download with traversal guard."""
-
-    @staticmethod
-    def _build(client: TestClient) -> None:
-        response = client.post(
-            "/api/v1/profiles/alice/public-build/build",
-            json={"include_drafts": True, "base_url": ""},
-        )
-        assert response.status_code == 200
-
-    def test_artifact_served_after_build(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root)
-            client = self._client(root)
-            self._build(client)
-            response = client.get(
-                "/api/v1/profiles/alice/public-build/artifacts/index.html"
-            )
+            response = client.get(f"{BASE}/preview/page", params={"path": "index.html"})
             self.assertEqual(response.status_code, 200)
             self.assertIn("text/html", response.headers["Content-Type"])
             self.assertIn("<html", response.text)
-            css = client.get(
-                "/api/v1/profiles/alice/public-build/artifacts/assets/site.css"
-            )
-            self.assertEqual(css.status_code, 200)
-
-    def test_artifact_missing_404(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root)
-            client = self._client(root)
-            self._build(client)
-            response = client.get(
-                "/api/v1/profiles/alice/public-build/artifacts/nope.txt"
-            )
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json()["code"], "public_build_artifact_not_found")
-
-    def test_artifact_no_build_404(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root)
-            client = self._client(root)
-            response = client.get(
-                "/api/v1/profiles/alice/public-build/artifacts/index.html"
-            )
-        self.assertEqual(response.status_code, 404)
-
-    def test_artifact_traversal_404(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _template_profile(root)
-            client = self._client(root)
-            self._build(client)
-            secret = (profile / "claims.yaml").read_text(encoding="utf-8")
-            for sneaky in (
-                "..%2F..%2Fclaims.yaml",
-                "%2E%2E%2F%2E%2E%2Fclaims.yaml",
-                "..%2F..%2F..%2Fpyproject.toml",
-            ):
-                response = client.get(
-                    f"/api/v1/profiles/alice/public-build/artifacts/{sneaky}"
-                )
-                self.assertEqual(response.status_code, 404, sneaky)
-                self.assertNotIn(secret, response.text)
-
-
-class TestPublicBuildPreview(PublicBuildTestBase):
-    """GET /public-build/preview[...]: page list JSON + per-page HTML."""
-
-    def test_preview_page_list(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root)
-            client = self._client(root)
-            response = client.get("/api/v1/profiles/alice/public-build/preview")
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertTrue(payload["ok"])
-        self.assertTrue(payload["include_drafts"])
-        pages = {page["path"]: page for page in payload["pages"]}
-        self.assertIn("index.html", pages)
-        self.assertIn("warnings", payload)
-
-    def test_preview_page_html(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root)
-            client = self._client(root)
-            response = client.get(
-                "/api/v1/profiles/alice/public-build/preview/page",
-                params={"path": "index.html", "include_drafts": True},
-            )
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("text/html", response.headers["Content-Type"])
-        self.assertIn("<html", response.text)
-        self.assertIn("alice", response.text)
-
-    def test_preview_page_unknown_404(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _template_profile(root)
-            client = self._client(root)
-            response = client.get(
-                "/api/v1/profiles/alice/public-build/preview/page",
-                params={"path": "ghost/index.html"},
-            )
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json()["code"], "public_preview_page_not_found")
+            missing = client.get(f"{BASE}/preview/page", params={"path": "ghost/index.html"})
+            self.assertEqual(missing.status_code, 404)
 
     def test_preview_uninitialized_422(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _template_profile(root, public_layer=False)
             client = self._client(root)
-            for url in (
-                "/api/v1/profiles/alice/public-build/preview",
-                "/api/v1/profiles/alice/public-build/preview/page",
-            ):
+            for url in (f"{BASE}/preview", f"{BASE}/preview/page"):
                 response = client.get(url)
                 self.assertEqual(response.status_code, 422, url)
-                self.assertEqual(response.json()["code"], "public_layer_not_initialized")
 
 
 if __name__ == "__main__":

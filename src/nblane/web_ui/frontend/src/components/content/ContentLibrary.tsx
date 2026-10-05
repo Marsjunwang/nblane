@@ -104,7 +104,7 @@ export function ContentLibrary({ profile }: { profile: string }) {
             <Title order={2}>内容工作台</Title>
           </Group>
           <Text size="sm" c="dimmed" mt={4}>
-            {counted.length} 篇文章 · 写作、检查并发布博客；构建静态网站在公开站点完成。
+            {counted.length} 篇文章 · 写作、检查并发布博客；发布到网站在公开站点完成。
           </Text>
         </div>
         <Group gap="xs">

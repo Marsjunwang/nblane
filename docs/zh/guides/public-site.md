@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-09-15
+last_verified: 2026-10-06
 source_of_truth: true
 ---
 
@@ -11,9 +11,66 @@ source_of_truth: true
 YAML / Markdown 文件生成，不直接渲染内部 profile 文件。
 
 **当前状态：** Public Surface v1 已落地。仓库现在包含 profile 级公开数据文件、
-`nblane public ...` CLI、静态站构建器，以及 Streamlit **Public Site** 页面。
-后续重点不再是“是否有公开面”，而是继续打磨 React Blog Shell 工作流、
-更完整的 SEO、部署链路与展示质量。
+`nblane public ...` CLI、静态站构建器，以及 SPA **公开站点** 控制台
+（`/p/<name>/public-build`）。
+
+**定位（2026-10-05 定）：** 公开站 = 自我介绍 + 写作 + 作品。首页是照片和简介
+（来自求职工作台的主简历），主体是博客和「作品」（重点项目视频、论文、代码、
+发表在别处的文章链接）。`projects.yaml` 是内部工作记录，默认不上线。
+
+## 公开站点控制台
+
+SPA 的「公开站点」页左边决定网站显示什么，右边是实时预览，顶部发布到线上：
+
+- **网站公开**：`public-profile.yaml` 的 `visibility`。私有时不能发布。
+- **显示开关**：写在 `public-profile.yaml` 的 `site:` 下，全部可单独开关：
+
+  ```yaml
+  site:
+    show_photo: true      # 首页显示主简历照片
+    show_email: false     # 首页联系方式里显示邮箱
+    show_phone: false     # 首页联系方式里显示电话
+    resume_pdf: false     # 发布时生成 /resume.pdf 并在首页提供下载
+    show_projects: false  # 公开 projects.yaml（默认不公开）
+    base_url: ""          # 子路径部署时填写
+  ```
+
+  首页的姓名、头衔、简介和照片读主简历 `resume-source.yaml`（`basics.title`、
+  `summary`、`basics.photo`），`public-profile.yaml` 的 `headline` / `bio_short`
+  只在主简历为空时兜底。简历 PDF 用服务器上的 Chromium 打印，电话、邮箱、
+  照片跟随上面的开关；生成失败只出提示，不阻断发布。网站不再有在线简历页。
+- **写作**：每篇文章一个「公开」开关。打开 = 通过发布检查后发布，并把
+  `public-library.yaml` 里的节点设为 public；关闭 = 撤回为草稿。徽标显示
+  「线上 / 待发布 / 发布后下线 / 库中隐藏」。
+- **作品**：编辑 `outputs.yaml`（见下节）。改动先在本地，点「保存作品」写盘，
+  带 ETag，别处改过会提示刷新。
+- **预览**：默认就是线上会看到的内容；「预览包含草稿」只影响预览。
+- **发布到线上**：顶部显示与线上目录的差异（新增 / 更新 / 下线页、简历 PDF），
+  确认后直接构建到线上目录（只含已公开内容），上一版保留为
+  `.<name>.prev`，可以「回滚」（再回滚一次即恢复）。
+
+### 作品字段（`outputs.yaml`）
+
+```yaml
+outputs:
+  - id: arm-demo
+    title: 机械臂抓取演示
+    type: video          # video / paper / article / demo / code / talk / other
+    year: "2026"
+    summary: 一句话说明
+    video: https://www.bilibili.com/video/BV1xx411c7mD
+    video_mode: embed    # embed = 直接播放；link = 只放「观看视频」链接
+    cover: media/works/cover-1a2b3c4d5e.png
+    links:
+      论文: https://arxiv.org/abs/2401.00001
+      代码: https://github.com/example/repo
+    status: published
+    featured: true       # 首页精选；没有精选时首页显示前 4 条
+```
+
+内嵌播放支持 B 站（`bilibili.com/video/BV…` 自动转播放器）、YouTube、Vimeo，
+以及本地或外链的 `mp4` / `webm`；其他网址按链接显示。控制台上传的视频和封面
+放在 `media/works/`。作品页是 `/outputs/`，不再有单条作品详情页。
 
 ## 数据层
 
@@ -40,7 +97,7 @@ profiles/<name>/
 所有公开文件默认仍是 private / draft，发布必须显式确认：
 
 - `public-profile.yaml`：普通公开构建前需要 `visibility: public`。
-- `resume-source.yaml`：需要 `visibility: public` 才会进入在线简历页。
+- `resume-source.yaml`：首页简介与照片的来源（求职工作台的主简历）；网站不再有在线简历页。
 - `blog/**/*.md`、`projects.yaml`、`outputs.yaml`：需要 `status: published`
   才会进入普通构建。
 - `--include-drafts` 只用于本地预览草稿 / 私有内容。
@@ -82,7 +139,7 @@ nblane public validate <profile> --include-drafts
 ```bash
 nblane public build <profile>
 nblane public build <profile> --out dist/public/<profile>
-nblane public build <profile> --include-drafts
+nblane public build <profile> --include-drafts --out dist/public-preview/<profile>
 nblane public build <profile> --base-url https://www.example.com
 nblane public build <profile> --base-url https://www.example.com/site
 ```
@@ -309,12 +366,7 @@ paper / patent evidence 一对一补成 `outputs.yaml` 成果草稿。
 
 ## Streamlit
 
-生成出的首页是一个紧凑的内容总入口。它展示公开姓名、headline、简介、联系
-方式，并固定提供 Blog、Projects、Outputs、Resume 四类入口。首页每块只展示
-标题、数量或最近条目；点击后进入全量列表、博客详情、项目/成果列表或完整
-简历。
-
-Web UI 已拆为 **Output Studio** 与 **Public Build**：
+旧 Streamlit 页面仍可用（新功能只在 SPA 控制台）。Web UI 曾拆为 **Output Studio** 与 **Public Build**：
 
 - **Output Studio / Profile** 提供结构化表单编辑公开姓名、headline、简介、联系方式与头像；
   保存时会把头像写入 `media/` 并同步 `public-profile.yaml` 的 `avatar` 路径。
@@ -335,7 +387,8 @@ Web UI 已拆为 **Output Studio** 与 **Public Build**：
 - **Output Studio / Known Info** 展示 evidence 上下文、推荐分组，并支持勾选多条 evidence
   生成 draft 项目。
 - **Public Build** 只负责校验、预览并构建静态站，默认输出到
-  `dist/public/<profile>`。
+  `dist/public/<profile>`（即线上目录）；勾选「包含草稿」时默认改为
+  `dist/public-preview/<profile>`，草稿构建写入线上目录会被拒绝。
 
 这些页面复用现有 profile 选择器、文件 snapshot 冲突保护、缓存清理与可选 Git
 备份。
@@ -351,7 +404,8 @@ Web UI 已拆为 **Output Studio** 与 **Public Build**：
 - **Web UI：** **Output Studio** 页面含 Generate、Profile、Blog、Resume、
   Known Info；**Public Build** 页面含 Validate、Preview、Build。旧 **Public Site**
   兼容跳转页已删除，统一从这两个页面进入。
-- **静态输出：** 首页、Blog、Projects、Outputs、可选 Resume、复制后的媒体、
+- **静态输出：** 首页（照片 + 简介 + 最近写作 + 作品）、Blog、作品页、可选
+  Projects、可选简历 PDF、复制后的媒体、
   Blog cover 展示、Open Graph / Twitter 图片、`robots.txt`、`sitemap.xml` 与页面
   meta description。
 
@@ -390,11 +444,16 @@ app.example.com {
 构建器会先校验，再写入临时目录，最后替换目标目录。校验或渲染失败时，不会
 覆盖已有线上目录。
 
+生产环境里 `/srv/nblane-public` 是 `/srv/nblane-data/dist/public` 的 bind
+mount（`/etc/fstab`），Caddy 直接服务 `/srv/nblane-public/<profile>`。所以
+**构建到 `dist/public/<profile>` 就是上线**：控制台「发布到线上」和
+`nblane public build <profile>`（默认输出目录）都会立刻改变线上网站。
+`--include-drafts` 构建写入这个目录会被拒绝，需要用 `--out` 指定别的目录。
+
 ## 边界
 
 当前版本刻意不包含：
 
-- PDF 简历生成
 - 评论系统
 - 全文搜索
 - 多主题市场

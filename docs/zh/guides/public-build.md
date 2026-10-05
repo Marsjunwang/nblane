@@ -23,3 +23,9 @@ Public Build 是公开站点的校验、预览和构建页。
 ## 注意事项
 
 Base URL 应使用生产域名或子路径，否则部署后站内链接可能失效。
+
+默认输出目录 `dist/public/<profile>` 就是线上网站（生产环境 bind mount 给
+Caddy），构建即上线。勾选「包含草稿」时输出目录默认改为
+`dist/public-preview/<profile>`；草稿构建写入线上目录会被拒绝。日常发布推荐用
+SPA「公开站点」控制台（差异预览、确认发布、回滚），说明见
+[公开个人网站](public-site.md)。

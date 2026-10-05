@@ -254,9 +254,13 @@ def main() -> None:
         ensure_file_snapshot(path)
 
     include_drafts = st.checkbox(ui["include_drafts"])
+    # dist/public/<name> is the live site (bind-mounted in production); a
+    # drafts build is refused there, so previews default to a sibling dir.
     out_dir = st.text_input(
         ui["output_dir"],
-        value=str(REPO_ROOT / "dist" / "public" / selected),
+        value=str(
+            REPO_ROOT / "dist" / ("public-preview" if include_drafts else "public") / selected
+        ),
     )
     base_url = st.text_input(ui["base_url"], value="", help=ui["base_url_help"])
 

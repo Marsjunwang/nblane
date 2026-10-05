@@ -2200,7 +2200,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/public-build": {
+    "/api/v1/profiles/{name}/public-site": {
         parameters: {
             query?: never;
             header?: never;
@@ -2208,17 +2208,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Profile Public Build
-         * @description Public Build overview: init gate, validation, drafts, output state.
-         *
-         *     Read-only aggregation of the Streamlit page's status surface: the
-         *     four-file public-layer gate, the ``validate_public_layer`` outcome
-         *     (errors block a build), the unpublished blog drafts offered by the
-         *     publish-and-build section, and the observed output-directory state.
-         *     Carries the public-layer ETag (same fingerprint as the studio) for
-         *     ``If-Match`` on the build mutations.
+         * Get Profile Public Site
+         * @description Console overview: switches, intro (from the master resume), posts, works, live diff.
          */
-        get: operations["get_profile_public_build_api_v1_profiles__name__public_build_get"];
+        get: operations["get_profile_public_site_api_v1_profiles__name__public_site_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2227,32 +2220,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/public-build/artifacts/{path}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Profile Public Build Artifact
-         * @description Serve one file from the build output directory (preview/download).
-         *
-         *     Path-traversal guarded: anything resolving outside the pinned output
-         *     directory answers 404, same as a missing file. Auth follows the same
-         *     profile scope as every other route — a preview build may contain
-         *     drafts/private content, so artifacts are not public here.
-         */
-        get: operations["get_profile_public_build_artifact_api_v1_profiles__name__public_build_artifacts__path__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/public-build/build": {
+    "/api/v1/profiles/{name}/public-site/deploy": {
         parameters: {
             query?: never;
             header?: never;
@@ -2262,22 +2230,40 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Build Profile Public Site
-         * @description Build the static public site into the server-pinned output dir.
+         * Deploy Profile Public Site
+         * @description Build the site (published content only) into the live directory.
          *
-         *     Thin wrapper over ``core.public_site.build_public_site``: the core
-         *     validates first (errors → 422 ``public_build_blocked``) and requires
-         *     ``visibility: public`` unless ``include_drafts`` is set (preview mode).
-         *     Honors ``If-Match`` against the public-layer ETag (412 on mismatch).
+         *     Validation runs first and blocks the deploy (422 ``deploy_blocked``)
+         *     before anything is written; the replaced build is kept for rollback.
          */
-        post: operations["build_profile_public_site_api_v1_profiles__name__public_build_build_post"];
+        post: operations["deploy_profile_public_site_api_v1_profiles__name__public_site_deploy_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/public-build/preview": {
+    "/api/v1/profiles/{name}/public-site/posts/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Profile Public Site Post
+         * @description Put one post on the site (publish gate + library public) or take it off (draft).
+         */
+        put: operations["update_profile_public_site_post_api_v1_profiles__name__public_site_posts__slug__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/public-site/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -2285,15 +2271,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Profile Public Build Preview
-         * @description List the renderable site pages for the in-memory preview picker.
-         *
-         *     Warnings mirror ``render_public_site_preview``: validation warnings
-         *     plus each validation error prefixed ``preview validation:`` (the
-         *     preview renders even when a production build would be blocked). The
-         *     per-page HTML comes from ``GET .../preview/page?path=<rel>``.
+         * Get Profile Public Site Preview
+         * @description Page list of the in-memory preview (defaults to exactly what would go live).
          */
-        get: operations["get_profile_public_build_preview_api_v1_profiles__name__public_build_preview_get"];
+        get: operations["get_profile_public_site_preview_api_v1_profiles__name__public_site_preview_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2302,7 +2283,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/public-build/preview/page": {
+    "/api/v1/profiles/{name}/public-site/preview/page": {
         parameters: {
             query?: never;
             header?: never;
@@ -2310,14 +2291,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Profile Public Build Preview Page
-         * @description Render one preview page as self-contained HTML (inline CSS/media).
-         *
-         *     Same payload the Streamlit page iframes via ``components.html``: CSS
-         *     and local media are inlined as data URIs, so the page renders stand-
-         *     alone in the SPA iframe. Unknown page paths answer 404.
+         * Get Profile Public Site Preview Page
+         * @description One preview page as self-contained HTML (inline CSS/media) for the iframe.
          */
-        get: operations["get_profile_public_build_preview_page_api_v1_profiles__name__public_build_preview_page_get"];
+        get: operations["get_profile_public_site_preview_page_api_v1_profiles__name__public_site_preview_page_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2326,7 +2303,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/public-build/publish-and-build": {
+    "/api/v1/profiles/{name}/public-site/rollback": {
         parameters: {
             query?: never;
             header?: never;
@@ -2336,16 +2313,70 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Publish And Build Profile Public Site
-         * @description Publish the selected blog drafts, then build the static site.
-         *
-         *     Mirrors the Streamlit "发布草稿并构建" section: each slug goes through
-         *     ``publish_blog_post`` (full publish-readiness gate); the first failure
-         *     answers 422 ``public_publish_failed`` naming the slug, earlier slugs
-         *     stay published, and nothing is built. Honors ``If-Match`` against the
-         *     public-layer ETag (412 on mismatch) — publishing flips blog statuses.
+         * Rollback Profile Public Site
+         * @description Swap the live site with the build replaced by the last deploy.
          */
-        post: operations["publish_and_build_profile_public_site_api_v1_profiles__name__public_build_publish_and_build_post"];
+        post: operations["rollback_profile_public_site_api_v1_profiles__name__public_site_rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/public-site/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Profile Public Site Settings
+         * @description Merge display switches / site visibility into ``public-profile.yaml``.
+         */
+        patch: operations["update_profile_public_site_settings_api_v1_profiles__name__public_site_settings_patch"];
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/public-site/works": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Profile Public Site Works
+         * @description Replace the works list (``outputs.yaml``); If-Match carries ``works_etag``.
+         */
+        put: operations["update_profile_public_site_works_api_v1_profiles__name__public_site_works_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/public-site/works/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Profile Public Site Work Media
+         * @description Store a work cover / video under ``media/works/``; the works list is not written.
+         */
+        post: operations["upload_profile_public_site_work_media_api_v1_profiles__name__public_site_works_media_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3375,6 +3406,11 @@ export interface components {
         };
         /** Body_upload_profile_content_blog_media_api_v1_profiles__name__content_blog__slug__media_post */
         Body_upload_profile_content_blog_media_api_v1_profiles__name__content_blog__slug__media_post: {
+            /** File */
+            file: string;
+        };
+        /** Body_upload_profile_public_site_work_media_api_v1_profiles__name__public_site_works_media_post */
+        Body_upload_profile_public_site_work_media_api_v1_profiles__name__public_site_works_media_post: {
             /** File */
             file: string;
         };
@@ -7908,42 +7944,6 @@ export interface components {
             title: string;
         };
         /**
-         * PublicBuildArtifactModel
-         * @description One file under the build output directory (relative path + stat).
-         */
-        PublicBuildArtifactModel: {
-            /**
-             * Modified
-             * @default
-             */
-            modified: string;
-            /** Path */
-            path: string;
-            /**
-             * Size
-             * @default 0
-             */
-            size: number;
-        };
-        /**
-         * PublicBuildDraftModel
-         * @description One unpublished blog draft offered by the publish-and-build section.
-         */
-        PublicBuildDraftModel: {
-            /**
-             * Date
-             * @default
-             */
-            date: string;
-            /** Slug */
-            slug: string;
-            /**
-             * Title
-             * @default
-             */
-            title: string;
-        };
-        /**
          * PublicBuildPreviewPageModel
          * @description One renderable site page in the in-memory preview.
          */
@@ -7976,76 +7976,101 @@ export interface components {
             /** Warnings */
             warnings?: string[];
         };
-        /**
-         * PublicBuildPublishRequest
-         * @description Body for publish-and-build: draft slugs to publish, then build.
-         */
-        PublicBuildPublishRequest: {
-            /**
-             * Base Url
-             * @default
-             */
-            base_url: string;
-            /**
-             * Include Drafts
-             * @default false
-             */
-            include_drafts: boolean;
-            /** Slugs */
-            slugs?: string[];
-        };
-        /**
-         * PublicBuildRequest
-         * @description Body for the static-site build (synchronous, no LLM).
-         *
-         *     ``base_url`` is the production site URL (optional sub-path) used for
-         *     canonical/sitemap links, mirroring the Streamlit form. The output
-         *     directory is pinned server-side (``dist/public/<name>`` under the data
-         *     root) — the Streamlit page's free-form output path is not exposed for
-         *     path safety.
-         */
-        PublicBuildRequest: {
-            /**
-             * Base Url
-             * @default
-             */
-            base_url: string;
-            /**
-             * Include Drafts
-             * @default false
-             */
-            include_drafts: boolean;
-        };
-        /**
-         * PublicBuildResponse
-         * @description Public Build overview: init gate, validation, drafts, output state.
-         *
-         *     ``validation``/``drafts`` are null/empty until the profile's public
-         *     layer is initialized (POST ``/studio/init`` creates it).
-         */
-        PublicBuildResponse: {
-            build: components["schemas"]["PublicBuildStateModel"];
-            /** Drafts */
-            drafts?: components["schemas"]["PublicBuildDraftModel"][];
-            /**
-             * Initialized
-             * @default false
-             */
-            initialized: boolean;
-            /** Profile */
-            profile: string;
-            validation?: components["schemas"]["PublicBuildValidationModel"] | null;
-        };
-        /**
-         * PublicBuildResultResponse
-         * @description Result of one build / publish-and-build run.
-         */
-        PublicBuildResultResponse: {
+        /** PublicSiteDeployResponse */
+        PublicSiteDeployResponse: {
             /**
              * Ok
              * @default true
              */
             ok: boolean;
+            /**
+             * Page Count
+             * @default 0
+             */
+            page_count: number;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * PublicSiteIntroModel
+         * @description Home hero inputs, read from the master resume (career workspace).
+         */
+        PublicSiteIntroModel: {
+            /**
+             * Email
+             * @default
+             */
+            email: string;
+            /**
+             * English Name
+             * @default
+             */
+            english_name: string;
+            /**
+             * Has Resume
+             * @default false
+             */
+            has_resume: boolean;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Phone
+             * @default
+             */
+            phone: string;
+            /**
+             * Photo
+             * @default
+             */
+            photo: string;
+            /**
+             * Photo Url
+             * @default
+             */
+            photo_url: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /**
+         * PublicSiteLiveModel
+         * @description Live directory state plus the diff against the current files.
+         */
+        PublicSiteLiveModel: {
+            /** Added */
+            added?: components["schemas"]["PublicSitePageRefModel"][];
+            /**
+             * Built At
+             * @default
+             */
+            built_at: string;
+            /** Changed */
+            changed?: components["schemas"]["PublicSitePageRefModel"][];
+            /**
+             * Exists
+             * @default false
+             */
+            exists: boolean;
+            /**
+             * Has Previous
+             * @default false
+             */
+            has_previous: boolean;
+            /**
+             * In Sync
+             * @default false
+             */
+            in_sync: boolean;
             /** Output Dir */
             output_dir: string;
             /**
@@ -8053,64 +8078,264 @@ export interface components {
              * @default 0
              */
             page_count: number;
-            /** Pages */
-            pages?: string[];
-            /** Published */
-            published?: string[];
-        };
-        /**
-         * PublicBuildStateModel
-         * @description Observed state of the static-site output directory.
-         *
-         *     Derived from the directory itself (no separate build log): ``exists``
-         *     reports whether a build has ever landed, ``built_at`` is the newest
-         *     artifact mtime, and ``artifacts`` is the capped flat listing.
-         */
-        PublicBuildStateModel: {
-            /** Artifacts */
-            artifacts?: components["schemas"]["PublicBuildArtifactModel"][];
             /**
-             * Artifacts Truncated
+             * Pdf Live
              * @default false
              */
-            artifacts_truncated: boolean;
+            pdf_live: boolean;
             /**
-             * Built At
+             * Pdf Pending
+             * @default false
+             */
+            pdf_pending: boolean;
+            /**
+             * Previous Built At
              * @default
              */
-            built_at: string;
+            previous_built_at: string;
+            /** Removed */
+            removed?: components["schemas"]["PublicSitePageRefModel"][];
+        };
+        /** PublicSiteMediaResponse */
+        PublicSiteMediaResponse: {
+            /** Path */
+            path: string;
             /**
-             * Exists
-             * @default false
+             * Url
+             * @default
              */
-            exists: boolean;
-            /** Output Dir */
-            output_dir: string;
+            url: string;
+        };
+        /** PublicSitePageRefModel */
+        PublicSitePageRefModel: {
+            /** Path */
+            path: string;
             /**
-             * Total Bytes
-             * @default 0
+             * Title
+             * @default
              */
-            total_bytes: number;
-            /**
-             * Total Files
-             * @default 0
-             */
-            total_files: number;
+            title: string;
         };
         /**
-         * PublicBuildValidationModel
-         * @description Public-layer validation outcome (mirrors core PublicValidationResult).
+         * PublicSitePostModel
+         * @description One blog post row with its public toggle and live state.
          */
-        PublicBuildValidationModel: {
+        PublicSitePostModel: {
+            /**
+             * Date
+             * @default
+             */
+            date: string;
+            /**
+             * Library Hidden
+             * @default false
+             */
+            library_hidden: boolean;
+            /**
+             * Live
+             * @default false
+             */
+            live: boolean;
+            /**
+             * Public
+             * @default false
+             */
+            public: boolean;
+            /** Slug */
+            slug: string;
+            /**
+             * Status
+             * @default draft
+             */
+            status: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /** PublicSitePostUpdateRequest */
+        PublicSitePostUpdateRequest: {
+            /** Public */
+            public: boolean;
+        };
+        /**
+         * PublicSiteResponse
+         * @description Public-site console overview (``initialized`` false until the public layer exists).
+         */
+        PublicSiteResponse: {
             /** Errors */
             errors?: string[];
             /**
-             * Ok
-             * @default true
+             * Initialized
+             * @default false
              */
-            ok: boolean;
+            initialized: boolean;
+            intro?: components["schemas"]["PublicSiteIntroModel"];
+            live?: components["schemas"]["PublicSiteLiveModel"] | null;
+            /**
+             * Pdf Available
+             * @default false
+             */
+            pdf_available: boolean;
+            /** Posts */
+            posts?: components["schemas"]["PublicSitePostModel"][];
+            /** Profile */
+            profile: string;
+            /**
+             * Projects Count
+             * @default 0
+             */
+            projects_count: number;
+            settings?: components["schemas"]["PublicSiteSettingsModel"];
+            /**
+             * Visibility
+             * @default private
+             */
+            visibility: string;
             /** Warnings */
             warnings?: string[];
+            /** Works */
+            works?: components["schemas"]["PublicSiteWorkModel"][];
+            /**
+             * Works Etag
+             * @default
+             */
+            works_etag: string;
+        };
+        /**
+         * PublicSiteSettingsModel
+         * @description ``public-profile.yaml: site`` display switches.
+         */
+        PublicSiteSettingsModel: {
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+            /**
+             * Resume Pdf
+             * @default false
+             */
+            resume_pdf: boolean;
+            /**
+             * Show Email
+             * @default false
+             */
+            show_email: boolean;
+            /**
+             * Show Phone
+             * @default false
+             */
+            show_phone: boolean;
+            /**
+             * Show Photo
+             * @default true
+             */
+            show_photo: boolean;
+            /**
+             * Show Projects
+             * @default false
+             */
+            show_projects: boolean;
+        };
+        /**
+         * PublicSiteSettingsUpdateRequest
+         * @description Partial settings update; ``visibility`` flips the whole site public/private.
+         */
+        PublicSiteSettingsUpdateRequest: {
+            /** Base Url */
+            base_url?: string | null;
+            /** Resume Pdf */
+            resume_pdf?: boolean | null;
+            /** Show Email */
+            show_email?: boolean | null;
+            /** Show Phone */
+            show_phone?: boolean | null;
+            /** Show Photo */
+            show_photo?: boolean | null;
+            /** Show Projects */
+            show_projects?: boolean | null;
+            /** Visibility */
+            visibility?: string | null;
+        };
+        /** PublicSiteWorkLinkModel */
+        PublicSiteWorkLinkModel: {
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * PublicSiteWorkModel
+         * @description One work (``outputs.yaml`` row): video, cover, links, publish switch.
+         */
+        PublicSiteWorkModel: {
+            /**
+             * Cover
+             * @default
+             */
+            cover: string;
+            /**
+             * Featured
+             * @default false
+             */
+            featured: boolean;
+            /**
+             * Id
+             * @default
+             */
+            id: string;
+            /** Links */
+            links?: components["schemas"]["PublicSiteWorkLinkModel"][];
+            /**
+             * Status
+             * @default draft
+             */
+            status: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Type
+             * @default other
+             */
+            type: string;
+            /**
+             * Video
+             * @default
+             */
+            video: string;
+            /**
+             * Video Mode
+             * @default embed
+             */
+            video_mode: string;
+            /**
+             * Year
+             * @default
+             */
+            year: string;
+        };
+        /** PublicSiteWorksUpdateRequest */
+        PublicSiteWorksUpdateRequest: {
+            /** Works */
+            works?: components["schemas"]["PublicSiteWorkModel"][];
         };
         /**
          * ResearchPaperItemModel
@@ -15630,7 +15855,7 @@ export interface operations {
             };
         };
     };
-    get_profile_public_build_api_v1_profiles__name__public_build_get: {
+    get_profile_public_site_api_v1_profiles__name__public_site_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -15647,7 +15872,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PublicBuildResponse"];
+                    "application/json": components["schemas"]["PublicSiteResponse"];
                 };
             };
             /** @description Invalid profile name. */
@@ -15688,13 +15913,12 @@ export interface operations {
             };
         };
     };
-    get_profile_public_build_artifact_api_v1_profiles__name__public_build_artifacts__path__get: {
+    deploy_profile_public_site_api_v1_profiles__name__public_site_deploy_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 name: string;
-                path: string;
             };
             cookie?: never;
         };
@@ -15706,7 +15930,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["PublicSiteDeployResponse"];
                 };
             };
             /** @description Invalid profile name. */
@@ -15727,7 +15951,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Profile not found, or artifact missing/escapes the output dir. */
+            /** @description Profile, post or preview page not found. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -15736,31 +15960,48 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description No previous build to roll back to. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Works list changed since it was loaded. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Public layer not initialized, invalid input, or the site failed validation. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
     };
-    build_profile_public_site_api_v1_profiles__name__public_build_build_post: {
+    update_profile_public_site_post_api_v1_profiles__name__public_site_posts__slug__put: {
         parameters: {
             query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
+            header?: never;
             path: {
                 name: string;
+                slug: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PublicBuildRequest"];
+                "application/json": components["schemas"]["PublicSitePostUpdateRequest"];
             };
         };
         responses: {
@@ -15770,7 +16011,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PublicBuildResultResponse"];
+                    "application/json": components["schemas"]["PublicSiteResponse"];
                 };
             };
             /** @description Invalid profile name. */
@@ -15791,7 +16032,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Profile, build artifact, or preview page not found. */
+            /** @description Profile, post or preview page not found. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -15800,7 +16041,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description If-Match ETag does not match the public-layer files. */
+            /** @description No previous build to roll back to. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Works list changed since it was loaded. */
             412: {
                 headers: {
                     [name: string]: unknown;
@@ -15809,7 +16059,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Public layer not initialized, validation/visibility gate failed, invalid base URL, no drafts selected, or a draft failed publish-readiness validation. */
+            /** @description Public layer not initialized, invalid input, or the site failed validation. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15820,7 +16070,7 @@ export interface operations {
             };
         };
     };
-    get_profile_public_build_preview_api_v1_profiles__name__public_build_preview_get: {
+    get_profile_public_site_preview_api_v1_profiles__name__public_site_preview_get: {
         parameters: {
             query?: {
                 include_drafts?: boolean;
@@ -15880,7 +16130,7 @@ export interface operations {
             };
         };
     };
-    get_profile_public_build_preview_page_api_v1_profiles__name__public_build_preview_page_get: {
+    get_profile_public_site_preview_page_api_v1_profiles__name__public_site_preview_page_get: {
         parameters: {
             query?: {
                 path?: string;
@@ -15941,22 +16191,16 @@ export interface operations {
             };
         };
     };
-    publish_and_build_profile_public_site_api_v1_profiles__name__public_build_publish_and_build_post: {
+    rollback_profile_public_site_api_v1_profiles__name__public_site_rollback_post: {
         parameters: {
             query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
+            header?: never;
             path: {
                 name: string;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PublicBuildPublishRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -15964,7 +16208,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PublicBuildResultResponse"];
+                    "application/json": components["schemas"]["PublicSiteDeployResponse"];
                 };
             };
             /** @description Invalid profile name. */
@@ -15985,7 +16229,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Profile, build artifact, or preview page not found. */
+            /** @description Profile, post or preview page not found. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -15994,7 +16238,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description If-Match ETag does not match the public-layer files. */
+            /** @description No previous build to roll back to. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Works list changed since it was loaded. */
             412: {
                 headers: {
                     [name: string]: unknown;
@@ -16003,7 +16256,249 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Public layer not initialized, validation/visibility gate failed, invalid base URL, no drafts selected, or a draft failed publish-readiness validation. */
+            /** @description Public layer not initialized, invalid input, or the site failed validation. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_profile_public_site_settings_api_v1_profiles__name__public_site_settings_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicSiteSettingsUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicSiteResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile, post or preview page not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No previous build to roll back to. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Works list changed since it was loaded. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Public layer not initialized, invalid input, or the site failed validation. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_profile_public_site_works_api_v1_profiles__name__public_site_works_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicSiteWorksUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicSiteResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile, post or preview page not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No previous build to roll back to. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Works list changed since it was loaded. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Public layer not initialized, invalid input, or the site failed validation. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    upload_profile_public_site_work_media_api_v1_profiles__name__public_site_works_media_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_profile_public_site_work_media_api_v1_profiles__name__public_site_works_media_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicSiteMediaResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile, post or preview page not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No previous build to roll back to. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Works list changed since it was loaded. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Public layer not initialized, invalid input, or the site failed validation. */
             422: {
                 headers: {
                     [name: string]: unknown;

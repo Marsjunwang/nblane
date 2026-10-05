@@ -55,7 +55,7 @@ import { ifMatch } from '../../api/client';
 import {
   contentBlogApiUrl,
   contentMediaUrl,
-  publicBuildPreviewPageUrl,
+  publicSitePreviewPageUrl,
   useCheckContentPost,
   useContentPost,
   useContentPostMedia,
@@ -344,7 +344,7 @@ function PublishDialog({
     <Modal opened={opened} onClose={onClose} title="发布文章" centered size="lg" data-testid="content-publish-dialog">
       <Stack gap="md">
         <Text size="sm" c="dimmed">
-          发布后文章进入公开层；在「公开站点」构建后才会出现在静态网站上。
+          发布后文章进入公开层；在「公开站点」发布到线上后才会出现在网站上。
         </Text>
         {checking || !result ? (
           <Group gap="xs">
@@ -655,7 +655,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
           notifications.show({
             color: 'green',
             title: '已发布',
-            message: '文章已进入公开层。到「公开站点」构建后会出现在网站上。',
+            message: '文章已进入公开层。到「公开站点」发布到线上后会出现在网站上。',
           });
         },
         onError: (error) => {
@@ -807,7 +807,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const columnWidth = wideColumn ? COLUMN_WIDTH.wide : COLUMN_WIDTH.normal;
   const settingsInline = wideScreen && settingsPinned;
   const outlineInline = wideScreen && outlinePinned && mode !== 'preview';
-  const previewUrl = `${publicBuildPreviewPageUrl(profile, `blog/${slug}/index.html`, true)}&n=${previewNonce}`;
+  const previewUrl = `${publicSitePreviewPageUrl(profile, `blog/${slug}/index.html`, true)}&n=${previewNonce}`;
   const words = wordCount(draft.body);
 
   const saveLabel: Record<SaveState, string> = {
@@ -980,7 +980,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
                 component={Link}
                 to={`/p/${encodeURIComponent(profile)}/public-build`}
               >
-                去公开站点构建
+                去公开站点发布
               </Menu.Item>
               <Menu.Divider />
               <Menu.Item leftSection={<IconArrowBackUp size={14} />} onClick={() => void unpublish()}>

@@ -164,7 +164,7 @@ test.describe("SPA mobile 375px — 导航", () => {
       { label: "证据", url: spa("evidence") },
       { label: "内容工作台", url: spa("content") },
       { label: "求职工作台", url: spa("career") },
-      { label: "公开构建", url: spa("public-build") },
+      { label: "公开站点", url: spa("public-build") },
       { label: "研究台", url: spa("research") },
     ];
     for (const item of drawerItems) {

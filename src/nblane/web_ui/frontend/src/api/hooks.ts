@@ -88,11 +88,11 @@ import type {
   ProjectsBoardResponse,
   ProjectsBoardResult,
   PublicBuildPreviewResponse,
-  PublicBuildPublishRequest,
-  PublicBuildRequest,
-  PublicBuildResponse,
-  PublicBuildResult,
-  PublicBuildResultResponse,
+  PublicSiteDeployResponse,
+  PublicSiteMediaResponse,
+  PublicSiteResponse,
+  PublicSiteSettingsUpdate,
+  PublicSiteWork,
   ResearchResponse,
   ResearchReaderResponse,
   SkillNodePatchRequest,
@@ -2230,89 +2230,102 @@ export function useCreateStudioDraft(profile: string) {
   });
 }
 
-function publicBuildBase(profile: string): string {
-  return `/profiles/${encodeURIComponent(profile)}/public-build`;
+function publicSiteBase(profile: string): string {
+  return `/profiles/${encodeURIComponent(profile)}/public-site`;
 }
 
-/** Public-build overview fetch that captures the public-layer ETag. */
-export function usePublicBuild(profile: string) {
+/** Public-site console overview: switches, intro, posts, works, live diff. */
+export function usePublicSite(profile: string) {
   return useQuery({
-    queryKey: ['profiles', profile, 'public-build'],
-    queryFn: async (): Promise<PublicBuildResult> => {
-      const { data, headers } = await apiGetWithHeaders<PublicBuildResponse>(
-        publicBuildBase(profile),
-      );
-      return { data, etag: headers.get('ETag') ?? '' };
-    },
+    queryKey: ['profiles', profile, 'public-site'],
+    queryFn: () => apiGet<PublicSiteResponse>(publicSiteBase(profile)),
     enabled: profile.length > 0,
   });
 }
 
-/** Preview page list for the in-memory site preview picker. */
-export function usePublicBuildPreview(profile: string, includeDrafts: boolean) {
+/** Preview page list; `includeDrafts` false = exactly what would go live. */
+export function usePublicSitePreview(profile: string, includeDrafts: boolean) {
   return useQuery({
-    queryKey: ['profiles', profile, 'public-build', 'preview', includeDrafts],
+    queryKey: ['profiles', profile, 'public-site', 'preview', includeDrafts],
     queryFn: () => {
       const params = new URLSearchParams({ include_drafts: includeDrafts ? '1' : '0' });
-      return apiGet<PublicBuildPreviewResponse>(`${publicBuildBase(profile)}/preview?${params}`);
+      return apiGet<PublicBuildPreviewResponse>(`${publicSiteBase(profile)}/preview?${params}`);
     },
     enabled: profile.length > 0,
   });
 }
 
-function useInvalidatePublicBuild(profile: string) {
+/** Mutations answer the fresh overview; write it into the cache directly. */
+function usePublicSiteMutation<TVars>(profile: string, run: (vars: TVars) => Promise<PublicSiteResponse>) {
   const queryClient = useQueryClient();
-  return () => {
-    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'public-build'] });
-    // Publishing drafts also changes the studio blog list.
-    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'studio'] });
-  };
-}
-
-/** Build the static site (synchronous; server-pinned output dir). */
-export function useBuildPublicSite(profile: string) {
-  const invalidate = useInvalidatePublicBuild(profile);
   return useMutation({
-    mutationFn: ({ body, etag }: { body: PublicBuildRequest; etag: string }) =>
-      apiPost<PublicBuildResultResponse>(`${publicBuildBase(profile)}/build`, body, {
-        headers: ifMatch(etag),
-      }),
-    onSuccess: invalidate,
+    mutationFn: run,
+    onSuccess: (data) => {
+      queryClient.setQueryData(['profiles', profile, 'public-site'], data);
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'public-site', 'preview'] });
+      // Post toggles change blog statuses shown in the content workspace.
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content'] });
+    },
   });
 }
 
-/** Publish the selected drafts, then build the static site. */
-export function usePublishAndBuildPublicSite(profile: string) {
-  const invalidate = useInvalidatePublicBuild(profile);
+export function useUpdatePublicSiteSettings(profile: string) {
+  return usePublicSiteMutation(profile, (body: PublicSiteSettingsUpdate) =>
+    apiPatch<PublicSiteResponse>(`${publicSiteBase(profile)}/settings`, body),
+  );
+}
+
+export function useSetPublicSitePost(profile: string) {
+  return usePublicSiteMutation(profile, ({ slug, isPublic }: { slug: string; isPublic: boolean }) =>
+    apiPut<PublicSiteResponse>(
+      `${publicSiteBase(profile)}/posts/${slug.split('/').map(encodeURIComponent).join('/')}`,
+      { public: isPublic },
+    ),
+  );
+}
+
+export function useSavePublicSiteWorks(profile: string) {
+  return usePublicSiteMutation(profile, ({ works, etag }: { works: PublicSiteWork[]; etag: string }) =>
+    apiPut<PublicSiteResponse>(`${publicSiteBase(profile)}/works`, { works }, { headers: ifMatch(etag) }),
+  );
+}
+
+export function uploadPublicSiteWorkMedia(profile: string, file: File): Promise<PublicSiteMediaResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  return apiPostForm<PublicSiteMediaResponse>(`${publicSiteBase(profile)}/works/media`, form);
+}
+
+function usePublicSiteLiveMutation(profile: string, action: 'deploy' | 'rollback') {
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ body, etag }: { body: PublicBuildPublishRequest; etag: string }) =>
-      apiPost<PublicBuildResultResponse>(
-        `${publicBuildBase(profile)}/publish-and-build`,
-        body,
-        { headers: ifMatch(etag) },
-      ),
-    onSuccess: invalidate,
+    mutationFn: () => apiPost<PublicSiteDeployResponse>(`${publicSiteBase(profile)}/${action}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'public-site'] }),
   });
 }
 
-/** Same-origin URL of one built artifact (anchor href / iframe src). */
-export function publicBuildArtifactUrl(profile: string, path: string): string {
-  const encoded = path.split('/').map(encodeURIComponent).join('/');
-  // Same API_BASE as client.ts ('/api/v1'), which is not exported.
-  return `/api/v1${publicBuildBase(profile)}/artifacts/${encoded}`;
+/** Build published content straight into the live site (previous build kept). */
+export function useDeployPublicSite(profile: string) {
+  return usePublicSiteLiveMutation(profile, 'deploy');
+}
+
+export function useRollbackPublicSite(profile: string) {
+  return usePublicSiteLiveMutation(profile, 'rollback');
 }
 
 /** Same-origin URL of one self-contained preview page (iframe src). */
-export function publicBuildPreviewPageUrl(
-  profile: string,
-  path: string,
-  includeDrafts: boolean,
-): string {
+export function publicSitePreviewPageUrl(profile: string, path: string, includeDrafts: boolean): string {
   const params = new URLSearchParams({
     path,
     include_drafts: includeDrafts ? '1' : '0',
   });
-  return `/api/v1${publicBuildBase(profile)}/preview/page?${params}`;
+  return `/api/v1${publicSiteBase(profile)}/preview/page?${params}`;
+}
+
+/** Same-origin URL of a profile media file (``media/...``) for thumbnails. */
+export function profileMediaUrl(profile: string, rel: string): string {
+  const encoded = rel.replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
+  return `/api/v1/profiles/${encodeURIComponent(profile)}/content/media-file/${encoded}`;
 }
 
 /** Home dashboard overview (M4): aggregated profile snapshot, read-only. */

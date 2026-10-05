@@ -697,6 +697,20 @@
     "title": "Body_upload_profile_content_blog_media_api_v1_profiles__name__content_blog__slug__media_post",
     "type": "object"
    },
+   "Body_upload_profile_public_site_work_media_api_v1_profiles__name__public_site_works_media_post": {
+    "properties": {
+     "file": {
+      "contentMediaType": "application/octet-stream",
+      "title": "File",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file"
+    ],
+    "title": "Body_upload_profile_public_site_work_media_api_v1_profiles__name__public_site_works_media_post",
+    "type": "object"
+   },
    "CareerDraftModel": {
     "description": "One tailored resume draft under ``resumes/generated/<id>.md``.",
     "properties": {
@@ -7437,54 +7451,6 @@
     "title": "ProvenanceRefModel",
     "type": "object"
    },
-   "PublicBuildArtifactModel": {
-    "description": "One file under the build output directory (relative path + stat).",
-    "properties": {
-     "modified": {
-      "default": "",
-      "title": "Modified",
-      "type": "string"
-     },
-     "path": {
-      "title": "Path",
-      "type": "string"
-     },
-     "size": {
-      "default": 0,
-      "title": "Size",
-      "type": "integer"
-     }
-    },
-    "required": [
-     "path"
-    ],
-    "title": "PublicBuildArtifactModel",
-    "type": "object"
-   },
-   "PublicBuildDraftModel": {
-    "description": "One unpublished blog draft offered by the publish-and-build section.",
-    "properties": {
-     "date": {
-      "default": "",
-      "title": "Date",
-      "type": "string"
-     },
-     "slug": {
-      "title": "Slug",
-      "type": "string"
-     },
-     "title": {
-      "default": "",
-      "title": "Title",
-      "type": "string"
-     }
-    },
-    "required": [
-     "slug"
-    ],
-    "title": "PublicBuildDraftModel",
-    "type": "object"
-   },
    "PublicBuildPreviewPageModel": {
     "description": "One renderable site page in the in-memory preview.",
     "properties": {
@@ -7535,95 +7501,116 @@
     "title": "PublicBuildPreviewResponse",
     "type": "object"
    },
-   "PublicBuildPublishRequest": {
-    "description": "Body for publish-and-build: draft slugs to publish, then build.",
-    "properties": {
-     "base_url": {
-      "default": "",
-      "maxLength": 500,
-      "title": "Base Url",
-      "type": "string"
-     },
-     "include_drafts": {
-      "default": false,
-      "title": "Include Drafts",
-      "type": "boolean"
-     },
-     "slugs": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Slugs",
-      "type": "array"
-     }
-    },
-    "title": "PublicBuildPublishRequest",
-    "type": "object"
-   },
-   "PublicBuildRequest": {
-    "description": "Body for the static-site build (synchronous, no LLM).\n\n``base_url`` is the production site URL (optional sub-path) used for\ncanonical/sitemap links, mirroring the Streamlit form. The output\ndirectory is pinned server-side (``dist/public/<name>`` under the data\nroot) — the Streamlit page's free-form output path is not exposed for\npath safety.",
-    "properties": {
-     "base_url": {
-      "default": "",
-      "maxLength": 500,
-      "title": "Base Url",
-      "type": "string"
-     },
-     "include_drafts": {
-      "default": false,
-      "title": "Include Drafts",
-      "type": "boolean"
-     }
-    },
-    "title": "PublicBuildRequest",
-    "type": "object"
-   },
-   "PublicBuildResponse": {
-    "description": "Public Build overview: init gate, validation, drafts, output state.\n\n``validation``/``drafts`` are null/empty until the profile's public\nlayer is initialized (POST ``/studio/init`` creates it).",
-    "properties": {
-     "build": {
-      "$ref": "#/components/schemas/PublicBuildStateModel"
-     },
-     "drafts": {
-      "items": {
-       "$ref": "#/components/schemas/PublicBuildDraftModel"
-      },
-      "title": "Drafts",
-      "type": "array"
-     },
-     "initialized": {
-      "default": false,
-      "title": "Initialized",
-      "type": "boolean"
-     },
-     "profile": {
-      "title": "Profile",
-      "type": "string"
-     },
-     "validation": {
-      "anyOf": [
-       {
-        "$ref": "#/components/schemas/PublicBuildValidationModel"
-       },
-       {
-        "type": "null"
-       }
-      ]
-     }
-    },
-    "required": [
-     "profile",
-     "build"
-    ],
-    "title": "PublicBuildResponse",
-    "type": "object"
-   },
-   "PublicBuildResultResponse": {
-    "description": "Result of one build / publish-and-build run.",
+   "PublicSiteDeployResponse": {
     "properties": {
      "ok": {
       "default": true,
       "title": "Ok",
+      "type": "boolean"
+     },
+     "page_count": {
+      "default": 0,
+      "title": "Page Count",
+      "type": "integer"
+     },
+     "warnings": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+     }
+    },
+    "title": "PublicSiteDeployResponse",
+    "type": "object"
+   },
+   "PublicSiteIntroModel": {
+    "description": "Home hero inputs, read from the master resume (career workspace).",
+    "properties": {
+     "email": {
+      "default": "",
+      "title": "Email",
+      "type": "string"
+     },
+     "english_name": {
+      "default": "",
+      "title": "English Name",
+      "type": "string"
+     },
+     "has_resume": {
+      "default": false,
+      "title": "Has Resume",
+      "type": "boolean"
+     },
+     "name": {
+      "default": "",
+      "title": "Name",
+      "type": "string"
+     },
+     "phone": {
+      "default": "",
+      "title": "Phone",
+      "type": "string"
+     },
+     "photo": {
+      "default": "",
+      "title": "Photo",
+      "type": "string"
+     },
+     "photo_url": {
+      "default": "",
+      "title": "Photo Url",
+      "type": "string"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "title": "PublicSiteIntroModel",
+    "type": "object"
+   },
+   "PublicSiteLiveModel": {
+    "description": "Live directory state plus the diff against the current files.",
+    "properties": {
+     "added": {
+      "items": {
+       "$ref": "#/components/schemas/PublicSitePageRefModel"
+      },
+      "title": "Added",
+      "type": "array"
+     },
+     "built_at": {
+      "default": "",
+      "title": "Built At",
+      "type": "string"
+     },
+     "changed": {
+      "items": {
+       "$ref": "#/components/schemas/PublicSitePageRefModel"
+      },
+      "title": "Changed",
+      "type": "array"
+     },
+     "exists": {
+      "default": false,
+      "title": "Exists",
+      "type": "boolean"
+     },
+     "has_previous": {
+      "default": false,
+      "title": "Has Previous",
+      "type": "boolean"
+     },
+     "in_sync": {
+      "default": false,
+      "title": "In Sync",
       "type": "boolean"
      },
      "output_dir": {
@@ -7635,75 +7622,135 @@
       "title": "Page Count",
       "type": "integer"
      },
-     "pages": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Pages",
-      "type": "array"
-     },
-     "published": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Published",
-      "type": "array"
-     }
-    },
-    "required": [
-     "output_dir"
-    ],
-    "title": "PublicBuildResultResponse",
-    "type": "object"
-   },
-   "PublicBuildStateModel": {
-    "description": "Observed state of the static-site output directory.\n\nDerived from the directory itself (no separate build log): ``exists``\nreports whether a build has ever landed, ``built_at`` is the newest\nartifact mtime, and ``artifacts`` is the capped flat listing.",
-    "properties": {
-     "artifacts": {
-      "items": {
-       "$ref": "#/components/schemas/PublicBuildArtifactModel"
-      },
-      "title": "Artifacts",
-      "type": "array"
-     },
-     "artifacts_truncated": {
+     "pdf_live": {
       "default": false,
-      "title": "Artifacts Truncated",
+      "title": "Pdf Live",
       "type": "boolean"
      },
-     "built_at": {
+     "pdf_pending": {
+      "default": false,
+      "title": "Pdf Pending",
+      "type": "boolean"
+     },
+     "previous_built_at": {
       "default": "",
-      "title": "Built At",
+      "title": "Previous Built At",
       "type": "string"
      },
-     "exists": {
-      "default": false,
-      "title": "Exists",
-      "type": "boolean"
-     },
-     "output_dir": {
-      "title": "Output Dir",
-      "type": "string"
-     },
-     "total_bytes": {
-      "default": 0,
-      "title": "Total Bytes",
-      "type": "integer"
-     },
-     "total_files": {
-      "default": 0,
-      "title": "Total Files",
-      "type": "integer"
+     "removed": {
+      "items": {
+       "$ref": "#/components/schemas/PublicSitePageRefModel"
+      },
+      "title": "Removed",
+      "type": "array"
      }
     },
     "required": [
      "output_dir"
     ],
-    "title": "PublicBuildStateModel",
+    "title": "PublicSiteLiveModel",
     "type": "object"
    },
-   "PublicBuildValidationModel": {
-    "description": "Public-layer validation outcome (mirrors core PublicValidationResult).",
+   "PublicSiteMediaResponse": {
+    "properties": {
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
+     "url": {
+      "default": "",
+      "title": "Url",
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "title": "PublicSiteMediaResponse",
+    "type": "object"
+   },
+   "PublicSitePageRefModel": {
+    "properties": {
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "title": "PublicSitePageRefModel",
+    "type": "object"
+   },
+   "PublicSitePostModel": {
+    "description": "One blog post row with its public toggle and live state.",
+    "properties": {
+     "date": {
+      "default": "",
+      "title": "Date",
+      "type": "string"
+     },
+     "library_hidden": {
+      "default": false,
+      "title": "Library Hidden",
+      "type": "boolean"
+     },
+     "live": {
+      "default": false,
+      "title": "Live",
+      "type": "boolean"
+     },
+     "public": {
+      "default": false,
+      "title": "Public",
+      "type": "boolean"
+     },
+     "slug": {
+      "title": "Slug",
+      "type": "string"
+     },
+     "status": {
+      "default": "draft",
+      "title": "Status",
+      "type": "string"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "slug"
+    ],
+    "title": "PublicSitePostModel",
+    "type": "object"
+   },
+   "PublicSitePostUpdateRequest": {
+    "properties": {
+     "public": {
+      "title": "Public",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "public"
+    ],
+    "title": "PublicSitePostUpdateRequest",
+    "type": "object"
+   },
+   "PublicSiteResponse": {
+    "description": "Public-site console overview (``initialized`` false until the public layer exists).",
     "properties": {
      "errors": {
       "items": {
@@ -7712,10 +7759,52 @@
       "title": "Errors",
       "type": "array"
      },
-     "ok": {
-      "default": true,
-      "title": "Ok",
+     "initialized": {
+      "default": false,
+      "title": "Initialized",
       "type": "boolean"
+     },
+     "intro": {
+      "$ref": "#/components/schemas/PublicSiteIntroModel"
+     },
+     "live": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/PublicSiteLiveModel"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "pdf_available": {
+      "default": false,
+      "title": "Pdf Available",
+      "type": "boolean"
+     },
+     "posts": {
+      "items": {
+       "$ref": "#/components/schemas/PublicSitePostModel"
+      },
+      "title": "Posts",
+      "type": "array"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "projects_count": {
+      "default": 0,
+      "title": "Projects Count",
+      "type": "integer"
+     },
+     "settings": {
+      "$ref": "#/components/schemas/PublicSiteSettingsModel"
+     },
+     "visibility": {
+      "default": "private",
+      "title": "Visibility",
+      "type": "string"
      },
      "warnings": {
       "items": {
@@ -7723,9 +7812,253 @@
       },
       "title": "Warnings",
       "type": "array"
+     },
+     "works": {
+      "items": {
+       "$ref": "#/components/schemas/PublicSiteWorkModel"
+      },
+      "title": "Works",
+      "type": "array"
+     },
+     "works_etag": {
+      "default": "",
+      "title": "Works Etag",
+      "type": "string"
      }
     },
-    "title": "PublicBuildValidationModel",
+    "required": [
+     "profile"
+    ],
+    "title": "PublicSiteResponse",
+    "type": "object"
+   },
+   "PublicSiteSettingsModel": {
+    "description": "``public-profile.yaml: site`` display switches.",
+    "properties": {
+     "base_url": {
+      "default": "",
+      "title": "Base Url",
+      "type": "string"
+     },
+     "resume_pdf": {
+      "default": false,
+      "title": "Resume Pdf",
+      "type": "boolean"
+     },
+     "show_email": {
+      "default": false,
+      "title": "Show Email",
+      "type": "boolean"
+     },
+     "show_phone": {
+      "default": false,
+      "title": "Show Phone",
+      "type": "boolean"
+     },
+     "show_photo": {
+      "default": true,
+      "title": "Show Photo",
+      "type": "boolean"
+     },
+     "show_projects": {
+      "default": false,
+      "title": "Show Projects",
+      "type": "boolean"
+     }
+    },
+    "title": "PublicSiteSettingsModel",
+    "type": "object"
+   },
+   "PublicSiteSettingsUpdateRequest": {
+    "description": "Partial settings update; ``visibility`` flips the whole site public/private.",
+    "properties": {
+     "base_url": {
+      "anyOf": [
+       {
+        "maxLength": 500,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Base Url"
+     },
+     "resume_pdf": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resume Pdf"
+     },
+     "show_email": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Show Email"
+     },
+     "show_phone": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Show Phone"
+     },
+     "show_photo": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Show Photo"
+     },
+     "show_projects": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Show Projects"
+     },
+     "visibility": {
+      "anyOf": [
+       {
+        "pattern": "^(public|private)$",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Visibility"
+     }
+    },
+    "title": "PublicSiteSettingsUpdateRequest",
+    "type": "object"
+   },
+   "PublicSiteWorkLinkModel": {
+    "properties": {
+     "label": {
+      "default": "",
+      "maxLength": 40,
+      "title": "Label",
+      "type": "string"
+     },
+     "url": {
+      "maxLength": 1000,
+      "title": "Url",
+      "type": "string"
+     }
+    },
+    "required": [
+     "url"
+    ],
+    "title": "PublicSiteWorkLinkModel",
+    "type": "object"
+   },
+   "PublicSiteWorkModel": {
+    "description": "One work (``outputs.yaml`` row): video, cover, links, publish switch.",
+    "properties": {
+     "cover": {
+      "default": "",
+      "maxLength": 1000,
+      "title": "Cover",
+      "type": "string"
+     },
+     "featured": {
+      "default": false,
+      "title": "Featured",
+      "type": "boolean"
+     },
+     "id": {
+      "default": "",
+      "maxLength": 80,
+      "title": "Id",
+      "type": "string"
+     },
+     "links": {
+      "items": {
+       "$ref": "#/components/schemas/PublicSiteWorkLinkModel"
+      },
+      "title": "Links",
+      "type": "array"
+     },
+     "status": {
+      "default": "draft",
+      "pattern": "^(draft|published)$",
+      "title": "Status",
+      "type": "string"
+     },
+     "summary": {
+      "default": "",
+      "maxLength": 2000,
+      "title": "Summary",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Title",
+      "type": "string"
+     },
+     "type": {
+      "default": "other",
+      "title": "Type",
+      "type": "string"
+     },
+     "video": {
+      "default": "",
+      "maxLength": 1000,
+      "title": "Video",
+      "type": "string"
+     },
+     "video_mode": {
+      "default": "embed",
+      "pattern": "^(embed|link)$",
+      "title": "Video Mode",
+      "type": "string"
+     },
+     "year": {
+      "default": "",
+      "maxLength": 20,
+      "title": "Year",
+      "type": "string"
+     }
+    },
+    "title": "PublicSiteWorkModel",
+    "type": "object"
+   },
+   "PublicSiteWorksUpdateRequest": {
+    "properties": {
+     "works": {
+      "items": {
+       "$ref": "#/components/schemas/PublicSiteWorkModel"
+      },
+      "maxItems": 60,
+      "title": "Works",
+      "type": "array"
+     }
+    },
+    "title": "PublicSiteWorksUpdateRequest",
     "type": "object"
    },
    "ResearchPaperItemModel": {
@@ -18519,10 +18852,10 @@
     "summary": "Get Profile Projects Board"
    }
   },
-  "/api/v1/profiles/{name}/public-build": {
+  "/api/v1/profiles/{name}/public-site": {
    "get": {
-    "description": "Public Build overview: init gate, validation, drafts, output state.\n\nRead-only aggregation of the Streamlit page's status surface: the\nfour-file public-layer gate, the ``validate_public_layer`` outcome\n(errors block a build), the unpublished blog drafts offered by the\npublish-and-build section, and the observed output-directory state.\nCarries the public-layer ETag (same fingerprint as the studio) for\n``If-Match`` on the build mutations.",
-    "operationId": "get_profile_public_build_api_v1_profiles__name__public_build_get",
+    "description": "Console overview: switches, intro (from the master resume), posts, works, live diff.",
+    "operationId": "get_profile_public_site_api_v1_profiles__name__public_site_get",
     "parameters": [
      {
       "in": "path",
@@ -18539,7 +18872,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/PublicBuildResponse"
+         "$ref": "#/components/schemas/PublicSiteResponse"
         }
        }
       },
@@ -18586,13 +18919,13 @@
       "description": "Validation Error"
      }
     },
-    "summary": "Get Profile Public Build"
+    "summary": "Get Profile Public Site"
    }
   },
-  "/api/v1/profiles/{name}/public-build/artifacts/{path}": {
-   "get": {
-    "description": "Serve one file from the build output directory (preview/download).\n\nPath-traversal guarded: anything resolving outside the pinned output\ndirectory answers 404, same as a missing file. Auth follows the same\nprofile scope as every other route — a preview build may contain\ndrafts/private content, so artifacts are not public here.",
-    "operationId": "get_profile_public_build_artifact_api_v1_profiles__name__public_build_artifacts__path__get",
+  "/api/v1/profiles/{name}/public-site/deploy": {
+   "post": {
+    "description": "Build the site (published content only) into the live directory.\n\nValidation runs first and blocks the deploy (422 ``deploy_blocked``)\nbefore anything is written; the replaced build is kept for rollback.",
+    "operationId": "deploy_profile_public_site_api_v1_profiles__name__public_site_deploy_post",
     "parameters": [
      {
       "in": "path",
@@ -18602,22 +18935,15 @@
        "title": "Name",
        "type": "string"
       }
-     },
-     {
-      "in": "path",
-      "name": "path",
-      "required": true,
-      "schema": {
-       "title": "Path",
-       "type": "string"
-      }
      }
     ],
     "responses": {
      "200": {
       "content": {
        "application/json": {
-        "schema": {}
+        "schema": {
+         "$ref": "#/components/schemas/PublicSiteDeployResponse"
+        }
        }
       },
       "description": "Successful Response"
@@ -18650,26 +18976,46 @@
         }
        }
       },
-      "description": "Profile not found, or artifact missing/escapes the output dir."
+      "description": "Profile, post or preview page not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "No previous build to roll back to."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Works list changed since it was loaded."
      },
      "422": {
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
+         "$ref": "#/components/schemas/ErrorResponse"
         }
        }
       },
-      "description": "Validation Error"
+      "description": "Public layer not initialized, invalid input, or the site failed validation."
      }
     },
-    "summary": "Get Profile Public Build Artifact"
+    "summary": "Deploy Profile Public Site"
    }
   },
-  "/api/v1/profiles/{name}/public-build/build": {
-   "post": {
-    "description": "Build the static public site into the server-pinned output dir.\n\nThin wrapper over ``core.public_site.build_public_site``: the core\nvalidates first (errors → 422 ``public_build_blocked``) and requires\n``visibility: public`` unless ``include_drafts`` is set (preview mode).\nHonors ``If-Match`` against the public-layer ETag (412 on mismatch).",
-    "operationId": "build_profile_public_site_api_v1_profiles__name__public_build_build_post",
+  "/api/v1/profiles/{name}/public-site/posts/{slug}": {
+   "put": {
+    "description": "Put one post on the site (publish gate + library public) or take it off (draft).",
+    "operationId": "update_profile_public_site_post_api_v1_profiles__name__public_site_posts__slug__put",
     "parameters": [
      {
       "in": "path",
@@ -18681,19 +19027,12 @@
       }
      },
      {
-      "in": "header",
-      "name": "if-match",
-      "required": false,
+      "in": "path",
+      "name": "slug",
+      "required": true,
       "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "If-Match"
+       "title": "Slug",
+       "type": "string"
       }
      }
     ],
@@ -18701,7 +19040,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/PublicBuildRequest"
+        "$ref": "#/components/schemas/PublicSitePostUpdateRequest"
        }
       }
      },
@@ -18712,7 +19051,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/PublicBuildResultResponse"
+         "$ref": "#/components/schemas/PublicSiteResponse"
         }
        }
       },
@@ -18746,7 +19085,17 @@
         }
        }
       },
-      "description": "Profile, build artifact, or preview page not found."
+      "description": "Profile, post or preview page not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "No previous build to roll back to."
      },
      "412": {
       "content": {
@@ -18756,7 +19105,7 @@
         }
        }
       },
-      "description": "If-Match ETag does not match the public-layer files."
+      "description": "Works list changed since it was loaded."
      },
      "422": {
       "content": {
@@ -18766,16 +19115,16 @@
         }
        }
       },
-      "description": "Public layer not initialized, validation/visibility gate failed, invalid base URL, no drafts selected, or a draft failed publish-readiness validation."
+      "description": "Public layer not initialized, invalid input, or the site failed validation."
      }
     },
-    "summary": "Build Profile Public Site"
+    "summary": "Update Profile Public Site Post"
    }
   },
-  "/api/v1/profiles/{name}/public-build/preview": {
+  "/api/v1/profiles/{name}/public-site/preview": {
    "get": {
-    "description": "List the renderable site pages for the in-memory preview picker.\n\nWarnings mirror ``render_public_site_preview``: validation warnings\nplus each validation error prefixed ``preview validation:`` (the\npreview renders even when a production build would be blocked). The\nper-page HTML comes from ``GET .../preview/page?path=<rel>``.",
-    "operationId": "get_profile_public_build_preview_api_v1_profiles__name__public_build_preview_get",
+    "description": "Page list of the in-memory preview (defaults to exactly what would go live).",
+    "operationId": "get_profile_public_site_preview_api_v1_profiles__name__public_site_preview_get",
     "parameters": [
      {
       "in": "path",
@@ -18791,7 +19140,7 @@
       "name": "include_drafts",
       "required": false,
       "schema": {
-       "default": true,
+       "default": false,
        "title": "Include Drafts",
        "type": "boolean"
       }
@@ -18849,13 +19198,13 @@
       "description": "Public layer not initialized."
      }
     },
-    "summary": "Get Profile Public Build Preview"
+    "summary": "Get Profile Public Site Preview"
    }
   },
-  "/api/v1/profiles/{name}/public-build/preview/page": {
+  "/api/v1/profiles/{name}/public-site/preview/page": {
    "get": {
-    "description": "Render one preview page as self-contained HTML (inline CSS/media).\n\nSame payload the Streamlit page iframes via ``components.html``: CSS\nand local media are inlined as data URIs, so the page renders stand-\nalone in the SPA iframe. Unknown page paths answer 404.",
-    "operationId": "get_profile_public_build_preview_page_api_v1_profiles__name__public_build_preview_page_get",
+    "description": "One preview page as self-contained HTML (inline CSS/media) for the iframe.",
+    "operationId": "get_profile_public_site_preview_page_api_v1_profiles__name__public_site_preview_page_get",
     "parameters": [
      {
       "in": "path",
@@ -18881,7 +19230,7 @@
       "name": "include_drafts",
       "required": false,
       "schema": {
-       "default": true,
+       "default": false,
        "title": "Include Drafts",
        "type": "boolean"
       }
@@ -18939,13 +19288,13 @@
       "description": "Public layer not initialized."
      }
     },
-    "summary": "Get Profile Public Build Preview Page"
+    "summary": "Get Profile Public Site Preview Page"
    }
   },
-  "/api/v1/profiles/{name}/public-build/publish-and-build": {
+  "/api/v1/profiles/{name}/public-site/rollback": {
    "post": {
-    "description": "Publish the selected blog drafts, then build the static site.\n\nMirrors the Streamlit \"发布草稿并构建\" section: each slug goes through\n``publish_blog_post`` (full publish-readiness gate); the first failure\nanswers 422 ``public_publish_failed`` naming the slug, earlier slugs\nstay published, and nothing is built. Honors ``If-Match`` against the\npublic-layer ETag (412 on mismatch) — publishing flips blog statuses.",
-    "operationId": "publish_and_build_profile_public_site_api_v1_profiles__name__public_build_publish_and_build_post",
+    "description": "Swap the live site with the build replaced by the last deploy.",
+    "operationId": "rollback_profile_public_site_api_v1_profiles__name__public_site_rollback_post",
     "parameters": [
      {
       "in": "path",
@@ -18955,40 +19304,14 @@
        "title": "Name",
        "type": "string"
       }
-     },
-     {
-      "in": "header",
-      "name": "if-match",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "If-Match"
-      }
      }
     ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/PublicBuildPublishRequest"
-       }
-      }
-     },
-     "required": true
-    },
     "responses": {
      "200": {
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/PublicBuildResultResponse"
+         "$ref": "#/components/schemas/PublicSiteDeployResponse"
         }
        }
       },
@@ -19022,7 +19345,17 @@
         }
        }
       },
-      "description": "Profile, build artifact, or preview page not found."
+      "description": "Profile, post or preview page not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "No previous build to roll back to."
      },
      "412": {
       "content": {
@@ -19032,7 +19365,7 @@
         }
        }
       },
-      "description": "If-Match ETag does not match the public-layer files."
+      "description": "Works list changed since it was loaded."
      },
      "422": {
       "content": {
@@ -19042,10 +19375,326 @@
         }
        }
       },
-      "description": "Public layer not initialized, validation/visibility gate failed, invalid base URL, no drafts selected, or a draft failed publish-readiness validation."
+      "description": "Public layer not initialized, invalid input, or the site failed validation."
      }
     },
-    "summary": "Publish And Build Profile Public Site"
+    "summary": "Rollback Profile Public Site"
+   }
+  },
+  "/api/v1/profiles/{name}/public-site/settings": {
+   "patch": {
+    "description": "Merge display switches / site visibility into ``public-profile.yaml``.",
+    "operationId": "update_profile_public_site_settings_api_v1_profiles__name__public_site_settings_patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PublicSiteSettingsUpdateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PublicSiteResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile, post or preview page not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "No previous build to roll back to."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Works list changed since it was loaded."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Public layer not initialized, invalid input, or the site failed validation."
+     }
+    },
+    "summary": "Update Profile Public Site Settings"
+   }
+  },
+  "/api/v1/profiles/{name}/public-site/works": {
+   "put": {
+    "description": "Replace the works list (``outputs.yaml``); If-Match carries ``works_etag``.",
+    "operationId": "update_profile_public_site_works_api_v1_profiles__name__public_site_works_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PublicSiteWorksUpdateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PublicSiteResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile, post or preview page not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "No previous build to roll back to."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Works list changed since it was loaded."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Public layer not initialized, invalid input, or the site failed validation."
+     }
+    },
+    "summary": "Update Profile Public Site Works"
+   }
+  },
+  "/api/v1/profiles/{name}/public-site/works/media": {
+   "post": {
+    "description": "Store a work cover / video under ``media/works/``; the works list is not written.",
+    "operationId": "upload_profile_public_site_work_media_api_v1_profiles__name__public_site_works_media_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_upload_profile_public_site_work_media_api_v1_profiles__name__public_site_works_media_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PublicSiteMediaResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile, post or preview page not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "No previous build to roll back to."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Works list changed since it was loaded."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Public layer not initialized, invalid input, or the site failed validation."
+     }
+    },
+    "summary": "Upload Profile Public Site Work Media"
    }
   },
   "/api/v1/profiles/{name}/research": {

@@ -509,29 +509,17 @@ export interface CareerStructureResult {
   resume: ResumeDoc;
 }
 
-/** PublicBuildValidationModel from web_api/schemas.py (public-layer check). */
-export type PublicBuildValidation = Schemas['PublicBuildValidationModel'];
-
-/** PublicBuildDraftModel from web_api/schemas.py (unpublished draft row). */
-export type PublicBuildDraft = Schemas['PublicBuildDraftModel'];
-
-/** PublicBuildArtifactModel from web_api/schemas.py (output file row). */
-export type PublicBuildArtifact = Schemas['PublicBuildArtifactModel'];
-
-/** PublicBuildStateModel from web_api/schemas.py (output-dir state). */
-export type PublicBuildState = Schemas['PublicBuildStateModel'];
-
-/** PublicBuildResponse from web_api/schemas.py (public-build overview). */
-export type PublicBuildResponse = Schemas['PublicBuildResponse'];
-
-/** PublicBuildRequest from web_api/schemas.py (build body). */
-export type PublicBuildRequest = Schemas['PublicBuildRequest'];
-
-/** PublicBuildPublishRequest from web_api/schemas.py (publish+build body). */
-export type PublicBuildPublishRequest = Schemas['PublicBuildPublishRequest'];
-
-/** PublicBuildResultResponse from web_api/schemas.py (one build run). */
-export type PublicBuildResultResponse = Schemas['PublicBuildResultResponse'];
+/** Public-site console models from web_api/schemas.py. */
+export type PublicSiteSettings = Schemas['PublicSiteSettingsModel'];
+export type PublicSiteSettingsUpdate = Schemas['PublicSiteSettingsUpdateRequest'];
+export type PublicSiteIntro = Schemas['PublicSiteIntroModel'];
+export type PublicSitePost = Schemas['PublicSitePostModel'];
+export type PublicSiteWork = Schemas['PublicSiteWorkModel'];
+export type PublicSiteWorkLink = Schemas['PublicSiteWorkLinkModel'];
+export type PublicSiteLive = Schemas['PublicSiteLiveModel'];
+export type PublicSiteResponse = Schemas['PublicSiteResponse'];
+export type PublicSiteMediaResponse = Schemas['PublicSiteMediaResponse'];
+export type PublicSiteDeployResponse = Schemas['PublicSiteDeployResponse'];
 
 /** PublicBuildPreviewPageModel from web_api/schemas.py (preview picker row). */
 export type PublicBuildPreviewPage = Schemas['PublicBuildPreviewPageModel'];
@@ -679,12 +667,6 @@ export interface StudioResult {
 /** Blog detail GET result: the post plus its per-post ETag (W/"<sha256>"). */
 export interface StudioPostResult {
   post: StudioPostDetail;
-  etag: string;
-}
-
-/** Public-build GET result: the payload plus the public-layer ETag. */
-export interface PublicBuildResult {
-  data: PublicBuildResponse;
   etag: string;
 }
 

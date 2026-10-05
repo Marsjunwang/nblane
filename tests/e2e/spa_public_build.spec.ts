@@ -1,107 +1,154 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { SPA_BASE_URL, SPA_E2E_PROFILE } from "./spa_auth_shared";
 
 /**
- * Real-browser journey for the Public Build SPA page (公开构建), against the
- * isolated sandbox (`scripts/dev-web.sh --isolated`, profile=dev):
+ * Real-browser journey for the 公开站点 console (route /p/:name/public-build),
+ * against the isolated sandbox (`scripts/dev-web.sh --isolated`, profile=dev).
  *
- * 打开页 → 状态总览渲染（校验/产物/草稿）→ 触发一次构建（dev 档案为 private，
- * 需开「包含草稿」预览模式）→ 成功反馈 → 产物清单可见且 index.html 真实可下载
- * → 整站预览 iframe 指向 preview/page 端点且真实返回 HTML。
- *
- * The build is idempotent and lands in the sandbox `.dev-data/dist/public/dev`
- * only — no entity seeding, so reruns never collide; the first run sees
- * 「尚未构建」, later runs 「已有产物」, both are accepted.
+ * The sandbox "live" directory is `.dev-data/dist/public/dev` — nothing is
+ * served from it, so deploying there is safe. Every test restores what it
+ * changes (switches, works list, visibility) through the API in `finally`.
  */
 
-const SPA_BASE_URL = (process.env.NBLANE_E2E_SPA_BASE_URL || "http://127.0.0.1:18504").replace(
-  /\/+$/,
-  "",
-);
-const PROFILE = process.env.NBLANE_E2E_PROFILE || "dev";
+const PROFILE = SPA_E2E_PROFILE;
+const API = `${SPA_BASE_URL}/api/v1/profiles/${encodeURIComponent(PROFILE)}/public-site`;
 
 function spa(path: string): string {
   return `${SPA_BASE_URL}/p/${encodeURIComponent(PROFILE)}/${path}`;
 }
 
-test.describe("SPA Public Build (公开构建)", () => {
-  test("overview → build → success feedback → artifacts + preview", async ({ page }) => {
+async function overview(page: Page) {
+  const res = await page.request.get(API);
+  expect(res.status()).toBe(200);
+  return res.json();
+}
+
+async function patchSettings(page: Page, body: Record<string, unknown>) {
+  const res = await page.request.patch(`${API}/settings`, { data: body });
+  expect(res.status()).toBe(200);
+}
+
+test.describe("SPA 公开站点", () => {
+  test("console renders intro, posts, works, live diff and a real preview", async ({ page }) => {
     await page.goto(spa("public-build"));
+    await expect(page.getByRole("link", { name: "公开站点", exact: true })).toBeVisible();
+    await expect(page.getByTestId("public-site-page")).toBeVisible();
+    await expect(page.getByTestId("intro-card")).toBeVisible();
+    await expect(page.getByTestId("posts-section")).toBeVisible();
+    await expect(page.getByTestId("works-editor")).toBeVisible();
+    await expect(page.getByTestId("live-summary")).not.toBeEmpty();
 
-    // 状态渲染: navbar entry + status card (validation ok after the sandbox
-    // outputs.yaml type fix; both build-state badges accepted for reruns).
-    await expect(page.getByRole("link", { name: "公开构建", exact: true })).toBeVisible();
-    const status = page.getByTestId("build-status");
-    await expect(status).toBeVisible();
-    await expect(status.getByTestId("validation-ok")).toBeVisible();
-    await expect(status).toContainText(".dev-data/dist/public/dev");
-    await expect(
-      status.getByTestId("build-exists").or(status.getByTestId("build-empty")),
-    ).toBeVisible();
-
-    // Drafts section and the by-design notes card render.
-    await expect(page.getByTestId("draft-list")).toBeVisible();
-    await expect(page.getByTestId("build-notes")).toContainText("同步");
-    await expect(page.getByTestId("build-notes")).toContainText("内容工作台");
-
-    // 触发构建: dev 档案 visibility=private → 必须开「包含草稿」预览模式。
-    await page.getByRole("switch", { name: /包含草稿/ }).click();
-    const buildResponsePromise = page.waitForResponse(
-      (res) => res.url().includes("/public-build/build") && res.request().method() === "POST",
-    );
-    await page.getByTestId("build-button").click();
-    const buildResponse = await buildResponsePromise;
-    expect(buildResponse.status()).toBe(200);
-    const built = await buildResponse.json();
-    expect(built.output_dir).toContain(".dev-data/dist/public/dev");
-    expect(built.page_count).toBeGreaterThan(0);
-
-    // 成功反馈。
-    const success = page.getByTestId("build-success");
-    await expect(success).toBeVisible();
-    await expect(success).toContainText("已构建");
-
-    // 产物可见: the artifacts table lists index.html and the link really
-    // downloads (200 text/html through the same authenticated session).
-    const artifactRow = page.getByTestId("artifact-index.html");
-    await expect(artifactRow).toBeVisible();
-    const href = await artifactRow.locator("a").getAttribute("href");
-    expect(href).toContain(`/api/v1/profiles/${encodeURIComponent(PROFILE)}/public-build/artifacts/index.html`);
-    const artifact = await page.request.get(new URL(href!, SPA_BASE_URL).toString());
-    expect(artifact.status()).toBe(200);
-    expect(artifact.headers()["content-type"]).toContain("text/html");
-    expect(await artifact.text()).toContain("<html");
-
-    // The status card flips to 已有产物 after the invalidation refetch.
-    await expect(status.getByTestId("build-exists")).toBeVisible();
-
-    // 整站预览: the iframe points at the preview/page endpoint and the same
-    // endpoint really serves self-contained HTML (inline CSS).
+    // The preview iframe serves the live-content site (no drafts) by default.
     const frame = page.getByTestId("preview-frame");
     await expect(frame).toBeVisible();
     const src = await frame.getAttribute("src");
-    expect(src).toContain("/public-build/preview/page");
-    expect(src).toContain("path=index.html");
+    expect(src).toContain("/public-site/preview/page");
+    expect(src).toContain("include_drafts=0");
     const preview = await page.request.get(new URL(src!, SPA_BASE_URL).toString());
     expect(preview.status()).toBe(200);
-    expect(preview.headers()["content-type"]).toContain("text/html");
-    expect(await preview.text()).toContain("<html");
+    const html = await preview.text();
+    expect(html).toContain("<html");
+    // Projects are off by default: no 项目 nav entry on the site.
+    expect(html).not.toContain('href="/projects/"');
+
+    await page.getByTestId("preview-include-drafts").click();
+    await expect(frame).toHaveAttribute("src", /include_drafts=1/);
   });
 
-  test("private profile without 包含草稿 hits the visibility gate (422)", async ({ page }) => {
-    await page.goto(spa("public-build"));
-    await expect(page.getByTestId("build-status")).toBeVisible();
+  test("display switch round-trips to public-profile.yaml", async ({ page }) => {
+    const before = (await overview(page)).settings.show_email;
+    try {
+      await page.goto(spa("public-build"));
+      const toggle = page.getByTestId("setting-show_email");
+      const patched = page.waitForResponse(
+        (res) => res.url().endsWith("/public-site/settings") && res.request().method() === "PATCH",
+      );
+      await toggle.click();
+      expect((await patched).status()).toBe(200);
+      await expect(toggle).toBeChecked({ checked: !before });
+      expect((await overview(page)).settings.show_email).toBe(!before);
+    } finally {
+      await patchSettings(page, { show_email: before });
+    }
+  });
 
-    // Sandbox dev is visibility=private: a production build (switch off) is
-    // blocked by the core visibility gate — the page shows the core message.
-    const buildResponsePromise = page.waitForResponse(
-      (res) => res.url().includes("/public-build/build") && res.request().method() === "POST",
-    );
-    await page.getByTestId("build-button").click();
-    const buildResponse = await buildResponsePromise;
-    expect(buildResponse.status()).toBe(422);
-    expect((await buildResponse.json()).code).toBe("public_build_blocked");
-    const error = page.getByTestId("mutation-error");
-    await expect(error).toBeVisible();
-    await expect(error).toContainText("visibility");
+  test("adds a work with an embeddable video, saves, and removes it", async ({ page }) => {
+    const original = await overview(page);
+    const title = `作品验收 ${Date.now()}`;
+    try {
+      await page.goto(spa("public-build"));
+      const count = original.works.length;
+      await page.getByTestId("works-add").click();
+      const card = page.getByTestId(`work-${count}`);
+      await card.getByTestId(`work-${count}-title`).fill(title);
+      await card.getByTestId(`work-${count}-video`).fill("https://www.bilibili.com/video/BV1xx411c7mD");
+      await expect(card.getByTestId(`work-${count}-video-hint`)).toContainText("内嵌播放");
+      await card.getByTestId(`work-${count}-add-link`).click();
+      await card.getByTestId(`work-${count}-link-url-0`).fill("https://arxiv.org/abs/2401.00001");
+      await card.getByTestId(`work-${count}-published`).click();
+
+      const saved = page.waitForResponse(
+        (res) => res.url().endsWith("/public-site/works") && res.request().method() === "PUT",
+      );
+      await page.getByTestId("works-save").click();
+      expect((await saved).status()).toBe(200);
+      await expect(page.getByTestId("works-save")).toHaveText("已保存");
+
+      const after = await overview(page);
+      const work = after.works.find((row: { title: string }) => row.title === title);
+      expect(work).toBeTruthy();
+      expect(work.video_mode).toBe("embed");
+      expect(work.links).toEqual([{ label: "https://arxiv.org/abs/2401.00001", url: "https://arxiv.org/abs/2401.00001" }]);
+
+      // The works page of the preview embeds the Bilibili player.
+      const worksPage = await page.request.get(`${API}/preview/page?path=outputs/index.html&include_drafts=0`);
+      expect(await worksPage.text()).toContain("player.bilibili.com/player.html?bvid=BV1xx411c7mD");
+    } finally {
+      const current = await overview(page);
+      const kept = current.works.filter((row: { title: string }) => row.title !== title);
+      await page.request.put(`${API}/works`, {
+        data: { works: kept },
+        headers: { "If-Match": current.works_etag },
+      });
+    }
+  });
+
+  test("private site blocks deploy; public site deploys and rolls back", async ({ page }) => {
+    const original = await overview(page);
+    try {
+      await patchSettings(page, { visibility: "private" });
+      await page.goto(spa("public-build"));
+      await expect(page.getByTestId("site-errors")).toContainText("网站公开");
+      await expect(page.getByTestId("deploy-button")).toBeDisabled();
+
+      // Flip the site public in the UI, then deploy through the confirmation.
+      await page.getByTestId("setting-visibility").click();
+      await expect(page.getByTestId("site-errors")).toHaveCount(0);
+      const deployButton = page.getByTestId("deploy-button");
+      if (await deployButton.isEnabled()) {
+        await deployButton.click();
+        await expect(page.getByTestId("live-confirm")).toBeVisible();
+        const deployed = page.waitForResponse(
+          (res) => res.url().endsWith("/public-site/deploy") && res.request().method() === "POST",
+        );
+        await page.getByTestId("live-confirm-button").click();
+        expect((await deployed).status()).toBe(200);
+      }
+      await expect(page.getByTestId("live-summary")).toHaveText("线上已是最新。");
+      await expect(deployButton).toBeDisabled();
+
+      // Rollback is offered once a previous build exists.
+      const rollback = page.getByTestId("rollback-button");
+      if (await rollback.isVisible()) {
+        await rollback.click();
+        const rolled = page.waitForResponse(
+          (res) => res.url().endsWith("/public-site/rollback") && res.request().method() === "POST",
+        );
+        await page.getByTestId("live-confirm-button").click();
+        expect((await rolled).status()).toBe(200);
+      }
+    } finally {
+      await patchSettings(page, { visibility: original.visibility });
+    }
   });
 });

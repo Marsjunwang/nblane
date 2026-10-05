@@ -1,42 +1,73 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
 import { jsonResponse, renderWithProviders } from '../test/render';
 import { PublicBuildPage } from './PublicBuildPage';
 
-const PB_ETAG = 'W/"public-build-sha"';
+const LIVE = {
+  output_dir: '/data/dist/public/alice',
+  exists: true,
+  built_at: '2026-10-01T12:00:00',
+  page_count: 4,
+  has_previous: true,
+  previous_built_at: '2026-09-30T12:00:00',
+  added: [{ path: 'blog/new/index.html', title: 'New post' }],
+  changed: [{ path: 'index.html', title: 'Home' }],
+  removed: [{ path: 'projects/index.html', title: 'projects/index.html' }],
+  pdf_live: false,
+  pdf_pending: false,
+  in_sync: false,
+};
 
 const OVERVIEW = {
   profile: 'alice',
   initialized: true,
-  validation: { ok: true, errors: [], warnings: [] },
-  drafts: [{ slug: 'ready', title: 'Ready post', date: '2026-09-11' }],
-  build: {
-    output_dir: '/data/dist/public/alice',
-    exists: false,
-    built_at: '',
-    total_files: 0,
-    total_bytes: 0,
-    artifacts_truncated: false,
-    artifacts: [],
+  visibility: 'public',
+  settings: {
+    show_photo: true,
+    show_email: false,
+    show_phone: false,
+    resume_pdf: false,
+    show_projects: false,
+    base_url: '',
   },
-};
-
-const OVERVIEW_BUILT = {
-  ...OVERVIEW,
-  build: {
-    output_dir: '/data/dist/public/alice',
-    exists: true,
-    built_at: '2026-09-21T12:00:00',
-    total_files: 2,
-    total_bytes: 4096,
-    artifacts_truncated: false,
-    artifacts: [
-      { path: 'index.html', size: 3072, modified: '2026-09-21T12:00:00' },
-      { path: 'assets/site.css', size: 1024, modified: '2026-09-21T12:00:00' },
-    ],
+  intro: {
+    name: 'Alice',
+    english_name: 'Al',
+    title: 'Robotics engineer',
+    summary: 'Builds **robots**.',
+    photo: '',
+    photo_url: '',
+    phone: '',
+    email: 'a@example.com',
+    has_resume: true,
   },
+  posts: [
+    { slug: 'new', title: 'New post', date: '2026-10-01', status: 'published', summary: '', library_hidden: false, public: true, live: false },
+    { slug: 'draft-one', title: 'Draft one', date: '2026-09-01', status: 'draft', summary: '', library_hidden: false, public: false, live: false },
+  ],
+  works: [
+    {
+      id: 'demo',
+      title: 'Demo video',
+      type: 'video',
+      year: '2026',
+      summary: 'Arm demo',
+      video: 'https://www.bilibili.com/video/BV1xx411c7mD',
+      video_mode: 'embed',
+      cover: '',
+      links: [{ label: '论文', url: 'https://arxiv.org/abs/1' }],
+      status: 'published',
+      featured: true,
+    },
+  ],
+  works_etag: 'works-sha',
+  projects_count: 3,
+  errors: [],
+  warnings: [],
+  live: LIVE,
+  pdf_available: true,
 };
 
 const PREVIEW = {
@@ -49,55 +80,30 @@ const PREVIEW = {
   warnings: [],
 };
 
-const BUILD_OK = {
-  ok: true,
-  output_dir: '/data/dist/public/alice',
-  page_count: 5,
-  pages: ['index.html'],
-  published: [],
-};
-
-function withEtag(response: Response, etag: string): Response {
-  return new Response(response.body, {
-    status: response.status,
-    headers: { 'Content-Type': 'application/json', ETag: etag },
-  });
-}
-
 interface MockOptions {
   overview?: unknown;
-  buildResponse?: Response;
-  publishResponse?: Response;
+  responses?: Record<string, Response>;
 }
 
 function mockApi(options: MockOptions = {}) {
-  const calls: { url: string; init?: RequestInit }[] = [];
+  const calls: { url: string; method: string; init?: RequestInit }[] = [];
+  const overview = options.overview ?? OVERVIEW;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    calls.push({ url, init });
     const method = init?.method ?? 'GET';
-    if (url.endsWith('/profiles/alice/public-build') && method === 'GET') {
-      return withEtag(jsonResponse(200, options.overview ?? OVERVIEW), PB_ETAG);
+    calls.push({ url, method, init });
+    const key = `${method} ${url.replace(/^.*\/public-site/, '').replace(/\?.*$/, '')}`;
+    if (options.responses?.[key]) return options.responses[key].clone();
+    if (url.includes('/public-site/preview')) return jsonResponse(200, PREVIEW);
+    if (url.endsWith('/public-site/deploy') || url.endsWith('/public-site/rollback')) {
+      return jsonResponse(200, { ok: true, page_count: 4, warnings: [] });
     }
-    if (url.includes('/public-build/preview?')) {
-      return jsonResponse(200, PREVIEW);
-    }
-    if (url.endsWith('/public-build/build')) {
-      return options.buildResponse ?? withEtag(jsonResponse(200, BUILD_OK), PB_ETAG);
-    }
-    if (url.endsWith('/public-build/publish-and-build')) {
-      return (
-        options.publishResponse ??
-        withEtag(jsonResponse(200, { ...BUILD_OK, published: ['ready'] }), PB_ETAG)
-      );
-    }
-    if (url.endsWith('/studio/init')) {
-      return jsonResponse(200, { ok: true, created_paths: ['public-profile.yaml'] });
-    }
+    if (url.includes('/public-site')) return jsonResponse(200, overview);
+    if (url.endsWith('/studio/init')) return jsonResponse(200, { ok: true, created_paths: [] });
     return jsonResponse(404, { code: 'not_found', message: `no mock for ${method} ${url}` });
   });
   vi.stubGlobal('fetch', fetchMock);
-  return { fetchMock, calls };
+  return { calls };
 }
 
 afterEach(() => {
@@ -113,142 +119,113 @@ function renderPage() {
   );
 }
 
-describe('PublicBuildPage', () => {
-  it('renders the status overview, drafts, and empty artifacts', async () => {
+describe('PublicBuildPage (公开站点)', () => {
+  it('shows intro, switches, posts, works, live diff and the preview', async () => {
     mockApi();
     renderPage();
 
-    const status = await screen.findByTestId('build-status');
-    expect(status).toHaveTextContent('校验通过');
-    expect(status).toHaveTextContent('尚未构建');
-    expect(status).toHaveTextContent('/data/dist/public/alice');
-    expect(screen.getByTestId('no-artifacts')).toBeVisible();
-    expect(screen.getByTestId('draft-list')).toHaveTextContent('Ready post');
-    // Publish is gated on a selection; the preview iframe points at the API.
-    expect(screen.getByTestId('publish-build-button')).toBeDisabled();
+    await screen.findByTestId('public-site-page');
+    expect(screen.getByTestId('intro-card')).toHaveTextContent('Robotics engineer');
+    expect(screen.getByTestId('intro-card')).toHaveTextContent('Builds robots.');
+    expect(screen.getByTestId('setting-visibility')).toBeChecked();
+    expect(screen.getByTestId('setting-show_email')).not.toBeChecked();
+    expect(screen.getByTestId('setting-show_projects')).not.toBeChecked();
+    expect(screen.getByTestId('post-public-new')).toBeChecked();
+    expect(screen.getByTestId('post-public-draft-one')).not.toBeChecked();
+    expect(screen.getByTestId('work-0')).toHaveTextContent('Demo video');
+    expect(screen.getByTestId('live-summary')).toHaveTextContent('新增 1 页，更新 1 页，下线 1 页');
+    expect(screen.getByTestId('deploy-button')).toBeEnabled();
     const frame = await screen.findByTestId('preview-frame');
-    expect(frame.getAttribute('src')).toContain('/api/v1/profiles/alice/public-build/preview/page');
-    expect(frame.getAttribute('src')).toContain('path=index.html');
+    expect(frame.getAttribute('src')).toContain('/api/v1/profiles/alice/public-site/preview/page');
+    expect(frame.getAttribute('src')).toContain('include_drafts=0');
   });
 
-  it('shows the init gate on an uninitialized profile and calls studio init', async () => {
-    const { calls } = mockApi({
-      overview: { ...OVERVIEW, initialized: false, validation: null, drafts: [] },
-    });
+  it('patches one display switch', async () => {
+    const { calls } = mockApi();
     renderPage();
-
-    await screen.findByTestId('init-needed');
-    fireEvent.click(screen.getByRole('button', { name: '初始化公开层' }));
+    fireEvent.click(await screen.findByTestId('setting-show_email'));
     await waitFor(() => {
-      const initCall = calls.find((call) => call.url.endsWith('/studio/init'));
-      expect(initCall).toBeDefined();
-      const headers = initCall?.init?.headers as Record<string, string>;
-      expect(headers['If-Match']).toBe(PB_ETAG);
+      const call = calls.find((c) => c.method === 'PATCH');
+      expect(call?.url).toContain('/public-site/settings');
+      expect(JSON.parse(String(call?.init?.body))).toEqual({ show_email: true });
     });
   });
 
-  it('builds with the overview ETag and shows the success feedback', async () => {
+  it('toggles a post public and surfaces a publish-gate error inline', async () => {
+    const { calls } = mockApi({
+      responses: {
+        'PUT /posts/draft-one': jsonResponse(422, {
+          code: 'post_not_publishable',
+          message: '这篇还不能公开：文章「draft-one」缺少必填字段「summary」',
+        }),
+      },
+    });
+    renderPage();
+    fireEvent.click(await screen.findByTestId('post-public-draft-one'));
+    expect(await screen.findByTestId('post-error-draft-one')).toHaveTextContent('缺少必填字段');
+    const call = calls.find((c) => c.method === 'PUT');
+    expect(JSON.parse(String(call?.init?.body))).toEqual({ public: true });
+  });
+
+  it('saves edited works with the works etag', async () => {
     const { calls } = mockApi();
     renderPage();
-    await screen.findByTestId('build-status');
-
-    fireEvent.click(screen.getByTestId('build-button'));
-    await screen.findByTestId('build-success');
-
-    const buildCall = calls.find((call) => call.url.endsWith('/public-build/build'));
-    expect(buildCall).toBeDefined();
-    const headers = buildCall?.init?.headers as Record<string, string>;
-    expect(headers['If-Match']).toBe(PB_ETAG);
-    expect(JSON.parse(String(buildCall?.init?.body))).toEqual({
-      include_drafts: false,
-      base_url: '',
+    fireEvent.click(await screen.findByTestId('work-0-toggle'));
+    fireEvent.change(screen.getByTestId('work-0-title'), { target: { value: 'Arm demo' } });
+    fireEvent.click(screen.getByTestId('work-0-add-link'));
+    fireEvent.click(screen.getByTestId('works-save'));
+    await waitFor(() => {
+      const call = calls.find((c) => c.method === 'PUT' && c.url.endsWith('/public-site/works'));
+      expect(call).toBeDefined();
+      expect((call?.init?.headers as Record<string, string>)['If-Match']).toBe('works-sha');
+      const body = JSON.parse(String(call?.init?.body));
+      expect(body.works[0].title).toBe('Arm demo');
+      // The empty link row is dropped before sending.
+      expect(body.works[0].links).toEqual([{ label: '论文', url: 'https://arxiv.org/abs/1' }]);
     });
-    expect(screen.getByTestId('build-success')).toHaveTextContent('已构建');
-    expect(screen.getByTestId('build-success')).toHaveTextContent('5 页');
   });
 
-  it('sends include_drafts after toggling the preview-mode switch', async () => {
+  it('marks unsupported video hosts as link-only', async () => {
+    mockApi();
+    renderPage();
+    fireEvent.click(await screen.findByTestId('work-0-toggle'));
+    expect(screen.getByTestId('work-0-video-hint')).toHaveTextContent('直接内嵌播放');
+    fireEvent.change(screen.getByTestId('work-0-video'), { target: { value: 'https://example.com/watch' } });
+    expect(screen.getByTestId('work-0-video-hint')).toHaveTextContent('不支持内嵌播放');
+  });
+
+  it('deploys only after confirmation', async () => {
     const { calls } = mockApi();
     renderPage();
-    await screen.findByTestId('build-status');
-
-    fireEvent.click(screen.getByRole('switch', { name: /包含草稿/ }));
-    fireEvent.click(screen.getByTestId('build-button'));
-    await screen.findByTestId('build-success');
-
-    const buildCall = calls.find((call) => call.url.endsWith('/public-build/build'));
-    expect(JSON.parse(String(buildCall?.init?.body))).toEqual({
-      include_drafts: true,
-      base_url: '',
-    });
+    fireEvent.click(await screen.findByTestId('deploy-button'));
+    const dialog = await screen.findByTestId('live-confirm');
+    expect(within(dialog).getByText('New post')).toBeInTheDocument();
+    expect(calls.some((c) => c.url.endsWith('/deploy'))).toBe(false);
+    fireEvent.click(screen.getByTestId('live-confirm-button'));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/public-site/deploy'))).toBe(true));
   });
 
-  it('shows the validation gate message on a blocked build (422)', async () => {
+  it('blocks deploy while validation errors exist', async () => {
+    mockApi({ overview: { ...OVERVIEW, visibility: 'private', errors: ['网站还没有设为公开（打开「网站公开」开关）'] } });
+    renderPage();
+    expect(await screen.findByTestId('site-errors')).toHaveTextContent('网站还没有设为公开');
+    expect(screen.getByTestId('deploy-button')).toBeDisabled();
+  });
+
+  it('disables deploy when the live site is in sync', async () => {
     mockApi({
-      buildResponse: jsonResponse(422, {
-        code: 'public_build_blocked',
-        message: "public-profile.yaml: missing required field 'public_name'",
-      }),
+      overview: { ...OVERVIEW, live: { ...LIVE, added: [], changed: [], removed: [], in_sync: true } },
     });
     renderPage();
-    await screen.findByTestId('build-status');
-
-    fireEvent.click(screen.getByTestId('build-button'));
-    const error = await screen.findByTestId('mutation-error');
-    expect(error).toHaveTextContent('构建失败');
-    expect(error).toHaveTextContent('public_name');
+    expect(await screen.findByTestId('live-summary')).toHaveTextContent('线上已是最新');
+    expect(screen.getByTestId('deploy-button')).toBeDisabled();
   });
 
-  it('shows the conflict alert on a stale ETag (412)', async () => {
-    mockApi({
-      buildResponse: withEtag(
-        jsonResponse(412, { code: 'etag_mismatch', message: 'stale' }),
-        'W/"fresh"',
-      ),
-    });
+  it('shows the init gate on an uninitialized profile', async () => {
+    const { calls } = mockApi({ overview: { profile: 'alice', initialized: false } });
     renderPage();
-    await screen.findByTestId('build-status');
-
-    fireEvent.click(screen.getByTestId('build-button'));
-    expect(await screen.findByTestId('conflict-alert')).toHaveTextContent(
-      '数据已被他人修改',
-    );
-  });
-
-  it('publishes the selected drafts and builds', async () => {
-    const { calls } = mockApi();
-    renderPage();
-    await screen.findByTestId('draft-list');
-
-    fireEvent.click(screen.getByRole('checkbox', { name: /Ready post/ }));
-    const button = screen.getByTestId('publish-build-button');
-    expect(button).toBeEnabled();
-    fireEvent.click(button);
-    await screen.findByTestId('publish-success');
-
-    const publishCall = calls.find((call) => call.url.endsWith('/publish-and-build'));
-    expect(publishCall).toBeDefined();
-    const headers = publishCall?.init?.headers as Record<string, string>;
-    expect(headers['If-Match']).toBe(PB_ETAG);
-    expect(JSON.parse(String(publishCall?.init?.body))).toEqual({
-      slugs: ['ready'],
-      include_drafts: false,
-      base_url: '',
-    });
-    expect(screen.getByTestId('publish-success')).toHaveTextContent('已发布 1 篇草稿并构建');
-  });
-
-  it('renders the artifact table with download links after a build', async () => {
-    mockApi({ overview: OVERVIEW_BUILT });
-    renderPage();
-
-    const row = await screen.findByTestId('artifact-index.html');
-    expect(row).toHaveTextContent('index.html');
-    const link = row.querySelector('a');
-    expect(link?.getAttribute('href')).toBe(
-      '/api/v1/profiles/alice/public-build/artifacts/index.html',
-    );
-    expect(screen.getByTestId('artifact-assets/site.css')).toBeInTheDocument();
-    expect(screen.getByTestId('build-exists')).toBeInTheDocument();
+    await screen.findByTestId('init-needed');
+    fireEvent.click(screen.getByRole('button', { name: '初始化' }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/studio/init'))).toBe(true));
   });
 });

@@ -48,6 +48,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 
 from nblane.core import agent_activity, agent_tasks, file_state, gap, inbox
 from nblane.core import career_ai, career_workspace, content_ai, content_workspace, git_backup, resume_doc, visual_candidate_store
+from nblane.core import public_console
+from nblane.core.file_lock import locked_profile_write
 from nblane.core.ai.exceptions import collect_profile_exceptions
 from nblane.core import chronicle as chronicle_core
 from nblane.core import north_star as north_star_core
@@ -115,7 +117,6 @@ from nblane.core.public_site import (
     add_blog_media_bytes,
     blog_candidate_from_claims,
     blog_candidate_from_evidence,
-    build_public_site,
     create_blog_draft,
     delete_blog_media,
     draft_blog_from_claims,
@@ -129,7 +130,6 @@ from nblane.core.public_site import (
     markdown_contains_math,
     parse_blog_post,
     project_update_candidate_from_claims,
-    publish_blog_post,
     publish_blog_text,
     render_public_site_pages,
     render_public_site_preview,
@@ -332,16 +332,19 @@ from nblane.web_api.schemas import (
     ProjectsBoardProjectModel,
     ProjectsBoardResponse,
     ProjectsBoardTaskModel,
-    PublicBuildArtifactModel,
-    PublicBuildDraftModel,
     PublicBuildPreviewPageModel,
     PublicBuildPreviewResponse,
-    PublicBuildPublishRequest,
-    PublicBuildRequest,
-    PublicBuildResponse,
-    PublicBuildResultResponse,
-    PublicBuildStateModel,
-    PublicBuildValidationModel,
+    PublicSiteDeployResponse,
+    PublicSiteIntroModel,
+    PublicSiteLiveModel,
+    PublicSiteMediaResponse,
+    PublicSitePostModel,
+    PublicSitePostUpdateRequest,
+    PublicSiteResponse,
+    PublicSiteSettingsModel,
+    PublicSiteSettingsUpdateRequest,
+    PublicSiteWorkModel,
+    PublicSiteWorksUpdateRequest,
     ProfileSettingsPatch,
     ProfileSettingsResponse,
     ResearchResponse,
@@ -8725,39 +8728,36 @@ def export_profile_career(name: str, body: CareerExportRequest) -> Response:
     return Response(content=data, media_type=media_type, headers={"Content-Disposition": disposition})
 
 
-# --- Public Build (M5): validate / build / publish the static public site -----
+# --- Public site console: settings, post toggles, works, go-live, preview -------
+#
+# The live directory is ``<data root>/dist/public/<name>`` — in production
+# that directory is bind-mounted to the Caddy site root, so "deploy" is a
+# build straight into it. Deploys never include drafts; the previous build
+# is kept for one-step rollback.
 
-# Cap on the flat artifact listing in the overview; totals stay accurate.
-_PUBLIC_BUILD_ARTIFACT_LIMIT = 300
+_PUBLIC_CONSOLE_ERROR_STATUS = {
+    "etag_mismatch": 412,
+    "post_not_found": 404,
+    "no_previous_build": 409,
+}
 
-PUBLIC_BUILD_MUTATION_RESPONSES = {
+PUBLIC_SITE_RESPONSES = {
     **ERROR_RESPONSES,
-    404: {
-        "model": ErrorResponse,
-        "description": "Profile, build artifact, or preview page not found.",
-    },
-    412: {
-        "model": ErrorResponse,
-        "description": "If-Match ETag does not match the public-layer files.",
-    },
+    404: {"model": ErrorResponse, "description": "Profile, post or preview page not found."},
+    409: {"model": ErrorResponse, "description": "No previous build to roll back to."},
+    412: {"model": ErrorResponse, "description": "Works list changed since it was loaded."},
     422: {
         "model": ErrorResponse,
-        "description": (
-            "Public layer not initialized, validation/visibility gate "
-            "failed, invalid base URL, no drafts selected, or a draft "
-            "failed publish-readiness validation."
-        ),
+        "description": "Public layer not initialized, invalid input, or the site failed validation.",
     },
 }
 
 
 def _public_build_output_dir(name: str) -> Path:
-    """Server-pinned static-site output directory.
+    """Live static-site directory (``dist/public/<name>`` under the data root).
 
-    Same default as ``core.public_site.build_public_site`` (``dist/public/
-    <name>`` under the data root — the sandbox root on the isolated dev
-    stack). Pinned server-side: unlike the Streamlit form, the API does not
-    accept a free-form output path.
+    Resolved from this module's ``REPO_ROOT`` (same value as
+    ``public_site.default_public_output_dir``) so tests can redirect it.
     """
     return (REPO_ROOT / "dist" / "public" / name).resolve()
 
@@ -8775,335 +8775,225 @@ def _public_build_initialized(pdir: Path) -> bool:
     )
 
 
-def _public_build_state(output_dir: Path) -> PublicBuildStateModel:
-    """Derive the build-state card from the output directory itself.
+def _require_public_layer(pdir: Path) -> None:
+    if not _public_build_initialized(pdir):
+        raise ApiError(
+            422,
+            "public_layer_not_initialized",
+            "Initialize the public layer first (POST /studio/init).",
+        )
 
-    No build log is kept anywhere (Streamlit parity): the newest artifact
-    mtime stands in for the last build time, and the flat listing (capped
-    at ``_PUBLIC_BUILD_ARTIFACT_LIMIT``) feeds the artifact links.
-    """
-    state = PublicBuildStateModel(output_dir=str(output_dir))
-    if not output_dir.is_dir():
-        return state
-    newest = 0.0
-    artifacts: list[PublicBuildArtifactModel] = []
-    for path in sorted(output_dir.rglob("*")):
-        if not path.is_file():
-            continue
-        stat = path.stat()
-        state.total_files += 1
-        state.total_bytes += stat.st_size
-        newest = max(newest, stat.st_mtime)
-        if len(artifacts) < _PUBLIC_BUILD_ARTIFACT_LIMIT:
-            artifacts.append(
-                PublicBuildArtifactModel(
-                    path=path.relative_to(output_dir).as_posix(),
-                    size=stat.st_size,
-                    modified=datetime.fromtimestamp(stat.st_mtime).isoformat(
-                        timespec="seconds"
-                    ),
-                )
-            )
-    state.exists = state.total_files > 0
-    state.artifacts_truncated = state.total_files > len(artifacts)
-    state.artifacts = artifacts
-    if newest:
-        state.built_at = datetime.fromtimestamp(newest).isoformat(timespec="seconds")
-    return state
+
+def _console_call(fn: Any) -> Any:
+    try:
+        return fn()
+    except public_console.ConsoleError as exc:
+        raise ApiError(
+            _PUBLIC_CONSOLE_ERROR_STATUS.get(exc.code, 422), exc.code, exc.message
+        ) from exc
+    except PublicSiteError as exc:
+        raise ApiError(422, "public_site_error", str(exc)) from exc
+
+
+def _public_site_response(pdir: Path) -> PublicSiteResponse:
+    if not _public_build_initialized(pdir):
+        return PublicSiteResponse(profile=pdir.name, initialized=False)
+    data = public_console.overview(pdir.name, _public_build_output_dir(pdir.name))
+    intro = dict(data["intro"])
+    intro["photo_url"] = _career_photo_url(pdir.name, {"basics": {"photo": intro["photo"]}})
+    return PublicSiteResponse(
+        profile=pdir.name,
+        initialized=True,
+        visibility=data["visibility"],
+        settings=PublicSiteSettingsModel(**data["settings"]),
+        intro=PublicSiteIntroModel(**intro),
+        posts=[PublicSitePostModel(**row) for row in data["posts"]],
+        works=[PublicSiteWorkModel(**row) for row in data["works"]],
+        works_etag=data["works_etag"],
+        projects_count=data["projects_count"],
+        errors=data["errors"],
+        warnings=data["warnings"],
+        live=PublicSiteLiveModel(**data["live"]),
+        pdf_available=bool(resume_doc.find_chromium()),
+    )
 
 
 @router.get(
-    "/profiles/{name}/public-build",
-    response_model=PublicBuildResponse,
+    "/profiles/{name}/public-site",
+    response_model=PublicSiteResponse,
     responses=ERROR_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def get_profile_public_build(name: str, response: Response) -> PublicBuildResponse:
-    """Public Build overview: init gate, validation, drafts, output state.
-
-    Read-only aggregation of the Streamlit page's status surface: the
-    four-file public-layer gate, the ``validate_public_layer`` outcome
-    (errors block a build), the unpublished blog drafts offered by the
-    publish-and-build section, and the observed output-directory state.
-    Carries the public-layer ETag (same fingerprint as the studio) for
-    ``If-Match`` on the build mutations.
-    """
+def get_profile_public_site(name: str, response: Response) -> PublicSiteResponse:
+    """Console overview: switches, intro (from the master resume), posts, works, live diff."""
     pdir = _resolve_profile(name)
-    initialized = _public_build_initialized(pdir)
-    validation: PublicBuildValidationModel | None = None
-    drafts: list[PublicBuildDraftModel] = []
-    if initialized:
-        result = validate_public_layer(pdir.name, include_drafts=False)
-        validation = PublicBuildValidationModel(
-            ok=result.ok,
-            errors=list(result.errors),
-            warnings=list(result.warnings),
-        )
-        drafts = [
-            PublicBuildDraftModel(slug=post.slug, title=post.title, date=post.date)
-            for post in load_blog_posts(pdir.name, include_drafts=True)
-            if post.status == "draft"
-        ]
     response.headers["ETag"] = _studio_etag(pdir)
-    return PublicBuildResponse(
-        profile=pdir.name,
-        initialized=initialized,
-        validation=validation,
-        drafts=drafts,
-        build=_public_build_state(_public_build_output_dir(pdir.name)),
+    return _public_site_response(pdir)
+
+
+@router.patch(
+    "/profiles/{name}/public-site/settings",
+    response_model=PublicSiteResponse,
+    responses=PUBLIC_SITE_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def update_profile_public_site_settings(
+    name: str, body: PublicSiteSettingsUpdateRequest
+) -> PublicSiteResponse:
+    """Merge display switches / site visibility into ``public-profile.yaml``."""
+    pdir = _resolve_profile(name)
+    _require_public_layer(pdir)
+    _console_call(
+        lambda: public_console.update_settings(pdir.name, body.model_dump(exclude_none=True))
     )
+    return _public_site_response(pdir)
 
 
-def _run_public_build(
-    pdir: Path,
-    body: PublicBuildRequest,
-    *,
-    published: list[str],
-) -> PublicBuildResultResponse | JSONResponse:
-    """Shared synchronous build step for build / publish-and-build.
+@router.put(
+    "/profiles/{name}/public-site/posts/{slug:path}",
+    response_model=PublicSiteResponse,
+    responses=PUBLIC_SITE_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def update_profile_public_site_post(
+    name: str, slug: str, body: PublicSitePostUpdateRequest
+) -> PublicSiteResponse:
+    """Put one post on the site (publish gate + library public) or take it off (draft)."""
+    pdir = _resolve_profile(name)
+    _require_public_layer(pdir)
+    _console_call(lambda: public_console.set_post_public(pdir.name, slug, body.public))
+    return _public_site_response(pdir)
 
-    The core builder is deterministic file rendering (no LLM, no network),
-    so it runs inline like the Streamlit button. Validation and visibility
-    failures surface as 422 ``public_build_blocked`` with the core message
-    and write nothing (the core validates before touching the output dir).
-    """
-    try:
-        result = build_public_site(
+
+@router.put(
+    "/profiles/{name}/public-site/works",
+    response_model=PublicSiteResponse,
+    responses=PUBLIC_SITE_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def update_profile_public_site_works(
+    name: str,
+    body: PublicSiteWorksUpdateRequest,
+    if_match: str | None = Header(default=None),
+) -> PublicSiteResponse:
+    """Replace the works list (``outputs.yaml``); If-Match carries ``works_etag``."""
+    pdir = _resolve_profile(name)
+    _require_public_layer(pdir)
+    expected = _normalize_etag(if_match) if if_match and if_match.strip() != "*" else ""
+    _console_call(
+        lambda: public_console.save_works(
             pdir.name,
-            out_dir=_public_build_output_dir(pdir.name),
-            include_drafts=body.include_drafts,
-            base_url=body.base_url,
+            [work.model_dump() for work in body.works],
+            expected_etag=expected,
         )
-    except PublicSiteError as exc:
-        return _studio_error(
-            422, "public_build_blocked", str(exc), _studio_etag(pdir)
-        )
-    return PublicBuildResultResponse(
-        output_dir=str(result.output_dir),
-        page_count=len(result.pages),
-        pages=[
-            page.relative_to(result.output_dir).as_posix() for page in result.pages
-        ],
-        published=published,
+    )
+    return _public_site_response(pdir)
+
+
+@router.post(
+    "/profiles/{name}/public-site/works/media",
+    response_model=PublicSiteMediaResponse,
+    responses=PUBLIC_SITE_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+async def upload_profile_public_site_work_media(
+    name: str, file: UploadFile = File(...)
+) -> PublicSiteMediaResponse:
+    """Store a work cover / video under ``media/works/``; the works list is not written."""
+    pdir = _resolve_profile(name)
+    data = await file.read()
+    rel = _console_call(
+        lambda: public_console.save_work_media(pdir.name, file.filename or "", data)
+    )
+    encoded = "/".join(quote(part) for part in rel.split("/"))
+    return PublicSiteMediaResponse(
+        path=rel,
+        url=f"/api/v1/profiles/{quote(pdir.name)}/content/media-file/{encoded}",
     )
 
 
 @router.post(
-    "/profiles/{name}/public-build/build",
-    response_model=PublicBuildResultResponse,
-    responses=PUBLIC_BUILD_MUTATION_RESPONSES,
+    "/profiles/{name}/public-site/deploy",
+    response_model=PublicSiteDeployResponse,
+    responses=PUBLIC_SITE_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def build_profile_public_site(
-    name: str,
-    body: PublicBuildRequest,
-    response: Response,
-    if_match: str | None = Header(default=None),
-) -> PublicBuildResultResponse | JSONResponse:
-    """Build the static public site into the server-pinned output dir.
+def deploy_profile_public_site(name: str) -> PublicSiteDeployResponse:
+    """Build the site (published content only) into the live directory.
 
-    Thin wrapper over ``core.public_site.build_public_site``: the core
-    validates first (errors → 422 ``public_build_blocked``) and requires
-    ``visibility: public`` unless ``include_drafts`` is set (preview mode).
-    Honors ``If-Match`` against the public-layer ETag (412 on mismatch).
+    Validation runs first and blocks the deploy (422 ``deploy_blocked``)
+    before anything is written; the replaced build is kept for rollback.
     """
     pdir = _resolve_profile(name)
-    etag = _studio_etag(pdir)
-    if not _if_match_satisfied(if_match, etag):
-        return _studio_error(
-            412,
-            "etag_mismatch",
-            "Public layer files changed since they were loaded; "
-            "reload before building.",
-            etag,
+    _require_public_layer(pdir)
+    with locked_profile_write(pdir, "public-site-deploy"):
+        result = _console_call(
+            lambda: public_console.deploy(pdir.name, _public_build_output_dir(pdir.name))
         )
-    if not _public_build_initialized(pdir):
-        raise ApiError(
-            422,
-            "public_layer_not_initialized",
-            "Initialize the public layer first (POST /studio/init).",
-        )
-    result = _run_public_build(pdir, body, published=[])
-    if isinstance(result, PublicBuildResultResponse):
-        response.headers["ETag"] = _studio_etag(pdir)
-    return result
+    return PublicSiteDeployResponse(**result)
 
 
 @router.post(
-    "/profiles/{name}/public-build/publish-and-build",
-    response_model=PublicBuildResultResponse,
-    responses=PUBLIC_BUILD_MUTATION_RESPONSES,
+    "/profiles/{name}/public-site/rollback",
+    response_model=PublicSiteDeployResponse,
+    responses=PUBLIC_SITE_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def publish_and_build_profile_public_site(
-    name: str,
-    body: PublicBuildPublishRequest,
-    response: Response,
-    if_match: str | None = Header(default=None),
-) -> PublicBuildResultResponse | JSONResponse:
-    """Publish the selected blog drafts, then build the static site.
-
-    Mirrors the Streamlit "发布草稿并构建" section: each slug goes through
-    ``publish_blog_post`` (full publish-readiness gate); the first failure
-    answers 422 ``public_publish_failed`` naming the slug, earlier slugs
-    stay published, and nothing is built. Honors ``If-Match`` against the
-    public-layer ETag (412 on mismatch) — publishing flips blog statuses.
-    """
+def rollback_profile_public_site(name: str) -> PublicSiteDeployResponse:
+    """Swap the live site with the build replaced by the last deploy."""
     pdir = _resolve_profile(name)
-    etag = _studio_etag(pdir)
-    if not _if_match_satisfied(if_match, etag):
-        return _studio_error(
-            412,
-            "etag_mismatch",
-            "Public layer files changed since they were loaded; "
-            "reload before publishing.",
-            etag,
+    with locked_profile_write(pdir, "public-site-deploy"):
+        _console_call(
+            lambda: public_console.rollback(pdir.name, _public_build_output_dir(pdir.name))
         )
-    if not _public_build_initialized(pdir):
-        raise ApiError(
-            422,
-            "public_layer_not_initialized",
-            "Initialize the public layer first (POST /studio/init).",
-        )
-    slugs = [slug.strip() for slug in body.slugs if slug.strip()]
-    if not slugs:
-        raise ApiError(
-            422,
-            "invalid_public_publish",
-            "Select at least one draft to publish.",
-        )
-    published: list[str] = []
-    for slug in slugs:
-        try:
-            publish_blog_post(pdir.name, slug)
-        except PublicSiteError as exc:
-            return _studio_error(
-                422,
-                "public_publish_failed",
-                f"Failed to publish {slug}: {exc}",
-                _studio_etag(pdir),
-            )
-        published.append(slug)
-    result = _run_public_build(pdir, body, published=published)
-    if isinstance(result, PublicBuildResultResponse):
-        response.headers["ETag"] = _studio_etag(pdir)
-    return result
+    return PublicSiteDeployResponse()
 
 
 @router.get(
-    "/profiles/{name}/public-build/artifacts/{path:path}",
-    responses={
-        **ERROR_RESPONSES,
-        404: {
-            "model": ErrorResponse,
-            "description": "Profile not found, or artifact missing/escapes the output dir.",
-        },
-    },
-    dependencies=PROFILE_DEPENDENCY,
-)
-def get_profile_public_build_artifact(name: str, path: str) -> FileResponse:
-    """Serve one file from the build output directory (preview/download).
-
-    Path-traversal guarded: anything resolving outside the pinned output
-    directory answers 404, same as a missing file. Auth follows the same
-    profile scope as every other route — a preview build may contain
-    drafts/private content, so artifacts are not public here.
-    """
-    pdir = _resolve_profile(name)
-    output_dir = _public_build_output_dir(pdir.name)
-    target = (output_dir / path).resolve()
-    try:
-        target.relative_to(output_dir)
-    except ValueError as exc:
-        raise ApiError(
-            404, "public_build_artifact_not_found", f"Unknown artifact: {path}"
-        ) from exc
-    if not target.is_file():
-        raise ApiError(
-            404, "public_build_artifact_not_found", f"Unknown artifact: {path}"
-        )
-    return FileResponse(target)
-
-
-@router.get(
-    "/profiles/{name}/public-build/preview",
+    "/profiles/{name}/public-site/preview",
     response_model=PublicBuildPreviewResponse,
     responses={
         **ERROR_RESPONSES,
-        422: {
-            "model": ErrorResponse,
-            "description": "Public layer not initialized.",
-        },
+        422: {"model": ErrorResponse, "description": "Public layer not initialized."},
     },
     dependencies=PROFILE_DEPENDENCY,
 )
-def get_profile_public_build_preview(
-    name: str, include_drafts: bool = Query(default=True)
+def get_profile_public_site_preview(
+    name: str, include_drafts: bool = Query(default=False)
 ) -> PublicBuildPreviewResponse:
-    """List the renderable site pages for the in-memory preview picker.
-
-    Warnings mirror ``render_public_site_preview``: validation warnings
-    plus each validation error prefixed ``preview validation:`` (the
-    preview renders even when a production build would be blocked). The
-    per-page HTML comes from ``GET .../preview/page?path=<rel>``.
-    """
+    """Page list of the in-memory preview (defaults to exactly what would go live)."""
     pdir = _resolve_profile(name)
-    if not _public_build_initialized(pdir):
-        raise ApiError(
-            422,
-            "public_layer_not_initialized",
-            "Initialize the public layer first (POST /studio/init).",
-        )
+    _require_public_layer(pdir)
     rendered = render_public_site_pages(pdir.name, include_drafts=include_drafts)
     validation = validate_public_layer(pdir.name, include_drafts=include_drafts)
-    warnings = list(validation.warnings)
-    warnings.extend(f"preview validation: {error}" for error in validation.errors)
     return PublicBuildPreviewResponse(
         include_drafts=include_drafts,
         pages=[
-            PublicBuildPreviewPageModel(
-                path=rel, title=rendered.page_titles.get(rel, rel)
-            )
+            PublicBuildPreviewPageModel(path=rel, title=rendered.page_titles.get(rel, rel))
             for rel in rendered.pages
         ],
-        warnings=warnings,
+        warnings=[public_console.humanize_issue(line) for line in validation.warnings],
     )
 
 
 @router.get(
-    "/profiles/{name}/public-build/preview/page",
+    "/profiles/{name}/public-site/preview/page",
     responses={
         **ERROR_RESPONSES,
-        404: {
-            "model": ErrorResponse,
-            "description": "Profile or preview page not found.",
-        },
-        422: {
-            "model": ErrorResponse,
-            "description": "Public layer not initialized.",
-        },
+        404: {"model": ErrorResponse, "description": "Profile or preview page not found."},
+        422: {"model": ErrorResponse, "description": "Public layer not initialized."},
     },
     dependencies=PROFILE_DEPENDENCY,
     response_class=HTMLResponse,
 )
-def get_profile_public_build_preview_page(
+def get_profile_public_site_preview_page(
     name: str,
     path: str = Query(default="index.html"),
-    include_drafts: bool = Query(default=True),
+    include_drafts: bool = Query(default=False),
 ) -> HTMLResponse:
-    """Render one preview page as self-contained HTML (inline CSS/media).
-
-    Same payload the Streamlit page iframes via ``components.html``: CSS
-    and local media are inlined as data URIs, so the page renders stand-
-    alone in the SPA iframe. Unknown page paths answer 404.
-    """
+    """One preview page as self-contained HTML (inline CSS/media) for the iframe."""
     pdir = _resolve_profile(name)
-    if not _public_build_initialized(pdir):
-        raise ApiError(
-            422,
-            "public_layer_not_initialized",
-            "Initialize the public layer first (POST /studio/init).",
-        )
+    _require_public_layer(pdir)
     preview = render_public_site_preview(pdir.name, include_drafts=include_drafts)
     html = preview.pages.get(path)
     if html is None:

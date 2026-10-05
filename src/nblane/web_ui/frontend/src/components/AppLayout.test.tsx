@@ -37,7 +37,7 @@ describe('AppLayout', () => {
     const research = screen.getByRole('link', { name: '研究台' });
     const content = screen.getByRole('link', { name: '内容工作台' });
     const career = screen.getByRole('link', { name: '求职工作台' });
-    const publicBuild = screen.getByRole('link', { name: '公开构建' });
+    const publicBuild = screen.getByRole('link', { name: '公开站点' });
     expect(evidence.compareDocumentPosition(research) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(research.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(content.compareDocumentPosition(career) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

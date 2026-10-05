@@ -2464,92 +2464,137 @@ class CareerExportRequest(BaseModel):
     filename: str = ""
 
 
-# --- Public Build (M5): validate / build / publish-and-build the static site --
+# --- Public site console: settings, post toggles, works, go-live -----------------
 
 
-class PublicBuildValidationModel(BaseModel):
-    """Public-layer validation outcome (mirrors core PublicValidationResult)."""
+class PublicSiteSettingsModel(BaseModel):
+    """``public-profile.yaml: site`` display switches."""
 
-    ok: bool = True
-    errors: list[str] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
+    show_photo: bool = True
+    show_email: bool = False
+    show_phone: bool = False
+    resume_pdf: bool = False
+    show_projects: bool = False
+    base_url: str = ""
 
 
-class PublicBuildDraftModel(BaseModel):
-    """One unpublished blog draft offered by the publish-and-build section."""
+class PublicSiteSettingsUpdateRequest(BaseModel):
+    """Partial settings update; ``visibility`` flips the whole site public/private."""
+
+    show_photo: bool | None = None
+    show_email: bool | None = None
+    show_phone: bool | None = None
+    resume_pdf: bool | None = None
+    show_projects: bool | None = None
+    base_url: str | None = Field(default=None, max_length=500)
+    visibility: str | None = Field(default=None, pattern="^(public|private)$")
+
+
+class PublicSiteIntroModel(BaseModel):
+    """Home hero inputs, read from the master resume (career workspace)."""
+
+    name: str = ""
+    english_name: str = ""
+    title: str = ""
+    summary: str = ""
+    photo: str = ""
+    photo_url: str = ""
+    phone: str = ""
+    email: str = ""
+    has_resume: bool = False
+
+
+class PublicSitePostModel(BaseModel):
+    """One blog post row with its public toggle and live state."""
 
     slug: str
     title: str = ""
     date: str = ""
+    status: str = "draft"
+    summary: str = ""
+    library_hidden: bool = False
+    public: bool = False
+    live: bool = False
 
 
-class PublicBuildArtifactModel(BaseModel):
-    """One file under the build output directory (relative path + stat)."""
+class PublicSiteWorkLinkModel(BaseModel):
+    label: str = Field(default="", max_length=40)
+    url: str = Field(max_length=1000)
 
+
+class PublicSiteWorkModel(BaseModel):
+    """One work (``outputs.yaml`` row): video, cover, links, publish switch."""
+
+    id: str = Field(default="", max_length=80)
+    title: str = Field(default="", max_length=200)
+    type: str = "other"
+    year: str = Field(default="", max_length=20)
+    summary: str = Field(default="", max_length=2000)
+    video: str = Field(default="", max_length=1000)
+    video_mode: str = Field(default="embed", pattern="^(embed|link)$")
+    cover: str = Field(default="", max_length=1000)
+    links: list[PublicSiteWorkLinkModel] = Field(default_factory=list)
+    status: str = Field(default="draft", pattern="^(draft|published)$")
+    featured: bool = False
+
+
+class PublicSiteWorksUpdateRequest(BaseModel):
+    works: list[PublicSiteWorkModel] = Field(default_factory=list, max_length=60)
+
+
+class PublicSitePageRefModel(BaseModel):
     path: str
-    size: int = 0
-    modified: str = ""
+    title: str = ""
 
 
-class PublicBuildStateModel(BaseModel):
-    """Observed state of the static-site output directory.
-
-    Derived from the directory itself (no separate build log): ``exists``
-    reports whether a build has ever landed, ``built_at`` is the newest
-    artifact mtime, and ``artifacts`` is the capped flat listing.
-    """
+class PublicSiteLiveModel(BaseModel):
+    """Live directory state plus the diff against the current files."""
 
     output_dir: str
     exists: bool = False
     built_at: str = ""
-    total_files: int = 0
-    total_bytes: int = 0
-    artifacts_truncated: bool = False
-    artifacts: list[PublicBuildArtifactModel] = Field(default_factory=list)
+    page_count: int = 0
+    has_previous: bool = False
+    previous_built_at: str = ""
+    added: list[PublicSitePageRefModel] = Field(default_factory=list)
+    changed: list[PublicSitePageRefModel] = Field(default_factory=list)
+    removed: list[PublicSitePageRefModel] = Field(default_factory=list)
+    pdf_live: bool = False
+    pdf_pending: bool = False
+    in_sync: bool = False
 
 
-class PublicBuildResponse(BaseModel):
-    """Public Build overview: init gate, validation, drafts, output state.
-
-    ``validation``/``drafts`` are null/empty until the profile's public
-    layer is initialized (POST ``/studio/init`` creates it).
-    """
+class PublicSiteResponse(BaseModel):
+    """Public-site console overview (``initialized`` false until the public layer exists)."""
 
     profile: str
     initialized: bool = False
-    validation: PublicBuildValidationModel | None = None
-    drafts: list[PublicBuildDraftModel] = Field(default_factory=list)
-    build: PublicBuildStateModel
+    visibility: str = "private"
+    settings: PublicSiteSettingsModel = Field(default_factory=PublicSiteSettingsModel)
+    intro: PublicSiteIntroModel = Field(default_factory=PublicSiteIntroModel)
+    posts: list[PublicSitePostModel] = Field(default_factory=list)
+    works: list[PublicSiteWorkModel] = Field(default_factory=list)
+    works_etag: str = ""
+    projects_count: int = 0
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    live: PublicSiteLiveModel | None = None
+    pdf_available: bool = False
 
 
-class PublicBuildRequest(BaseModel):
-    """Body for the static-site build (synchronous, no LLM).
-
-    ``base_url`` is the production site URL (optional sub-path) used for
-    canonical/sitemap links, mirroring the Streamlit form. The output
-    directory is pinned server-side (``dist/public/<name>`` under the data
-    root) — the Streamlit page's free-form output path is not exposed for
-    path safety.
-    """
-
-    include_drafts: bool = False
-    base_url: str = Field(default="", max_length=500)
+class PublicSitePostUpdateRequest(BaseModel):
+    public: bool
 
 
-class PublicBuildPublishRequest(PublicBuildRequest):
-    """Body for publish-and-build: draft slugs to publish, then build."""
+class PublicSiteMediaResponse(BaseModel):
+    path: str
+    url: str = ""
 
-    slugs: list[str] = Field(default_factory=list)
 
-
-class PublicBuildResultResponse(BaseModel):
-    """Result of one build / publish-and-build run."""
-
+class PublicSiteDeployResponse(BaseModel):
     ok: bool = True
-    output_dir: str
     page_count: int = 0
-    pages: list[str] = Field(default_factory=list)
-    published: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class PublicBuildPreviewPageModel(BaseModel):

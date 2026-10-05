@@ -289,40 +289,34 @@ class TestPublicSite(unittest.TestCase):
             self.assertFalse(
                 (out / "blog" / "draft-post" / "index.html").exists()
             )
-            self.assertTrue((out / "resume" / "index.html").exists())
-            self.assertTrue(
-                (out / "projects" / "demo_project" / "index.html").exists()
-            )
-            self.assertTrue(
-                (out / "outputs" / "demo_output" / "index.html").exists()
-            )
+            # Self-introduction + writing + works: no online resume page,
+            # projects stay internal unless site.show_projects is on.
+            self.assertFalse((out / "resume").exists())
+            self.assertFalse((out / "projects").exists())
+            self.assertTrue((out / "outputs" / "index.html").exists())
+            self.assertFalse((out / "resume.pdf").exists())
 
             home = (out / "index.html").read_text(encoding="utf-8")
-            self.assertIn("Content Index", home)
             self.assertIn('href="/blog/"', home)
-            self.assertIn('href="/projects/"', home)
             self.assertIn('href="/outputs/"', home)
-            self.assertIn('href="/resume/"', home)
-            self.assertIn('href="mailto:alice@example.com"', home)
-            self.assertIn('href="https://github.com/alice"', home)
-            self.assertIn("Email: alice@example.com", home)
+            self.assertNotIn('href="/projects/"', home)
+            self.assertNotIn('href="/resume/"', home)
+            # Intro comes from the master resume.
+            self.assertIn("Robotics Engineer", home)
+            self.assertIn("Works on embodied AI.", home)
+            # Email is hidden unless site.show_email is on.
+            self.assertNotIn("alice@example.com", home)
             self.assertIn("<span class=\"pill\">WeChat: alice-wechat</span>", home)
             self.assertIn("GitHub: github.com/alice", home)
+            self.assertIn('href="https://github.com/alice"', home)
             self.assertIn("Published Post", home)
-            self.assertIn("Demo Project", home)
             self.assertIn("Demo Output", home)
+            self.assertNotIn("Demo Project", home)
             self.assertNotIn("Published body without secrets.", home)
-            self.assertNotIn("A public project.", home)
 
-            project_detail = (
-                out / "projects" / "demo_project" / "index.html"
-            ).read_text(encoding="utf-8")
-            self.assertIn("Verified public fact", project_detail)
-            self.assertIn("real_robot_ops", project_detail)
-            output_detail = (
-                out / "outputs" / "demo_output" / "index.html"
-            ).read_text(encoding="utf-8")
-            self.assertIn("Verified public fact", output_detail)
+            works = (out / "outputs" / "index.html").read_text(encoding="utf-8")
+            self.assertIn("Demo Output", works)
+            self.assertIn('href="https://example.com/paper"', works)
 
             all_html = "\n".join(
                 p.read_text(encoding="utf-8")
@@ -361,6 +355,11 @@ class TestPublicSite(unittest.TestCase):
                 }
             )
             _write_yaml(profile / "projects.yaml", projects)
+            public_profile = yaml.safe_load(
+                (profile / "public-profile.yaml").read_text(encoding="utf-8")
+            )
+            public_profile["site"] = {"show_projects": True}
+            _write_yaml(profile / "public-profile.yaml", public_profile)
 
             with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
                 public_site.build_public_site(
@@ -515,6 +514,7 @@ class TestPublicSite(unittest.TestCase):
                     "wechat": "preview-wechat",
                     "github": "https://example.com/preview",
                 },
+                "site": {"show_email": True},
             }
 
             with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
@@ -528,18 +528,21 @@ class TestPublicSite(unittest.TestCase):
 
             home = preview.pages["index.html"]
             self.assertIn("Preview Alice", home)
-            self.assertIn("Unsaved headline", home)
-            self.assertIn("Unsaved short bio", home)
-            self.assertIn("mailto:preview@example.com", home)
-            self.assertIn("Email: preview@example.com", home)
+            # The master resume title/summary win over public-profile fields.
+            self.assertIn("Robotics Engineer", home)
+            self.assertIn("Works on embodied AI.", home)
+            self.assertIn("Unsaved short bio", home)  # meta description
+            # The resume email is shown once site.show_email is on.
+            self.assertIn("mailto:alice@example.com", home)
+            self.assertIn("Email: alice@example.com", home)
             self.assertIn("WeChat: preview-wechat", home)
             self.assertIn("GitHub: example.com/preview", home)
             self.assertIn("data:image/png;base64,", home)
             self.assertNotIn('src="/media/avatar.png"', home)
-            self.assertIn("projects/demo_project/index.html", preview.pages)
-            self.assertIn("outputs/demo_output/index.html", preview.pages)
+            self.assertNotIn("projects/demo_project/index.html", preview.pages)
+            self.assertIn("outputs/index.html", preview.pages)
             self.assertIn("blog/published-post/index.html", preview.pages)
-            self.assertIn("resume/index.html", preview.pages)
+            self.assertNotIn("resume/index.html", preview.pages)
             self.assertFalse((profile / "media" / "avatar.png").exists())
             self.assertFalse((root / "dist").exists())
             self.assertEqual(
@@ -1979,3 +1982,180 @@ class TestPublicSite(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPublicSiteConsoleShape(unittest.TestCase):
+    """Self-introduction + writing + works site shape and its switches."""
+
+    def _profile(self, root: Path, *, site: dict | None = None) -> Path:
+        profile = _make_profile(root)
+        data = yaml.safe_load((profile / "public-profile.yaml").read_text(encoding="utf-8"))
+        if site is not None:
+            data["site"] = site
+        _write_yaml(profile / "public-profile.yaml", data)
+        resume = yaml.safe_load((profile / "resume-source.yaml").read_text(encoding="utf-8"))
+        resume["basics"]["phone"] = "13800000000"
+        _write_yaml(profile / "resume-source.yaml", resume)
+        return profile
+
+    def test_works_render_embed_link_and_local_video(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = self._profile(root)
+            (profile / "media" / "works").mkdir(parents=True)
+            (profile / "media" / "works" / "demo.mp4").write_bytes(b"mp4")
+            _write_yaml(
+                profile / "outputs.yaml",
+                {
+                    "outputs": [
+                        {
+                            "id": "bili",
+                            "type": "video",
+                            "title": "Bili demo",
+                            "status": "published",
+                            "video": "https://www.bilibili.com/video/BV1xx411c7mD?p=1",
+                        },
+                        {
+                            "id": "yt-link",
+                            "type": "video",
+                            "title": "YouTube as link",
+                            "status": "published",
+                            "video": "https://youtu.be/dQw4w9WgXcQ",
+                            "video_mode": "link",
+                            "links": [{"label": "Paper", "url": "https://arxiv.org/abs/1"}],
+                        },
+                        {
+                            "id": "local",
+                            "type": "demo",
+                            "title": "Local clip",
+                            "status": "published",
+                            "video": "media/works/demo.mp4",
+                        },
+                        {"id": "hidden", "type": "paper", "title": "Draft work", "status": "draft"},
+                    ]
+                },
+            )
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                self.assertEqual(public_site.validate_public_layer("alice").errors, [])
+                public_site.build_public_site("alice", out_dir=root / "dist")
+            works = (root / "dist" / "outputs" / "index.html").read_text(encoding="utf-8")
+            self.assertIn("https://player.bilibili.com/player.html?bvid=BV1xx411c7mD", works)
+            self.assertNotIn("youtube.com/embed", works)
+            self.assertIn('href="https://youtu.be/dQw4w9WgXcQ"', works)
+            self.assertIn('href="https://arxiv.org/abs/1">Paper</a>', works)
+            self.assertIn('<video class="media-video"', works)
+            self.assertIn('src="/media/works/demo.mp4"', works)
+            self.assertTrue((root / "dist" / "media" / "works" / "demo.mp4").exists())
+            self.assertNotIn("Draft work", works)
+
+    def test_unsafe_work_video_scheme_is_a_validation_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = self._profile(root)
+            _write_yaml(
+                profile / "outputs.yaml",
+                {"outputs": [{"id": "x", "type": "video", "title": "X", "status": "published",
+                              "video": "javascript:alert(1)"}]},
+            )
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                errors = public_site.validate_public_layer("alice").errors
+            self.assertTrue(any("outputs.yaml:x.video" in e for e in errors), errors)
+
+    def test_contact_switches_and_projects_switch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = self._profile(
+                root, site={"show_email": True, "show_phone": True, "show_projects": True}
+            )
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                public_site.build_public_site("alice", out_dir=root / "dist")
+            home = (root / "dist" / "index.html").read_text(encoding="utf-8")
+            self.assertIn("mailto:alice@example.com", home)
+            self.assertIn("13800000000", home)
+            self.assertIn('href="/projects/"', home)
+            self.assertTrue((root / "dist" / "projects" / "demo_project" / "index.html").exists())
+
+    def test_hidden_phone_never_rendered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = self._profile(root)
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                public_site.build_public_site("alice", out_dir=root / "dist")
+            all_html = "\n".join(p.read_text(encoding="utf-8") for p in (root / "dist").rglob("*.html"))
+            self.assertNotIn("13800000000", all_html)
+            self.assertNotIn("alice@example.com", all_html)
+
+    def test_preview_build_cannot_target_live_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = self._profile(root)
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch("nblane.core.public_site.REPO_ROOT", root),
+            ):
+                with self.assertRaises(public_site.PublicSiteError):
+                    public_site.build_public_site("alice", include_drafts=True)
+            self.assertFalse((root / "dist").exists())
+
+    def test_keep_previous_and_rollback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = self._profile(root)
+            out = root / "dist" / "alice"
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                public_site.build_public_site("alice", out_dir=out, keep_previous=True)
+                self.assertFalse(public_site.previous_build_dir(out).exists())
+                _write_blog(
+                    profile / "blog" / "second.md",
+                    title="Second Post",
+                    status="published",
+                    evidence=["ev_public"],
+                )
+                public_site.build_public_site("alice", out_dir=out, keep_previous=True)
+                self.assertTrue((out / "blog" / "second" / "index.html").exists())
+                public_site.rollback_public_site("alice", out_dir=out)
+                self.assertFalse((out / "blog" / "second" / "index.html").exists())
+                # Rolling back again restores the newer build.
+                public_site.rollback_public_site("alice", out_dir=out)
+                self.assertTrue((out / "blog" / "second" / "index.html").exists())
+
+    def test_resume_pdf_link_and_masked_contacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = self._profile(root, site={"resume_pdf": True})
+            captured: list[str] = []
+
+            def fake_pdf(page_html: str, **_kw) -> bytes:
+                captured.append(page_html)
+                return b"%PDF-1.4 fake"
+
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch("nblane.core.resume_doc.render_resume_pdf", fake_pdf),
+            ):
+                result = public_site.build_public_site("alice", out_dir=root / "dist")
+            self.assertEqual(result.warnings, [])
+            self.assertEqual((root / "dist" / "resume.pdf").read_bytes(), b"%PDF-1.4 fake")
+            home = (root / "dist" / "index.html").read_text(encoding="utf-8")
+            self.assertIn('href="/resume.pdf"', home)
+            self.assertIn("Robotics Engineer", captured[0])
+            self.assertNotIn("13800000000", captured[0])
+            self.assertNotIn("alice@example.com", captured[0])
+
+    def test_resume_pdf_unavailable_warns_without_link(self) -> None:
+        from nblane.core import resume_doc
+
+        def no_pdf(_html: str, **_kw) -> bytes:
+            raise resume_doc.ResumePdfUnavailable("no chromium")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = self._profile(root, site={"resume_pdf": True})
+            with (
+                patch("nblane.core.public_site.profile_dir", lambda _n: profile),
+                patch("nblane.core.resume_doc.render_resume_pdf", no_pdf),
+            ):
+                result = public_site.build_public_site("alice", out_dir=root / "dist")
+            self.assertTrue(result.warnings)
+            self.assertFalse((root / "dist" / "resume.pdf").exists())
+            self.assertNotIn("resume.pdf", (root / "dist" / "index.html").read_text(encoding="utf-8"))
