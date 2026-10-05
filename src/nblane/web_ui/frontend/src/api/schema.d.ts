@@ -581,6 +581,9 @@ export interface paths {
          *
          *     Publishing must go through ``.../publish`` so the readiness gate runs;
          *     a plain save that asks for ``published`` on an unpublished post is 422.
+         *     ``autosave=1`` writes the files but skips the Git backup commit, so the
+         *     editor's debounced saves do not produce a commit every few seconds; the
+         *     next explicit save (Ctrl/Cmd+S, leaving the editor) commits the diff.
          */
         put: operations["save_profile_content_blog_api_v1_profiles__name__content_blog__slug__put"];
         post?: never;
@@ -10669,7 +10672,9 @@ export interface operations {
     };
     save_profile_content_blog_api_v1_profiles__name__content_blog__slug__put: {
         parameters: {
-            query?: never;
+            query?: {
+                autosave?: boolean;
+            };
             header?: {
                 "if-match"?: string | null;
             };

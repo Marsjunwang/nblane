@@ -90,9 +90,9 @@ for (const viewport of VIEWPORTS) {
       await expect(page.getByTestId("stage-nav")).toBeVisible();
     });
 
-    test("输出工作室页: 内容限宽居中且无横向溢出", async ({ page }) => {
+    test("兼容内容编辑页(/studio): 内容限宽居中且无横向溢出", async ({ page }) => {
       await page.goto(spa("studio"));
-      await expect(page.getByRole("heading", { name: /输出工作室/ })).toBeVisible();
+      await expect(page.getByRole("heading", { name: /兼容内容编辑页/ })).toBeVisible();
 
       const width = await containerWidth(page);
       expect(width).toBeLessThanOrEqual(CONTENT_MAX_WIDTH);

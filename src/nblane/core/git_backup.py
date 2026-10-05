@@ -142,6 +142,20 @@ def defer_changes(action: str) -> Iterator[None]:
             _deferred_changes.reset(token)
 
 
+@contextmanager
+def skip_changes() -> Iterator[None]:
+    """Suppress backups for writes inside the block (e.g. editor autosave).
+
+    Nothing is lost: the files stay modified in the working tree, so the next
+    recorded change of the same paths commits the accumulated diff.
+    """
+    token = _deferred_changes.set([])
+    try:
+        yield
+    finally:
+        _deferred_changes.reset(token)
+
+
 def record_change(
     paths: Iterable[Path],
     *,

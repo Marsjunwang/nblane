@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 
-import { ApiError, apiDelete, apiDeleteWithHeaders, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, apiPostForm, apiPut, apiPutWithHeaders, ifMatch } from './client';
+import { ApiError, apiBase, apiDelete, apiDeleteWithHeaders, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, apiPostForm, apiPut, apiPutWithHeaders, ifMatch } from './client';
 import type {
   ActivityApplyResponse,
   ActivityDismissResponse,
@@ -1836,6 +1836,11 @@ function contentBlogPath(profile: string, slug: string): string {
   return `/profiles/${encodeURIComponent(profile)}/content/blog/${encoded}`;
 }
 
+/** Absolute API URL of one post (for keepalive saves outside react-query). */
+export function contentBlogApiUrl(profile: string, slug: string): string {
+  return `${apiBase()}${contentBlogPath(profile, slug)}`;
+}
+
 /**
  * Browser URL for a profile-relative media path (``media/blog/<slug>/x.png``).
  * Absolute URLs and data URIs pass through unchanged.
@@ -1890,8 +1895,20 @@ export function useCreateContentPost(profile: string) {
 export function useSaveContentPost(profile: string) {
   const invalidate = useInvalidateContentList(profile);
   return useMutation({
-    mutationFn: async ({ slug, body, etag }: { slug: string; body: StudioPostSaveRequest; etag: string }): Promise<ContentPostWriteResult> => {
-      const { data, headers } = await apiPutWithHeaders<StudioPostMutationResponse>(contentBlogPath(profile, slug), body, {
+    mutationFn: async ({
+      slug,
+      body,
+      etag,
+      autosave = false,
+    }: {
+      slug: string;
+      body: StudioPostSaveRequest;
+      etag: string;
+      /** Debounced editor save: written to disk, no Git backup commit. */
+      autosave?: boolean;
+    }): Promise<ContentPostWriteResult> => {
+      const path = `${contentBlogPath(profile, slug)}${autosave ? '?autosave=1' : ''}`;
+      const { data, headers } = await apiPutWithHeaders<StudioPostMutationResponse>(path, body, {
         headers: ifMatch(etag),
       });
       return { post: data.post, etag: headers.get('ETag') ?? '' };

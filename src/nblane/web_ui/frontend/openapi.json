@@ -11412,7 +11412,7 @@
     "summary": "Get Profile Content Blog"
    },
    "put": {
-    "description": "Conflict-safe save that cannot flip a post to ``published``.\n\nPublishing must go through ``.../publish`` so the readiness gate runs;\na plain save that asks for ``published`` on an unpublished post is 422.",
+    "description": "Conflict-safe save that cannot flip a post to ``published``.\n\nPublishing must go through ``.../publish`` so the readiness gate runs;\na plain save that asks for ``published`` on an unpublished post is 422.\n``autosave=1`` writes the files but skips the Git backup commit, so the\neditor's debounced saves do not produce a commit every few seconds; the\nnext explicit save (Ctrl/Cmd+S, leaving the editor) commits the diff.",
     "operationId": "save_profile_content_blog_api_v1_profiles__name__content_blog__slug__put",
     "parameters": [
      {
@@ -11431,6 +11431,16 @@
       "schema": {
        "title": "Slug",
        "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "autosave",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Autosave",
+       "type": "boolean"
       }
      },
      {

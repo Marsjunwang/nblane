@@ -161,6 +161,35 @@ class ContentWorkspaceApiTest(unittest.TestCase):
         )
         self.assertEqual(stale.status_code, 412)
 
+    def test_autosave_writes_but_skips_git_backup(self) -> None:
+        from nblane.core import git_backup
+
+        # setUp replaced record_change with a mock; record whether each call
+        # happened inside skip_changes() (the deferral context is set).
+        suppressed: list[bool] = []
+        git_backup.record_change.side_effect = lambda *a, **k: suppressed.append(
+            git_backup._deferred_changes.get() is not None
+        )
+        slug, etag = self._create()
+        suppressed.clear()
+        saved = self.client.put(
+            f"/api/v1/profiles/alice/content/blog/{slug}?autosave=1",
+            json={"body": "Autosaved body.\n"},
+            headers={"If-Match": etag},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertTrue(suppressed and all(suppressed), suppressed)
+        suppressed.clear()
+        explicit = self.client.put(
+            f"/api/v1/profiles/alice/content/blog/{slug}",
+            json={"body": "Explicit body.\n"},
+            headers={"If-Match": saved.headers["ETag"]},
+        )
+        self.assertEqual(explicit.status_code, 200, explicit.text)
+        self.assertTrue(suppressed and not any(suppressed), suppressed)
+        detail = self.client.get(f"/api/v1/profiles/alice/content/blog/{slug}").json()
+        self.assertEqual(detail["body"].strip(), "Explicit body.")
+
     def test_publish_runs_the_gate(self) -> None:
         slug, etag = self._create()
         blocked = self.client.post(
@@ -176,6 +205,20 @@ class ContentWorkspaceApiTest(unittest.TestCase):
         )
         self.assertEqual(published.status_code, 200, published.text)
         self.assertEqual(published.json()["post"]["status"], "published")
+
+
+def test_skip_changes_suppresses_record_change(tmp_path: Path) -> None:
+    """Inside skip_changes() the real hook neither commits nor queues."""
+    from nblane.core import git_backup
+
+    with patch("nblane.core.git_backup.autocommit_enabled", return_value=True), patch(
+        "nblane.core.git_backup._run_git"
+    ) as run_git:
+        with git_backup.skip_changes():
+            result = git_backup.record_change([tmp_path / "a.md"], action="autosave")
+        run_git.assert_not_called()
+    assert result.skipped_reason == "deferred"
+    assert result.committed is False
 
 
 if __name__ == "__main__":

@@ -1,63 +1,205 @@
 /*
- * SPA blog editor surface. The writing area is a light "paper" sheet inside
- * the dark app shell: it previews how text reads on the light public site,
- * and BlockNote's light theme plus the shared block styles assume it.
+ * SPA blog editor — dark writing canvas on the starmap indigo ground.
+ *
+ * The editor sits directly on the page surface (no inset "paper" card), so
+ * the whole editor route reads as one continuous indigo sheet. Colours come
+ * from theme.ts `chrome`: text 月白 #f2ede0 family, accents 泥金 #dcae55.
+ * The light public-site look is checked through the site preview instead.
  */
 .nb-spa-editor {
-  --nb-ink: #17211f;
-  --nb-muted: #60716e;
-  --nb-line: #d8e0dc;
-  --nb-paper: #ffffff;
-  --nb-soft: #f6f8f7;
-  --nb-soft-strong: #edf3f0;
-  --nb-accent: #21685b;
-  --nb-accent-strong: #174d43;
-  --nb-accent-soft: #e3f2ee;
-  --nb-warn: #8a5b12;
-  --nb-danger: #9f1d1d;
-  --nb-info: #295b82;
-  --nb-shadow: 0 10px 28px rgba(23, 33, 31, 0.08);
+  /* --nb-* drive the shared custom-block styles (blocks.css). */
+  --nb-ink: #ece6d6;
+  --nb-muted: #a59d86;
+  --nb-line: #2c3f5c;
+  --nb-paper: #16263d;
+  --nb-soft: #132036;
+  --nb-soft-strong: #1a2c46;
+  --nb-accent: #dcae55;
+  --nb-accent-strong: #eac57e;
+  --nb-accent-soft: rgba(220, 174, 85, 0.14);
+  --nb-warn: #e0b45c;
+  --nb-danger: #e07a6f;
+  --nb-info: #8fb4d9;
+  --nb-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
 
-  min-height: 560px;
-  padding: 28px 8px 40px;
-  border-radius: 10px;
-  background: var(--nb-paper);
   color: var(--nb-ink);
+}
+
+/* BlockNote dark palette mapped onto the indigo ladder. */
+.nb-spa-editor .bn-container[data-color-scheme='dark'],
+.nb-spa-editor [data-color-scheme='dark'] {
+  --bn-colors-editor-text: #e9e3d3;
+  --bn-colors-editor-background: transparent;
+  --bn-colors-menu-text: #ece6d6;
+  --bn-colors-menu-background: #16263d;
+  --bn-colors-tooltip-text: #ece6d6;
+  --bn-colors-tooltip-background: #0b1322;
+  --bn-colors-hovered-text: #f2ede0;
+  --bn-colors-hovered-background: #24374f;
+  --bn-colors-selected-text: #f2ede0;
+  --bn-colors-selected-background: #2c4263;
+  --bn-colors-disabled-text: #5d6a80;
+  --bn-colors-disabled-background: #132036;
+  --bn-colors-shadow: rgba(0, 0, 0, 0.45);
+  --bn-colors-border: #2c3f5c;
+  --bn-colors-side-menu: #6f7c93;
 }
 
 .nb-spa-editor .bn-container,
 .nb-spa-editor .bn-editor {
   background: transparent;
-  font-size: 16px;
-  line-height: 1.75;
 }
 
 .nb-spa-editor .bn-editor {
-  padding-inline: 44px;
+  font-family:
+    Inter, system-ui, -apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 17px;
+  line-height: 1.8;
+  padding-bottom: 30vh;
 }
 
-/* Media blocks never exceed the column; tall images stay readable. */
-.nb-spa-editor .bn-editor img,
-.nb-spa-editor .bn-editor video {
-  max-width: 100%;
+.nb-spa-editor .bn-block-content {
+  padding-block: 4px;
 }
+
+/* Calmer heading scale than BlockNote's 3em/2em defaults at a 17px base. */
+.nb-spa-editor [data-content-type='heading'] {
+  --level: 1.75em;
+  line-height: 1.35;
+}
+.nb-spa-editor [data-content-type='heading'][data-level='2'] {
+  --level: 1.45em;
+}
+.nb-spa-editor [data-content-type='heading'][data-level='3'] {
+  --level: 1.2em;
+}
+.nb-spa-editor .bn-block-outer:has(> .bn-block > [data-content-type='heading']) {
+  margin-top: 0.6em;
+}
+
+.nb-spa-editor [data-content-type='quote'] blockquote {
+  border-left: 3px solid rgba(220, 174, 85, 0.55);
+  color: #c9c1ac;
+}
+
+.nb-spa-editor .bn-block-content[data-content-type='codeBlock'] {
+  background: #0b1322;
+  border: 1px solid #22344f;
+  font-size: 14px;
+}
+
+.nb-spa-editor .bn-inline-content code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 0.9em;
+}
+
+.nb-spa-editor .bn-editor a {
+  color: var(--nb-accent-strong);
+}
+
+.nb-spa-editor .bn-editor [data-content-type='table'] th,
+.nb-spa-editor .bn-editor [data-content-type='table'] td {
+  border-color: #2c3f5c;
+}
+
+.nb-spa-editor [data-content-type='divider'] hr {
+  border-top-color: #2c3f5c;
+}
+
+/* --- Custom nblane blocks: content first, controls on demand ------------- */
+
+.nb-spa-editor .nb-custom-block {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+/* "Visual / accepted / Formula" chrome is authoring noise in the SPA. */
+.nb-spa-editor .nb-block-header {
+  display: none;
+}
+
+.nb-spa-editor .nb-block-details summary {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.nb-spa-editor .nb-custom-block:hover .nb-block-details summary,
+.nb-spa-editor .nb-block-details[open] summary {
+  opacity: 1;
+}
+
+.nb-spa-editor .nb-block-details[open] .nb-block-details-body {
+  padding: 10px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-soft);
+}
+
+.nb-spa-editor .nb-block-image,
+.nb-spa-editor .nb-block-video {
+  max-height: none;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.nb-spa-editor .nb-block-caption {
+  color: var(--nb-muted);
+  font-size: 0.85rem;
+}
+
+/* Mermaid's default theme is drawn for light paper: give diagrams a sheet. */
+.nb-spa-editor .nb-mermaid-renderer {
+  border: 0;
+  background: #f2ede0;
+}
+
+.nb-spa-editor .nb-math-preview {
+  background: transparent;
+}
+
+/* Hidden prompt/AI placeholders render as quiet dashed cards. */
+.nb-spa-editor .nb-ai-loading-formula,
+.nb-spa-editor .nb-ai-loading-visual,
+.nb-spa-editor .nb-ai-candidate-placeholder {
+  border-color: var(--nb-line);
+  background: var(--nb-soft);
+}
+
+/* --- Focus mode: dim everything but the block under the caret ----------- */
+
+/* Only top-level blocks dim; nested children follow their parent. The lit
+ * block is injected by BlockNoteBlogEditor from the caret position. */
+.nb-spa-editor--focus .bn-editor > .bn-block-group > .bn-block-outer {
+  opacity: 0.3;
+  transition: opacity 0.25s ease;
+}
+
+/* --- Markdown source mode ---------------------------------------------- */
 
 .nb-spa-editor-source textarea {
-  padding: 4px 20px;
+  padding: 0 54px 30vh;
   border: 0;
   background: transparent;
   color: var(--nb-ink);
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
-  font-size: 14px;
-  line-height: 1.65;
+  font-size: 14.5px;
+  line-height: 1.75;
+}
+
+.nb-spa-editor-source textarea:focus {
+  outline: none;
 }
 
 @media (max-width: 48em) {
-  .nb-spa-editor {
-    padding: 16px 0 24px;
+  .nb-spa-editor .bn-editor {
+    padding-inline: 16px;
+    font-size: 16px;
   }
 
-  .nb-spa-editor .bn-editor {
-    padding-inline: 18px;
+  .nb-spa-editor-source textarea {
+    padding-inline: 16px;
   }
 }

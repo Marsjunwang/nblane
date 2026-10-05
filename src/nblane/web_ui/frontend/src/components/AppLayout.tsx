@@ -75,8 +75,13 @@ export function AppLayout() {
   const exceptions = useAIExceptions(currentProfile);
   const exceptionCount = exceptions.data?.total ?? 0;
   const hasExceptionSignal = exceptionCount > 0 || exceptions.isError;
-  const fullBleed = FULL_BLEED_SEGMENTS.some((segment) => location.pathname.includes(segment));
-  const immersive = IMMERSIVE_SEGMENTS.some((segment) => location.pathname.includes(segment));
+  // The blog editor (/content/<slug>) is a full-screen writing surface; the
+  // content library (/content) stays a capped list page.
+  const contentEditor = /\/p\/[^/]+\/content\/.+/.test(location.pathname);
+  const fullBleed =
+    contentEditor || FULL_BLEED_SEGMENTS.some((segment) => location.pathname.includes(segment));
+  const immersive =
+    contentEditor || IMMERSIVE_SEGMENTS.some((segment) => location.pathname.includes(segment));
   const railWidth = railExpanded ? RAIL_WIDTH_EXPANDED : RAIL_WIDTH_COLLAPSED;
   // Mobile drawer entries always carry labels; the desktop rail shows them
   // only while expanded.

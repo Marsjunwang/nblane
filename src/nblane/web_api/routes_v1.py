@@ -47,7 +47,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from nblane.core import agent_activity, agent_tasks, file_state, gap, inbox
-from nblane.core import career_workspace, content_workspace
+from nblane.core import career_workspace, content_workspace, git_backup
 from nblane.core.resume_extract import extract_resume_text
 from nblane.core.ai.exceptions import collect_profile_exceptions
 from nblane.core import chronicle as chronicle_core
@@ -8314,11 +8314,15 @@ def save_profile_content_blog(
     body: StudioPostSaveRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    autosave: bool = Query(default=False),
 ) -> StudioPostMutationResponse | JSONResponse:
     """Conflict-safe save that cannot flip a post to ``published``.
 
     Publishing must go through ``.../publish`` so the readiness gate runs;
     a plain save that asks for ``published`` on an unpublished post is 422.
+    ``autosave=1`` writes the files but skips the Git backup commit, so the
+    editor's debounced saves do not produce a commit every few seconds; the
+    next explicit save (Ctrl/Cmd+S, leaving the editor) commits the diff.
     """
     pdir = _resolve_profile(name)
     post = _load_studio_post(pdir, slug)
@@ -8332,6 +8336,9 @@ def save_profile_content_blog(
             "publish_requires_check",
             "Use publish to set a post to published; saving cannot skip the publish check.",
         )
+    if autosave:
+        with git_backup.skip_changes():
+            return save_profile_studio_post(name, slug, body, response, if_match)
     return save_profile_studio_post(name, slug, body, response, if_match)
 
 
