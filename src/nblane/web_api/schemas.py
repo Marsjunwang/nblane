@@ -2370,35 +2370,23 @@ class ContentWorkspaceResponse(BaseModel):
 
 
 class CareerResumeUpdateRequest(BaseModel):
-    """Structured resume replacement; unknown fields are preserved."""
+    """Structured resume replacement (normalized server-side; unknown keys kept)."""
 
     resume: dict[str, Any] = Field(default_factory=dict)
 
 
-class CareerUploadResponse(BaseModel):
-    ok: bool = True
-    filename: str = ""
-    text: str = ""
-    error: str = ""
-    save_options: list[str] = Field(default_factory=lambda: ["主简历", "新的简历草稿", "仅本次匹配"])
-
-
-class CareerMatchRequest(BaseModel):
-    resume_md: str = Field(default="", max_length=50_000)
-    jd_text: str = Field(default="", max_length=50_000)
-
-
-class CareerMatchResponse(BaseModel):
-    ok: bool = True
-    job_id: str
-    analysis: dict[str, Any] = Field(default_factory=dict)
-
-
 class CareerDraftModel(BaseModel):
+    """One tailored resume draft under ``resumes/generated/<id>.md``."""
+
     id: str
     target: str = ""
     path: str = ""
     markdown: str = ""
+    etag: str = ""
+    updated_at: float = 0.0
+    jd_text: str = ""
+    notes: str = ""
+    analysis: dict[str, Any] | None = None
 
 
 class CareerWorkspaceResponse(BaseModel):
@@ -2406,20 +2394,74 @@ class CareerWorkspaceResponse(BaseModel):
     resume: dict[str, Any] = Field(default_factory=dict)
     resume_markdown: str = ""
     resume_etag: str = ""
+    has_resume: bool = False
+    photo_url: str = ""
     drafts: list[CareerDraftModel] = Field(default_factory=list)
+    ai_available: bool = False
+    pdf_available: bool = False
+
+
+class CareerImportPreviewResponse(BaseModel):
+    """Upload / paste preview. Nothing is written until the user picks a target."""
+
+    ok: bool = True
+    filename: str = ""
+    text: str = ""
+    markdown: str = ""
+    resume: dict[str, Any] | None = None
+    method: str = "text"
+    error: str = ""
+
+
+class CareerImportTextRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=200_000)
+    filename: str = ""
+
+
+class CareerPhotoResponse(BaseModel):
+    ok: bool = True
+    path: str
+    url: str
 
 
 class CareerDraftRequest(BaseModel):
     target: str = Field(min_length=1, max_length=120)
     markdown: str = Field(min_length=1, max_length=200_000)
     overwrite: bool = False
+    jd_text: str = Field(default="", max_length=50_000)
+    notes: str = Field(default="", max_length=5_000)
 
 
-class CareerExportResponse(BaseModel):
-    ok: bool = True
-    version_id: str
-    markdown_path: str
-    html_path: str
+class CareerDraftUpdateRequest(BaseModel):
+    """Any subset: draft text and/or the JD / notes / last analysis sidecar."""
+
+    markdown: str | None = Field(default=None, min_length=1, max_length=200_000)
+    jd_text: str | None = Field(default=None, max_length=50_000)
+    notes: str | None = Field(default=None, max_length=5_000)
+    analysis: dict[str, Any] | None = None
+
+
+class CareerPreviewRequest(BaseModel):
+    """Live preview: render an (unsaved) resume mapping or a Markdown draft."""
+
+    resume: dict[str, Any] | None = None
+    markdown: str | None = Field(default=None, max_length=200_000)
+    include_photo: bool = True
+
+
+class CareerPreviewResponse(BaseModel):
+    markdown: str
+    html: str
+
+
+class CareerExportRequest(BaseModel):
+    """Render Markdown (a draft or the master resume) to md / html / pdf bytes."""
+
+    format: str = Field(default="pdf", pattern="^(md|html|pdf)$")
+    markdown: str = Field(default="", max_length=200_000)
+    draft_id: str = ""
+    include_photo: bool = True
+    filename: str = ""
 
 
 # --- Public Build (M5): validate / build / publish-and-build the static site --

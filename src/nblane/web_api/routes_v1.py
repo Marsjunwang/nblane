@@ -40,15 +40,14 @@ from dataclasses import replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, File, Header, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from nblane.core import agent_activity, agent_tasks, file_state, gap, inbox
-from nblane.core import career_workspace, content_ai, content_workspace, git_backup, visual_candidate_store
-from nblane.core.resume_extract import extract_resume_text
+from nblane.core import career_ai, career_workspace, content_ai, content_workspace, git_backup, resume_doc, visual_candidate_store
 from nblane.core.ai.exceptions import collect_profile_exceptions
 from nblane.core import chronicle as chronicle_core
 from nblane.core import north_star as north_star_core
@@ -134,7 +133,6 @@ from nblane.core.public_site import (
     publish_blog_text,
     render_public_site_pages,
     render_public_site_preview,
-    generate_resume_files,
     resume_bullet_candidates_from_claims,
     save_blog_post,
     validate_blog_text_for_publish,
@@ -374,11 +372,14 @@ from nblane.web_api.schemas import (
     StudioJdMatchResponse,
     CareerDraftModel,
     CareerDraftRequest,
-    CareerExportResponse,
-    CareerMatchRequest,
-    CareerMatchResponse,
+    CareerDraftUpdateRequest,
+    CareerExportRequest,
+    CareerImportPreviewResponse,
+    CareerImportTextRequest,
+    CareerPhotoResponse,
+    CareerPreviewRequest,
+    CareerPreviewResponse,
     CareerResumeUpdateRequest,
-    CareerUploadResponse,
     CareerWorkspaceResponse,
     ContentAIStatusResponse,
     ContentCoverCandidateRequest,
@@ -8444,7 +8445,44 @@ def discard_profile_content_cover(name: str, body: ContentCoverCandidateRequest)
 # --- Career workspace --------------------------------------------------------
 
 
-_CAREER_MATCHES: dict[str, dict[str, Any]] = {}
+_CAREER_ERROR_STATUS = {
+    "etag_mismatch": 412,
+    "career_draft_not_found": 404,
+    "career_draft_exists": 409,
+    "pdf_unavailable": 503,
+}
+
+
+def _career_call(fn: Any) -> Any:
+    try:
+        return fn()
+    except career_workspace.CareerError as exc:
+        raise ApiError(_CAREER_ERROR_STATUS.get(exc.code, 422), exc.code, exc.message) from exc
+
+
+def _career_photo_url(name: str, resume: dict[str, Any]) -> str:
+    rel = str((resume.get("basics") or {}).get("photo") or "").strip()
+    if not rel or career_workspace.photo_file(name, resume) is None:
+        return ""
+    encoded = "/".join(quote(part) for part in rel.lstrip("/").split("/"))
+    return f"/api/v1/profiles/{quote(name)}/content/media-file/{encoded}"
+
+
+def _career_response(name: str, response: Response | None = None) -> CareerWorkspaceResponse:
+    data = career_workspace.overview(name)
+    if response is not None:
+        response.headers["ETag"] = data["resume_etag"]
+    return CareerWorkspaceResponse(
+        profile=name,
+        resume=data["resume"],
+        resume_markdown=data["resume_markdown"],
+        resume_etag=data["resume_etag"],
+        has_resume=data["has_resume"],
+        photo_url=_career_photo_url(name, data["resume"]),
+        drafts=[CareerDraftModel(**row) for row in data["drafts"]],
+        ai_available=career_ai.llm_available(),
+        pdf_available=bool(resume_doc.find_chromium()),
+    )
 
 
 @router.get(
@@ -8454,34 +8492,15 @@ _CAREER_MATCHES: dict[str, dict[str, Any]] = {}
     dependencies=PROFILE_DEPENDENCY,
 )
 def get_profile_career(name: str, response: Response) -> CareerWorkspaceResponse:
+    """Career overview. Read-only: a missing resume file is shown as empty."""
     pdir = _resolve_profile(name)
-    if not _public_build_initialized(pdir):
-        init_public_layer(pdir.name)
-    data = career_workspace.overview(pdir.name)
-    response.headers["ETag"] = data["resume_etag"]
-    return CareerWorkspaceResponse(
-        profile=pdir.name,
-        resume=data["resume"],
-        resume_markdown=data["resume_markdown"],
-        resume_etag=data["resume_etag"],
-        drafts=[CareerDraftModel(**row) for row in data["drafts"]],
-    )
-
-
-@router.get(
-    "/profiles/{name}/career/resume",
-    response_model=CareerWorkspaceResponse,
-    responses=ERROR_RESPONSES,
-    dependencies=PROFILE_DEPENDENCY,
-)
-def get_profile_career_resume(name: str, response: Response) -> CareerWorkspaceResponse:
-    return get_profile_career(name, response)
+    return _career_response(pdir.name, response)
 
 
 @router.put(
     "/profiles/{name}/career/resume",
     response_model=CareerWorkspaceResponse,
-    responses={**ERROR_RESPONSES, 412: {"model": ErrorResponse}},
+    responses={**ERROR_RESPONSES, 412: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
     dependencies=PROFILE_DEPENDENCY,
 )
 def update_profile_career_resume(
@@ -8489,147 +8508,221 @@ def update_profile_career_resume(
     body: CareerResumeUpdateRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    autosave: bool = Query(default=False),
 ) -> CareerWorkspaceResponse | JSONResponse:
+    """Conflict-safe structured resume save; ``autosave=1`` skips the Git backup commit."""
     pdir = _resolve_profile(name)
     current = career_workspace.resume_etag(pdir.name)
     if not _if_match_satisfied(if_match, current):
-        return _studio_error(412, "etag_mismatch", "Resume changed; reload before saving.", current)
+        return _studio_error(412, "etag_mismatch", "简历已在别处修改，请刷新后再保存。", current)
     try:
-        career_workspace.update_resume(pdir.name, body.resume, expected_etag=current)
-    except ValueError as exc:
-        return _studio_error(412, "etag_mismatch", str(exc), career_workspace.resume_etag(pdir.name))
-    return get_profile_career(name, response)
+        if autosave:
+            with git_backup.skip_changes():
+                career_workspace.update_resume(pdir.name, body.resume, expected_etag=current)
+        else:
+            career_workspace.update_resume(pdir.name, body.resume, expected_etag=current)
+    except career_workspace.ResumeConflict as exc:
+        return _studio_error(412, exc.code, exc.message, career_workspace.resume_etag(pdir.name))
+    except career_workspace.CareerError as exc:
+        raise ApiError(422, exc.code, exc.message) from exc
+    return _career_response(pdir.name, response)
 
 
 @router.post(
-    "/profiles/{name}/career/resume/upload",
-    response_model=CareerUploadResponse,
+    "/profiles/{name}/career/resume/photo",
+    response_model=CareerPhotoResponse,
     responses=ERROR_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-async def upload_profile_career_resume(name: str, file: UploadFile = File(...)) -> CareerUploadResponse:
-    filename = file.filename or "resume.txt"
-    text, error = extract_resume_text(filename, await file.read())
-    return CareerUploadResponse(filename=filename, text=text, error=error)
+async def upload_profile_career_photo(name: str, file: UploadFile = File(...)) -> CareerPhotoResponse:
+    """Store a resume photo under ``media/resume/``; the resume itself is not written."""
+    pdir = _resolve_profile(name)
+    data = await file.read()
+    path = _career_call(lambda: career_workspace.save_photo(pdir.name, file.filename or "", data))
+    url = _career_photo_url(pdir.name, {"basics": {"photo": path}})
+    return CareerPhotoResponse(path=path, url=url)
 
 
 @router.post(
-    "/profiles/{name}/career/resume/parse",
-    response_model=CareerUploadResponse,
+    "/profiles/{name}/career/import",
+    response_model=CareerImportPreviewResponse,
     responses=ERROR_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def parse_profile_career_resume(name: str, filename: str = "resume.txt", content: str = "") -> CareerUploadResponse:
-    text, error = extract_resume_text(filename, content.encode("utf-8"))
-    return CareerUploadResponse(filename=filename, text=text, error=error)
+async def import_profile_career_resume(name: str, file: UploadFile = File(...)) -> CareerImportPreviewResponse:
+    """Extract + map an uploaded resume (md/html/pdf/docx/txt). Preview only, nothing written."""
+    pdir = _resolve_profile(name)
+    data = await file.read()
+    preview = _career_call(lambda: career_workspace.import_preview(pdir.name, file.filename or "resume.txt", data))
+    return CareerImportPreviewResponse(**preview)
 
 
 @router.post(
-    "/profiles/{name}/career/match",
-    response_model=CareerMatchResponse,
+    "/profiles/{name}/career/import/text",
+    response_model=CareerImportPreviewResponse,
     responses=ERROR_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def match_profile_career(name: str, body: CareerMatchRequest) -> CareerMatchResponse:
-    resume_md = body.resume_md.strip()
-    jd_text = body.jd_text.strip()
-    if not resume_md or not jd_text:
-        raise ApiError(422, "invalid_career_match_request", "Both resume_md and jd_text are required.")
-    job_id = uuid.uuid4().hex
-    analysis = career_workspace.match(resume_md, jd_text)
-    _CAREER_MATCHES[job_id] = {"profile": name, "analysis": analysis, "created_at": datetime.now(timezone.utc).isoformat()}
-    return CareerMatchResponse(job_id=job_id, analysis=analysis)
+def import_profile_career_text(name: str, body: CareerImportTextRequest) -> CareerImportPreviewResponse:
+    """Map pasted resume text to fields. Preview only, nothing written."""
+    pdir = _resolve_profile(name)
+    text = body.text
+    if "<html" in text[:2000].lower() or "<body" in text[:4000].lower():
+        text = resume_doc.html_resume_to_markdown(text)
+    return CareerImportPreviewResponse(**career_workspace.preview_from_text(pdir.name, text, filename=body.filename))
 
 
 @router.get(
-    "/profiles/{name}/career/match/{job_id}",
-    response_model=CareerMatchResponse,
-    responses=ERROR_RESPONSES,
-    dependencies=PROFILE_DEPENDENCY,
-)
-def get_profile_career_match(name: str, job_id: str) -> CareerMatchResponse:
-    item = _CAREER_MATCHES.get(job_id)
-    if not item or item.get("profile") != name:
-        raise ApiError(404, "career_match_not_found", "Match job not found.")
-    return CareerMatchResponse(job_id=job_id, analysis=item["analysis"])
-
-
-@router.get(
-    "/profiles/{name}/career/match/{job_id}/events",
-    responses=ERROR_RESPONSES,
-    dependencies=PROFILE_DEPENDENCY,
-)
-def get_profile_career_match_events(name: str, job_id: str) -> dict[str, Any]:
-    item = _CAREER_MATCHES.get(job_id)
-    if not item or item.get("profile") != name:
-        raise ApiError(404, "career_match_not_found", "Match job not found.")
-    return {"job_id": job_id, "events": [{"phase": "done", "message": "匹配分析完成"}]}
-
-
-@router.get(
-    "/profiles/{name}/career/versions",
+    "/profiles/{name}/career/drafts",
     response_model=list[CareerDraftModel],
     responses=ERROR_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def list_profile_career_versions(name: str) -> list[CareerDraftModel]:
-    return [CareerDraftModel(**row) for row in career_workspace.overview(name)["drafts"]]
+def list_profile_career_drafts(name: str) -> list[CareerDraftModel]:
+    pdir = _resolve_profile(name)
+    return [CareerDraftModel(**row) for row in career_workspace.list_drafts(pdir.name)]
 
 
 @router.post(
-    "/profiles/{name}/career/versions",
+    "/profiles/{name}/career/drafts",
     response_model=CareerDraftModel,
-    responses=ERROR_RESPONSES,
+    status_code=201,
+    responses={**ERROR_RESPONSES, 409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
     dependencies=PROFILE_DEPENDENCY,
 )
-def create_profile_career_version(name: str, body: CareerDraftRequest) -> CareerDraftModel:
-    try:
-        return CareerDraftModel(**career_workspace.save_draft(name, body.target, body.markdown, overwrite=body.overwrite))
-    except FileExistsError as exc:
-        raise ApiError(409, "career_draft_exists", str(exc)) from exc
-    except ValueError as exc:
-        raise ApiError(422, "invalid_career_draft", str(exc)) from exc
+def create_profile_career_draft(name: str, body: CareerDraftRequest) -> CareerDraftModel:
+    """Create a tailored draft; an existing id is 409 unless ``overwrite``."""
+    pdir = _resolve_profile(name)
+    meta = {"jd_text": body.jd_text, "notes": body.notes}
+    row = _career_call(
+        lambda: career_workspace.save_draft(
+            pdir.name, body.target, body.markdown, overwrite=body.overwrite, meta=meta
+        )
+    )
+    return CareerDraftModel(**row)
 
 
 @router.get(
-    "/profiles/{name}/career/versions/{version_id}",
+    "/profiles/{name}/career/drafts/{draft_id}",
     response_model=CareerDraftModel,
     responses=ERROR_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def get_profile_career_version(name: str, version_id: str) -> CareerDraftModel:
-    for row in career_workspace.overview(name)["drafts"]:
-        if row["id"] == version_id:
-            return CareerDraftModel(**row)
-    raise ApiError(404, "career_draft_not_found", "Resume draft not found.")
+def get_profile_career_draft(name: str, draft_id: str, response: Response) -> CareerDraftModel:
+    pdir = _resolve_profile(name)
+    row = _career_call(lambda: career_workspace.get_draft(pdir.name, draft_id))
+    response.headers["ETag"] = row["etag"]
+    return CareerDraftModel(**row)
 
 
-@router.post(
-    "/profiles/{name}/career/versions/{version_id}/export",
-    response_model=CareerExportResponse,
+@router.put(
+    "/profiles/{name}/career/drafts/{draft_id}",
+    response_model=CareerDraftModel,
+    responses={**ERROR_RESPONSES, 412: {"model": ErrorResponse}},
+    dependencies=PROFILE_DEPENDENCY,
+)
+def update_profile_career_draft(
+    name: str,
+    draft_id: str,
+    body: CareerDraftUpdateRequest,
+    response: Response,
+    if_match: str | None = Header(default=None),
+    autosave: bool = Query(default=False),
+) -> CareerDraftModel | JSONResponse:
+    """Conflict-safe draft edit (text and/or JD/notes/analysis sidecar)."""
+    pdir = _resolve_profile(name)
+    current = _career_call(lambda: career_workspace.get_draft(pdir.name, draft_id))
+    if not _if_match_satisfied(if_match, current["etag"]):
+        return _studio_error(412, "etag_mismatch", "定制简历已在别处修改，请刷新后再保存。", current["etag"])
+
+    def write() -> dict[str, Any]:
+        meta = {"jd_text": body.jd_text, "notes": body.notes, "analysis": body.analysis}
+        if any(value is not None for value in meta.values()):
+            career_workspace.update_draft_meta(pdir.name, draft_id, meta)
+        if body.markdown is not None and body.markdown.rstrip() + "\n" != current["markdown"]:
+            return career_workspace.save_draft(pdir.name, draft_id, body.markdown, expected_etag=current["etag"])
+        return career_workspace.get_draft(pdir.name, draft_id)
+
+    try:
+        if autosave:
+            with git_backup.skip_changes():
+                row = write()
+        else:
+            row = write()
+    except career_workspace.ResumeConflict as exc:
+        return _studio_error(412, exc.code, exc.message, career_workspace.get_draft(pdir.name, draft_id)["etag"])
+    except career_workspace.CareerError as exc:
+        raise ApiError(_CAREER_ERROR_STATUS.get(exc.code, 422), exc.code, exc.message) from exc
+    response.headers["ETag"] = row["etag"]
+    return CareerDraftModel(**row)
+
+
+@router.delete(
+    "/profiles/{name}/career/drafts/{draft_id}",
     responses=ERROR_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def export_profile_career_version(name: str, version_id: str) -> CareerExportResponse:
-    """Render a reviewed tailored Markdown draft to portable HTML + Markdown."""
-    row = next(
-        (item for item in career_workspace.overview(name)["drafts"] if item["id"] == version_id),
-        None,
+def delete_profile_career_draft(name: str, draft_id: str) -> dict[str, Any]:
+    pdir = _resolve_profile(name)
+    _career_call(lambda: career_workspace.delete_draft(pdir.name, draft_id))
+    return {"ok": True}
+
+
+@router.post(
+    "/profiles/{name}/career/preview",
+    response_model=CareerPreviewResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def preview_profile_career(name: str, body: CareerPreviewRequest) -> CareerPreviewResponse:
+    """Render Markdown + HTML for the live preview; nothing is written.
+
+    With ``resume`` the unsaved form state is rendered (its photo shown by
+    URL); with ``markdown`` a draft is rendered using the master resume style.
+    """
+    pdir = _resolve_profile(name)
+    master = career_workspace.load_resume(pdir.name)
+    if body.resume is not None:
+        resume = resume_doc.normalize_resume(body.resume, profile=pdir.name)
+        markdown = career_workspace.resume_markdown(resume)
+    else:
+        resume = master
+        markdown = body.markdown or career_workspace.resume_markdown(master)
+    photo = _career_photo_url(pdir.name, resume) if body.include_photo else ""
+    return CareerPreviewResponse(markdown=markdown, html=career_workspace.page_html(resume, markdown, photo_src=photo))
+
+
+@router.post(
+    "/profiles/{name}/career/export",
+    responses={**ERROR_RESPONSES, 503: {"model": ErrorResponse}},
+    dependencies=PROFILE_DEPENDENCY,
+)
+def export_profile_career(name: str, body: CareerExportRequest) -> Response:
+    """Download md / html / pdf of a draft, given Markdown, or the master resume.
+
+    Rendering happens in memory; no profile file is written.
+    """
+    pdir = _resolve_profile(name)
+    if body.draft_id:
+        markdown = _career_call(lambda: career_workspace.get_draft(pdir.name, body.draft_id))["markdown"]
+        stem = body.draft_id
+    elif body.markdown.strip():
+        markdown = body.markdown
+        stem = "resume"
+    else:
+        resume = career_workspace.load_resume(pdir.name)
+        markdown = career_workspace.resume_markdown(resume)
+        stem = "resume"
+    resume = career_workspace.load_resume(pdir.name)
+    person = str(resume["basics"].get("name") or pdir.name)
+    data, media_type, ext = _career_call(
+        lambda: career_workspace.export_document(
+            pdir.name, markdown=markdown, fmt=body.format, include_photo=body.include_photo
+        )
     )
-    if row is None:
-        raise ApiError(404, "career_draft_not_found", "Resume draft not found.")
-    md_path = Path(row["path"])
-    html_path, exported_md = generate_resume_files(
-        name,
-        out_path=md_path.with_suffix(".html"),
-        target=version_id,
-        markdown_text=row["markdown"],
-    )
-    return CareerExportResponse(
-        version_id=version_id,
-        markdown_path=str(exported_md),
-        html_path=str(html_path),
-    )
+    filename = career_workspace.clean_draft_id(body.filename) or f"{person}-{stem}"
+    disposition = f"attachment; filename*=UTF-8''{quote(filename + '.' + ext)}"
+    return Response(content=data, media_type=media_type, headers={"Content-Disposition": disposition})
 
 
 # --- Public Build (M5): validate / build / publish the static public site -----

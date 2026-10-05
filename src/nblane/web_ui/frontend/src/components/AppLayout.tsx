@@ -77,7 +77,8 @@ export function AppLayout() {
   const hasExceptionSignal = exceptionCount > 0 || exceptions.isError;
   // The blog editor (/content/<slug>) is a full-screen writing surface; the
   // content library (/content) stays a capped list page.
-  const contentEditor = /\/p\/[^/]+\/content\/.+/.test(location.pathname);
+  // The career resume editor and target pages are full-screen work surfaces too.
+  const contentEditor = /\/p\/[^/]+\/(content\/.+|career\/(resume|jobs\/.+))/.test(location.pathname);
   const fullBleed =
     contentEditor || FULL_BLEED_SEGMENTS.some((segment) => location.pathname.includes(segment));
   const immersive =

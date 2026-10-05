@@ -1,7 +1,7 @@
 ---
 status: proposed
 owner: product/engineering
-last_verified: 2026-10-04
+last_verified: 2026-10-05
 source_of_truth: true
 ---
 
@@ -239,6 +239,15 @@ profiles/<name>/resume-source.yaml
 结构化编辑包括基本信息、联系方式、个人标题、摘要、技能、工作经历、项目、教育、
 论文成果、语言和外部链接，并同时提供结构化编辑、Markdown 预览和 HTML 预览。
 
+字段形状由 `core/resume_doc.py` 统一定义（表单、公开站、导入、导出共用）：
+`basics` 增加 `phone` / `tagline`（年龄学历等抬头补充）/ `photo`（`media/resume/` 下的
+照片）；技能支持 `skill_groups: [{label, text}]`；经历支持 `groups: [{label, bullets}]`
+（如“主线 / 支撑 / 科研产出”）；新增 `honors`、`extra_sections`（导入时无法归类的段落
+原样保留）和 `section_titles`（保留用户自己的段落标题）。旧字段（`skills` 列表、
+`org` / `title` 别名）继续兼容。Markdown 渲染为 `# 姓名 | 头衔`、
+`### 单位 | 职位 | 时间` 的规范格式，可与解析器往返。照片只用于导出的 HTML / PDF，
+公开站简历页不显示照片。
+
 ### 5.3 简历导入
 
 复用 `src/nblane/core/resume_extract.py`，支持 PDF、DOCX、TXT 和直接粘贴。
@@ -282,8 +291,11 @@ profiles/<name>/resume-source.yaml
 分析结果至少包括匹配概览、JD 关键要求、已覆盖项、可加强内容、真实缺口、关键词建议、
 建议弱化内容和潜在面试问题。
 
-继续复用现有 Job + SSE 基础设施。AI 输入只包括当前简历、当前 JD 和用户手动补充，
-不读取 Evidence、Claim、Skill Tree 或 Kanban。
+继续复用现有 Job + SSE 基础设施（`career-match` / `career-tailor` / `career-structure`）。
+AI 输入包括当前简历、当前 JD、用户手动补充，以及（默认开启、可关闭）evidence pool
+作为事实来源：只取未废弃条目，审阅过和强度高的优先，最多 25 条，带 id 供“依据”回指；
+回复里不存在的 evidence id 会被丢弃。不读取 Claim、Skill Tree、Kanban 或 SKILL.md。
+（2026-10-05 由 owner 调整：evidence 是好用的事实来源，claim 继续不读。）
 
 ### 5.5 定制简历草稿
 
@@ -405,23 +417,23 @@ POST   /api/v1/profiles/{name}/content/blog/{slug}/ai
 ### 求职工作台
 
 ```text
-GET  /api/v1/profiles/{name}/career
-GET  /api/v1/profiles/{name}/career/resume
-PUT  /api/v1/profiles/{name}/career/resume
-POST /api/v1/profiles/{name}/career/resume/upload
-POST /api/v1/profiles/{name}/career/resume/parse
-POST /api/v1/profiles/{name}/career/match
-GET  /api/v1/profiles/{name}/career/match/{job_id}
-GET  /api/v1/profiles/{name}/career/match/{job_id}/events
-GET  /api/v1/profiles/{name}/career/versions
-POST /api/v1/profiles/{name}/career/versions
-GET  /api/v1/profiles/{name}/career/versions/{version_id}
-PUT  /api/v1/profiles/{name}/career/versions/{version_id}
-POST /api/v1/profiles/{name}/career/versions/{version_id}/regenerate
-POST /api/v1/profiles/{name}/career/versions/{version_id}/export
+GET    /api/v1/profiles/{name}/career                     # 只读总览
+PUT    /api/v1/profiles/{name}/career/resume              # If-Match；?autosave=1 不做 Git 备份
+POST   /api/v1/profiles/{name}/career/resume/photo        # 只存照片，不写简历
+POST   /api/v1/profiles/{name}/career/import              # 上传 md/html/pdf/docx/txt → 预览
+POST   /api/v1/profiles/{name}/career/import/text         # 粘贴 → 预览
+POST   /api/v1/profiles/{name}/career/preview             # 未保存状态的 Markdown + HTML
+GET    /api/v1/profiles/{name}/career/drafts
+POST   /api/v1/profiles/{name}/career/drafts              # 同名 409
+GET    /api/v1/profiles/{name}/career/drafts/{id}
+PUT    /api/v1/profiles/{name}/career/drafts/{id}         # If-Match；正文与 JD/备注/分析
+DELETE /api/v1/profiles/{name}/career/drafts/{id}
+POST   /api/v1/profiles/{name}/career/export              # md / html / pdf 下载，不写文件
 ```
 
-JD 分析和简历生成继续复用 Job + SSE 基础设施。
+JD 分析、定制简历和字段识别走 `POST /jobs`（Job + SSE）。每个岗位的 JD、备注和最近一次
+分析存在 `resumes/generated/<id>.meta.yaml`。PDF 由无头 Chromium 打印（Playwright
+headless shell 优先，可用 `NBLANE_PDF_CHROMIUM` 指定），找不到时 PDF 选项置灰。
 
 ### 公开站点
 
@@ -441,7 +453,7 @@ GET /api/v1/profiles/{name}/public-build/history/{build_id}
 
 ```text
 Content 不读取 Evidence / Claim
-Career 不读取 Evidence / Claim
+Career 只把 Evidence 作为事实来源（可关闭），不读取 Claim
 Public Build 不编辑 Content / Career
 ```
 
@@ -544,7 +556,7 @@ React SPA 作为新功能唯一实现；Streamlit 只保留兼容和迁移提示
 - 可以上传 PDF、DOCX、TXT。
 - 可以选择主简历或临时简历。
 - 可以直接输入 JD。
-- JD 匹配不依赖 Evidence / Claim。
+- JD 匹配不依赖 Evidence / Claim（没有 evidence 也能用；有则作为补充依据）。
 - 可以生成结构化分析和定制简历。
 - 定制简历草稿有明确目标岗位标识。
 - 不会无提示覆盖主简历。

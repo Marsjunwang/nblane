@@ -9,7 +9,14 @@ import { apiPost } from '../../api/client';
 import { streamJob } from '../../api/jobs';
 import type { JobCreateResponse } from '../../api/types';
 
-export type ContentJobKind = 'content-rewrite' | 'content-meta' | 'content-cover';
+export type ContentJobKind =
+  | 'content-rewrite'
+  | 'content-meta'
+  | 'content-cover'
+  // Career workspace kinds share the same runner.
+  | 'career-match'
+  | 'career-tailor'
+  | 'career-structure';
 
 export interface ContentJobHandle<T> {
   result: Promise<T>;

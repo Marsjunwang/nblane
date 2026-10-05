@@ -655,7 +655,7 @@
     "title": "AssistantStatusResponse",
     "type": "object"
    },
-   "Body_upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post": {
+   "Body_import_profile_career_resume_api_v1_profiles__name__career_import_post": {
     "properties": {
      "file": {
       "contentMediaType": "application/octet-stream",
@@ -666,7 +666,21 @@
     "required": [
      "file"
     ],
-    "title": "Body_upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post",
+    "title": "Body_import_profile_career_resume_api_v1_profiles__name__career_import_post",
+    "type": "object"
+   },
+   "Body_upload_profile_career_photo_api_v1_profiles__name__career_resume_photo_post": {
+    "properties": {
+     "file": {
+      "contentMediaType": "application/octet-stream",
+      "title": "File",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file"
+    ],
+    "title": "Body_upload_profile_career_photo_api_v1_profiles__name__career_resume_photo_post",
     "type": "object"
    },
    "Body_upload_profile_content_blog_media_api_v1_profiles__name__content_blog__slug__media_post": {
@@ -684,14 +698,42 @@
     "type": "object"
    },
    "CareerDraftModel": {
+    "description": "One tailored resume draft under ``resumes/generated/<id>.md``.",
     "properties": {
+     "analysis": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Analysis"
+     },
+     "etag": {
+      "default": "",
+      "title": "Etag",
+      "type": "string"
+     },
      "id": {
       "title": "Id",
+      "type": "string"
+     },
+     "jd_text": {
+      "default": "",
+      "title": "Jd Text",
       "type": "string"
      },
      "markdown": {
       "default": "",
       "title": "Markdown",
+      "type": "string"
+     },
+     "notes": {
+      "default": "",
+      "title": "Notes",
       "type": "string"
      },
      "path": {
@@ -703,6 +745,11 @@
       "default": "",
       "title": "Target",
       "type": "string"
+     },
+     "updated_at": {
+      "default": 0.0,
+      "title": "Updated At",
+      "type": "number"
      }
     },
     "required": [
@@ -713,10 +760,22 @@
    },
    "CareerDraftRequest": {
     "properties": {
+     "jd_text": {
+      "default": "",
+      "maxLength": 50000,
+      "title": "Jd Text",
+      "type": "string"
+     },
      "markdown": {
       "maxLength": 200000,
       "minLength": 1,
       "title": "Markdown",
+      "type": "string"
+     },
+     "notes": {
+      "default": "",
+      "maxLength": 5000,
+      "title": "Notes",
       "type": "string"
      },
      "overwrite": {
@@ -738,88 +797,98 @@
     "title": "CareerDraftRequest",
     "type": "object"
    },
-   "CareerExportResponse": {
-    "properties": {
-     "html_path": {
-      "title": "Html Path",
-      "type": "string"
-     },
-     "markdown_path": {
-      "title": "Markdown Path",
-      "type": "string"
-     },
-     "ok": {
-      "default": true,
-      "title": "Ok",
-      "type": "boolean"
-     },
-     "version_id": {
-      "title": "Version Id",
-      "type": "string"
-     }
-    },
-    "required": [
-     "version_id",
-     "markdown_path",
-     "html_path"
-    ],
-    "title": "CareerExportResponse",
-    "type": "object"
-   },
-   "CareerMatchRequest": {
-    "properties": {
-     "jd_text": {
-      "default": "",
-      "maxLength": 50000,
-      "title": "Jd Text",
-      "type": "string"
-     },
-     "resume_md": {
-      "default": "",
-      "maxLength": 50000,
-      "title": "Resume Md",
-      "type": "string"
-     }
-    },
-    "title": "CareerMatchRequest",
-    "type": "object"
-   },
-   "CareerMatchResponse": {
+   "CareerDraftUpdateRequest": {
+    "description": "Any subset: draft text and/or the JD / notes / last analysis sidecar.",
     "properties": {
      "analysis": {
-      "additionalProperties": true,
-      "title": "Analysis",
-      "type": "object"
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Analysis"
      },
-     "job_id": {
-      "title": "Job Id",
+     "jd_text": {
+      "anyOf": [
+       {
+        "maxLength": 50000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Jd Text"
+     },
+     "markdown": {
+      "anyOf": [
+       {
+        "maxLength": 200000,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Markdown"
+     },
+     "notes": {
+      "anyOf": [
+       {
+        "maxLength": 5000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notes"
+     }
+    },
+    "title": "CareerDraftUpdateRequest",
+    "type": "object"
+   },
+   "CareerExportRequest": {
+    "description": "Render Markdown (a draft or the master resume) to md / html / pdf bytes.",
+    "properties": {
+     "draft_id": {
+      "default": "",
+      "title": "Draft Id",
       "type": "string"
      },
-     "ok": {
+     "filename": {
+      "default": "",
+      "title": "Filename",
+      "type": "string"
+     },
+     "format": {
+      "default": "pdf",
+      "pattern": "^(md|html|pdf)$",
+      "title": "Format",
+      "type": "string"
+     },
+     "include_photo": {
       "default": true,
-      "title": "Ok",
+      "title": "Include Photo",
       "type": "boolean"
+     },
+     "markdown": {
+      "default": "",
+      "maxLength": 200000,
+      "title": "Markdown",
+      "type": "string"
      }
     },
-    "required": [
-     "job_id"
-    ],
-    "title": "CareerMatchResponse",
+    "title": "CareerExportRequest",
     "type": "object"
    },
-   "CareerResumeUpdateRequest": {
-    "description": "Structured resume replacement; unknown fields are preserved.",
-    "properties": {
-     "resume": {
-      "additionalProperties": true,
-      "title": "Resume",
-      "type": "object"
-     }
-    },
-    "title": "CareerResumeUpdateRequest",
-    "type": "object"
-   },
-   "CareerUploadResponse": {
+   "CareerImportPreviewResponse": {
+    "description": "Upload / paste preview. Nothing is written until the user picks a target.",
     "properties": {
      "error": {
       "default": "",
@@ -831,17 +900,32 @@
       "title": "Filename",
       "type": "string"
      },
+     "markdown": {
+      "default": "",
+      "title": "Markdown",
+      "type": "string"
+     },
+     "method": {
+      "default": "text",
+      "title": "Method",
+      "type": "string"
+     },
      "ok": {
       "default": true,
       "title": "Ok",
       "type": "boolean"
      },
-     "save_options": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Save Options",
-      "type": "array"
+     "resume": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resume"
      },
      "text": {
       "default": "",
@@ -849,17 +933,146 @@
       "type": "string"
      }
     },
-    "title": "CareerUploadResponse",
+    "title": "CareerImportPreviewResponse",
+    "type": "object"
+   },
+   "CareerImportTextRequest": {
+    "properties": {
+     "filename": {
+      "default": "",
+      "title": "Filename",
+      "type": "string"
+     },
+     "text": {
+      "maxLength": 200000,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "title": "CareerImportTextRequest",
+    "type": "object"
+   },
+   "CareerPhotoResponse": {
+    "properties": {
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
+     "url": {
+      "title": "Url",
+      "type": "string"
+     }
+    },
+    "required": [
+     "path",
+     "url"
+    ],
+    "title": "CareerPhotoResponse",
+    "type": "object"
+   },
+   "CareerPreviewRequest": {
+    "description": "Live preview: render an (unsaved) resume mapping or a Markdown draft.",
+    "properties": {
+     "include_photo": {
+      "default": true,
+      "title": "Include Photo",
+      "type": "boolean"
+     },
+     "markdown": {
+      "anyOf": [
+       {
+        "maxLength": 200000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Markdown"
+     },
+     "resume": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resume"
+     }
+    },
+    "title": "CareerPreviewRequest",
+    "type": "object"
+   },
+   "CareerPreviewResponse": {
+    "properties": {
+     "html": {
+      "title": "Html",
+      "type": "string"
+     },
+     "markdown": {
+      "title": "Markdown",
+      "type": "string"
+     }
+    },
+    "required": [
+     "markdown",
+     "html"
+    ],
+    "title": "CareerPreviewResponse",
+    "type": "object"
+   },
+   "CareerResumeUpdateRequest": {
+    "description": "Structured resume replacement (normalized server-side; unknown keys kept).",
+    "properties": {
+     "resume": {
+      "additionalProperties": true,
+      "title": "Resume",
+      "type": "object"
+     }
+    },
+    "title": "CareerResumeUpdateRequest",
     "type": "object"
    },
    "CareerWorkspaceResponse": {
     "properties": {
+     "ai_available": {
+      "default": false,
+      "title": "Ai Available",
+      "type": "boolean"
+     },
      "drafts": {
       "items": {
        "$ref": "#/components/schemas/CareerDraftModel"
       },
       "title": "Drafts",
       "type": "array"
+     },
+     "has_resume": {
+      "default": false,
+      "title": "Has Resume",
+      "type": "boolean"
+     },
+     "pdf_available": {
+      "default": false,
+      "title": "Pdf Available",
+      "type": "boolean"
+     },
+     "photo_url": {
+      "default": "",
+      "title": "Photo Url",
+      "type": "string"
      },
      "profile": {
       "title": "Profile",
@@ -9964,6 +10177,7 @@
   },
   "/api/v1/profiles/{name}/career": {
    "get": {
+    "description": "Career overview. Read-only: a missing resume file is shown as empty.",
     "operationId": "get_profile_career_api_v1_profiles__name__career_get",
     "parameters": [
      {
@@ -10031,9 +10245,81 @@
     "summary": "Get Profile Career"
    }
   },
-  "/api/v1/profiles/{name}/career/match": {
+  "/api/v1/profiles/{name}/career/drafts": {
+   "get": {
+    "operationId": "list_profile_career_drafts_api_v1_profiles__name__career_drafts_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/CareerDraftModel"
+         },
+         "title": "Response List Profile Career Drafts Api V1 Profiles  Name  Career Drafts Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "List Profile Career Drafts"
+   },
    "post": {
-    "operationId": "match_profile_career_api_v1_profiles__name__career_match_post",
+    "description": "Create a tailored draft; an existing id is 409 unless ``overwrite``.",
+    "operationId": "create_profile_career_draft_api_v1_profiles__name__career_drafts_post",
     "parameters": [
      {
       "in": "path",
@@ -10049,18 +10335,18 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/CareerMatchRequest"
+        "$ref": "#/components/schemas/CareerDraftRequest"
        }
       }
      },
      "required": true
     },
     "responses": {
-     "200": {
+     "201": {
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/CareerMatchResponse"
+         "$ref": "#/components/schemas/CareerDraftModel"
         }
        }
       },
@@ -10096,23 +10382,33 @@
       },
       "description": "Profile not found."
      },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Conflict"
+     },
      "422": {
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
+         "$ref": "#/components/schemas/ErrorResponse"
         }
        }
       },
-      "description": "Validation Error"
+      "description": "Unprocessable Entity"
      }
     },
-    "summary": "Match Profile Career"
+    "summary": "Create Profile Career Draft"
    }
   },
-  "/api/v1/profiles/{name}/career/match/{job_id}": {
-   "get": {
-    "operationId": "get_profile_career_match_api_v1_profiles__name__career_match__job_id__get",
+  "/api/v1/profiles/{name}/career/drafts/{draft_id}": {
+   "delete": {
+    "operationId": "delete_profile_career_draft_api_v1_profiles__name__career_drafts__draft_id__delete",
     "parameters": [
      {
       "in": "path",
@@ -10125,88 +10421,10 @@
      },
      {
       "in": "path",
-      "name": "job_id",
+      "name": "draft_id",
       "required": true,
       "schema": {
-       "title": "Job Id",
-       "type": "string"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/CareerMatchResponse"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "400": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Invalid profile name."
-     },
-     "403": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile access denied."
-     },
-     "404": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile not found."
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Get Profile Career Match"
-   }
-  },
-  "/api/v1/profiles/{name}/career/match/{job_id}/events": {
-   "get": {
-    "operationId": "get_profile_career_match_events_api_v1_profiles__name__career_match__job_id__events_get",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "name",
-      "required": true,
-      "schema": {
-       "title": "Name",
-       "type": "string"
-      }
-     },
-     {
-      "in": "path",
-      "name": "job_id",
-      "required": true,
-      "schema": {
-       "title": "Job Id",
+       "title": "Draft Id",
        "type": "string"
       }
      }
@@ -10217,7 +10435,7 @@
        "application/json": {
         "schema": {
          "additionalProperties": true,
-         "title": "Response Get Profile Career Match Events Api V1 Profiles  Name  Career Match  Job Id  Events Get",
+         "title": "Response Delete Profile Career Draft Api V1 Profiles  Name  Career Drafts  Draft Id  Delete",
          "type": "object"
         }
        }
@@ -10265,12 +10483,10 @@
       "description": "Validation Error"
      }
     },
-    "summary": "Get Profile Career Match Events"
-   }
-  },
-  "/api/v1/profiles/{name}/career/resume": {
+    "summary": "Delete Profile Career Draft"
+   },
    "get": {
-    "operationId": "get_profile_career_resume_api_v1_profiles__name__career_resume_get",
+    "operationId": "get_profile_career_draft_api_v1_profiles__name__career_drafts__draft_id__get",
     "parameters": [
      {
       "in": "path",
@@ -10280,6 +10496,15 @@
        "title": "Name",
        "type": "string"
       }
+     },
+     {
+      "in": "path",
+      "name": "draft_id",
+      "required": true,
+      "schema": {
+       "title": "Draft Id",
+       "type": "string"
+      }
      }
     ],
     "responses": {
@@ -10287,7 +10512,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/CareerWorkspaceResponse"
+         "$ref": "#/components/schemas/CareerDraftModel"
         }
        }
       },
@@ -10334,9 +10559,463 @@
       "description": "Validation Error"
      }
     },
-    "summary": "Get Profile Career Resume"
+    "summary": "Get Profile Career Draft"
    },
    "put": {
+    "description": "Conflict-safe draft edit (text and/or JD/notes/analysis sidecar).",
+    "operationId": "update_profile_career_draft_api_v1_profiles__name__career_drafts__draft_id__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "draft_id",
+      "required": true,
+      "schema": {
+       "title": "Draft Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "autosave",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Autosave",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CareerDraftUpdateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerDraftModel"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Precondition Failed"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Update Profile Career Draft"
+   }
+  },
+  "/api/v1/profiles/{name}/career/export": {
+   "post": {
+    "description": "Download md / html / pdf of a draft, given Markdown, or the master resume.\n\nRendering happens in memory; no profile file is written.",
+    "operationId": "export_profile_career_api_v1_profiles__name__career_export_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CareerExportRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Service Unavailable"
+     }
+    },
+    "summary": "Export Profile Career"
+   }
+  },
+  "/api/v1/profiles/{name}/career/import": {
+   "post": {
+    "description": "Extract + map an uploaded resume (md/html/pdf/docx/txt). Preview only, nothing written.",
+    "operationId": "import_profile_career_resume_api_v1_profiles__name__career_import_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_import_profile_career_resume_api_v1_profiles__name__career_import_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerImportPreviewResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Import Profile Career Resume"
+   }
+  },
+  "/api/v1/profiles/{name}/career/import/text": {
+   "post": {
+    "description": "Map pasted resume text to fields. Preview only, nothing written.",
+    "operationId": "import_profile_career_text_api_v1_profiles__name__career_import_text_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CareerImportTextRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerImportPreviewResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Import Profile Career Text"
+   }
+  },
+  "/api/v1/profiles/{name}/career/preview": {
+   "post": {
+    "description": "Render Markdown + HTML for the live preview; nothing is written.\n\nWith ``resume`` the unsaved form state is rendered (its photo shown by\nURL); with ``markdown`` a draft is rendered using the master resume style.",
+    "operationId": "preview_profile_career_api_v1_profiles__name__career_preview_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CareerPreviewRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CareerPreviewResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Preview Profile Career"
+   }
+  },
+  "/api/v1/profiles/{name}/career/resume": {
+   "put": {
+    "description": "Conflict-safe structured resume save; ``autosave=1`` skips the Git backup commit.",
     "operationId": "update_profile_career_resume_api_v1_profiles__name__career_resume_put",
     "parameters": [
      {
@@ -10346,6 +11025,16 @@
       "schema": {
        "title": "Name",
        "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "autosave",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Autosave",
+       "type": "boolean"
       }
      },
      {
@@ -10430,108 +11119,20 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
+         "$ref": "#/components/schemas/ErrorResponse"
         }
        }
       },
-      "description": "Validation Error"
+      "description": "Unprocessable Entity"
      }
     },
     "summary": "Update Profile Career Resume"
    }
   },
-  "/api/v1/profiles/{name}/career/resume/parse": {
+  "/api/v1/profiles/{name}/career/resume/photo": {
    "post": {
-    "operationId": "parse_profile_career_resume_api_v1_profiles__name__career_resume_parse_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "name",
-      "required": true,
-      "schema": {
-       "title": "Name",
-       "type": "string"
-      }
-     },
-     {
-      "in": "query",
-      "name": "filename",
-      "required": false,
-      "schema": {
-       "default": "resume.txt",
-       "title": "Filename",
-       "type": "string"
-      }
-     },
-     {
-      "in": "query",
-      "name": "content",
-      "required": false,
-      "schema": {
-       "default": "",
-       "title": "Content",
-       "type": "string"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/CareerUploadResponse"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "400": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Invalid profile name."
-     },
-     "403": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile access denied."
-     },
-     "404": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile not found."
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Parse Profile Career Resume"
-   }
-  },
-  "/api/v1/profiles/{name}/career/resume/upload": {
-   "post": {
-    "operationId": "upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post",
+    "description": "Store a resume photo under ``media/resume/``; the resume itself is not written.",
+    "operationId": "upload_profile_career_photo_api_v1_profiles__name__career_resume_photo_post",
     "parameters": [
      {
       "in": "path",
@@ -10547,7 +11148,7 @@
      "content": {
       "multipart/form-data": {
        "schema": {
-        "$ref": "#/components/schemas/Body_upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post"
+        "$ref": "#/components/schemas/Body_upload_profile_career_photo_api_v1_profiles__name__career_resume_photo_post"
        }
       }
      },
@@ -10558,7 +11159,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/CareerUploadResponse"
+         "$ref": "#/components/schemas/CareerPhotoResponse"
         }
        }
       },
@@ -10605,314 +11206,7 @@
       "description": "Validation Error"
      }
     },
-    "summary": "Upload Profile Career Resume"
-   }
-  },
-  "/api/v1/profiles/{name}/career/versions": {
-   "get": {
-    "operationId": "list_profile_career_versions_api_v1_profiles__name__career_versions_get",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "name",
-      "required": true,
-      "schema": {
-       "title": "Name",
-       "type": "string"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "items": {
-          "$ref": "#/components/schemas/CareerDraftModel"
-         },
-         "title": "Response List Profile Career Versions Api V1 Profiles  Name  Career Versions Get",
-         "type": "array"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "400": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Invalid profile name."
-     },
-     "403": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile access denied."
-     },
-     "404": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile not found."
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "List Profile Career Versions"
-   },
-   "post": {
-    "operationId": "create_profile_career_version_api_v1_profiles__name__career_versions_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "name",
-      "required": true,
-      "schema": {
-       "title": "Name",
-       "type": "string"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/CareerDraftRequest"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/CareerDraftModel"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "400": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Invalid profile name."
-     },
-     "403": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile access denied."
-     },
-     "404": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile not found."
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Create Profile Career Version"
-   }
-  },
-  "/api/v1/profiles/{name}/career/versions/{version_id}": {
-   "get": {
-    "operationId": "get_profile_career_version_api_v1_profiles__name__career_versions__version_id__get",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "name",
-      "required": true,
-      "schema": {
-       "title": "Name",
-       "type": "string"
-      }
-     },
-     {
-      "in": "path",
-      "name": "version_id",
-      "required": true,
-      "schema": {
-       "title": "Version Id",
-       "type": "string"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/CareerDraftModel"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "400": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Invalid profile name."
-     },
-     "403": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile access denied."
-     },
-     "404": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile not found."
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Get Profile Career Version"
-   }
-  },
-  "/api/v1/profiles/{name}/career/versions/{version_id}/export": {
-   "post": {
-    "description": "Render a reviewed tailored Markdown draft to portable HTML + Markdown.",
-    "operationId": "export_profile_career_version_api_v1_profiles__name__career_versions__version_id__export_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "name",
-      "required": true,
-      "schema": {
-       "title": "Name",
-       "type": "string"
-      }
-     },
-     {
-      "in": "path",
-      "name": "version_id",
-      "required": true,
-      "schema": {
-       "title": "Version Id",
-       "type": "string"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/CareerExportResponse"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "400": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Invalid profile name."
-     },
-     "403": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile access denied."
-     },
-     "404": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ErrorResponse"
-        }
-       }
-      },
-      "description": "Profile not found."
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Export Profile Career Version"
+    "summary": "Upload Profile Career Photo"
    }
   },
   "/api/v1/profiles/{name}/checkins": {

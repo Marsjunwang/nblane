@@ -417,25 +417,97 @@ export interface ContentCoverResult {
 
 /** ContentMediaUploadResponse from web_api/schemas.py. */
 export type ContentMediaUploadResponse = Schemas['ContentMediaUploadResponse'];
-export interface CareerDraft { id: string; target: string; path: string; markdown: string; }
-export interface CareerWorkspaceResponse {
-  profile: string;
-  resume: Record<string, unknown>;
-  resume_markdown: string;
-  resume_etag: string;
+/** Career workspace (web_api/schemas.py Career*). */
+export type CareerWorkspaceResponse = Omit<Schemas['CareerWorkspaceResponse'], 'resume' | 'drafts'> & {
+  resume: ResumeDoc;
   drafts: CareerDraft[];
+};
+export type CareerDraft = Omit<Schemas['CareerDraftModel'], 'analysis'> & { analysis?: CareerMatchResult | null };
+export type CareerImportPreview = Omit<Schemas['CareerImportPreviewResponse'], 'resume'> & {
+  resume?: ResumeDoc | null;
+};
+export type CareerPhotoResponse = Schemas['CareerPhotoResponse'];
+export type CareerPreviewResponse = Schemas['CareerPreviewResponse'];
+
+/**
+ * Structured resume (resume-source.yaml), shape owned by core/resume_doc.py.
+ * The server normalizes on save; unknown keys round-trip untouched.
+ */
+export interface ResumeBasics {
+  name: string;
+  title: string;
+  tagline: string;
+  location: string;
+  phone: string;
+  email: string;
+  website: string;
+  photo: string;
+  [key: string]: unknown;
 }
-export interface CareerUploadResponse {
-  ok: boolean; filename: string; text: string; error: string; save_options: string[];
+export interface ResumeGroup {
+  label: string;
+  bullets: string[];
 }
-export interface CareerMatchResponse {
-  ok: boolean; job_id: string; analysis: {
-    score: number; summary: string; key_requirements: string[]; covered: string[];
-    gaps: string[]; keyword_suggestions: string[]; strengthen: string[];
-    de_emphasize: string[]; interview_questions: string[];
-  };
+export interface ResumeRecord {
+  start: string;
+  end: string;
+  location?: string;
+  summary: string;
+  bullets: string[];
+  groups: ResumeGroup[];
+  [key: string]: unknown;
 }
-export interface CareerExportResponse { ok: boolean; version_id: string; markdown_path: string; html_path: string; }
+export interface ResumeDoc {
+  profile: string;
+  visibility: string;
+  basics: ResumeBasics;
+  summary: string;
+  skills: string[];
+  skill_groups: { label: string; text: string }[];
+  experiences: ResumeRecord[];
+  projects: ResumeRecord[];
+  outputs: ResumeRecord[];
+  education: ResumeRecord[];
+  honors: string[];
+  extra_sections: { title: string; body: string }[];
+  section_titles: Record<string, string>;
+  lang?: string;
+  [key: string]: unknown;
+}
+
+/** Result payloads of the career-* job kinds (core/career_ai.py). */
+export interface CareerRequirement {
+  requirement: string;
+  verdict: 'match' | 'partial' | 'missing';
+  basis: string;
+  evidence_refs: string[];
+}
+export interface CareerEvidenceItem {
+  id: string;
+  type: string;
+  title: string;
+  summary: string;
+  date: string;
+}
+export interface CareerMatchResult {
+  method: string;
+  score: number;
+  summary: string;
+  requirements: CareerRequirement[];
+  strengthen: string[];
+  gaps: string[];
+  keywords: string[];
+  de_emphasize: string[];
+  interview_questions: { question: string; answer_hint: string }[];
+  evidence: CareerEvidenceItem[];
+  evidence_used: number;
+}
+export interface CareerTailorResult {
+  markdown: string;
+}
+export interface CareerStructureResult {
+  resume: ResumeDoc;
+}
 
 /** PublicBuildValidationModel from web_api/schemas.py (public-layer check). */
 export type PublicBuildValidation = Schemas['PublicBuildValidationModel'];

@@ -277,7 +277,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Profile Career */
+        /**
+         * Get Profile Career
+         * @description Career overview. Read-only: a missing resume file is shown as empty.
+         */
         get: operations["get_profile_career_api_v1_profiles__name__career_get"];
         put?: never;
         post?: never;
@@ -287,7 +290,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/career/match": {
+    "/api/v1/profiles/{name}/career/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Profile Career Drafts */
+        get: operations["list_profile_career_drafts_api_v1_profiles__name__career_drafts_get"];
+        put?: never;
+        /**
+         * Create Profile Career Draft
+         * @description Create a tailored draft; an existing id is 409 unless ``overwrite``.
+         */
+        post: operations["create_profile_career_draft_api_v1_profiles__name__career_drafts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/career/drafts/{draft_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Profile Career Draft */
+        get: operations["get_profile_career_draft_api_v1_profiles__name__career_drafts__draft_id__get"];
+        /**
+         * Update Profile Career Draft
+         * @description Conflict-safe draft edit (text and/or JD/notes/analysis sidecar).
+         */
+        put: operations["update_profile_career_draft_api_v1_profiles__name__career_drafts__draft_id__put"];
+        post?: never;
+        /** Delete Profile Career Draft */
+        delete: operations["delete_profile_career_draft_api_v1_profiles__name__career_drafts__draft_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/career/export": {
         parameters: {
             query?: never;
             header?: never;
@@ -296,42 +342,76 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Match Profile Career */
-        post: operations["match_profile_career_api_v1_profiles__name__career_match_post"];
+        /**
+         * Export Profile Career
+         * @description Download md / html / pdf of a draft, given Markdown, or the master resume.
+         *
+         *     Rendering happens in memory; no profile file is written.
+         */
+        post: operations["export_profile_career_api_v1_profiles__name__career_export_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/career/match/{job_id}": {
+    "/api/v1/profiles/{name}/career/import": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Profile Career Match */
-        get: operations["get_profile_career_match_api_v1_profiles__name__career_match__job_id__get"];
+        get?: never;
         put?: never;
-        post?: never;
+        /**
+         * Import Profile Career Resume
+         * @description Extract + map an uploaded resume (md/html/pdf/docx/txt). Preview only, nothing written.
+         */
+        post: operations["import_profile_career_resume_api_v1_profiles__name__career_import_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/career/match/{job_id}/events": {
+    "/api/v1/profiles/{name}/career/import/text": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Profile Career Match Events */
-        get: operations["get_profile_career_match_events_api_v1_profiles__name__career_match__job_id__events_get"];
+        get?: never;
         put?: never;
-        post?: never;
+        /**
+         * Import Profile Career Text
+         * @description Map pasted resume text to fields. Preview only, nothing written.
+         */
+        post: operations["import_profile_career_text_api_v1_profiles__name__career_import_text_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/career/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Profile Career
+         * @description Render Markdown + HTML for the live preview; nothing is written.
+         *
+         *     With ``resume`` the unsaved form state is rendered (its photo shown by
+         *     URL); with ``markdown`` a draft is rendered using the master resume style.
+         */
+        post: operations["preview_profile_career_api_v1_profiles__name__career_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -345,9 +425,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Profile Career Resume */
-        get: operations["get_profile_career_resume_api_v1_profiles__name__career_resume_get"];
-        /** Update Profile Career Resume */
+        get?: never;
+        /**
+         * Update Profile Career Resume
+         * @description Conflict-safe structured resume save; ``autosave=1`` skips the Git backup commit.
+         */
         put: operations["update_profile_career_resume_api_v1_profiles__name__career_resume_put"];
         post?: never;
         delete?: never;
@@ -356,76 +438,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/career/resume/parse": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Parse Profile Career Resume */
-        post: operations["parse_profile_career_resume_api_v1_profiles__name__career_resume_parse_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/career/resume/upload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Upload Profile Career Resume */
-        post: operations["upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/career/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Profile Career Versions */
-        get: operations["list_profile_career_versions_api_v1_profiles__name__career_versions_get"];
-        put?: never;
-        /** Create Profile Career Version */
-        post: operations["create_profile_career_version_api_v1_profiles__name__career_versions_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/career/versions/{version_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Profile Career Version */
-        get: operations["get_profile_career_version_api_v1_profiles__name__career_versions__version_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/career/versions/{version_id}/export": {
+    "/api/v1/profiles/{name}/career/resume/photo": {
         parameters: {
             query?: never;
             header?: never;
@@ -435,10 +448,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Export Profile Career Version
-         * @description Render a reviewed tailored Markdown draft to portable HTML + Markdown.
+         * Upload Profile Career Photo
+         * @description Store a resume photo under ``media/resume/``; the resume itself is not written.
          */
-        post: operations["export_profile_career_version_api_v1_profiles__name__career_versions__version_id__export_post"];
+        post: operations["upload_profile_career_photo_api_v1_profiles__name__career_resume_photo_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3350,8 +3363,13 @@ export interface components {
             /** Version */
             version?: string | null;
         };
-        /** Body_upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post */
-        Body_upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post: {
+        /** Body_import_profile_career_resume_api_v1_profiles__name__career_import_post */
+        Body_import_profile_career_resume_api_v1_profiles__name__career_import_post: {
+            /** File */
+            file: string;
+        };
+        /** Body_upload_profile_career_photo_api_v1_profiles__name__career_resume_photo_post */
+        Body_upload_profile_career_photo_api_v1_profiles__name__career_resume_photo_post: {
             /** File */
             file: string;
         };
@@ -3360,15 +3378,37 @@ export interface components {
             /** File */
             file: string;
         };
-        /** CareerDraftModel */
+        /**
+         * CareerDraftModel
+         * @description One tailored resume draft under ``resumes/generated/<id>.md``.
+         */
         CareerDraftModel: {
+            /** Analysis */
+            analysis?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Etag
+             * @default
+             */
+            etag: string;
             /** Id */
             id: string;
+            /**
+             * Jd Text
+             * @default
+             */
+            jd_text: string;
             /**
              * Markdown
              * @default
              */
             markdown: string;
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
             /**
              * Path
              * @default
@@ -3379,11 +3419,26 @@ export interface components {
              * @default
              */
             target: string;
+            /**
+             * Updated At
+             * @default 0
+             */
+            updated_at: number;
         };
         /** CareerDraftRequest */
         CareerDraftRequest: {
+            /**
+             * Jd Text
+             * @default
+             */
+            jd_text: string;
             /** Markdown */
             markdown: string;
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
             /**
              * Overwrite
              * @default false
@@ -3392,59 +3447,58 @@ export interface components {
             /** Target */
             target: string;
         };
-        /** CareerExportResponse */
-        CareerExportResponse: {
-            /** Html Path */
-            html_path: string;
-            /** Markdown Path */
-            markdown_path: string;
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-            /** Version Id */
-            version_id: string;
-        };
-        /** CareerMatchRequest */
-        CareerMatchRequest: {
-            /**
-             * Jd Text
-             * @default
-             */
-            jd_text: string;
-            /**
-             * Resume Md
-             * @default
-             */
-            resume_md: string;
-        };
-        /** CareerMatchResponse */
-        CareerMatchResponse: {
+        /**
+         * CareerDraftUpdateRequest
+         * @description Any subset: draft text and/or the JD / notes / last analysis sidecar.
+         */
+        CareerDraftUpdateRequest: {
             /** Analysis */
             analysis?: {
                 [key: string]: unknown;
-            };
-            /** Job Id */
-            job_id: string;
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
+            } | null;
+            /** Jd Text */
+            jd_text?: string | null;
+            /** Markdown */
+            markdown?: string | null;
+            /** Notes */
+            notes?: string | null;
         };
         /**
-         * CareerResumeUpdateRequest
-         * @description Structured resume replacement; unknown fields are preserved.
+         * CareerExportRequest
+         * @description Render Markdown (a draft or the master resume) to md / html / pdf bytes.
          */
-        CareerResumeUpdateRequest: {
-            /** Resume */
-            resume?: {
-                [key: string]: unknown;
-            };
+        CareerExportRequest: {
+            /**
+             * Draft Id
+             * @default
+             */
+            draft_id: string;
+            /**
+             * Filename
+             * @default
+             */
+            filename: string;
+            /**
+             * Format
+             * @default pdf
+             */
+            format: string;
+            /**
+             * Include Photo
+             * @default true
+             */
+            include_photo: boolean;
+            /**
+             * Markdown
+             * @default
+             */
+            markdown: string;
         };
-        /** CareerUploadResponse */
-        CareerUploadResponse: {
+        /**
+         * CareerImportPreviewResponse
+         * @description Upload / paste preview. Nothing is written until the user picks a target.
+         */
+        CareerImportPreviewResponse: {
             /**
              * Error
              * @default
@@ -3456,22 +3510,110 @@ export interface components {
              */
             filename: string;
             /**
+             * Markdown
+             * @default
+             */
+            markdown: string;
+            /**
+             * Method
+             * @default text
+             */
+            method: string;
+            /**
              * Ok
              * @default true
              */
             ok: boolean;
-            /** Save Options */
-            save_options?: string[];
+            /** Resume */
+            resume?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Text
              * @default
              */
             text: string;
         };
+        /** CareerImportTextRequest */
+        CareerImportTextRequest: {
+            /**
+             * Filename
+             * @default
+             */
+            filename: string;
+            /** Text */
+            text: string;
+        };
+        /** CareerPhotoResponse */
+        CareerPhotoResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Path */
+            path: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * CareerPreviewRequest
+         * @description Live preview: render an (unsaved) resume mapping or a Markdown draft.
+         */
+        CareerPreviewRequest: {
+            /**
+             * Include Photo
+             * @default true
+             */
+            include_photo: boolean;
+            /** Markdown */
+            markdown?: string | null;
+            /** Resume */
+            resume?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** CareerPreviewResponse */
+        CareerPreviewResponse: {
+            /** Html */
+            html: string;
+            /** Markdown */
+            markdown: string;
+        };
+        /**
+         * CareerResumeUpdateRequest
+         * @description Structured resume replacement (normalized server-side; unknown keys kept).
+         */
+        CareerResumeUpdateRequest: {
+            /** Resume */
+            resume?: {
+                [key: string]: unknown;
+            };
+        };
         /** CareerWorkspaceResponse */
         CareerWorkspaceResponse: {
+            /**
+             * Ai Available
+             * @default false
+             */
+            ai_available: boolean;
             /** Drafts */
             drafts?: components["schemas"]["CareerDraftModel"][];
+            /**
+             * Has Resume
+             * @default false
+             */
+            has_resume: boolean;
+            /**
+             * Pdf Available
+             * @default false
+             */
+            pdf_available: boolean;
+            /**
+             * Photo Url
+             * @default
+             */
+            photo_url: string;
             /** Profile */
             profile: string;
             /** Resume */
@@ -9722,75 +9864,12 @@ export interface operations {
             };
         };
     };
-    match_profile_career_api_v1_profiles__name__career_match_post: {
+    list_profile_career_drafts_api_v1_profiles__name__career_drafts_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CareerMatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CareerMatchResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_profile_career_match_api_v1_profiles__name__career_match__job_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-                job_id: string;
             };
             cookie?: never;
         };
@@ -9802,7 +9881,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CareerMatchResponse"];
+                    "application/json": components["schemas"]["CareerDraftModel"][];
                 };
             };
             /** @description Invalid profile name. */
@@ -9843,13 +9922,219 @@ export interface operations {
             };
         };
     };
-    get_profile_career_match_events_api_v1_profiles__name__career_match__job_id__events_get: {
+    create_profile_career_draft_api_v1_profiles__name__career_drafts_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 name: string;
-                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CareerDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CareerDraftModel"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_profile_career_draft_api_v1_profiles__name__career_drafts__draft_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CareerDraftModel"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_profile_career_draft_api_v1_profiles__name__career_drafts__draft_id__put: {
+        parameters: {
+            query?: {
+                autosave?: boolean;
+            };
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CareerDraftUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CareerDraftModel"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_profile_career_draft_api_v1_profiles__name__career_drafts__draft_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                draft_id: string;
             };
             cookie?: never;
         };
@@ -9904,7 +10189,7 @@ export interface operations {
             };
         };
     };
-    get_profile_career_resume_api_v1_profiles__name__career_resume_get: {
+    export_profile_career_api_v1_profiles__name__career_export_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -9913,7 +10198,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CareerExportRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -9921,7 +10210,202 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CareerWorkspaceResponse"];
+                    "application/json": unknown;
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    import_profile_career_resume_api_v1_profiles__name__career_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_profile_career_resume_api_v1_profiles__name__career_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CareerImportPreviewResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_profile_career_text_api_v1_profiles__name__career_import_text_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CareerImportTextRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CareerImportPreviewResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_profile_career_api_v1_profiles__name__career_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CareerPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CareerPreviewResponse"];
                 };
             };
             /** @description Invalid profile name. */
@@ -9964,7 +10448,9 @@ export interface operations {
     };
     update_profile_career_resume_api_v1_profiles__name__career_resume_put: {
         parameters: {
-            query?: never;
+            query?: {
+                autosave?: boolean;
+            };
             header?: {
                 "if-match"?: string | null;
             };
@@ -10024,79 +10510,18 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
     };
-    parse_profile_career_resume_api_v1_profiles__name__career_resume_parse_post: {
-        parameters: {
-            query?: {
-                filename?: string;
-                content?: string;
-            };
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CareerUploadResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post: {
+    upload_profile_career_photo_api_v1_profiles__name__career_resume_photo_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -10107,7 +10532,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_upload_profile_career_resume_api_v1_profiles__name__career_resume_upload_post"];
+                "multipart/form-data": components["schemas"]["Body_upload_profile_career_photo_api_v1_profiles__name__career_resume_photo_post"];
             };
         };
         responses: {
@@ -10117,245 +10542,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CareerUploadResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_profile_career_versions_api_v1_profiles__name__career_versions_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CareerDraftModel"][];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_profile_career_version_api_v1_profiles__name__career_versions_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CareerDraftRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CareerDraftModel"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_profile_career_version_api_v1_profiles__name__career_versions__version_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CareerDraftModel"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    export_profile_career_version_api_v1_profiles__name__career_versions__version_id__export_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CareerExportResponse"];
+                    "application/json": components["schemas"]["CareerPhotoResponse"];
                 };
             };
             /** @description Invalid profile name. */

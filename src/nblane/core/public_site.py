@@ -6316,83 +6316,10 @@ def _render_sitemap(
 
 
 def render_resume_markdown(resume_source: dict) -> str:
-    """Render resume-source.yaml into Markdown."""
-    basics = resume_source.get("basics") or {}
-    if not isinstance(basics, dict):
-        basics = {}
-    name = str(basics.get("name", "") or resume_source.get("profile", ""))
-    title = str(basics.get("title", "") or "")
-    lines = [f"# {name}", ""]
-    if title:
-        lines += [f"**{title}**", ""]
-    contact_bits = [
-        str(basics.get("location", "") or ""),
-        str(basics.get("email", "") or ""),
-        str(basics.get("website", "") or ""),
-    ]
-    contact_line = " · ".join(x for x in contact_bits if x)
-    if contact_line:
-        lines += [contact_line, ""]
-    summary = str(resume_source.get("summary", "") or "")
-    if summary:
-        lines += ["## Summary", "", summary, ""]
-    _append_resume_list(lines, "Skills", resume_source.get("skills"))
-    _append_resume_records(lines, "Experience", resume_source.get("experiences"))
-    _append_resume_records(lines, "Projects", resume_source.get("projects"))
-    _append_resume_records(lines, "Outputs", resume_source.get("outputs"))
-    _append_resume_records(lines, "Education", resume_source.get("education"))
-    return "\n".join(lines).rstrip() + "\n"
+    """Render resume-source.yaml into Markdown (see ``core/resume_doc.py``)."""
+    from nblane.core import resume_doc
 
-
-def _append_resume_list(lines: list[str], title: str, raw: object) -> None:
-    items = _as_string_list(raw)
-    if not items:
-        return
-    lines += [f"## {title}", ""]
-    for item in items:
-        lines.append(f"- {item}")
-    lines.append("")
-
-
-def _append_resume_records(lines: list[str], title: str, raw: object) -> None:
-    if not isinstance(raw, list) or not raw:
-        return
-    records = [r for r in raw if isinstance(r, dict)]
-    if not records:
-        return
-    lines += [f"## {title}", ""]
-    for record in records:
-        heading = str(
-            record.get("role")
-            or record.get("title")
-            or record.get("degree")
-            or record.get("company")
-            or ""
-        )
-        org = str(record.get("company") or record.get("org") or "")
-        period = " - ".join(
-            x
-            for x in (
-                str(record.get("start", "") or ""),
-                str(record.get("end", "") or ""),
-            )
-            if x
-        )
-        meta = " · ".join(x for x in (org, period) if x)
-        if heading:
-            lines.append(f"### {heading}")
-        if meta:
-            lines.append(meta)
-        bullets = record.get("bullets") or []
-        if isinstance(bullets, list):
-            for bullet in bullets:
-                text = str(bullet).strip()
-                if text:
-                    lines.append(f"- {text}")
-        summary = str(record.get("summary", "") or "").strip()
-        if summary:
-            lines.append(summary)
-        lines.append("")
+    return resume_doc.render_resume_markdown(resume_source)
 
 
 def generate_resume_files(

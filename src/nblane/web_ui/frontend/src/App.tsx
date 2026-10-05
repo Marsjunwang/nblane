@@ -75,7 +75,7 @@ export function App() {
           <Route path="/p/:name/projects" element={<ProjectsPage />} />
           <Route path="/p/:name/studio" element={<StudioPage />} />
           <Route path="/p/:name/content/*" element={<Suspense fallback={<Center py="xl"><Loader /></Center>}><ContentWorkspacePage /></Suspense>} />
-          <Route path="/p/:name/career" element={<CareerWorkspacePage />} />
+          <Route path="/p/:name/career/*" element={<CareerWorkspacePage />} />
           <Route path="/p/:name/public-build" element={<PublicBuildPage />} />
           <Route path="/p/:name/research" element={<ResearchPage />} />
           <Route path="/p/:name/research/papers/:sourceId" element={<PaperReaderPage />} />

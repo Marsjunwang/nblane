@@ -115,9 +115,11 @@ import type {
   ContentMediaUploadResponse,
   ContentWorkspaceResponse,
   CareerWorkspaceResponse,
-  CareerMatchResponse,
   CareerDraft,
-  CareerExportResponse,
+  CareerImportPreview,
+  CareerPhotoResponse,
+  CareerPreviewResponse,
+  ResumeDoc,
   WorkshopStatus,
   CodexSettings,
   CodexSettingsPatch,
@@ -1999,51 +2001,120 @@ export function discardCoverCandidate(profile: string, candidatePath: string): P
   });
 }
 
-/** Career workspace projection and resume source. */
+const careerPath = (profile: string, rest = '') => `/profiles/${encodeURIComponent(profile)}/career${rest}`;
+
+/** Career workspace overview: master resume (+ETag), drafts, AI/PDF availability. */
 export function useCareerWorkspace(profile: string) {
   return useQuery({
     queryKey: ['profiles', profile, 'career'],
-    queryFn: () => apiGetWithHeaders<CareerWorkspaceResponse>(`/profiles/${encodeURIComponent(profile)}/career`),
+    queryFn: () => apiGet<CareerWorkspaceResponse>(careerPath(profile)),
     enabled: profile.length > 0,
+    // The resume editor owns its draft; avoid refetches clobbering the form.
+    staleTime: Infinity,
   });
 }
 
-export function useCareerResumeSave(profile: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ resume, etag }: { resume: Record<string, unknown>; etag: string }) =>
-      apiPutWithHeaders<CareerWorkspaceResponse>(
-        `/profiles/${encodeURIComponent(profile)}/career/resume`,
-        { resume },
-        { headers: ifMatch(etag) },
-      ),
-    onSuccess: (result) => queryClient.setQueryData(['profiles', profile, 'career'], result),
-  });
+/** Conflict-safe resume save; `autosave` skips the Git backup commit server-side. */
+export function saveCareerResume(
+  profile: string,
+  resume: ResumeDoc,
+  etag: string,
+  autosave: boolean,
+): Promise<CareerWorkspaceResponse> {
+  return apiPut<CareerWorkspaceResponse>(
+    careerPath(profile, `/resume${autosave ? '?autosave=1' : ''}`),
+    { resume },
+    { headers: ifMatch(etag) },
+  );
 }
 
-export function useCareerMatch(profile: string) {
-  return useMutation({
-    mutationFn: (body: { resume_md: string; jd_text: string }) =>
-      apiPost<CareerMatchResponse>(`/profiles/${encodeURIComponent(profile)}/career/match`, body),
-  });
+export function careerResumeApiUrl(profile: string): string {
+  return `${apiBase()}${careerPath(profile, '/resume')}`;
 }
 
-export function useCareerDraftSave(profile: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { target: string; markdown: string; overwrite?: boolean }) =>
-      apiPost<CareerDraft>(`/profiles/${encodeURIComponent(profile)}/career/versions`, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'career'] }),
-  });
+export function uploadCareerPhoto(profile: string, file: File): Promise<CareerPhotoResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  return apiPostForm<CareerPhotoResponse>(careerPath(profile, '/resume/photo'), form);
 }
 
-export function useCareerDraftExport(profile: string) {
-  return useMutation({
-    mutationFn: (versionId: string) =>
-      apiPost<CareerExportResponse>(
-        `/profiles/${encodeURIComponent(profile)}/career/versions/${encodeURIComponent(versionId)}/export`,
-      ),
+export function importCareerFile(profile: string, file: File): Promise<CareerImportPreview> {
+  const form = new FormData();
+  form.append('file', file);
+  return apiPostForm<CareerImportPreview>(careerPath(profile, '/import'), form);
+}
+
+export function importCareerText(profile: string, text: string): Promise<CareerImportPreview> {
+  return apiPost<CareerImportPreview>(careerPath(profile, '/import/text'), { text });
+}
+
+export function previewCareer(
+  profile: string,
+  body: { resume?: ResumeDoc; markdown?: string; include_photo?: boolean },
+): Promise<CareerPreviewResponse> {
+  return apiPost<CareerPreviewResponse>(careerPath(profile, '/preview'), body);
+}
+
+export function createCareerDraft(
+  profile: string,
+  body: { target: string; markdown: string; jd_text?: string; notes?: string; overwrite?: boolean },
+): Promise<CareerDraft> {
+  return apiPost<CareerDraft>(careerPath(profile, '/drafts'), body);
+}
+
+export function updateCareerDraft(
+  profile: string,
+  draftId: string,
+  body: { markdown?: string; jd_text?: string; notes?: string; analysis?: unknown },
+  etag: string,
+  autosave = false,
+): Promise<CareerDraft> {
+  return apiPut<CareerDraft>(
+    careerPath(profile, `/drafts/${encodeURIComponent(draftId)}${autosave ? '?autosave=1' : ''}`),
+    body,
+    { headers: ifMatch(etag) },
+  );
+}
+
+export function deleteCareerDraft(profile: string, draftId: string): Promise<unknown> {
+  return apiDelete(careerPath(profile, `/drafts/${encodeURIComponent(draftId)}`));
+}
+
+/**
+ * Download md / html / pdf. Rendering happens server-side in memory; the
+ * browser receives the file as an attachment (nothing is written).
+ */
+export async function downloadCareerExport(
+  profile: string,
+  body: { format: 'md' | 'html' | 'pdf'; draft_id?: string; markdown?: string; include_photo?: boolean },
+): Promise<void> {
+  const res = await fetch(`${apiBase()}${careerPath(profile, '/export')}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
+  if (!res.ok) {
+    let message = `导出失败（${res.status}）`;
+    try {
+      const data = (await res.json()) as { message?: string };
+      if (data.message) message = data.message;
+    } catch {
+      // keep the status message
+    }
+    throw new Error(message);
+  }
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  const filename = match ? decodeURIComponent(match[1]) : `resume.${body.format}`;
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** Blog detail fetch that captures the per-post ETag for If-Match. */

@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from nblane.core import content_ai, gap
-from nblane.core import jd_match
+from nblane.core import career_ai, jd_match
 from nblane.core import llm as llm_client
 from nblane.core import profile_io, project_suggest
 from nblane.core.project_board import load_project_board
@@ -52,6 +52,9 @@ KIND_EVIDENCE_CRYSTALLIZE = "evidence-crystallize"
 KIND_CONTENT_REWRITE = "content-rewrite"
 KIND_CONTENT_META = "content-meta"
 KIND_CONTENT_COVER = "content-cover"
+KIND_CAREER_MATCH = "career-match"
+KIND_CAREER_TAILOR = "career-tailor"
+KIND_CAREER_STRUCTURE = "career-structure"
 
 FINAL_STATUSES = ("done", "failed")
 
@@ -861,4 +864,93 @@ _KINDS[KIND_CONTENT_COVER] = JobKind(
     queued_message="Queued cover generation.",
     timeout_seconds=300,
     timeout_message="封面生成超时（5 分钟），请重试。",
+)
+
+
+# --- Career workspace AI -------------------------------------------------------
+#
+# Inputs: resume + JD + the user's notes, plus the evidence pool as an
+# optional fact source. Results are candidates; nothing is written here.
+
+_CAREER_TEXT_MAX = 50_000
+
+
+def _career_ai_call(fn: Callable[[], Any]) -> Any:
+    try:
+        return fn()
+    except career_ai.CareerAIError as exc:
+        raise JobFailedError(exc.code, exc.message) from exc
+
+
+def _validate_career_pair(job_input: dict[str, Any]) -> dict[str, Any]:
+    resume_md = str(job_input.get("resume_md") or "").strip()
+    jd_text = str(job_input.get("jd_text") or "").strip()
+    if not resume_md or not jd_text:
+        raise JobInputError("invalid_career_match_request", "简历和 JD 都不能为空。")
+    if len(resume_md) > _CAREER_TEXT_MAX or len(jd_text) > _CAREER_TEXT_MAX:
+        raise JobInputError("invalid_career_match_request", f"简历和 JD 各不超过 {_CAREER_TEXT_MAX} 字。")
+    return {
+        "resume_md": resume_md,
+        "jd_text": jd_text,
+        "notes": str(job_input.get("notes") or "")[:5000],
+        "use_evidence": job_input.get("use_evidence", True) is not False,
+    }
+
+
+def _run_career_match(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
+    report(phase="generating", message="AI 正在逐条比对 JD 要求。")
+    return _career_ai_call(lambda: career_ai.analyze_match(profile, **job_input))
+
+
+def _validate_career_tailor_input(job_input: dict[str, Any]) -> dict[str, Any]:
+    clean = _validate_career_pair(job_input)
+    analysis = job_input.get("analysis")
+    clean["analysis"] = analysis if isinstance(analysis, dict) else None
+    clean["current_draft"] = str(job_input.get("current_draft") or "")[:_CAREER_TEXT_MAX]
+    return clean
+
+
+def _run_career_tailor(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
+    report(phase="generating", message="AI 正在生成定制简历。")
+    return _career_ai_call(lambda: career_ai.tailor_resume(profile, **job_input))
+
+
+def _validate_career_structure_input(job_input: dict[str, Any]) -> dict[str, Any]:
+    text = str(job_input.get("text") or "").strip()
+    if not text:
+        raise JobInputError("invalid_import", "简历文本为空。")
+    return {"text": text[:_CAREER_TEXT_MAX]}
+
+
+def _run_career_structure(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
+    report(phase="generating", message="AI 正在识别简历字段。")
+    resume = _career_ai_call(lambda: career_ai.structure_resume(profile, job_input["text"]))
+    return {"resume": resume}
+
+
+_KINDS[KIND_CAREER_MATCH] = JobKind(
+    name=KIND_CAREER_MATCH,
+    validate=_validate_career_pair,
+    run=_run_career_match,
+    queued_message="Queued JD match.",
+    timeout_seconds=180,
+    timeout_message="JD 匹配超时（3 分钟），请重试。",
+)
+
+_KINDS[KIND_CAREER_TAILOR] = JobKind(
+    name=KIND_CAREER_TAILOR,
+    validate=_validate_career_tailor_input,
+    run=_run_career_tailor,
+    queued_message="Queued tailored resume.",
+    timeout_seconds=240,
+    timeout_message="定制简历生成超时（4 分钟），请重试。",
+)
+
+_KINDS[KIND_CAREER_STRUCTURE] = JobKind(
+    name=KIND_CAREER_STRUCTURE,
+    validate=_validate_career_structure_input,
+    run=_run_career_structure,
+    queued_message="Queued resume field recognition.",
+    timeout_seconds=180,
+    timeout_message="简历识别超时（3 分钟），请重试。",
 )

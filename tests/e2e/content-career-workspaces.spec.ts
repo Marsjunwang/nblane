@@ -180,16 +180,98 @@ test.describe("SPA content and career workspaces", () => {
     await expect(page.getByAltText("封面预览")).toBeVisible();
   });
 
-  test("matches a JD and saves an explicitly named tailored draft", async ({ page }) => {
-    await page.goto(`${SPA_BASE_URL}/p/${encodeURIComponent(SPA_E2E_PROFILE)}/career`);
-    await expect(page.getByTestId("career-workspace")).toBeVisible();
-    await page.getByTestId("career-jd").fill("Python FastAPI Docker");
+  test("imports a resume into the structured form, then matches and tailors a target (stubbed AI)", async ({ page }) => {
+    const base = `${SPA_BASE_URL}/p/${encodeURIComponent(SPA_E2E_PROFILE)}/career`;
+    const stamp = Date.now();
+    const resumeMd = [
+      `# 验收者 | 算法工程师 ${stamp}`,
+      "",
+      "✉️ e2e@example.com",
+      "",
+      "## 工作概要",
+      "",
+      "做具身智能。",
+      "",
+      "## 工作经历",
+      "",
+      "### 示例公司 | 工程师 | 2025/04 – 至今",
+      "",
+      "**主线**",
+      "- 主导 VLA 复现。",
+      "",
+    ].join("\n");
+
+    // Resume: paste import → preview → write into the form → autosave.
+    await page.goto(`${base}/resume`);
+    await expect(page.getByTestId("resume-form")).toBeVisible();
+    await page.getByTestId("resume-import").click();
+    await page.getByText("粘贴文本").click();
+    await page.getByTestId("career-import-text").fill(resumeMd);
+    await page.getByTestId("career-import-parse").click();
+    await expect(page.getByTestId("career-import-stats")).toContainText("经历 1 段");
+    await page.getByTestId("career-import-apply").click();
+    await expect(page.getByTestId("resume-title")).toHaveValue(`算法工程师 ${stamp}`);
+    await expect(page.getByTestId("resume-record-experiences")).toHaveCount(1);
+    await expect(page.getByTestId("resume-save-state")).toHaveText(/已保存/, { timeout: 10_000 });
+    await expect(page.frameLocator('[data-testid="career-preview"]').getByText("示例公司")).toBeVisible();
+
+    // Reload restores the structured resume from disk.
+    await page.reload();
+    await expect(page.getByTestId("resume-title")).toHaveValue(`算法工程师 ${stamp}`);
+    await page.getByTestId("career-back").click();
+    await expect(page.getByTestId("career-resume-stats")).toContainText("经历");
+
+    // Target: create, paste JD, stubbed match + tailor; tailor is a candidate until accepted.
+    await page.route("**/api/v1/profiles/*/jobs", async (route) => {
+      const body = route.request().postDataJSON() as { kind: string };
+      await route.fulfill({ status: 202, json: { ok: true, job_id: `job-${body.kind}`, job: { job_id: `job-${body.kind}` } } });
+    });
+    const results: Record<string, unknown> = {
+      "career-match": {
+        method: "llm",
+        score: 81,
+        summary: "较匹配",
+        requirements: [{ requirement: "VLA 经验", verdict: "match", basis: "主导 VLA 复现", evidence_refs: [] }],
+        strengthen: ["量化成功率"],
+        gaps: ["C++"],
+        keywords: ["VLA"],
+        de_emphasize: [],
+        interview_questions: [{ question: "为什么选 π0.5？", answer_hint: "开源与效果" }],
+        evidence: [],
+        evidence_used: 0,
+      },
+      "career-tailor": { markdown: `# 验收者 | VLA 工程师 ${stamp}\n\n## 工作经历\n\n### 示例公司 | 工程师 | 2025/04 – 至今\n\n- 主导 VLA 复现。\n` },
+    };
+    await page.route("**/api/v1/profiles/*/jobs/*/stream", (route) => {
+      const kind = route.request().url().split("/jobs/job-")[1].split("/")[0];
+      return route.fulfill({
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+        body: `event: done\ndata: ${JSON.stringify({ job: { job_id: `job-${kind}`, status: "done" }, result: results[kind] })}\n\n`,
+      });
+    });
+    await page.getByTestId("career-new-target").click();
+    await page.getByTestId("career-new-target-name").fill(`e2e-target-${stamp}`);
+    await page.getByTestId("career-new-target-confirm").click();
+    await expect(page.getByTestId("career-target")).toBeVisible();
+    await page.getByTestId("career-jd").fill("需要 VLA 与 C++ 经验");
     await page.getByTestId("career-match").click();
-    await expect(page.getByText(/匹配度/)).toBeVisible();
-    await page.getByRole("tab", { name: "定制草稿" }).click();
-    await page.getByLabel("目标岗位标识").fill("browser-career-acceptance");
-    await page.getByLabel("定制简历草稿（人工确认后保存）").fill("# Browser career acceptance\n\n- Python");
-    await page.getByRole("button", { name: "保存定制草稿" }).click();
-    await expect(page.getByText("browser-career-acceptance · 已保存")).toBeVisible();
+    await expect(page.getByTestId("career-match-score")).toHaveText("81");
+    await expect(page.getByTestId("career-requirements")).toContainText("VLA 经验");
+    await page.getByTestId("career-tailor").click();
+    await expect(page.getByTestId("career-tailor-diff")).toContainText(`VLA 工程师 ${stamp}`);
+    await page.getByTestId("career-tailor-accept").click();
+    await expect(page.getByTestId("career-save-state")).toHaveText(/已保存/, { timeout: 10_000 });
+    await expect(page.frameLocator('[data-testid="career-preview"]').getByText(`VLA 工程师 ${stamp}`)).toBeVisible();
+
+    // The draft, JD and analysis persist; the target shows its score on the home list.
+    await page.getByTestId("career-back").click();
+    const row = page.getByTestId("career-target-row").filter({ hasText: `e2e-target-${stamp}` });
+    await expect(row).toContainText("匹配 81");
+    await row.click();
+    await expect(page.getByTestId("career-jd")).toHaveValue("需要 VLA 与 C++ 经验");
+    await page.getByRole("button", { name: "删除" }).click();
+    await page.getByTestId("career-delete-confirm").click();
+    await expect(page.getByTestId("career-workspace")).toBeVisible();
   });
 });
