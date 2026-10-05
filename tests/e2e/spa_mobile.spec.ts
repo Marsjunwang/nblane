@@ -243,10 +243,13 @@ test.describe("SPA mobile 375px — 宽表格五页", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("研究台页: 最近来源表格横向滚动且文档不溢出", async ({ page }) => {
+  test("研究台页: 阅读台卡片与论文索引筛选不溢出", async ({ page }) => {
+    // The research page is a card-based reading desk (no wide table since
+    // 2026-10): queue / recent cards plus the paper index with search+filter.
     await page.goto(spa("research"));
-    await expect(page.locator("table").first()).toBeVisible();
-    await expectTablesScrollable(page);
+    await expect(page.getByRole("heading", { name: /研究台/ })).toBeVisible();
+    await expect(page.getByText("论文索引", { exact: true })).toBeVisible();
+    await expect(page.getByPlaceholder("搜索标题、摘要或标签")).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 });
