@@ -111,6 +111,11 @@ class JobKind:
 _KINDS: dict[str, JobKind] = {}
 
 
+def register_kind(spec: JobKind) -> None:
+    """Register (or replace) one job kind from another router module."""
+    _KINDS[spec.name] = spec
+
+
 def _clean(value: object) -> str:
     return str(value or "").strip()
 

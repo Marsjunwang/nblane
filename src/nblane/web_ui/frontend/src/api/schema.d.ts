@@ -2412,6 +2412,181 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/research/ai-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Research Ai Config
+         * @description Per-action backend/model choice for research AI actions.
+         */
+        get: operations["get_research_ai_config_api_v1_profiles__name__research_ai_config_get"];
+        /**
+         * Put Research Ai Config
+         * @description Write ``ai.actions.<research action>`` only; other actions are untouched.
+         */
+        put: operations["put_research_ai_config_api_v1_profiles__name__research_ai_config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/research/connectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Research Connectors
+         * @description Saved connector configs, providers, and collection import targets.
+         */
+        get: operations["get_research_connectors_api_v1_profiles__name__research_connectors_get"];
+        /**
+         * Upsert Research Connector
+         * @description Create or update one connector config (secrets are rejected, 422).
+         */
+        put: operations["upsert_research_connector_api_v1_profiles__name__research_connectors_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/research/connectors/manual/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Manual Connector
+         * @description Import selected fingerprints of a pasted list into the source inbox.
+         */
+        post: operations["import_manual_connector_api_v1_profiles__name__research_connectors_manual_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/research/connectors/manual/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Manual Connector
+         * @description Parse pasted URLs / CSV / JSON locally and mark duplicates (no writes).
+         */
+        post: operations["preview_manual_connector_api_v1_profiles__name__research_connectors_manual_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/research/connectors/{connector_id}/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Research Connector
+         * @description Start an import job; result is a ResearchConnectorImportResultModel.
+         *
+         *     Selected fingerprints are re-discovered and imported (duplicates
+         *     skipped); an empty selection runs the whole connector.
+         */
+        post: operations["import_research_connector_api_v1_profiles__name__research_connectors__connector_id__import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/research/connectors/{connector_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Research Connector
+         * @description Start a dry-run discovery job; result is a ResearchConnectorPreviewModel.
+         */
+        post: operations["preview_research_connector_api_v1_profiles__name__research_connectors__connector_id__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/research/papers/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Paper Overview
+         * @description Single-paper overview (paper_reading.md §1.1.2). Read-only.
+         */
+        get: operations["get_paper_overview_api_v1_profiles__name__research_papers__source_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/research/papers/{source_id}/analysis-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Paper Analysis Job
+         * @description Start quick analysis / deep study for one paper (202 + job handle).
+         *
+         *     A job of the same kind already running for this paper is returned
+         *     instead of starting a second run. Subscribe to
+         *     ``GET .../jobs/{job_id}/stream`` for progress.
+         */
+        post: operations["start_paper_analysis_job_api_v1_profiles__name__research_papers__source_id__analysis_jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/research/papers/{source_id}/reader": {
         parameters: {
             query?: never;
@@ -2426,6 +2601,73 @@ export interface paths {
         get: operations["get_profile_research_reader_api_v1_profiles__name__research_papers__source_id__reader_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/research/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Research Sources
+         * @description Research source inbox (all kinds), newest capture first.
+         */
+        get: operations["list_research_sources_api_v1_profiles__name__research_sources_get"];
+        put?: never;
+        /**
+         * Create Research Source
+         * @description Manually add one source (origin ``manual``); 409 on a duplicate URL.
+         */
+        post: operations["create_research_source_api_v1_profiles__name__research_sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/research/sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Research Source
+         * @description Partial update (status / tags / title / visibility / summary / ...).
+         *
+         *     ``If-Match`` carries the source's ``etag``; mismatch answers 412 with
+         *     the current source. Changing ``url`` onto another source's URL is 409.
+         */
+        patch: operations["patch_research_source_api_v1_profiles__name__research_sources__source_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/research/sources/{source_id}/task": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Research Source Task
+         * @description Create a kanban Queue task linked to one source ("Read: <title>").
+         */
+        post: operations["create_research_source_task_api_v1_profiles__name__research_sources__source_id__task_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6792,6 +7034,451 @@ export interface components {
              */
             ok: boolean;
         };
+        /** PaperAbstractModel */
+        PaperAbstractModel: {
+            /**
+             * Origin
+             * @default
+             */
+            origin: string;
+            /**
+             * Page
+             * @default 0
+             */
+            page: number;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+            /**
+             * Translation
+             * @default
+             */
+            translation: string;
+            /**
+             * Translation Status
+             * @default missing
+             */
+            translation_status: string;
+        };
+        /**
+         * PaperAnalysisItemModel
+         * @description One analysis bullet: optional label (term/metric/section) + refs.
+         */
+        PaperAnalysisItemModel: {
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /** Refs */
+            refs?: components["schemas"]["PaperRefModel"][];
+            /** Text */
+            text: string;
+        };
+        /** PaperAnalysisSectionModel */
+        PaperAnalysisSectionModel: {
+            /** Items */
+            items?: components["schemas"]["PaperAnalysisItemModel"][];
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+        };
+        /**
+         * PaperCoverageModel
+         * @description What part of the paper an AI result actually cites.
+         */
+        PaperCoverageModel: {
+            /**
+             * Cited Segments
+             * @default 0
+             */
+            cited_segments: number;
+            /**
+             * Page Count
+             * @default 0
+             */
+            page_count: number;
+            /** Pages */
+            pages?: number[];
+            /** Sections */
+            sections?: string[];
+        };
+        /**
+         * PaperDeepReadModel
+         * @description Deep study (深度研读) report saved under ``codex_deep_read``.
+         */
+        PaperDeepReadModel: {
+            /**
+             * Batch Count
+             * @default 0
+             */
+            batch_count: number;
+            coverage?: components["schemas"]["PaperCoverageModel"];
+            /**
+             * Fallback
+             * @default false
+             */
+            fallback: boolean;
+            /** Sections */
+            sections?: components["schemas"]["PaperAnalysisSectionModel"][];
+            /**
+             * Status
+             * @default ready
+             */
+            status: string;
+            /**
+             * Takeaway
+             * @default
+             */
+            takeaway: string;
+            /**
+             * Updated
+             * @default
+             */
+            updated: string;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * PaperJobRefModel
+         * @description An in-flight analysis job the page can re-attach its SSE stream to.
+         */
+        PaperJobRefModel: {
+            /** Job Id */
+            job_id: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Phase
+             * @default
+             */
+            phase: string;
+            /** Status */
+            status: string;
+        };
+        /** PaperJobStartRequest */
+        PaperJobStartRequest: {
+            /**
+             * Kind
+             * @description paper-quick-analysis | paper-deep-read
+             */
+            kind: string;
+        };
+        /** PaperNoteModel */
+        PaperNoteModel: {
+            /**
+             * Color
+             * @default
+             */
+            color: string;
+            /** Id */
+            id: string;
+            /**
+             * Locator
+             * @default
+             */
+            locator: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /**
+             * Page
+             * @default 0
+             */
+            page: number;
+            /**
+             * Quote
+             * @default
+             */
+            quote: string;
+            /**
+             * Updated
+             * @default
+             */
+            updated: string;
+        };
+        /** PaperNotesSummaryModel */
+        PaperNotesSummaryModel: {
+            /**
+             * Annotation Count
+             * @default 0
+             */
+            annotation_count: number;
+            /**
+             * Chunk Count
+             * @default 0
+             */
+            chunk_count: number;
+            /** Recent */
+            recent?: components["schemas"]["PaperNoteModel"][];
+        };
+        /** PaperOverviewResponse */
+        PaperOverviewResponse: {
+            abstract?: components["schemas"]["PaperAbstractModel"];
+            /** Active Jobs */
+            active_jobs?: components["schemas"]["PaperJobRefModel"][];
+            deep_read?: components["schemas"]["PaperDeepReadModel"] | null;
+            notes?: components["schemas"]["PaperNotesSummaryModel"];
+            pdf?: components["schemas"]["PaperPdfStatusModel"];
+            /** Profile */
+            profile: string;
+            progress?: components["schemas"]["PaperReadingProgressModel"];
+            quick_analysis?: components["schemas"]["PaperQuickAnalysisModel"] | null;
+            /**
+             * Reader Available
+             * @default false
+             */
+            reader_available: boolean;
+            /**
+             * Reader Unavailable Reason
+             * @default
+             */
+            reader_unavailable_reason: string;
+            source: components["schemas"]["PaperSourceMetaModel"];
+            translation?: components["schemas"]["PaperTranslationProgressModel"];
+        };
+        /** PaperPdfStatusModel */
+        PaperPdfStatusModel: {
+            /**
+             * Available
+             * @default false
+             */
+            available: boolean;
+            /**
+             * Download Error
+             * @default
+             */
+            download_error: string;
+            /**
+             * Download Status
+             * @default
+             */
+            download_status: string;
+            /**
+             * Extracted At
+             * @default
+             */
+            extracted_at: string;
+            /**
+             * Extraction Status
+             * @default
+             */
+            extraction_status: string;
+            /**
+             * Page Count
+             * @default 0
+             */
+            page_count: number;
+            /**
+             * Segment Count
+             * @default 0
+             */
+            segment_count: number;
+            /**
+             * Structure Backend
+             * @default
+             */
+            structure_backend: string;
+            /**
+             * Structure Unit Count
+             * @default 0
+             */
+            structure_unit_count: number;
+        };
+        /**
+         * PaperQuickAnalysisModel
+         * @description Quick analysis (快速分析): judge what the paper did / whether to read on.
+         */
+        PaperQuickAnalysisModel: {
+            coverage?: components["schemas"]["PaperCoverageModel"];
+            /** Experiments */
+            experiments?: components["schemas"]["PaperAnalysisItemModel"][];
+            /**
+             * Fallback
+             * @default false
+             */
+            fallback: boolean;
+            /** Key Points */
+            key_points?: components["schemas"]["PaperAnalysisItemModel"][];
+            /** Limitations */
+            limitations?: components["schemas"]["PaperAnalysisItemModel"][];
+            /** Method */
+            method?: components["schemas"]["PaperAnalysisItemModel"][];
+            /** Open Questions */
+            open_questions?: components["schemas"]["PaperAnalysisItemModel"][];
+            /** Project Relevance */
+            project_relevance?: components["schemas"]["PaperAnalysisItemModel"][];
+            /** Reading Plan */
+            reading_plan?: components["schemas"]["PaperAnalysisItemModel"][];
+            /** Score Rationale */
+            score_rationale?: components["schemas"]["PaperAnalysisItemModel"][];
+            /** Scores */
+            scores?: {
+                [key: string]: number;
+            };
+            /**
+             * Scores Evaluated
+             * @default false
+             */
+            scores_evaluated: boolean;
+            /**
+             * Status
+             * @default ready
+             */
+            status: string;
+            /**
+             * Tldr
+             * @default
+             */
+            tldr: string;
+            /**
+             * Updated
+             * @default
+             */
+            updated: string;
+            /** Usefulness */
+            usefulness?: components["schemas"]["PaperAnalysisItemModel"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** PaperReadingProgressModel */
+        PaperReadingProgressModel: {
+            /**
+             * Last Page
+             * @default 0
+             */
+            last_page: number;
+            /**
+             * Last Read At
+             * @default
+             */
+            last_read_at: string;
+            /**
+             * Mode
+             * @default
+             */
+            mode: string;
+            /**
+             * Page Count
+             * @default 0
+             */
+            page_count: number;
+        };
+        /**
+         * PaperRefModel
+         * @description One cited ref resolved to a PDF page (``page`` 0 = unresolved).
+         */
+        PaperRefModel: {
+            /**
+             * Page
+             * @default 0
+             */
+            page: number;
+            /** Ref */
+            ref: string;
+        };
+        /** PaperSourceMetaModel */
+        PaperSourceMetaModel: {
+            /**
+             * Arxiv Id
+             * @default
+             */
+            arxiv_id: string;
+            /** Authors */
+            authors?: string[];
+            /**
+             * Captured At
+             * @default
+             */
+            captured_at: string;
+            /**
+             * Doi
+             * @default
+             */
+            doi: string;
+            /** Id */
+            id: string;
+            /**
+             * Pdf Url
+             * @default
+             */
+            pdf_url: string;
+            /**
+             * Published
+             * @default
+             */
+            published: string;
+            /**
+             * Status
+             * @default inbox
+             */
+            status: string;
+            /** Tags */
+            tags?: string[];
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /**
+             * Venue
+             * @default
+             */
+            venue: string;
+            /**
+             * Year
+             * @default
+             */
+            year: string;
+        };
+        /** PaperTranslationProgressModel */
+        PaperTranslationProgressModel: {
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Missing
+             * @default 0
+             */
+            missing: number;
+            /**
+             * Stale
+             * @default 0
+             */
+            stale: number;
+            /**
+             * Status
+             * @default missing
+             */
+            status: string;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Translated
+             * @default 0
+             */
+            translated: number;
+        };
         /**
          * PlanTemplateHabitModel
          * @description The habit a plan template suggests (created when missing).
@@ -8338,6 +9025,356 @@ export interface components {
             works?: components["schemas"]["PublicSiteWorkModel"][];
         };
         /**
+         * ResearchAIActionModel
+         * @description One research AI action's effective routing preference.
+         */
+        ResearchAIActionModel: {
+            /** Action */
+            action: string;
+            /**
+             * Backend
+             * @default
+             */
+            backend: string;
+            /**
+             * Codex Model
+             * @default
+             */
+            codex_model: string;
+            /**
+             * Default Backend
+             * @default llm
+             */
+            default_backend: string;
+            /**
+             * Llm Model
+             * @default
+             */
+            llm_model: string;
+        };
+        /**
+         * ResearchAIActionUpdate
+         * @description Backend/model choice for one action; empty strings mean app default.
+         */
+        ResearchAIActionUpdate: {
+            /**
+             * Backend
+             * @default
+             * @enum {string}
+             */
+            backend: "" | "llm" | "codex";
+            /**
+             * Codex Model
+             * @default
+             */
+            codex_model: string;
+            /**
+             * Llm Model
+             * @default
+             */
+            llm_model: string;
+        };
+        /**
+         * ResearchAIConfigResponse
+         * @description Research-scoped slice of ``web-preferences.yaml`` ``ai.actions``.
+         */
+        ResearchAIConfigResponse: {
+            /** Actions */
+            actions?: components["schemas"]["ResearchAIActionModel"][];
+            /**
+             * Codex Default Model
+             * @default
+             */
+            codex_default_model: string;
+            /** Codex Model Suggestions */
+            codex_model_suggestions?: string[];
+            /**
+             * Llm Default Model
+             * @default
+             */
+            llm_default_model: string;
+            /** Profile */
+            profile: string;
+        };
+        /**
+         * ResearchAIConfigUpdateRequest
+         * @description Only research actions are accepted; unknown keys answer 422.
+         */
+        ResearchAIConfigUpdateRequest: {
+            /** Actions */
+            actions?: {
+                [key: string]: components["schemas"]["ResearchAIActionUpdate"];
+            };
+        };
+        /**
+         * ResearchConnectorCandidateModel
+         * @description One discovered candidate with its duplicate verdict.
+         */
+        ResearchConnectorCandidateModel: {
+            /**
+             * Canonical Url
+             * @default
+             */
+            canonical_url: string;
+            /** Duplicate */
+            duplicate?: {
+                [key: string]: unknown;
+            };
+            /** Fingerprint */
+            fingerprint: string;
+            /** Item */
+            item?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Selected
+             * @default false
+             */
+            selected: boolean;
+        };
+        /**
+         * ResearchConnectorImportRequest
+         * @description Import selected candidates of a saved connector (async job).
+         *
+         *     An empty ``fingerprints`` list runs the whole connector (every
+         *     non-duplicate discovery is imported), like the Streamlit "run now".
+         */
+        ResearchConnectorImportRequest: {
+            /** Fingerprints */
+            fingerprints?: string[];
+            target?: components["schemas"]["ResearchImportTargetModel"];
+        };
+        /**
+         * ResearchConnectorImportResultModel
+         * @description Outcome of importing selected candidates (or a full connector run).
+         */
+        ResearchConnectorImportResultModel: {
+            /**
+             * Connector Id
+             * @default
+             */
+            connector_id: string;
+            /**
+             * Discovered
+             * @default 0
+             */
+            discovered: number;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /**
+             * Imported
+             * @default 0
+             */
+            imported: number;
+            /** Imported Source Ids */
+            imported_source_ids?: string[];
+            /**
+             * Provider
+             * @default
+             */
+            provider: string;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * ResearchConnectorModel
+         * @description One saved connector config (secret-looking keys are always stripped).
+         */
+        ResearchConnectorModel: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /** Last Result */
+            last_result?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Last Run
+             * @default
+             */
+            last_run: string;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Privacy Default
+             * @default private
+             */
+            privacy_default: string;
+            /** Provider */
+            provider: string;
+            /**
+             * Query
+             * @default
+             */
+            query: string;
+            /** Rate Limit */
+            rate_limit?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Status
+             * @default idle
+             */
+            status: string;
+        };
+        /**
+         * ResearchConnectorPreviewModel
+         * @description Dry-run discovery result (no source facts written).
+         */
+        ResearchConnectorPreviewModel: {
+            /** Candidates */
+            candidates?: components["schemas"]["ResearchConnectorCandidateModel"][];
+            /**
+             * Connector Id
+             * @default
+             */
+            connector_id: string;
+            /**
+             * Discovered
+             * @default 0
+             */
+            discovered: number;
+            /**
+             * Importable
+             * @default 0
+             */
+            importable: number;
+            /**
+             * Provider
+             * @default
+             */
+            provider: string;
+            /**
+             * Query
+             * @default
+             */
+            query: string;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * ResearchConnectorUpsertRequest
+         * @description Create/update one connector. Never carries tokens/cookies/API keys.
+         */
+        ResearchConnectorUpsertRequest: {
+            /**
+             * Connector Id
+             * @default
+             */
+            connector_id: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Privacy Default
+             * @default private
+             */
+            privacy_default: string;
+            /** Provider */
+            provider: string;
+            /**
+             * Query
+             * @default
+             */
+            query: string;
+        };
+        /**
+         * ResearchConnectorsResponse
+         * @description Connector configs plus provider metadata and import targets.
+         */
+        ResearchConnectorsResponse: {
+            /** Auto Providers */
+            auto_providers?: string[];
+            /** Connectors */
+            connectors?: components["schemas"]["ResearchConnectorModel"][];
+            /** Library Nodes */
+            library_nodes?: components["schemas"]["ResearchLibraryNodeModel"][];
+            /** Profile */
+            profile: string;
+            /** Providers */
+            providers?: string[];
+        };
+        /**
+         * ResearchImportTargetModel
+         * @description Where imported candidates land: inbox, metadata only, or a collection.
+         */
+        ResearchImportTargetModel: {
+            /**
+             * Kind
+             * @default source_inbox
+             * @enum {string}
+             */
+            kind: "source_inbox" | "metadata_only" | "collection";
+            /**
+             * Node Id
+             * @default
+             */
+            node_id: string;
+        };
+        /**
+         * ResearchLibraryNodeModel
+         * @description One Paper Library collection usable as a connector import target.
+         */
+        ResearchLibraryNodeModel: {
+            /** Id */
+            id: string;
+            /** Path */
+            path: string;
+        };
+        /**
+         * ResearchManualImportRequest
+         * @description Import selected fingerprints from a pasted manual list.
+         */
+        ResearchManualImportRequest: {
+            /** Fingerprints */
+            fingerprints?: string[];
+            /**
+             * Privacy Default
+             * @default private
+             */
+            privacy_default: string;
+            /** Provider */
+            provider: string;
+            /** Raw Items */
+            raw_items: string;
+            target?: components["schemas"]["ResearchImportTargetModel"];
+        };
+        /**
+         * ResearchManualPreviewRequest
+         * @description Pasted URLs / CSV / JSON list to preview without a saved connector.
+         */
+        ResearchManualPreviewRequest: {
+            /** Provider */
+            provider: string;
+            /** Raw Items */
+            raw_items: string;
+        };
+        /**
          * ResearchPaperItemModel
          * @description Paper library projection used by the SPA research workbench.
          */
@@ -8473,6 +9510,148 @@ export interface components {
             summary?: components["schemas"]["ResearchSummaryModel"];
         };
         /**
+         * ResearchSourceCreateRequest
+         * @description Manually add one source; deduped by canonical URL.
+         */
+        ResearchSourceCreateRequest: {
+            /** Authors */
+            authors?: string[];
+            /**
+             * Kind
+             * @default web
+             */
+            kind: string;
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
+            /**
+             * Published
+             * @default
+             */
+            published: string;
+            /**
+             * Status
+             * @default inbox
+             */
+            status: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** Tags */
+            tags?: string[];
+            /** Title */
+            title: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /**
+             * Visibility
+             * @default private
+             */
+            visibility: string;
+        };
+        /**
+         * ResearchSourceDetailModel
+         * @description One research source row for the SPA source inbox (no reading/claims).
+         */
+        ResearchSourceDetailModel: {
+            /** Authors */
+            authors?: string[];
+            /**
+             * Captured At
+             * @default
+             */
+            captured_at: string;
+            /**
+             * Etag
+             * @default
+             */
+            etag: string;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @default web
+             */
+            kind: string;
+            /** Library Node Refs */
+            library_node_refs?: string[];
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
+            /**
+             * Origin
+             * @default manual
+             */
+            origin: string;
+            /**
+             * Pdf Available
+             * @default false
+             */
+            pdf_available: boolean;
+            /**
+             * Provider
+             * @default
+             */
+            provider: string;
+            /**
+             * Published
+             * @default
+             */
+            published: string;
+            /**
+             * Status
+             * @default inbox
+             */
+            status: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** Tags */
+            tags?: string[];
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /**
+             * Visibility
+             * @default private
+             */
+            visibility: string;
+        };
+        /**
+         * ResearchSourceErrorResponse
+         * @description 409/412 body: the current source (if any) and the duplicate it hit.
+         */
+        ResearchSourceErrorResponse: {
+            /** Code */
+            code: string;
+            /**
+             * Duplicate Source Id
+             * @default
+             */
+            duplicate_source_id: string;
+            /** Message */
+            message: string;
+            source?: components["schemas"]["ResearchSourceDetailModel"] | null;
+        };
+        /**
          * ResearchSourceItemModel
          * @description One research source row for the SPA overview list.
          */
@@ -8511,6 +9690,101 @@ export interface components {
              * @default
              */
             url: string;
+        };
+        /**
+         * ResearchSourceMutationResponse
+         * @description Answer of the source create/update endpoints.
+         */
+        ResearchSourceMutationResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            source: components["schemas"]["ResearchSourceDetailModel"];
+        };
+        /**
+         * ResearchSourceOptionsModel
+         * @description Allowed enum values for source forms (from core.research_sources).
+         */
+        ResearchSourceOptionsModel: {
+            /** Kinds */
+            kinds?: string[];
+            /** Statuses */
+            statuses?: string[];
+            /** Visibilities */
+            visibilities?: string[];
+        };
+        /**
+         * ResearchSourcePatchRequest
+         * @description Partial source update; omitted (null) fields are left unchanged.
+         */
+        ResearchSourcePatchRequest: {
+            /** Authors */
+            authors?: string[] | null;
+            /** Kind */
+            kind?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Published */
+            published?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Summary */
+            summary?: string | null;
+            /** Tags */
+            tags?: string[] | null;
+            /** Title */
+            title?: string | null;
+            /** Url */
+            url?: string | null;
+            /** Visibility */
+            visibility?: string | null;
+        };
+        /**
+         * ResearchSourceTaskResponse
+         * @description A kanban Queue task created from one source.
+         */
+        ResearchSourceTaskResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Task Id
+             * @default
+             */
+            task_id: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /**
+         * ResearchSourcesResponse
+         * @description Source inbox list. ``total``/counts cover the whole inbox, unfiltered.
+         */
+        ResearchSourcesResponse: {
+            /** Kind Counts */
+            kind_counts?: {
+                [key: string]: number;
+            };
+            options?: components["schemas"]["ResearchSourceOptionsModel"];
+            /** Profile */
+            profile: string;
+            /** Sources */
+            sources?: components["schemas"]["ResearchSourceDetailModel"][];
+            /** Status Counts */
+            status_counts?: {
+                [key: string]: number;
+            };
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
         };
         /**
          * ResearchSummaryModel
@@ -16567,6 +17841,614 @@ export interface operations {
             };
         };
     };
+    get_research_ai_config_api_v1_profiles__name__research_ai_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchAIConfigResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_research_ai_config_api_v1_profiles__name__research_ai_config_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchAIConfigUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchAIConfigResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_research_connectors_api_v1_profiles__name__research_connectors_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchConnectorsResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_research_connector_api_v1_profiles__name__research_connectors_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchConnectorUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchConnectorsResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_manual_connector_api_v1_profiles__name__research_connectors_manual_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchManualImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchConnectorImportResultModel"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_manual_connector_api_v1_profiles__name__research_connectors_manual_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchManualPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchConnectorPreviewModel"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_research_connector_api_v1_profiles__name__research_connectors__connector_id__import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchConnectorImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreateResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_research_connector_api_v1_profiles__name__research_connectors__connector_id__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreateResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_paper_overview_api_v1_profiles__name__research_papers__source_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaperOverviewResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_paper_analysis_job_api_v1_profiles__name__research_papers__source_id__analysis_jobs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaperJobStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreateResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_profile_research_reader_api_v1_profiles__name__research_papers__source_id__reader_get: {
         parameters: {
             query?: never;
@@ -16586,6 +18468,293 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResearchReaderResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_research_sources_api_v1_profiles__name__research_sources_get: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated statuses; empty/all = every status. */
+                status?: string;
+                /** @description Comma-separated kinds; empty/all = every kind. */
+                kind?: string;
+                /** @description Case-insensitive title/url/summary/tag match. */
+                q?: string;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchSourcesResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_research_source_api_v1_profiles__name__research_sources_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchSourceCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchSourceMutationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Duplicate source URL. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchSourceErrorResponse"];
+                };
+            };
+            /** @description Source changed since it was loaded. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchSourceErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_research_source_api_v1_profiles__name__research_sources__source_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchSourcePatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchSourceMutationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Duplicate source URL. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchSourceErrorResponse"];
+                };
+            };
+            /** @description Source changed since it was loaded. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchSourceErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_research_source_task_api_v1_profiles__name__research_sources__source_id__task_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchSourceTaskResponse"];
                 };
             };
             /** @description Invalid profile name. */

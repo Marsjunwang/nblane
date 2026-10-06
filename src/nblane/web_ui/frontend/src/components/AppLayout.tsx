@@ -79,8 +79,13 @@ export function AppLayout() {
   // content library (/content) stays a capped list page.
   // The career resume editor and target pages are full-screen work surfaces too.
   const contentEditor = /\/p\/[^/]+\/(content\/.+|career\/(resume|jobs\/.+))/.test(location.pathname);
+  // The paper Reader and the embedded Paper Library are viewport-height
+  // iframe workspaces: full width, but they keep the AppShell padding.
+  const researchWorkspace = /\/p\/[^/]+\/research\/(library$|papers\/[^/]+\/read$)/.test(location.pathname);
   const fullBleed =
-    contentEditor || FULL_BLEED_SEGMENTS.some((segment) => location.pathname.includes(segment));
+    contentEditor ||
+    researchWorkspace ||
+    FULL_BLEED_SEGMENTS.some((segment) => location.pathname.includes(segment));
   const immersive =
     contentEditor || IMMERSIVE_SEGMENTS.some((segment) => location.pathname.includes(segment));
   const railWidth = railExpanded ? RAIL_WIDTH_EXPANDED : RAIL_WIDTH_COLLAPSED;

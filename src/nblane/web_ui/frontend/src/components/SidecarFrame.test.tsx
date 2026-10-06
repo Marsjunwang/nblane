@@ -68,6 +68,25 @@ describe('SidecarFrame', () => {
     expect(screen.queryByTestId('sidecar-loading')).not.toBeInTheDocument();
   });
 
+  it('lifts the veil after the ready timeout when the app never reports ready', () => {
+    vi.useFakeTimers();
+    renderWithProviders(
+      <SidecarFrame
+        title="Paper Library"
+        url="http://127.0.0.1:8502/paper-library"
+        base="http://127.0.0.1:8502"
+        readyMessageType="nblane.library.ready"
+        readyTimeoutMs={3000}
+      />,
+    );
+    fireEvent.load(screen.getByTestId('sidecar-frame'));
+    expect(screen.getByTestId('sidecar-loading')).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(3100);
+    });
+    expect(screen.queryByTestId('sidecar-loading')).not.toBeInTheDocument();
+  });
+
   it('bootstraps the session before loading content and re-bootstraps on reload', () => {
     vi.useFakeTimers();
     renderWithProviders(

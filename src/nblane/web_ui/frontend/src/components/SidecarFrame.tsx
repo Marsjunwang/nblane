@@ -29,6 +29,16 @@ interface SidecarFrameProps {
   height?: number | string;
   /** Optional postMessage type emitted when the embedded app is ready. */
   readyMessageType?: string;
+  /**
+   * Give up waiting for `readyMessageType` this long after the frame's
+   * onLoad and lift the veil anyway, so an embedded build that never posts
+   * the ready message cannot leave a permanent loading overlay.
+   */
+  readyTimeoutMs?: number;
+  /** Hide the built-in 重新加载 row (the host page renders its own). */
+  hideReloadButton?: boolean;
+  /** Bump to trigger the same full reload as the built-in button. */
+  reloadSignal?: number;
 }
 
 export function SidecarFrame({
@@ -38,13 +48,17 @@ export function SidecarFrame({
   handoffToken = '',
   height = 720,
   readyMessageType = '',
+  readyTimeoutMs = 15000,
+  hideReloadButton = false,
+  reloadSignal = 0,
 }: SidecarFrameProps) {
   const targetName = `sidecar-auth-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const formRef = useRef<HTMLFormElement>(null);
   const [ready, setReady] = useState(!handoffToken);
   const [loaded, setLoaded] = useState(false);
   const [appReady, setAppReady] = useState(!readyMessageType);
-  const [reloadNonce, setReloadNonce] = useState(0);
+  const [localNonce, setLocalNonce] = useState(0);
+  const reloadNonce = localNonce + reloadSignal;
 
   // Some browsers partition or reject the cookie written by the hidden
   // bootstrap iframe. Keep the short-lived handoff on the content request as
@@ -95,6 +109,12 @@ export function SidecarFrame({
     return () => window.removeEventListener('message', onMessage);
   }, [base, readyMessageType, reloadNonce]);
 
+  useEffect(() => {
+    if (!readyMessageType || !loaded || appReady || readyTimeoutMs <= 0) return undefined;
+    const timer = window.setTimeout(() => setAppReady(true), readyTimeoutMs);
+    return () => window.clearTimeout(timer);
+  }, [readyMessageType, loaded, appReady, readyTimeoutMs]);
+
   return (
     <>
       {handoffToken ? (
@@ -116,25 +136,27 @@ export function SidecarFrame({
           </form>
         </>
       ) : null}
-      <Group justify="flex-end" mb={4}>
-        <Button
-          size="compact-xs"
-          variant="default"
-          leftSection={<IconRefresh size={14} />}
-          onClick={() => setReloadNonce((nonce) => nonce + 1)}
-        >
-          重新加载
-        </Button>
-      </Group>
+      {!hideReloadButton && (
+        <Group justify="flex-end" mb={4}>
+          <Button
+            size="compact-xs"
+            variant="default"
+            leftSection={<IconRefresh size={14} />}
+            onClick={() => setLocalNonce((nonce) => nonce + 1)}
+          >
+            重新加载
+          </Button>
+        </Group>
+      )}
       {ready ? (
-        <div style={{ position: 'relative' }}>
+        <div style={{ position: 'relative', height }}>
           <iframe
             key={reloadNonce}
             title={title}
             src={contentUrl}
             data-testid="sidecar-frame"
             onLoad={() => setLoaded(true)}
-            style={{ width: '100%', height, border: 0, borderRadius: 8 }}
+            style={{ display: 'block', width: '100%', height: '100%', border: 0, borderRadius: 8 }}
           />
           {(!loaded || !appReady) && (
             <Center

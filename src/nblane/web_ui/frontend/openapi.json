@@ -5585,6 +5585,672 @@
     "title": "OkResponse",
     "type": "object"
    },
+   "PaperAbstractModel": {
+    "properties": {
+     "origin": {
+      "default": "",
+      "title": "Origin",
+      "type": "string"
+     },
+     "page": {
+      "default": 0,
+      "title": "Page",
+      "type": "integer"
+     },
+     "text": {
+      "default": "",
+      "title": "Text",
+      "type": "string"
+     },
+     "translation": {
+      "default": "",
+      "title": "Translation",
+      "type": "string"
+     },
+     "translation_status": {
+      "default": "missing",
+      "title": "Translation Status",
+      "type": "string"
+     }
+    },
+    "title": "PaperAbstractModel",
+    "type": "object"
+   },
+   "PaperAnalysisItemModel": {
+    "description": "One analysis bullet: optional label (term/metric/section) + refs.",
+    "properties": {
+     "label": {
+      "default": "",
+      "title": "Label",
+      "type": "string"
+     },
+     "refs": {
+      "items": {
+       "$ref": "#/components/schemas/PaperRefModel"
+      },
+      "title": "Refs",
+      "type": "array"
+     },
+     "text": {
+      "title": "Text",
+      "type": "string"
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "title": "PaperAnalysisItemModel",
+    "type": "object"
+   },
+   "PaperAnalysisSectionModel": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/PaperAnalysisItemModel"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "label": {
+      "title": "Label",
+      "type": "string"
+     }
+    },
+    "required": [
+     "key",
+     "label"
+    ],
+    "title": "PaperAnalysisSectionModel",
+    "type": "object"
+   },
+   "PaperCoverageModel": {
+    "description": "What part of the paper an AI result actually cites.",
+    "properties": {
+     "cited_segments": {
+      "default": 0,
+      "title": "Cited Segments",
+      "type": "integer"
+     },
+     "page_count": {
+      "default": 0,
+      "title": "Page Count",
+      "type": "integer"
+     },
+     "pages": {
+      "items": {
+       "type": "integer"
+      },
+      "title": "Pages",
+      "type": "array"
+     },
+     "sections": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Sections",
+      "type": "array"
+     }
+    },
+    "title": "PaperCoverageModel",
+    "type": "object"
+   },
+   "PaperDeepReadModel": {
+    "description": "Deep study (深度研读) report saved under ``codex_deep_read``.",
+    "properties": {
+     "batch_count": {
+      "default": 0,
+      "title": "Batch Count",
+      "type": "integer"
+     },
+     "coverage": {
+      "$ref": "#/components/schemas/PaperCoverageModel"
+     },
+     "fallback": {
+      "default": false,
+      "title": "Fallback",
+      "type": "boolean"
+     },
+     "sections": {
+      "items": {
+       "$ref": "#/components/schemas/PaperAnalysisSectionModel"
+      },
+      "title": "Sections",
+      "type": "array"
+     },
+     "status": {
+      "default": "ready",
+      "title": "Status",
+      "type": "string"
+     },
+     "takeaway": {
+      "default": "",
+      "title": "Takeaway",
+      "type": "string"
+     },
+     "updated": {
+      "default": "",
+      "title": "Updated",
+      "type": "string"
+     },
+     "warnings": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+     }
+    },
+    "title": "PaperDeepReadModel",
+    "type": "object"
+   },
+   "PaperJobRefModel": {
+    "description": "An in-flight analysis job the page can re-attach its SSE stream to.",
+    "properties": {
+     "job_id": {
+      "title": "Job Id",
+      "type": "string"
+     },
+     "kind": {
+      "title": "Kind",
+      "type": "string"
+     },
+     "message": {
+      "default": "",
+      "title": "Message",
+      "type": "string"
+     },
+     "phase": {
+      "default": "",
+      "title": "Phase",
+      "type": "string"
+     },
+     "status": {
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "job_id",
+     "kind",
+     "status"
+    ],
+    "title": "PaperJobRefModel",
+    "type": "object"
+   },
+   "PaperJobStartRequest": {
+    "properties": {
+     "kind": {
+      "description": "paper-quick-analysis | paper-deep-read",
+      "title": "Kind",
+      "type": "string"
+     }
+    },
+    "required": [
+     "kind"
+    ],
+    "title": "PaperJobStartRequest",
+    "type": "object"
+   },
+   "PaperNoteModel": {
+    "properties": {
+     "color": {
+      "default": "",
+      "title": "Color",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "locator": {
+      "default": "",
+      "title": "Locator",
+      "type": "string"
+     },
+     "note": {
+      "default": "",
+      "title": "Note",
+      "type": "string"
+     },
+     "page": {
+      "default": 0,
+      "title": "Page",
+      "type": "integer"
+     },
+     "quote": {
+      "default": "",
+      "title": "Quote",
+      "type": "string"
+     },
+     "updated": {
+      "default": "",
+      "title": "Updated",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "PaperNoteModel",
+    "type": "object"
+   },
+   "PaperNotesSummaryModel": {
+    "properties": {
+     "annotation_count": {
+      "default": 0,
+      "title": "Annotation Count",
+      "type": "integer"
+     },
+     "chunk_count": {
+      "default": 0,
+      "title": "Chunk Count",
+      "type": "integer"
+     },
+     "recent": {
+      "items": {
+       "$ref": "#/components/schemas/PaperNoteModel"
+      },
+      "title": "Recent",
+      "type": "array"
+     }
+    },
+    "title": "PaperNotesSummaryModel",
+    "type": "object"
+   },
+   "PaperOverviewResponse": {
+    "properties": {
+     "abstract": {
+      "$ref": "#/components/schemas/PaperAbstractModel"
+     },
+     "active_jobs": {
+      "items": {
+       "$ref": "#/components/schemas/PaperJobRefModel"
+      },
+      "title": "Active Jobs",
+      "type": "array"
+     },
+     "deep_read": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/PaperDeepReadModel"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "notes": {
+      "$ref": "#/components/schemas/PaperNotesSummaryModel"
+     },
+     "pdf": {
+      "$ref": "#/components/schemas/PaperPdfStatusModel"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "progress": {
+      "$ref": "#/components/schemas/PaperReadingProgressModel"
+     },
+     "quick_analysis": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/PaperQuickAnalysisModel"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "reader_available": {
+      "default": false,
+      "title": "Reader Available",
+      "type": "boolean"
+     },
+     "reader_unavailable_reason": {
+      "default": "",
+      "title": "Reader Unavailable Reason",
+      "type": "string"
+     },
+     "source": {
+      "$ref": "#/components/schemas/PaperSourceMetaModel"
+     },
+     "translation": {
+      "$ref": "#/components/schemas/PaperTranslationProgressModel"
+     }
+    },
+    "required": [
+     "profile",
+     "source"
+    ],
+    "title": "PaperOverviewResponse",
+    "type": "object"
+   },
+   "PaperPdfStatusModel": {
+    "properties": {
+     "available": {
+      "default": false,
+      "title": "Available",
+      "type": "boolean"
+     },
+     "download_error": {
+      "default": "",
+      "title": "Download Error",
+      "type": "string"
+     },
+     "download_status": {
+      "default": "",
+      "title": "Download Status",
+      "type": "string"
+     },
+     "extracted_at": {
+      "default": "",
+      "title": "Extracted At",
+      "type": "string"
+     },
+     "extraction_status": {
+      "default": "",
+      "title": "Extraction Status",
+      "type": "string"
+     },
+     "page_count": {
+      "default": 0,
+      "title": "Page Count",
+      "type": "integer"
+     },
+     "segment_count": {
+      "default": 0,
+      "title": "Segment Count",
+      "type": "integer"
+     },
+     "structure_backend": {
+      "default": "",
+      "title": "Structure Backend",
+      "type": "string"
+     },
+     "structure_unit_count": {
+      "default": 0,
+      "title": "Structure Unit Count",
+      "type": "integer"
+     }
+    },
+    "title": "PaperPdfStatusModel",
+    "type": "object"
+   },
+   "PaperQuickAnalysisModel": {
+    "description": "Quick analysis (快速分析): judge what the paper did / whether to read on.",
+    "properties": {
+     "coverage": {
+      "$ref": "#/components/schemas/PaperCoverageModel"
+     },
+     "experiments": {
+      "items": {
+       "$ref": "#/components/schemas/PaperAnalysisItemModel"
+      },
+      "title": "Experiments",
+      "type": "array"
+     },
+     "fallback": {
+      "default": false,
+      "title": "Fallback",
+      "type": "boolean"
+     },
+     "key_points": {
+      "items": {
+       "$ref": "#/components/schemas/PaperAnalysisItemModel"
+      },
+      "title": "Key Points",
+      "type": "array"
+     },
+     "limitations": {
+      "items": {
+       "$ref": "#/components/schemas/PaperAnalysisItemModel"
+      },
+      "title": "Limitations",
+      "type": "array"
+     },
+     "method": {
+      "items": {
+       "$ref": "#/components/schemas/PaperAnalysisItemModel"
+      },
+      "title": "Method",
+      "type": "array"
+     },
+     "open_questions": {
+      "items": {
+       "$ref": "#/components/schemas/PaperAnalysisItemModel"
+      },
+      "title": "Open Questions",
+      "type": "array"
+     },
+     "project_relevance": {
+      "items": {
+       "$ref": "#/components/schemas/PaperAnalysisItemModel"
+      },
+      "title": "Project Relevance",
+      "type": "array"
+     },
+     "reading_plan": {
+      "items": {
+       "$ref": "#/components/schemas/PaperAnalysisItemModel"
+      },
+      "title": "Reading Plan",
+      "type": "array"
+     },
+     "score_rationale": {
+      "items": {
+       "$ref": "#/components/schemas/PaperAnalysisItemModel"
+      },
+      "title": "Score Rationale",
+      "type": "array"
+     },
+     "scores": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "title": "Scores",
+      "type": "object"
+     },
+     "scores_evaluated": {
+      "default": false,
+      "title": "Scores Evaluated",
+      "type": "boolean"
+     },
+     "status": {
+      "default": "ready",
+      "title": "Status",
+      "type": "string"
+     },
+     "tldr": {
+      "default": "",
+      "title": "Tldr",
+      "type": "string"
+     },
+     "updated": {
+      "default": "",
+      "title": "Updated",
+      "type": "string"
+     },
+     "usefulness": {
+      "items": {
+       "$ref": "#/components/schemas/PaperAnalysisItemModel"
+      },
+      "title": "Usefulness",
+      "type": "array"
+     },
+     "warnings": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+     }
+    },
+    "title": "PaperQuickAnalysisModel",
+    "type": "object"
+   },
+   "PaperReadingProgressModel": {
+    "properties": {
+     "last_page": {
+      "default": 0,
+      "title": "Last Page",
+      "type": "integer"
+     },
+     "last_read_at": {
+      "default": "",
+      "title": "Last Read At",
+      "type": "string"
+     },
+     "mode": {
+      "default": "",
+      "title": "Mode",
+      "type": "string"
+     },
+     "page_count": {
+      "default": 0,
+      "title": "Page Count",
+      "type": "integer"
+     }
+    },
+    "title": "PaperReadingProgressModel",
+    "type": "object"
+   },
+   "PaperRefModel": {
+    "description": "One cited ref resolved to a PDF page (``page`` 0 = unresolved).",
+    "properties": {
+     "page": {
+      "default": 0,
+      "title": "Page",
+      "type": "integer"
+     },
+     "ref": {
+      "title": "Ref",
+      "type": "string"
+     }
+    },
+    "required": [
+     "ref"
+    ],
+    "title": "PaperRefModel",
+    "type": "object"
+   },
+   "PaperSourceMetaModel": {
+    "properties": {
+     "arxiv_id": {
+      "default": "",
+      "title": "Arxiv Id",
+      "type": "string"
+     },
+     "authors": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Authors",
+      "type": "array"
+     },
+     "captured_at": {
+      "default": "",
+      "title": "Captured At",
+      "type": "string"
+     },
+     "doi": {
+      "default": "",
+      "title": "Doi",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "pdf_url": {
+      "default": "",
+      "title": "Pdf Url",
+      "type": "string"
+     },
+     "published": {
+      "default": "",
+      "title": "Published",
+      "type": "string"
+     },
+     "status": {
+      "default": "inbox",
+      "title": "Status",
+      "type": "string"
+     },
+     "tags": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     },
+     "url": {
+      "default": "",
+      "title": "Url",
+      "type": "string"
+     },
+     "venue": {
+      "default": "",
+      "title": "Venue",
+      "type": "string"
+     },
+     "year": {
+      "default": "",
+      "title": "Year",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "PaperSourceMetaModel",
+    "type": "object"
+   },
+   "PaperTranslationProgressModel": {
+    "properties": {
+     "failed": {
+      "default": 0,
+      "title": "Failed",
+      "type": "integer"
+     },
+     "missing": {
+      "default": 0,
+      "title": "Missing",
+      "type": "integer"
+     },
+     "stale": {
+      "default": 0,
+      "title": "Stale",
+      "type": "integer"
+     },
+     "status": {
+      "default": "missing",
+      "title": "Status",
+      "type": "string"
+     },
+     "total": {
+      "default": 0,
+      "title": "Total",
+      "type": "integer"
+     },
+     "translated": {
+      "default": 0,
+      "title": "Translated",
+      "type": "integer"
+     }
+    },
+    "title": "PaperTranslationProgressModel",
+    "type": "object"
+   },
    "PlanTemplateHabitModel": {
     "description": "The habit a plan template suggests (created when missing).",
     "properties": {
@@ -8061,6 +8727,514 @@
     "title": "PublicSiteWorksUpdateRequest",
     "type": "object"
    },
+   "ResearchAIActionModel": {
+    "description": "One research AI action's effective routing preference.",
+    "properties": {
+     "action": {
+      "title": "Action",
+      "type": "string"
+     },
+     "backend": {
+      "default": "",
+      "title": "Backend",
+      "type": "string"
+     },
+     "codex_model": {
+      "default": "",
+      "title": "Codex Model",
+      "type": "string"
+     },
+     "default_backend": {
+      "default": "llm",
+      "title": "Default Backend",
+      "type": "string"
+     },
+     "llm_model": {
+      "default": "",
+      "title": "Llm Model",
+      "type": "string"
+     }
+    },
+    "required": [
+     "action"
+    ],
+    "title": "ResearchAIActionModel",
+    "type": "object"
+   },
+   "ResearchAIActionUpdate": {
+    "description": "Backend/model choice for one action; empty strings mean app default.",
+    "properties": {
+     "backend": {
+      "default": "",
+      "enum": [
+       "",
+       "llm",
+       "codex"
+      ],
+      "title": "Backend",
+      "type": "string"
+     },
+     "codex_model": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Codex Model",
+      "type": "string"
+     },
+     "llm_model": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Llm Model",
+      "type": "string"
+     }
+    },
+    "title": "ResearchAIActionUpdate",
+    "type": "object"
+   },
+   "ResearchAIConfigResponse": {
+    "description": "Research-scoped slice of ``web-preferences.yaml`` ``ai.actions``.",
+    "properties": {
+     "actions": {
+      "items": {
+       "$ref": "#/components/schemas/ResearchAIActionModel"
+      },
+      "title": "Actions",
+      "type": "array"
+     },
+     "codex_default_model": {
+      "default": "",
+      "title": "Codex Default Model",
+      "type": "string"
+     },
+     "codex_model_suggestions": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Codex Model Suggestions",
+      "type": "array"
+     },
+     "llm_default_model": {
+      "default": "",
+      "title": "Llm Default Model",
+      "type": "string"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "ResearchAIConfigResponse",
+    "type": "object"
+   },
+   "ResearchAIConfigUpdateRequest": {
+    "description": "Only research actions are accepted; unknown keys answer 422.",
+    "properties": {
+     "actions": {
+      "additionalProperties": {
+       "$ref": "#/components/schemas/ResearchAIActionUpdate"
+      },
+      "title": "Actions",
+      "type": "object"
+     }
+    },
+    "title": "ResearchAIConfigUpdateRequest",
+    "type": "object"
+   },
+   "ResearchConnectorCandidateModel": {
+    "description": "One discovered candidate with its duplicate verdict.",
+    "properties": {
+     "canonical_url": {
+      "default": "",
+      "title": "Canonical Url",
+      "type": "string"
+     },
+     "duplicate": {
+      "additionalProperties": true,
+      "title": "Duplicate",
+      "type": "object"
+     },
+     "fingerprint": {
+      "title": "Fingerprint",
+      "type": "string"
+     },
+     "item": {
+      "additionalProperties": true,
+      "title": "Item",
+      "type": "object"
+     },
+     "selected": {
+      "default": false,
+      "title": "Selected",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "fingerprint"
+    ],
+    "title": "ResearchConnectorCandidateModel",
+    "type": "object"
+   },
+   "ResearchConnectorImportRequest": {
+    "description": "Import selected candidates of a saved connector (async job).\n\nAn empty ``fingerprints`` list runs the whole connector (every\nnon-duplicate discovery is imported), like the Streamlit \"run now\".",
+    "properties": {
+     "fingerprints": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Fingerprints",
+      "type": "array"
+     },
+     "target": {
+      "$ref": "#/components/schemas/ResearchImportTargetModel"
+     }
+    },
+    "title": "ResearchConnectorImportRequest",
+    "type": "object"
+   },
+   "ResearchConnectorImportResultModel": {
+    "description": "Outcome of importing selected candidates (or a full connector run).",
+    "properties": {
+     "connector_id": {
+      "default": "",
+      "title": "Connector Id",
+      "type": "string"
+     },
+     "discovered": {
+      "default": 0,
+      "title": "Discovered",
+      "type": "integer"
+     },
+     "error": {
+      "default": "",
+      "title": "Error",
+      "type": "string"
+     },
+     "imported": {
+      "default": 0,
+      "title": "Imported",
+      "type": "integer"
+     },
+     "imported_source_ids": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Imported Source Ids",
+      "type": "array"
+     },
+     "provider": {
+      "default": "",
+      "title": "Provider",
+      "type": "string"
+     },
+     "skipped": {
+      "default": 0,
+      "title": "Skipped",
+      "type": "integer"
+     },
+     "warnings": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+     }
+    },
+    "title": "ResearchConnectorImportResultModel",
+    "type": "object"
+   },
+   "ResearchConnectorModel": {
+    "description": "One saved connector config (secret-looking keys are always stripped).",
+    "properties": {
+     "enabled": {
+      "default": true,
+      "title": "Enabled",
+      "type": "boolean"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "last_result": {
+      "additionalProperties": true,
+      "title": "Last Result",
+      "type": "object"
+     },
+     "last_run": {
+      "default": "",
+      "title": "Last Run",
+      "type": "string"
+     },
+     "options": {
+      "additionalProperties": true,
+      "title": "Options",
+      "type": "object"
+     },
+     "privacy_default": {
+      "default": "private",
+      "title": "Privacy Default",
+      "type": "string"
+     },
+     "provider": {
+      "title": "Provider",
+      "type": "string"
+     },
+     "query": {
+      "default": "",
+      "title": "Query",
+      "type": "string"
+     },
+     "rate_limit": {
+      "additionalProperties": true,
+      "title": "Rate Limit",
+      "type": "object"
+     },
+     "status": {
+      "default": "idle",
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "provider"
+    ],
+    "title": "ResearchConnectorModel",
+    "type": "object"
+   },
+   "ResearchConnectorPreviewModel": {
+    "description": "Dry-run discovery result (no source facts written).",
+    "properties": {
+     "candidates": {
+      "items": {
+       "$ref": "#/components/schemas/ResearchConnectorCandidateModel"
+      },
+      "title": "Candidates",
+      "type": "array"
+     },
+     "connector_id": {
+      "default": "",
+      "title": "Connector Id",
+      "type": "string"
+     },
+     "discovered": {
+      "default": 0,
+      "title": "Discovered",
+      "type": "integer"
+     },
+     "importable": {
+      "default": 0,
+      "title": "Importable",
+      "type": "integer"
+     },
+     "provider": {
+      "default": "",
+      "title": "Provider",
+      "type": "string"
+     },
+     "query": {
+      "default": "",
+      "title": "Query",
+      "type": "string"
+     },
+     "skipped": {
+      "default": 0,
+      "title": "Skipped",
+      "type": "integer"
+     },
+     "warnings": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+     }
+    },
+    "title": "ResearchConnectorPreviewModel",
+    "type": "object"
+   },
+   "ResearchConnectorUpsertRequest": {
+    "description": "Create/update one connector. Never carries tokens/cookies/API keys.",
+    "properties": {
+     "connector_id": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Connector Id",
+      "type": "string"
+     },
+     "enabled": {
+      "default": true,
+      "title": "Enabled",
+      "type": "boolean"
+     },
+     "options": {
+      "additionalProperties": true,
+      "title": "Options",
+      "type": "object"
+     },
+     "privacy_default": {
+      "default": "private",
+      "title": "Privacy Default",
+      "type": "string"
+     },
+     "provider": {
+      "title": "Provider",
+      "type": "string"
+     },
+     "query": {
+      "default": "",
+      "maxLength": 1000,
+      "title": "Query",
+      "type": "string"
+     }
+    },
+    "required": [
+     "provider"
+    ],
+    "title": "ResearchConnectorUpsertRequest",
+    "type": "object"
+   },
+   "ResearchConnectorsResponse": {
+    "description": "Connector configs plus provider metadata and import targets.",
+    "properties": {
+     "auto_providers": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Auto Providers",
+      "type": "array"
+     },
+     "connectors": {
+      "items": {
+       "$ref": "#/components/schemas/ResearchConnectorModel"
+      },
+      "title": "Connectors",
+      "type": "array"
+     },
+     "library_nodes": {
+      "items": {
+       "$ref": "#/components/schemas/ResearchLibraryNodeModel"
+      },
+      "title": "Library Nodes",
+      "type": "array"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "providers": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Providers",
+      "type": "array"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "ResearchConnectorsResponse",
+    "type": "object"
+   },
+   "ResearchImportTargetModel": {
+    "description": "Where imported candidates land: inbox, metadata only, or a collection.",
+    "properties": {
+     "kind": {
+      "default": "source_inbox",
+      "enum": [
+       "source_inbox",
+       "metadata_only",
+       "collection"
+      ],
+      "title": "Kind",
+      "type": "string"
+     },
+     "node_id": {
+      "default": "",
+      "title": "Node Id",
+      "type": "string"
+     }
+    },
+    "title": "ResearchImportTargetModel",
+    "type": "object"
+   },
+   "ResearchLibraryNodeModel": {
+    "description": "One Paper Library collection usable as a connector import target.",
+    "properties": {
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "path": {
+      "title": "Path",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "path"
+    ],
+    "title": "ResearchLibraryNodeModel",
+    "type": "object"
+   },
+   "ResearchManualImportRequest": {
+    "description": "Import selected fingerprints from a pasted manual list.",
+    "properties": {
+     "fingerprints": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Fingerprints",
+      "type": "array"
+     },
+     "privacy_default": {
+      "default": "private",
+      "title": "Privacy Default",
+      "type": "string"
+     },
+     "provider": {
+      "title": "Provider",
+      "type": "string"
+     },
+     "raw_items": {
+      "maxLength": 200000,
+      "minLength": 1,
+      "title": "Raw Items",
+      "type": "string"
+     },
+     "target": {
+      "$ref": "#/components/schemas/ResearchImportTargetModel"
+     }
+    },
+    "required": [
+     "provider",
+     "raw_items"
+    ],
+    "title": "ResearchManualImportRequest",
+    "type": "object"
+   },
+   "ResearchManualPreviewRequest": {
+    "description": "Pasted URLs / CSV / JSON list to preview without a saved connector.",
+    "properties": {
+     "provider": {
+      "title": "Provider",
+      "type": "string"
+     },
+     "raw_items": {
+      "maxLength": 200000,
+      "minLength": 1,
+      "title": "Raw Items",
+      "type": "string"
+     }
+    },
+    "required": [
+     "provider",
+     "raw_items"
+    ],
+    "title": "ResearchManualPreviewRequest",
+    "type": "object"
+   },
    "ResearchPaperItemModel": {
     "description": "Paper library projection used by the SPA research workbench.",
     "properties": {
@@ -8235,6 +9409,209 @@
     "title": "ResearchResponse",
     "type": "object"
    },
+   "ResearchSourceCreateRequest": {
+    "description": "Manually add one source; deduped by canonical URL.",
+    "properties": {
+     "authors": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Authors",
+      "type": "array"
+     },
+     "kind": {
+      "default": "web",
+      "title": "Kind",
+      "type": "string"
+     },
+     "notes": {
+      "default": "",
+      "maxLength": 20000,
+      "title": "Notes",
+      "type": "string"
+     },
+     "published": {
+      "default": "",
+      "maxLength": 64,
+      "title": "Published",
+      "type": "string"
+     },
+     "status": {
+      "default": "inbox",
+      "title": "Status",
+      "type": "string"
+     },
+     "summary": {
+      "default": "",
+      "maxLength": 20000,
+      "title": "Summary",
+      "type": "string"
+     },
+     "tags": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+     },
+     "title": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+     },
+     "url": {
+      "default": "",
+      "maxLength": 2000,
+      "title": "Url",
+      "type": "string"
+     },
+     "visibility": {
+      "default": "private",
+      "title": "Visibility",
+      "type": "string"
+     }
+    },
+    "required": [
+     "title"
+    ],
+    "title": "ResearchSourceCreateRequest",
+    "type": "object"
+   },
+   "ResearchSourceDetailModel": {
+    "description": "One research source row for the SPA source inbox (no reading/claims).",
+    "properties": {
+     "authors": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Authors",
+      "type": "array"
+     },
+     "captured_at": {
+      "default": "",
+      "title": "Captured At",
+      "type": "string"
+     },
+     "etag": {
+      "default": "",
+      "title": "Etag",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "kind": {
+      "default": "web",
+      "title": "Kind",
+      "type": "string"
+     },
+     "library_node_refs": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Library Node Refs",
+      "type": "array"
+     },
+     "notes": {
+      "default": "",
+      "title": "Notes",
+      "type": "string"
+     },
+     "origin": {
+      "default": "manual",
+      "title": "Origin",
+      "type": "string"
+     },
+     "pdf_available": {
+      "default": false,
+      "title": "Pdf Available",
+      "type": "boolean"
+     },
+     "provider": {
+      "default": "",
+      "title": "Provider",
+      "type": "string"
+     },
+     "published": {
+      "default": "",
+      "title": "Published",
+      "type": "string"
+     },
+     "status": {
+      "default": "inbox",
+      "title": "Status",
+      "type": "string"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "tags": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     },
+     "url": {
+      "default": "",
+      "title": "Url",
+      "type": "string"
+     },
+     "visibility": {
+      "default": "private",
+      "title": "Visibility",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "ResearchSourceDetailModel",
+    "type": "object"
+   },
+   "ResearchSourceErrorResponse": {
+    "description": "409/412 body: the current source (if any) and the duplicate it hit.",
+    "properties": {
+     "code": {
+      "title": "Code",
+      "type": "string"
+     },
+     "duplicate_source_id": {
+      "default": "",
+      "title": "Duplicate Source Id",
+      "type": "string"
+     },
+     "message": {
+      "title": "Message",
+      "type": "string"
+     },
+     "source": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/ResearchSourceDetailModel"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "code",
+     "message"
+    ],
+    "title": "ResearchSourceErrorResponse",
+    "type": "object"
+   },
    "ResearchSourceItemModel": {
     "description": "One research source row for the SPA overview list.",
     "properties": {
@@ -8284,6 +9661,245 @@
      "id"
     ],
     "title": "ResearchSourceItemModel",
+    "type": "object"
+   },
+   "ResearchSourceMutationResponse": {
+    "description": "Answer of the source create/update endpoints.",
+    "properties": {
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "source": {
+      "$ref": "#/components/schemas/ResearchSourceDetailModel"
+     }
+    },
+    "required": [
+     "source"
+    ],
+    "title": "ResearchSourceMutationResponse",
+    "type": "object"
+   },
+   "ResearchSourceOptionsModel": {
+    "description": "Allowed enum values for source forms (from core.research_sources).",
+    "properties": {
+     "kinds": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Kinds",
+      "type": "array"
+     },
+     "statuses": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Statuses",
+      "type": "array"
+     },
+     "visibilities": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Visibilities",
+      "type": "array"
+     }
+    },
+    "title": "ResearchSourceOptionsModel",
+    "type": "object"
+   },
+   "ResearchSourcePatchRequest": {
+    "description": "Partial source update; omitted (null) fields are left unchanged.",
+    "properties": {
+     "authors": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Authors"
+     },
+     "kind": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kind"
+     },
+     "notes": {
+      "anyOf": [
+       {
+        "maxLength": 20000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notes"
+     },
+     "published": {
+      "anyOf": [
+       {
+        "maxLength": 64,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Published"
+     },
+     "status": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Status"
+     },
+     "summary": {
+      "anyOf": [
+       {
+        "maxLength": 20000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Summary"
+     },
+     "tags": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tags"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "maxLength": 500,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     },
+     "url": {
+      "anyOf": [
+       {
+        "maxLength": 2000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Url"
+     },
+     "visibility": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Visibility"
+     }
+    },
+    "title": "ResearchSourcePatchRequest",
+    "type": "object"
+   },
+   "ResearchSourceTaskResponse": {
+    "description": "A kanban Queue task created from one source.",
+    "properties": {
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "task_id": {
+      "default": "",
+      "title": "Task Id",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "title": "ResearchSourceTaskResponse",
+    "type": "object"
+   },
+   "ResearchSourcesResponse": {
+    "description": "Source inbox list. ``total``/counts cover the whole inbox, unfiltered.",
+    "properties": {
+     "kind_counts": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "title": "Kind Counts",
+      "type": "object"
+     },
+     "options": {
+      "$ref": "#/components/schemas/ResearchSourceOptionsModel"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "sources": {
+      "items": {
+       "$ref": "#/components/schemas/ResearchSourceDetailModel"
+      },
+      "title": "Sources",
+      "type": "array"
+     },
+     "status_counts": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "title": "Status Counts",
+      "type": "object"
+     },
+     "total": {
+      "default": 0,
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "ResearchSourcesResponse",
     "type": "object"
    },
    "ResearchSummaryModel": {
@@ -19767,6 +21383,798 @@
     "summary": "Get Profile Research"
    }
   },
+  "/api/v1/profiles/{name}/research/ai-config": {
+   "get": {
+    "description": "Per-action backend/model choice for research AI actions.",
+    "operationId": "get_research_ai_config_api_v1_profiles__name__research_ai_config_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchAIConfigResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Research Ai Config"
+   },
+   "put": {
+    "description": "Write ``ai.actions.<research action>`` only; other actions are untouched.",
+    "operationId": "put_research_ai_config_api_v1_profiles__name__research_ai_config_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ResearchAIConfigUpdateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchAIConfigResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Put Research Ai Config"
+   }
+  },
+  "/api/v1/profiles/{name}/research/connectors": {
+   "get": {
+    "description": "Saved connector configs, providers, and collection import targets.",
+    "operationId": "get_research_connectors_api_v1_profiles__name__research_connectors_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchConnectorsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Research Connectors"
+   },
+   "put": {
+    "description": "Create or update one connector config (secrets are rejected, 422).",
+    "operationId": "upsert_research_connector_api_v1_profiles__name__research_connectors_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ResearchConnectorUpsertRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchConnectorsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Upsert Research Connector"
+   }
+  },
+  "/api/v1/profiles/{name}/research/connectors/manual/import": {
+   "post": {
+    "description": "Import selected fingerprints of a pasted list into the source inbox.",
+    "operationId": "import_manual_connector_api_v1_profiles__name__research_connectors_manual_import_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ResearchManualImportRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchConnectorImportResultModel"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Import Manual Connector"
+   }
+  },
+  "/api/v1/profiles/{name}/research/connectors/manual/preview": {
+   "post": {
+    "description": "Parse pasted URLs / CSV / JSON locally and mark duplicates (no writes).",
+    "operationId": "preview_manual_connector_api_v1_profiles__name__research_connectors_manual_preview_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ResearchManualPreviewRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchConnectorPreviewModel"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Preview Manual Connector"
+   }
+  },
+  "/api/v1/profiles/{name}/research/connectors/{connector_id}/import": {
+   "post": {
+    "description": "Start an import job; result is a ResearchConnectorImportResultModel.\n\nSelected fingerprints are re-discovered and imported (duplicates\nskipped); an empty selection runs the whole connector.",
+    "operationId": "import_research_connector_api_v1_profiles__name__research_connectors__connector_id__import_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "connector_id",
+      "required": true,
+      "schema": {
+       "title": "Connector Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ResearchConnectorImportRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/JobCreateResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Import Research Connector"
+   }
+  },
+  "/api/v1/profiles/{name}/research/connectors/{connector_id}/preview": {
+   "post": {
+    "description": "Start a dry-run discovery job; result is a ResearchConnectorPreviewModel.",
+    "operationId": "preview_research_connector_api_v1_profiles__name__research_connectors__connector_id__preview_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "connector_id",
+      "required": true,
+      "schema": {
+       "title": "Connector Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/JobCreateResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Preview Research Connector"
+   }
+  },
+  "/api/v1/profiles/{name}/research/papers/{source_id}": {
+   "get": {
+    "description": "Single-paper overview (paper_reading.md §1.1.2). Read-only.",
+    "operationId": "get_paper_overview_api_v1_profiles__name__research_papers__source_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "source_id",
+      "required": true,
+      "schema": {
+       "title": "Source Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PaperOverviewResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Paper Overview"
+   }
+  },
+  "/api/v1/profiles/{name}/research/papers/{source_id}/analysis-jobs": {
+   "post": {
+    "description": "Start quick analysis / deep study for one paper (202 + job handle).\n\nA job of the same kind already running for this paper is returned\ninstead of starting a second run. Subscribe to\n``GET .../jobs/{job_id}/stream`` for progress.",
+    "operationId": "start_paper_analysis_job_api_v1_profiles__name__research_papers__source_id__analysis_jobs_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "source_id",
+      "required": true,
+      "schema": {
+       "title": "Source Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PaperJobStartRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/JobCreateResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Start Paper Analysis Job"
+   }
+  },
   "/api/v1/profiles/{name}/research/papers/{source_id}/reader": {
    "get": {
     "description": "Mint a source-scoped Reader URL for the SPA deep-link page.",
@@ -19844,6 +22252,415 @@
      }
     },
     "summary": "Get Profile Research Reader"
+   }
+  },
+  "/api/v1/profiles/{name}/research/sources": {
+   "get": {
+    "description": "Research source inbox (all kinds), newest capture first.",
+    "operationId": "list_research_sources_api_v1_profiles__name__research_sources_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Comma-separated statuses; empty/all = every status.",
+      "in": "query",
+      "name": "status",
+      "required": false,
+      "schema": {
+       "default": "",
+       "description": "Comma-separated statuses; empty/all = every status.",
+       "title": "Status",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Comma-separated kinds; empty/all = every kind.",
+      "in": "query",
+      "name": "kind",
+      "required": false,
+      "schema": {
+       "default": "",
+       "description": "Comma-separated kinds; empty/all = every kind.",
+       "title": "Kind",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Case-insensitive title/url/summary/tag match.",
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "default": "",
+       "description": "Case-insensitive title/url/summary/tag match.",
+       "maxLength": 200,
+       "title": "Q",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchSourcesResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "List Research Sources"
+   },
+   "post": {
+    "description": "Manually add one source (origin ``manual``); 409 on a duplicate URL.",
+    "operationId": "create_research_source_api_v1_profiles__name__research_sources_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ResearchSourceCreateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchSourceMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchSourceErrorResponse"
+        }
+       }
+      },
+      "description": "Duplicate source URL."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchSourceErrorResponse"
+        }
+       }
+      },
+      "description": "Source changed since it was loaded."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Create Research Source"
+   }
+  },
+  "/api/v1/profiles/{name}/research/sources/{source_id}": {
+   "patch": {
+    "description": "Partial update (status / tags / title / visibility / summary / ...).\n\n``If-Match`` carries the source's ``etag``; mismatch answers 412 with\nthe current source. Changing ``url`` onto another source's URL is 409.",
+    "operationId": "patch_research_source_api_v1_profiles__name__research_sources__source_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "source_id",
+      "required": true,
+      "schema": {
+       "title": "Source Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ResearchSourcePatchRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchSourceMutationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchSourceErrorResponse"
+        }
+       }
+      },
+      "description": "Duplicate source URL."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchSourceErrorResponse"
+        }
+       }
+      },
+      "description": "Source changed since it was loaded."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Patch Research Source"
+   }
+  },
+  "/api/v1/profiles/{name}/research/sources/{source_id}/task": {
+   "post": {
+    "description": "Create a kanban Queue task linked to one source (\"Read: <title>\").",
+    "operationId": "create_research_source_task_api_v1_profiles__name__research_sources__source_id__task_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "source_id",
+      "required": true,
+      "schema": {
+       "title": "Source Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchSourceTaskResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Create Research Source Task"
    }
   },
   "/api/v1/profiles/{name}/settings": {

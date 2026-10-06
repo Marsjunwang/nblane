@@ -28,7 +28,7 @@ nblane 当前功能可用，但产品结构还没有完全收束。主要问题�
 | Kanban | 已实现 | Markdown parser/render、拖拽、子任务、归档、Done -> evidence |
 | Profile Ingest | 已实现 | resume/kanban Done -> LLM JSON patch -> validate/sync |
 | Web UI | 已实现 | Streamlit 多页应用 |
-| Research Workspace | 初版已实现 | source/chunk/claim/citation/synthesis + connectors |
+| Research Workspace | 已实现（SPA） | 研究台、论文库（内嵌）、论文概览、Reader、研究来源/连接器均在 SPA；Claim/Evidence 暂不进 SPA，Streamlit Research 待下线 |
 | Output Studio / Public Build | 已实现 | profile/blog/resume/project output 生产与静态构建拆分 |
 | Public Site 旧页面 | 已删除 | 兼容跳转页已移除，由 Output Studio / Public Build 承接 |
 | Blog Editor | 已实现 | BlockNote、sidecar、AI patch、visual、Reviewer |

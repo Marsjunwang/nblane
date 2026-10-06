@@ -2841,3 +2841,245 @@ class ResearchReaderResponse(BaseModel):
     source_id: str
     reader_url: str
     token: str = ""
+
+
+# --- Research source intake (SPA research desk: inbox / connectors / AI) -----
+
+
+class ResearchSourceDetailModel(BaseModel):
+    """One research source row for the SPA source inbox (no reading/claims)."""
+
+    id: str
+    title: str = ""
+    kind: str = "web"
+    status: str = "inbox"
+    url: str = ""
+    captured_at: str = ""
+    authors: list[str] = Field(default_factory=list)
+    published: str = ""
+    tags: list[str] = Field(default_factory=list)
+    summary: str = ""
+    notes: str = ""
+    visibility: str = "private"
+    origin: str = "manual"
+    library_node_refs: list[str] = Field(default_factory=list)
+    provider: str = ""
+    pdf_available: bool = False
+    etag: str = ""
+
+
+class ResearchSourceOptionsModel(BaseModel):
+    """Allowed enum values for source forms (from core.research_sources)."""
+
+    kinds: list[str] = Field(default_factory=list)
+    statuses: list[str] = Field(default_factory=list)
+    visibilities: list[str] = Field(default_factory=list)
+
+
+class ResearchSourcesResponse(BaseModel):
+    """Source inbox list. ``total``/counts cover the whole inbox, unfiltered."""
+
+    profile: str
+    total: int = 0
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    kind_counts: dict[str, int] = Field(default_factory=dict)
+    sources: list[ResearchSourceDetailModel] = Field(default_factory=list)
+    options: ResearchSourceOptionsModel = Field(default_factory=ResearchSourceOptionsModel)
+
+
+class ResearchSourceCreateRequest(BaseModel):
+    """Manually add one source; deduped by canonical URL."""
+
+    title: str = Field(min_length=1, max_length=500)
+    url: str = Field(default="", max_length=2000)
+    kind: str = "web"
+    status: str = "inbox"
+    visibility: str = "private"
+    tags: list[str] = Field(default_factory=list)
+    authors: list[str] = Field(default_factory=list)
+    published: str = Field(default="", max_length=64)
+    summary: str = Field(default="", max_length=20_000)
+    notes: str = Field(default="", max_length=20_000)
+
+
+class ResearchSourcePatchRequest(BaseModel):
+    """Partial source update; omitted (null) fields are left unchanged."""
+
+    title: str | None = Field(default=None, max_length=500)
+    url: str | None = Field(default=None, max_length=2000)
+    kind: str | None = None
+    status: str | None = None
+    visibility: str | None = None
+    tags: list[str] | None = None
+    authors: list[str] | None = None
+    published: str | None = Field(default=None, max_length=64)
+    summary: str | None = Field(default=None, max_length=20_000)
+    notes: str | None = Field(default=None, max_length=20_000)
+
+
+class ResearchSourceMutationResponse(BaseModel):
+    """Answer of the source create/update endpoints."""
+
+    ok: bool = True
+    source: ResearchSourceDetailModel
+
+
+class ResearchSourceErrorResponse(ErrorResponse):
+    """409/412 body: the current source (if any) and the duplicate it hit."""
+
+    source: ResearchSourceDetailModel | None = None
+    duplicate_source_id: str = ""
+
+
+class ResearchSourceTaskResponse(BaseModel):
+    """A kanban Queue task created from one source."""
+
+    ok: bool = True
+    task_id: str = ""
+    title: str = ""
+
+
+class ResearchConnectorModel(BaseModel):
+    """One saved connector config (secret-looking keys are always stripped)."""
+
+    id: str
+    provider: str
+    enabled: bool = True
+    query: str = ""
+    privacy_default: str = "private"
+    status: str = "idle"
+    last_run: str = ""
+    options: dict[str, Any] = Field(default_factory=dict)
+    rate_limit: dict[str, Any] = Field(default_factory=dict)
+    last_result: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResearchLibraryNodeModel(BaseModel):
+    """One Paper Library collection usable as a connector import target."""
+
+    id: str
+    path: str
+
+
+class ResearchConnectorsResponse(BaseModel):
+    """Connector configs plus provider metadata and import targets."""
+
+    profile: str
+    providers: list[str] = Field(default_factory=list)
+    auto_providers: list[str] = Field(default_factory=list)
+    connectors: list[ResearchConnectorModel] = Field(default_factory=list)
+    library_nodes: list[ResearchLibraryNodeModel] = Field(default_factory=list)
+
+
+class ResearchConnectorUpsertRequest(BaseModel):
+    """Create/update one connector. Never carries tokens/cookies/API keys."""
+
+    provider: str
+    connector_id: str = Field(default="", max_length=200)
+    query: str = Field(default="", max_length=1000)
+    enabled: bool = True
+    privacy_default: str = "private"
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResearchImportTargetModel(BaseModel):
+    """Where imported candidates land: inbox, metadata only, or a collection."""
+
+    kind: Literal["source_inbox", "metadata_only", "collection"] = "source_inbox"
+    node_id: str = ""
+
+
+class ResearchConnectorCandidateModel(BaseModel):
+    """One discovered candidate with its duplicate verdict."""
+
+    fingerprint: str
+    canonical_url: str = ""
+    selected: bool = False
+    duplicate: dict[str, Any] = Field(default_factory=dict)
+    item: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResearchConnectorPreviewModel(BaseModel):
+    """Dry-run discovery result (no source facts written)."""
+
+    connector_id: str = ""
+    provider: str = ""
+    query: str = ""
+    discovered: int = 0
+    importable: int = 0
+    skipped: int = 0
+    candidates: list[ResearchConnectorCandidateModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ResearchConnectorImportResultModel(BaseModel):
+    """Outcome of importing selected candidates (or a full connector run)."""
+
+    connector_id: str = ""
+    provider: str = ""
+    discovered: int = 0
+    imported: int = 0
+    skipped: int = 0
+    imported_source_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    error: str = ""
+
+
+class ResearchManualPreviewRequest(BaseModel):
+    """Pasted URLs / CSV / JSON list to preview without a saved connector."""
+
+    provider: str
+    raw_items: str = Field(min_length=1, max_length=200_000)
+
+
+class ResearchManualImportRequest(ResearchManualPreviewRequest):
+    """Import selected fingerprints from a pasted manual list."""
+
+    fingerprints: list[str] = Field(default_factory=list)
+    privacy_default: str = "private"
+    target: ResearchImportTargetModel = Field(default_factory=ResearchImportTargetModel)
+
+
+class ResearchConnectorImportRequest(BaseModel):
+    """Import selected candidates of a saved connector (async job).
+
+    An empty ``fingerprints`` list runs the whole connector (every
+    non-duplicate discovery is imported), like the Streamlit "run now".
+    """
+
+    fingerprints: list[str] = Field(default_factory=list)
+    target: ResearchImportTargetModel = Field(default_factory=ResearchImportTargetModel)
+
+
+class ResearchAIActionModel(BaseModel):
+    """One research AI action's effective routing preference."""
+
+    action: str
+    default_backend: str = "llm"
+    backend: str = ""
+    llm_model: str = ""
+    codex_model: str = ""
+
+
+class ResearchAIConfigResponse(BaseModel):
+    """Research-scoped slice of ``web-preferences.yaml`` ``ai.actions``."""
+
+    profile: str
+    actions: list[ResearchAIActionModel] = Field(default_factory=list)
+    llm_default_model: str = ""
+    codex_default_model: str = ""
+    codex_model_suggestions: list[str] = Field(default_factory=list)
+
+
+class ResearchAIActionUpdate(BaseModel):
+    """Backend/model choice for one action; empty strings mean app default."""
+
+    backend: Literal["", "llm", "codex"] = ""
+    llm_model: str = Field(default="", max_length=200)
+    codex_model: str = Field(default="", max_length=200)
+
+
+class ResearchAIConfigUpdateRequest(BaseModel):
+    """Only research actions are accepted; unknown keys answer 422."""
+
+    actions: dict[str, ResearchAIActionUpdate] = Field(default_factory=dict)

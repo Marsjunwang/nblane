@@ -1,4 +1,5 @@
 import {
+  Alert,
   Anchor,
   Badge,
   Button,
@@ -16,7 +17,6 @@ import {
   Title,
 } from '@mantine/core';
 import {
-  IconArrowUpRight,
   IconBook2,
   IconCheck,
   IconChevronRight,
@@ -25,12 +25,15 @@ import {
   IconInbox,
   IconLibrary,
   IconPlayerPlay,
+  IconRefresh,
   IconSearch,
+  IconSparkles,
 } from '@tabler/icons-react';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { useResearch } from '../api/hooks';
+import { paperLibraryPath, paperOverviewPath, paperReaderPath, researchSourcesPath } from '../api/paperHooks';
 import type { ResearchPaperItem } from '../api/types';
 import { chrome } from '../theme';
 
@@ -59,9 +62,33 @@ function pageLabel(paper: ResearchPaperItem): string {
   return `第 ${paper.last_page} / ${paper.page_count} 页`;
 }
 
+function hasQuickAnalysis(paper: ResearchPaperItem): boolean {
+  const analysis = (paper.analysis ?? {}) as { tldr?: unknown; key_points?: unknown };
+  return Boolean(
+    (typeof analysis.tldr === 'string' && analysis.tldr.trim()) ||
+      (Array.isArray(analysis.key_points) && analysis.key_points.length),
+  );
+}
+
+function TranslationBadge({ paper }: { paper: ResearchPaperItem }) {
+  if (!paper.segment_count) return null;
+  const done = paper.translation_status === 'translated';
+  const color = done ? 'green' : paper.stale_count || paper.failed_count ? 'yellow' : 'gray';
+  const extra = [
+    paper.stale_count ? `过期 ${paper.stale_count}` : '',
+    paper.failed_count ? `失败 ${paper.failed_count}` : '',
+  ].filter(Boolean).join(' · ');
+  return (
+    <Badge size="sm" variant="outline" color={color} data-testid="paper-translation-badge">
+      {done ? '已全部翻译' : `译 ${paper.translated_count} / ${paper.segment_count}`}{extra ? ` · ${extra}` : ''}
+    </Badge>
+  );
+}
+
 function PaperRow({ paper, profile }: { paper: ResearchPaperItem; profile: string }) {
   const progress = progressFor(paper);
   const canRead = paper.pdf_available;
+  const analyzed = hasQuickAnalysis(paper);
   const card = (
     <Paper
       component="div"
@@ -95,23 +122,35 @@ function PaperRow({ paper, profile }: { paper: ResearchPaperItem; profile: strin
         <Badge size="sm" variant="outline" color={paper.pdf_available ? 'green' : 'gray'}>
           {paper.pdf_available ? 'PDF 已就绪' : '等待 PDF'}
         </Badge>
+        <TranslationBadge paper={paper} />
+        <Badge
+          size="sm"
+          variant={analyzed ? 'light' : 'outline'}
+          color={analyzed ? 'brand' : 'gray'}
+          leftSection={analyzed ? <IconSparkles size={11} /> : undefined}
+        >
+          {analyzed ? '已快速分析' : '未分析'}
+        </Badge>
         {paper.tags?.slice(0, 2).map((tag) => <Badge key={tag} size="sm" variant="dot" color="gray">{tag}</Badge>)}
       </Group>
       {paper.page_count > 0 && <Progress value={progress} size={3} mt="md" color={paper.status === 'reading' ? 'brand' : 'gray'} />}
       <Group justify="space-between" mt="xs">
         <Text size="xs" c={chrome.dim} lineClamp={1}>{paper.summary || '还没有阅读摘要'}</Text>
-        {canRead && <IconChevronRight size={16} color={chrome.goldText} />}
+        <IconChevronRight size={16} color={chrome.goldText} />
       </Group>
     </Paper>
   );
-  return canRead ? (
+  // Every paper lands on its overview first (metadata, quick analysis,
+  // continue reading); the Reader is one click further.
+  return (
     <Link
-      to={`/p/${encodeURIComponent(profile)}/research/papers/${encodeURIComponent(paper.id)}`}
+      to={paperOverviewPath(profile, paper.id)}
+      aria-label={`${paper.title || paper.id} · 论文概览`}
       style={{ display: 'block', color: 'inherit', textDecoration: 'none' }}
     >
       {card}
     </Link>
-  ) : card;
+  );
 }
 
 export function ResearchPage() {
@@ -121,7 +160,16 @@ export function ResearchPage() {
   const [status, setStatus] = useState('all');
 
   if (research.isPending) return <Text c="dimmed">正在打开研究台…</Text>;
-  if (research.isError) return <Text c="red">研究台加载失败：{research.error.message}</Text>;
+  if (research.isError) {
+    return (
+      <Alert color="red" title="研究台加载失败">
+        <Text size="sm">{research.error.message}</Text>
+        <Button mt="sm" size="compact-sm" variant="default" leftSection={<IconRefresh size={14} />} onClick={() => void research.refetch()}>
+          重试
+        </Button>
+      </Alert>
+    );
+  }
 
   const data = research.data;
   const papers = data.papers ?? [];
@@ -138,12 +186,12 @@ export function ResearchPage() {
     <Stack gap="lg" pb="xl">
       <Group justify="space-between" align="flex-end">
         <div>
-          <Text size="xs" tt="uppercase" fw={700} c={chrome.goldText}>Research / reading desk</Text>
+          <Text size="xs" fw={700} c={chrome.goldText}>研究 · 阅读节奏</Text>
           <Title order={2} mt={4}>{data.profile} · 研究台</Title>
           <Text size="sm" c={chrome.dim} mt={5}>从待读到读完，只管理阅读节奏，不把阅读强行变成证据。</Text>
         </div>
         {data.sidecar?.paper_library_url && (
-          <Button component="a" href={data.sidecar.paper_library_url} target="_blank" rel="noreferrer" variant="light" leftSection={<IconLibrary size={15} />} rightSection={<IconArrowUpRight size={14} />}>
+          <Button component={Link} to={paperLibraryPath(name)} variant="light" leftSection={<IconLibrary size={15} />}>
             打开论文库
           </Button>
         )}
@@ -154,15 +202,18 @@ export function ResearchPage() {
           <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
             <ThemeIcon size={42} radius="sm" color="brand" variant="light"><IconBook2 size={21} /></ThemeIcon>
             <div style={{ minWidth: 0 }}>
-              <Text size="xs" tt="uppercase" fw={700} c={chrome.goldText}>继续阅读</Text>
+              <Text size="xs" fw={700} c={chrome.goldText}>继续阅读</Text>
               <Title order={3} mt={3} lineClamp={1}>{nextPaper?.title ?? '今天还没有正在阅读的论文'}</Title>
               <Text size="sm" c={chrome.dim} mt={4}>{nextPaper ? `${pageLabel(nextPaper)} · ${statusLabel(nextPaper.status)}` : '从论文库导入一篇，建立你的阅读队列。'}</Text>
             </div>
           </Group>
           {nextPaper?.pdf_available ? (
-            <Button component={Link} to={`/p/${encodeURIComponent(name)}/research/papers/${encodeURIComponent(nextPaper.id)}`} color="brand" leftSection={<IconPlayerPlay size={15} />}>继续阅读</Button>
+            <Group gap="xs" wrap="nowrap">
+              <Button component={Link} to={paperOverviewPath(name, nextPaper.id)} variant="default">论文概览</Button>
+              <Button component={Link} to={paperReaderPath(name, nextPaper.id)} color="brand" leftSection={<IconPlayerPlay size={15} />}>继续阅读</Button>
+            </Group>
           ) : data.sidecar?.paper_library_url ? (
-            <Button component="a" href={data.sidecar.paper_library_url} target="_blank" rel="noreferrer" variant="default" leftSection={<IconLibrary size={15} />}>选择论文</Button>
+            <Button component={Link} to={paperLibraryPath(name)} variant="default" leftSection={<IconLibrary size={15} />}>选择论文</Button>
           ) : null}
         </Group>
         {nextPaper?.page_count ? <Progress value={progressFor(nextPaper)} size={5} mt="lg" color="brand" /> : null}
@@ -214,7 +265,7 @@ export function ResearchPage() {
         </Stack>
       </Card>
 
-      <Group justify="flex-end"><Anchor component={Link} to={`/p/${encodeURIComponent(name)}/inbox`} size="sm" c={chrome.goldText}>查看研究收件箱 <IconChevronRight size={14} style={{ verticalAlign: 'middle' }} /></Anchor></Group>
+      <Group justify="flex-end"><Anchor component={Link} to={researchSourcesPath(name)} size="sm" c={chrome.goldText}>查看研究收件箱 <IconChevronRight size={14} style={{ verticalAlign: 'middle' }} /></Anchor></Group>
     </Stack>
   );
 }

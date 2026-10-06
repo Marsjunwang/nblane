@@ -16,7 +16,10 @@ import { ProfilesPage } from './pages/ProfilesPage';
 import { KanbanRedirect, ProjectBoardRedirect, ProjectsPage } from './pages/ProjectsPage';
 import { PublicBuildPage } from './pages/PublicBuildPage';
 import { ResearchPage } from './pages/ResearchPage';
+import { ResearchSourcesPage } from './pages/ResearchSourcesPage';
 import { PaperReaderPage } from './pages/PaperReaderPage';
+import { PaperOverviewPage } from './pages/PaperOverviewPage';
+import { PaperLibraryPage } from './pages/PaperLibraryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { SkillTreePage } from './pages/SkillTreePage';
 import { StudioPage } from './pages/StudioPage';
@@ -78,7 +81,11 @@ export function App() {
           <Route path="/p/:name/career/*" element={<CareerWorkspacePage />} />
           <Route path="/p/:name/public-build" element={<PublicBuildPage />} />
           <Route path="/p/:name/research" element={<ResearchPage />} />
-          <Route path="/p/:name/research/papers/:sourceId" element={<PaperReaderPage />} />
+          <Route path="/p/:name/research/library" element={<PaperLibraryPage />} />
+          {/* The overview is the paper landing page; ?mode= deep links on it redirect to /read. */}
+          <Route path="/p/:name/research/papers/:sourceId" element={<PaperOverviewPage />} />
+          <Route path="/p/:name/research/papers/:sourceId/read" element={<PaperReaderPage />} />
+          <Route path="/p/:name/research/sources" element={<ResearchSourcesPage />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

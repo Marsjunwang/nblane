@@ -771,6 +771,19 @@ def _source_fingerprint_lookup(inbox: ResearchSourceInbox) -> dict[str, dict[str
     return lookup
 
 
+def find_duplicate_source(inbox: ResearchSourceInbox, url: str) -> dict[str, str] | None:
+    """Return ``{source_id, reason}`` when *url* matches an inbox source.
+
+    Uses the same canonical-URL rule as connector previews/imports so
+    manual adds and connector imports dedupe against each other.
+    """
+    canonical = _canonical_url(url)
+    if not canonical:
+        return None
+    hit = _source_fingerprint_lookup(inbox).get(canonical)
+    return dict(hit) if hit else None
+
+
 def _connector_row(profile: str | Path, connector_id: str) -> tuple[dict[str, Any], list[dict[str, object]], dict[str, object]]:
     book = load_connectors(profile)
     rows = list(book.get("connectors") or [])
@@ -1190,6 +1203,7 @@ __all__ = [
     "ConnectorItem",
     "ConnectorSyncResult",
     "discover_connector_items",
+    "find_duplicate_source",
     "import_connector_items",
     "import_manual_connector_items",
     "load_connectors",
