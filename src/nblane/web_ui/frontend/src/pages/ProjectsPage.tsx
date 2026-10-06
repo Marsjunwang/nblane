@@ -290,13 +290,31 @@ export function ProjectsPage() {
                 ? unassignedLaneCount
                 : value;
             const hiddenDone = key === 'tasks_unassigned' ? unassignedDoneCount : 0;
+            // 未归属 is the triage pile and sits below every lane: on the board
+            // the badge jumps straight to it.
+            const jump = key === 'tasks_unassigned' && view === 'kanban' && unassignedLaneCount > 0;
             return (
               <Badge
                 key={key}
                 size="sm"
                 variant="outline"
-                style={{ borderColor: boardPalette.border, color: boardPalette.dim }}
+                style={{
+                  borderColor: jump ? boardPalette.gold : boardPalette.border,
+                  color: jump ? boardPalette.goldText : boardPalette.dim,
+                  cursor: jump ? 'pointer' : undefined,
+                }}
                 data-testid={`stats-${key}`}
+                {...(jump
+                  ? {
+                      component: 'button' as const,
+                      type: 'button' as const,
+                      'aria-label': `跳到未归属任务(${laneVisible})`,
+                      onClick: () =>
+                        document
+                          .querySelector('[data-testid="unassigned-lane"]')
+                          ?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+                    }
+                  : {})}
               >
                 {STATS_LABELS[key] ?? key} {laneVisible}
                 {hiddenDone > 0 ? `(含已完成 ${hiddenDone})` : ''}

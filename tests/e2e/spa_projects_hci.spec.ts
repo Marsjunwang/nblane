@@ -152,23 +152,31 @@ test.describe("SPA /projects HCI package (phase2-projects-hci)", () => {
     const lane = page.getByTestId(`project-lane-${caseId}`);
     await expect(lane).toBeVisible();
 
-    // 行内快添: click → type → Enter, zero scrolling (pinned to Queue top).
-    const queueColumn = page.getByTestId(`lane-column-${caseId}-queue`);
-    const quickAdd = queueColumn.getByTestId(`quick-add-${caseId}`);
-    const quickAddBox = await quickAdd.boundingBox();
-    const columnBox = await queueColumn.boundingBox();
-    expect(quickAddBox!.y - columnBox!.y).toBeLessThan(60);
+    // 行内快添: a fresh (empty) case renders folded — one quick-add row, no
+    // empty Queue/Doing blocks. Click → type → Enter, zero scrolling.
+    const folded = page.getByTestId(`lane-folded-${caseId}`);
+    await expect(folded).toBeVisible();
+    await expect(page.getByTestId(`lane-column-${caseId}-queue`)).toHaveCount(0);
+    const quickAdd = folded.getByTestId(`quick-add-${caseId}`);
     const addResponse = page.waitForResponse(
       (res) =>
         res.url().includes(`/cases/${encodeURIComponent(caseId)}/tasks`) &&
         res.request().method() === "POST",
     );
     await quickAdd.click();
-    await queueColumn.getByTestId(`quick-add-input-${caseId}`).fill(title);
-    await queueColumn.getByTestId(`quick-add-input-${caseId}`).press("Enter");
+    await folded.getByTestId(`quick-add-input-${caseId}`).fill(title);
+    await folded.getByTestId(`quick-add-input-${caseId}`).press("Enter");
     expect((await addResponse).status()).toBeLessThan(300);
+    // The first card unfolds the lane; quick-add stays pinned to the Queue top.
+    const queueColumn = page.getByTestId(`lane-column-${caseId}-queue`);
     await expect(queueColumn.getByText(title)).toBeVisible({ timeout: 10_000 });
+    const quickAddBox = await queueColumn.getByTestId(`quick-add-${caseId}`).boundingBox();
+    const columnBox = await queueColumn.boundingBox();
+    expect(quickAddBox!.y - columnBox!.y).toBeLessThan(60);
     await shot(page, "04-quick-add");
+    // Quick-add auto-opens the created card's detail card; close it first.
+    await page.getByTestId("task-detail-card").getByRole("button", { name: "关闭详情" }).click();
+    await expect(page.getByTestId("task-detail-card")).toHaveCount(0);
 
     // 删除项目: drawer → danger zone → preview + confirm + DELETE.
     await lane.getByRole("button", { name: `编辑项目 hci-验收项目-${run}` }).click();

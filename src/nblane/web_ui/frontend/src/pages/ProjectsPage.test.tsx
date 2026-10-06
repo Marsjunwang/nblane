@@ -338,6 +338,40 @@ describe('ProjectsPage board view', () => {
     expect(badge).not.toHaveTextContent('含已完成');
   });
 
+  it('an empty lane folds to one quick-add row (no empty Queue/Doing blocks)', async () => {
+    const empty = {
+      ...BOARD.goals[0].projects[0],
+      id: 'p-empty',
+      title: '空项目',
+      queue: [],
+      doing: [],
+      someday: [],
+      column_counts: { queue: 0, doing: 0, someday: 0, done: 0 },
+      done_count: 0,
+      archived_done_count: 0,
+    };
+    stubFetch((url) => {
+      if (url.includes('/profiles/alice/projects-board')) {
+        return new Response(
+          JSON.stringify({
+            ...BOARD,
+            goals: [{ ...BOARD.goals[0], projects: [...BOARD.goals[0].projects, empty] }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json', ETag: BOARD_ETAG } },
+        );
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+
+    const folded = await screen.findByTestId('lane-folded-p-empty');
+    expect(within(folded).getByTestId('quick-add-p-empty')).toBeInTheDocument();
+    expect(screen.queryByTestId('lane-column-p-empty-queue')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('lane-column-p-empty-doing')).not.toBeInTheDocument();
+    // A lane with cards keeps its full columns.
+    expect(screen.getByTestId('lane-column-p1-queue')).toBeInTheDocument();
+  });
+
   it('日课栏 dedupe: a habit-plan renders only as a band row, never as a lane', async () => {
     const habitPlan = {
       id: 'plan-exercise',

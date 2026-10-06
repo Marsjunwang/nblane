@@ -6,6 +6,9 @@ import type { ReactNode } from 'react';
 import type { ProjectsBoardTask } from '../../api/types';
 import { boardPalette } from './palette';
 
+/** Column card-list cap (px): roughly 8 cards before it scrolls in place. */
+export const LANE_COLUMN_MAX_HEIGHT = 560;
+
 /** Droppable id for one lane column (unique per lane + column). */
 export function laneColumnDroppableId(laneId: string, column: string): string {
   return `lane::${laneId}::${column}`;
@@ -62,9 +65,17 @@ export function LaneColumn({
         </Badge>
       </Group>
       <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
-        {/* mih keeps empty columns reachable as drop targets. */}
-        <Stack gap="xs" mih={48}>
-          {quickAdd}
+        {quickAdd && <div style={{ marginBottom: 8 }}>{quickAdd}</div>}
+        {/* mih keeps empty columns reachable as drop targets; the max height
+            stops one long column (a 46-card 未归属 Queue) from stretching the
+            page by thousands of px — it scrolls in place instead (dnd-kit
+            auto-scrolls the column while dragging). */}
+        <Stack
+          gap="xs"
+          mih={48}
+          data-testid={`lane-scroll-${laneId}-${column}`}
+          style={{ maxHeight: LANE_COLUMN_MAX_HEIGHT, overflowY: 'auto', overscrollBehavior: 'contain' }}
+        >
           {children}
         </Stack>
       </SortableContext>

@@ -881,21 +881,43 @@ export function ProjectLane({
         </Group>
       </Group>
       <HabitPlanSection profile={profile} plans={lanePlans} />
-      <TaskLaneDnd
-        profile={profile}
-        laneId={project.id}
-        queue={project.queue ?? []}
-        doing={project.doing ?? []}
-        someday={project.someday ?? []}
-        kanbanEtag={kanbanEtag}
-        kanbanSections={kanbanSections}
-        today={today}
-        selectedTaskId={selectedTaskId}
-        onSelectTask={onSelectTask}
-        onRefresh={onRefresh}
-        quickAdd={quickAdd}
-      />
+      {isEmptyLane(project) ? (
+        // Nothing live to show or drag (DnD is lane-local): fold the two empty
+        // columns into the quick-add row so an empty lane costs one line, not
+        // a full Queue/Doing block. The first added card unfolds it.
+        <Box maw={280} data-testid={`lane-folded-${project.id}`}>
+          <QuickAddInput
+            laneId={project.id}
+            pending={quickAdd.pending}
+            onSubmit={quickAdd.onSubmit}
+          />
+        </Box>
+      ) : (
+        <TaskLaneDnd
+          profile={profile}
+          laneId={project.id}
+          queue={project.queue ?? []}
+          doing={project.doing ?? []}
+          someday={project.someday ?? []}
+          kanbanEtag={kanbanEtag}
+          kanbanSections={kanbanSections}
+          today={today}
+          selectedTaskId={selectedTaskId}
+          onSelectTask={onSelectTask}
+          onRefresh={onRefresh}
+          quickAdd={quickAdd}
+        />
+      )}
     </Stack>
+  );
+}
+
+/** A lane with no Queue / Doing / Someday card renders folded. */
+export function isEmptyLane(project: ProjectsBoardProject): boolean {
+  return (
+    (project.queue ?? []).length === 0 &&
+    (project.doing ?? []).length === 0 &&
+    (project.someday ?? []).length === 0
   );
 }
 

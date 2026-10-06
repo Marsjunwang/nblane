@@ -268,13 +268,14 @@ test.describe("SPA /projects shared selection & views", () => {
       (res) => res.url().includes("/schedule") && res.request().method() === "POST",
     );
     await detail.getByLabel("排期开始").fill("2026-10-01");
-    await detail.getByLabel("排期结束").fill("2026-10-15");
+    // < 14 days: a ≥14-day span renders as a 期间带, not a timeline bar.
+    await detail.getByLabel("排期结束").fill("2026-10-10");
     await detail.getByTestId("schedule-save").click();
     const response = await scheduleResponse;
     expect(response.status(), "schedule should succeed").toBeLessThan(300);
     expect(
       response.request().postDataJSON() as { planned_start?: string; planned_end?: string },
-    ).toMatchObject({ planned_start: "2026-10-01", planned_end: "2026-10-15" });
+    ).toMatchObject({ planned_start: "2026-10-01", planned_end: "2026-10-10" });
 
     // The scheduled span renders on the timeline.
     await detail.getByRole("button", { name: "关闭详情" }).click();

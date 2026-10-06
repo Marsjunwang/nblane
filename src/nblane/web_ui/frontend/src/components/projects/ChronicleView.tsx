@@ -753,6 +753,22 @@ function ChronicleInspector({
   );
 }
 
+/**
+ * Row under a viewport y, measured from the rendered row wrappers (one
+ * direct child per row, elbow included). Collapsed 断行 strips are far
+ * shorter than full rows, so a uniform-height division lands clicks and
+ * Ctrl+wheel zoom anchors on the wrong row below any collapsed one.
+ */
+function rowIndexAtY(viewport: HTMLElement, clientY: number): number {
+  const children = Array.from(viewport.children);
+  for (let index = 0; index < children.length; index += 1) {
+    if (clientY < children[index].getBoundingClientRect().bottom) {
+      return index;
+    }
+  }
+  return Math.max(children.length - 1, 0);
+}
+
 export function ChronicleView({
   board,
   groups,
@@ -971,11 +987,7 @@ export function ChronicleView({
     }
     viewport.focus();
     const rect = viewport.getBoundingClientRect();
-    const unit = CHRONICLE_ROW_HEIGHT + CHRONICLE_ELBOW_HEIGHT;
-    const rowIndex = Math.min(
-      Math.max(Math.floor((event.clientY - rect.top) / unit), 0),
-      placedByRow.length - 1,
-    );
+    const rowIndex = rowIndexAtY(viewport, event.clientY);
     const placed = placedByRow[rowIndex] ?? [];
     if (placed.length === 0) {
       return;
@@ -1009,11 +1021,7 @@ export function ChronicleView({
         // Ctrl+wheel / pinch: stepless per-row span zoom, anchored at the
         // date under the cursor (row + time fraction preserved).
         const rect = viewport.getBoundingClientRect();
-        const unit = CHRONICLE_ROW_HEIGHT + CHRONICLE_ELBOW_HEIGHT;
-        const rowIndex = Math.min(
-          Math.max(Math.floor((event.clientY - rect.top) / unit), 0),
-          live.rowScales.length - 1,
-        );
+        const rowIndex = rowIndexAtY(viewport, event.clientY);
         const scale = live.rowScales[rowIndex];
         if (!scale) {
           return;

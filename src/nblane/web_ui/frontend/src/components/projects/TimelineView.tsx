@@ -1575,16 +1575,24 @@ export function TimelineView({
     return { byProject: map, loose };
   }, [historyTasks, scale]);
 
+  // Done-column cards ride the history layer (刻痕), exactly like project
+  // lanes, whose live lists never carry Done. Feeding them in as live bars too
+  // drew each one twice under the same React key — and toggling 历史 off
+  // then left stale history nodes behind.
+  const unassignedLive = useMemo(
+    () => unassigned.filter((task) => task.column !== 'done'),
+    [unassigned],
+  );
   const unassignedLane = useMemo(() => {
     const { inputs, periods, unscheduled } = laneInputs(
-      unassigned,
+      unassignedLive,
       historyByProject.loose,
       showHistory,
       today,
       scale,
     );
     return { layout: layoutLane(inputs), periods, unscheduled };
-  }, [unassigned, historyByProject.loose, showHistory, today, scale]);
+  }, [unassignedLive, historyByProject.loose, showHistory, today, scale]);
 
   return (
     <Stack gap="xs" data-testid="timeline-view">
@@ -1833,9 +1841,9 @@ export function TimelineView({
             </Stack>
           )}
 
-          {unassigned.length > 0 && (
+          {(unassignedLive.length > 0 || historyByProject.loose.length > 0) && (
             <Group wrap="nowrap" gap={0} data-testid="timeline-unassigned">
-              <RowLabel title="未归属任务" meta={`${unassigned.length} 项`} />
+              <RowLabel title="未归属任务" meta={`${unassignedLive.length} 项`} />
               <Box
                 style={{
                   position: 'relative',
