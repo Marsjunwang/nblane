@@ -100,7 +100,13 @@ function ArchivedLane({
             message: `「${project.title || project.id}」已恢复为进行中。`,
           });
         },
-        onError: (error) => handleLaneMutationError(error, '恢复失败', onRefresh),
+        // Restore writes project-board.yaml: a 412 must also refresh that
+        // query, whose ETag the retry will send.
+        onError: (error) =>
+          handleLaneMutationError(error, '恢复失败', () => {
+            void board.refetch();
+            onRefresh();
+          }),
       },
     );
   };
@@ -144,6 +150,8 @@ function ArchivedLane({
             size="sm"
             aria-label={`恢复项目 ${project.title || project.id}`}
             loading={restore.isPending}
+            // No ETag yet = the save would skip the server's If-Match check.
+            disabled={!etag}
             onClick={runRestore}
             style={{ color: boardPalette.goldText }}
           >

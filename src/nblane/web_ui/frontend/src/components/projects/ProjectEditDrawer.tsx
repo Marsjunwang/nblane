@@ -138,6 +138,63 @@ function draftFromCase(projectCase: ProjectCase): CaseDraft {
   };
 }
 
+function sameDraftValue(a: CaseDraft[keyof CaseDraft], b: CaseDraft[keyof CaseDraft]): boolean {
+  return Array.isArray(a) && Array.isArray(b)
+    ? a.length === b.length && a.every((item, index) => item === b[index])
+    : a === b;
+}
+
+/** Fields the user changed relative to the server state the draft started
+ * from — the save body carries only these (the backend keeps None fields),
+ * so a save never rewrites a field someone else changed meanwhile. */
+export function caseDraftChanges(baseline: CaseDraft, draft: CaseDraft): Partial<CaseDraft> {
+  const changes: Partial<CaseDraft> = {};
+  for (const key of Object.keys(draft) as (keyof CaseDraft)[]) {
+    if (!sameDraftValue(draft[key], baseline[key])) {
+      (changes as Record<string, unknown>)[key] = draft[key];
+    }
+  }
+  return changes;
+}
+
+/** 3-way rebase of a dirty draft onto fresh server state: untouched fields
+ * follow the server, edited fields keep the user's value. Returns the keys
+ * both sides changed (to name them in the conflict notice). */
+export function rebaseCaseDraft(
+  baseline: CaseDraft,
+  draft: CaseDraft,
+  server: CaseDraft,
+): { draft: CaseDraft; conflicts: (keyof CaseDraft)[] } {
+  const next = { ...draft };
+  const conflicts: (keyof CaseDraft)[] = [];
+  for (const key of Object.keys(draft) as (keyof CaseDraft)[]) {
+    const userChanged = !sameDraftValue(draft[key], baseline[key]);
+    const serverChanged = !sameDraftValue(server[key], baseline[key]);
+    if (!userChanged) {
+      (next as Record<string, unknown>)[key] = server[key];
+    } else if (serverChanged && !sameDraftValue(server[key], draft[key])) {
+      conflicts.push(key);
+    }
+  }
+  return { draft: next, conflicts };
+}
+
+const CASE_FIELD_LABELS: Record<keyof CaseDraft, string> = {
+  title: '标题',
+  status: '状态',
+  kind: '类型',
+  visibility: '可见性',
+  time_range: '时间范围',
+  summary: '摘要',
+  notes: '备注',
+  goal_refs: '关联目标',
+  task_refs: '关联任务',
+  evidence_refs: '关联证据',
+  source_refs: '关联资料',
+  experience_refs: '关联经历',
+  output_refs: '关联输出',
+};
+
 const SUGGEST_FIELD_LABELS: Record<string, string> = {
   goal_refs: '目标',
   task_refs: '任务',
@@ -332,6 +389,7 @@ function BasicsTab({
   board,
   etag,
   onDeleted,
+  onDirtyChange,
 }: {
   profile: string;
   projectCase: ProjectCase;
@@ -339,6 +397,8 @@ function BasicsTab({
   etag: string;
   /** Fired after a successful delete so the drawer closes. */
   onDeleted: () => void;
+  /** Reports unsaved basics edits so the drawer can guard its close. */
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [draft, setDraft] = useState<CaseDraft>(() => draftFromCase(projectCase));
   const [dirty, setDirty] = useState(false);
@@ -353,15 +413,40 @@ function BasicsTab({
   const refreshBoard = useRefreshBoards(profile);
   const stopStreamRef = useRef<(() => void) | null>(null);
 
-  // Follow server-side changes only while the local draft is untouched; a
-  // dirty draft always wins.
+  // `baseline` = the server state the draft was last reconciled with. Fresh
+  // server state is rebased into the draft field by field: untouched fields
+  // follow the server, edited ones keep the user's value, and a field both
+  // sides changed is named in a notice instead of being silently overwritten.
   const lastSynced = useRef(projectCase);
+  const baselineRef = useRef<CaseDraft>(draftFromCase(projectCase));
   useEffect(() => {
-    if (!dirty && projectCase !== lastSynced.current) {
-      lastSynced.current = projectCase;
-      setDraft(draftFromCase(projectCase));
+    if (projectCase === lastSynced.current) {
+      return;
     }
+    lastSynced.current = projectCase;
+    const server = draftFromCase(projectCase);
+    if (!dirty) {
+      setDraft(server);
+    } else {
+      const rebased = rebaseCaseDraft(baselineRef.current, draft, server);
+      setDraft(rebased.draft);
+      if (rebased.conflicts.length > 0) {
+        notifications.show({
+          color: 'yellow',
+          title: '项目已被他人修改',
+          message: `以下字段两边都改了,当前保留你的修改,保存会覆盖对方:${rebased.conflicts
+            .map((key) => CASE_FIELD_LABELS[key])
+            .join('、')}`,
+        });
+      }
+    }
+    baselineRef.current = server;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectCase, dirty]);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   const stopStream = () => {
     stopStreamRef.current?.();
@@ -382,11 +467,17 @@ function BasicsTab({
     setDraft((prev) => ({ ...prev, [field]: value }));
   };
 
-  const runSave = () =>
+  const runSave = () => {
+    const body = caseDraftChanges(baselineRef.current, draft);
+    if (Object.keys(body).length === 0) {
+      setDirty(false);
+      return;
+    }
     save.mutate(
-      { caseId: projectCase.id, body: { ...draft }, etag },
+      { caseId: projectCase.id, body, etag },
       { onSuccess: () => setDirty(false) },
     );
+  };
 
   const runSuggest = () => {
     stopStream();
@@ -1031,20 +1122,61 @@ export function ProjectEditDrawer({
 }) {
   const board = useProjectBoard(profile);
   const projectCase = (board.data?.data.cases ?? []).find((item) => item.id === projectId);
+  const [basicsDirty, setBasicsDirty] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+
+  useEffect(() => {
+    setBasicsDirty(false);
+    setConfirmDiscard(false);
+  }, [projectId]);
+
+  // Unsaved basics edits: the first close attempt asks instead of dropping them.
+  const requestClose = () => {
+    if (basicsDirty) {
+      setConfirmDiscard(true);
+      return;
+    }
+    onClose();
+  };
 
   return (
     <Drawer
       opened={projectId !== null}
-      onClose={onClose}
+      onClose={requestClose}
       position="right"
       size="xl"
       title={projectCase ? `编辑项目 · ${projectCase.title || projectCase.id}` : '编辑项目'}
       data-testid="project-edit-drawer"
     >
+      {confirmDiscard && (
+        <Alert color="yellow" title="有未保存的修改" mb="md" data-testid="drawer-discard-confirm">
+          <Group justify="space-between" wrap="wrap" gap="xs">
+            <Text size="sm">基本信息有改动尚未保存,关闭将丢弃。</Text>
+            <Group gap="xs">
+              <Button size="compact-sm" variant="default" onClick={() => setConfirmDiscard(false)}>
+                继续编辑
+              </Button>
+              <Button
+                size="compact-sm"
+                color="red"
+                variant="light"
+                onClick={onClose}
+                data-testid="drawer-discard-confirm-close"
+              >
+                丢弃并关闭
+              </Button>
+            </Group>
+          </Group>
+        </Alert>
+      )}
       {board.isPending ? (
         <Center py="xl">
           <Loader />
         </Center>
+      ) : board.isError ? (
+        <Alert color="red" title="加载失败">
+          {board.error?.message ?? '无法加载项目看板。'}
+        </Alert>
       ) : !projectCase ? (
         <Alert color="yellow" title="项目不存在">
           未在项目看板中找到该项目;可能已删除。
@@ -1064,6 +1196,7 @@ export function ProjectEditDrawer({
               board={board.data!.data}
               etag={board.data!.etag}
               onDeleted={onClose}
+              onDirtyChange={setBasicsDirty}
             />
           </Tabs.Panel>
           <Tabs.Panel value="milestones" pt="md">

@@ -36,17 +36,23 @@ export function NewPlanModal({
   const [title, setTitle] = useState('');
   const [start, setStart] = useState('');
 
-  // Reset the form each time the modal opens; default to the first builtin.
+  // Reset the form each time the modal opens. Keyed on `opened` only: a
+  // background templates refetch (window focus) must not wipe typed input.
   useEffect(() => {
     if (!opened) {
       return;
     }
-    const first = templates.data?.data.builtin?.[0];
-    setSelectedId((current) => current || first?.id || '');
     setTitle('');
     setStart('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened, templates.data]);
+  }, [opened]);
+
+  // Default to the first builtin once templates arrive (never overrides a pick).
+  const firstBuiltinId = templates.data?.data.builtin?.[0]?.id ?? '';
+  useEffect(() => {
+    if (opened && firstBuiltinId) {
+      setSelectedId((current) => current || firstBuiltinId);
+    }
+  }, [opened, firstBuiltinId]);
 
   const builtin = templates.data?.data.builtin ?? [];
   const history = templates.data?.data.history ?? [];

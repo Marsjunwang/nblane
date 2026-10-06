@@ -99,8 +99,10 @@ export function NewHabitPlanModal({
     setDayTexts([]);
     setProjectPick(null);
     create.reset();
+    // Keyed on open/habit only: a board refetch moving `today` (midnight,
+    // focus refetch) must not wipe a half-filled plan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened, today, habit.id]);
+  }, [opened, habit.id]);
 
   const cases = useMemo(
     () => (board.data ? collectProjects(board.data.board) : []),

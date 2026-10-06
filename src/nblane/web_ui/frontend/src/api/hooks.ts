@@ -686,6 +686,12 @@ export function useScheduleKanbanCard(profile: string) {
  * Edit one card's whitelist fields (title/context/why/project_id/
  * milestone_id/tags). `project_id: ''` unassigns the card from its lane.
  */
+/** A card PATCH that replaces a whole list field (server semantics: tags /
+ * todos are full-replace) must not be auto-retried after a 412. */
+export function kanbanPatchReplacesList(body: KanbanCardPatchRequest): boolean {
+  return body.tags != null || body.todos != null;
+}
+
 export function usePatchKanbanCard(profile: string) {
   const invalidate = useInvalidateKanban(profile);
   const queryClient = useQueryClient();
@@ -704,6 +710,7 @@ export function usePatchKanbanCard(profile: string) {
         body,
         etag,
         () => refreshKanbanEtag(profile),
+        { retryOn412: !kanbanPatchReplacesList(body) },
       ),
     onSuccess: ({ etag }) => {
       writeKanbanEtag(queryClient, profile, etag);
@@ -813,8 +820,16 @@ export function useAddCheckin(profile: string) {
         if (!(error instanceof ApiError) || error.status !== 412) {
           throw error;
         }
-        const res = await apiPostWithHeaders<CheckinMutationResponse>(path, body);
-        return { data: res.data, etag: res.headers.get('ETag') ?? '' };
+        // Retry with the fresh ETag (never without If-Match — that would
+        // bypass the concurrency check entirely).
+        const fresh = error.etag;
+        if (!fresh) {
+          throw error;
+        }
+        const res = await apiPostWithHeaders<CheckinMutationResponse>(path, body, {
+          headers: ifMatch(fresh),
+        });
+        return { data: res.data, etag: res.headers.get('ETag') ?? fresh };
       }
     },
     onSuccess: ({ etag }) => {
@@ -851,8 +866,14 @@ export function useDeleteCheckin(profile: string) {
         if (!(error instanceof ApiError) || error.status !== 412) {
           throw error;
         }
-        const res = await apiDeleteWithHeaders<CheckinDeleteResponse>(path);
-        return { data: res.data, etag: res.headers.get('ETag') ?? '' };
+        // Retry with the fresh ETag the 412 carried — never without If-Match.
+        if (!error.etag) {
+          throw error;
+        }
+        const res = await apiDeleteWithHeaders<CheckinDeleteResponse>(path, undefined, {
+          headers: ifMatch(error.etag),
+        });
+        return { data: res.data, etag: res.headers.get('ETag') ?? error.etag };
       }
     },
     onSuccess: ({ etag }) => {
@@ -1445,18 +1466,22 @@ async function postEtagMutation<T>(
   }
 }
 
-/** PATCH twin of postEtagMutation (kanban card field edits). */
+/** PATCH twin of postEtagMutation (kanban card field edits).
+ * `retryOn412: false` surfaces the 412 instead of blindly re-sending — for
+ * bodies that replace a whole list (tags / todos), where a retry would
+ * silently drop the concurrent writer's items. */
 async function patchEtagMutation<T>(
   path: string,
   body: unknown,
   etag: string,
   refreshEtag: () => Promise<string>,
+  { retryOn412 = true }: { retryOn412?: boolean } = {},
 ): Promise<{ data: T; etag: string }> {
   try {
     const res = await apiPatchWithHeaders<T>(path, body, { headers: ifMatch(etag) });
     return { data: res.data, etag: res.headers.get('ETag') ?? etag };
   } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 412) {
+    if (!(error instanceof ApiError) || error.status !== 412 || !retryOn412) {
       throw error;
     }
     const fresh = await refreshEtag();

@@ -16,12 +16,15 @@ export function apiBase(): string {
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  /** Fresh ETag the server attached to the error (412 bodies carry one). */
+  readonly etag: string;
 
-  constructor(status: number, message: string, code = '') {
+  constructor(status: number, message: string, code = '', etag = '') {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.etag = etag;
   }
 }
 
@@ -96,7 +99,7 @@ async function requestWithHeaders<T>(
       unauthorizedHandler?.();
     }
     const { message, code } = await errorMessage(res);
-    throw new ApiError(res.status, message, code);
+    throw new ApiError(res.status, message, code, res.headers.get('ETag') ?? '');
   }
   if (res.status === 204) {
     return { data: undefined as T, headers: res.headers };
@@ -157,7 +160,7 @@ export async function apiPostForm<T>(path: string, form: FormData): Promise<T> {
       unauthorizedHandler?.();
     }
     const { message, code } = await errorMessage(res);
-    throw new ApiError(res.status, message, code);
+    throw new ApiError(res.status, message, code, res.headers.get('ETag') ?? '');
   }
   return (await res.json()) as T;
 }

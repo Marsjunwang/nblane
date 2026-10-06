@@ -76,6 +76,15 @@ function cardRefOf(task: ProjectsBoardTask): string {
   return task.id || task.title;
 }
 
+/** Split a tags string on ASCII/full-width commas and whitespace — the one
+ * rule shared by the read-only badges and the edit diff. */
+export function splitTags(raw: string): string[] {
+  return raw
+    .split(/[,，\s]+/)
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
 interface TodoDraft {
   text: string;
   done: boolean;
@@ -99,40 +108,46 @@ function TodoChecklist({
   );
   const [newTodo, setNewTodo] = useState('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The debounced write waiting on timerRef; flushed (not dropped) when the
+  // card closes or switches task inside the debounce window.
+  const pendingRef = useRef<(() => void) | null>(null);
+
+  const flush = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    pending?.();
+  };
 
   // Re-seed only when a different task opens; same-task refetches must not
   // clobber an in-flight optimistic edit (the local list is what we sent).
+  // The cleanup flushes the previous task's pending write first.
   useEffect(() => {
     setTodos((task.todos ?? []).map((todo) => ({ text: todo.text, done: todo.done ?? false })));
     setNewTodo('');
+    return flush;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task.id]);
-
-  useEffect(
-    () => () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
-    },
-    [],
-  );
 
   const commit = (next: TodoDraft[]) => {
     setTodos(next);
     if (timerRef.current) {
       clearTimeout(timerRef.current);
     }
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
+    const cardRef = cardRefOf(task);
+    pendingRef.current = () =>
       patchCard.mutate(
         {
-          cardRef: cardRefOf(task),
+          cardRef,
           body: { todos: next.map((todo) => ({ text: todo.text, done: todo.done })) },
           etag: kanbanEtag,
         },
         { onError: onError('清单保存失败') },
       );
-    }, TODO_SAVE_DELAY_MS);
+    timerRef.current = setTimeout(flush, TODO_SAVE_DELAY_MS);
   };
 
   const toggle = (index: number) =>
@@ -241,15 +256,19 @@ export function TaskDetailCard({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [recordChronicle, setRecordChronicle] = useState(false);
 
-  // Re-seed the local editors whenever a different task opens (or the same
-  // task's server state lands after a mutation).
+  // A different task opening resets every local mode (edit / delete confirm).
+  useEffect(() => {
+    setEditing(false);
+    setConfirmingDelete(false);
+    setRecordChronicle(false);
+  }, [task?.id]);
+
+  // Same-task server state (after a schedule/assign write or a refetch) only
+  // re-syncs the schedule and ownership pickers — an open edit draft survives.
   useEffect(() => {
     setPlannedStart(task?.planned_start ?? '');
     setPlannedEnd(task?.planned_end ?? '');
     setAssignTo(task?.project_id ?? project?.id ?? '');
-    setEditing(false);
-    setConfirmingDelete(false);
-    setRecordChronicle(false);
   }, [task?.id, task?.planned_start, task?.planned_end, task?.project_id, project?.id]);
 
   if (!task) {
@@ -328,10 +347,17 @@ export function TaskDetailCard({
     );
 
   const runAssign = (projectId: string) => {
+    const previous = assignTo;
     setAssignTo(projectId);
     patchCard.mutate(
       { cardRef: cardRefOf(task), body: { project_id: projectId }, etag: kanbanEtag },
-      { onError: onError('归属变更失败') },
+      {
+        onError: (error) => {
+          // The picker must not keep showing an ownership the server refused.
+          setAssignTo(previous);
+          onError('归属变更失败')(error);
+        },
+      },
     );
   };
 
@@ -354,10 +380,7 @@ export function TaskDetailCard({
     );
 
   const startedDays = task.started_on && today ? daysSince(task.started_on, today) : null;
-  const tags = (task.tags ?? '')
-    .split(/[,\s]+/)
-    .map((tag) => tag.trim())
-    .filter(Boolean);
+  const tags = splitTags(task.tags ?? '');
 
   const startEdit = () => {
     setEditTitle(task.title);
@@ -371,10 +394,7 @@ export function TaskDetailCard({
   // PATCH carries only the fields that actually changed (None keeps server
   // side; "" clears context/why/project_id).
   const trimmedEditTitle = editTitle.trim();
-  const nextTags = editTags
-    .split(/[,，\s]+/)
-    .map((tag) => tag.trim())
-    .filter(Boolean);
+  const nextTags = splitTags(editTags);
   const editBody: KanbanCardPatchRequest = {};
   if (trimmedEditTitle && trimmedEditTitle !== task.title) {
     editBody.title = trimmedEditTitle;

@@ -3,11 +3,12 @@
 
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { cleanNotifications } from '@mantine/notifications';
+import { act, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProjectsBoardProject, ProjectsBoardTask } from '../../api/types';
 import { jsonResponse, renderWithProviders } from '../../test/render';
-import { TaskDetailCard } from './TaskDetailCard';
+import { splitTags, TaskDetailCard } from './TaskDetailCard';
 
 const KANBAN_ETAG = 'W/"kanban-test"';
 
@@ -445,5 +446,78 @@ describe('TaskDetailCard delete action', () => {
     expect(deletes).toHaveLength(2);
     expect((deletes[0][1]?.headers as Record<string, string>)['If-Match']).toBe(KANBAN_ETAG);
     expect((deletes[1][1]?.headers as Record<string, string>)['If-Match']).toBe('W/"kanban-fresh"');
+  });
+});
+
+describe('TaskDetailCard data-loss regressions', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    cleanup();
+    cleanNotifications();
+  });
+
+  // Harness whose task prop the test can swap (null = card closed), the way
+  // ProjectsPage feeds refetched board state into the card.
+  let setHarnessTask: (task: ProjectsBoardTask | null) => void = () => {};
+  function Harness({ initial }: { initial: ProjectsBoardTask }) {
+    const [task, setTask] = useState<ProjectsBoardTask | null>(initial);
+    setHarnessTask = setTask;
+    return (
+      <TaskDetailCard
+        profile="alice"
+        task={task}
+        project={PROJECT}
+        projects={[PROJECT]}
+        habits={[]}
+        today="2026-09-23"
+        kanbanEtag={KANBAN_ETAG}
+        onClose={() => {}}
+        onRefresh={() => {}}
+      />
+    );
+  }
+
+  function mountHarness(fetchImpl?: (init?: RequestInit) => Response) {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      fetchImpl ? fetchImpl(init) : patchResponse('读 VLA 综述'),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<Harness initial={TASK} />);
+    return fetchMock;
+  }
+
+  it('closing inside the debounce window flushes the pending checklist PATCH', async () => {
+    const fetchMock = mountHarness();
+    fireEvent.click(screen.getByTestId('todo-toggle-1'));
+    act(() => setHarnessTask(null));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true),
+    );
+    const call = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')!;
+    expect(JSON.parse(String(call[1]?.body)).todos[1]).toEqual({ text: '整理笔记', done: true });
+  });
+
+  it('a same-task refetch moving planned dates keeps the open edit draft', () => {
+    mountHarness();
+    fireEvent.click(screen.getByRole('button', { name: /编辑/ }));
+    const titleInput = screen.getByDisplayValue('读 VLA 综述');
+    fireEvent.change(titleInput, { target: { value: '草稿标题' } });
+    act(() => setHarnessTask({ ...TASK, planned_start: '2026-10-01', planned_end: '2026-10-03' }));
+    expect(screen.getByDisplayValue('草稿标题')).toBeInTheDocument();
+  });
+
+  it('opening a different task resets edit mode', () => {
+    mountHarness();
+    fireEvent.click(screen.getByRole('button', { name: /编辑/ }));
+    fireEvent.change(screen.getByDisplayValue('读 VLA 综述'), { target: { value: '草稿标题' } });
+    act(() => setHarnessTask({ ...TASK, id: 'kb_2', title: '另一张卡' }));
+    expect(screen.queryByDisplayValue('草稿标题')).not.toBeInTheDocument();
+  });
+});
+
+describe('splitTags', () => {
+  it('splits on ASCII and full-width commas and whitespace alike', () => {
+    expect(splitTags('a, b，c  d')).toEqual(['a', 'b', 'c', 'd']);
+    expect(splitTags('')).toEqual([]);
   });
 });
