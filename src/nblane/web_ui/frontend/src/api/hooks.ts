@@ -127,6 +127,8 @@ import type {
   LlmConnection,
   LlmConnectionUpdate,
   LlmConnectionVerify,
+  LocalModels,
+  LocalModelTestResult,
   ProfileSettings,
   ProfileSettingsPatch,
 } from './types';
@@ -185,6 +187,60 @@ export function useUpdateSettingsConnection() {
     onSuccess: (value) => {
       queryClient.setQueryData(['settings', 'connection'], value);
     },
+  });
+}
+
+const LOCAL_MODELS_KEY = ['settings', 'local-models'] as const;
+
+/** Admin-only local model catalog; polls while an install is running. */
+export function useLocalModels(enabled = true) {
+  return useQuery({
+    queryKey: LOCAL_MODELS_KEY,
+    queryFn: () => apiGet<LocalModels>('/settings/local-models'),
+    enabled,
+    refetchInterval: (query) =>
+      query.state.data?.models.some((model) => model.install.status === 'running') ? 1500 : false,
+  });
+}
+
+function useLocalModelMutation<TVars>(request: (vars: TVars) => Promise<LocalModels>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: request,
+    onSuccess: (value) => queryClient.setQueryData(LOCAL_MODELS_KEY, value),
+  });
+}
+
+export function useInstallLocalModel() {
+  return useLocalModelMutation((id: string) =>
+    apiPost<LocalModels>(`/settings/local-models/${encodeURIComponent(id)}/install`, {}),
+  );
+}
+
+export function useCancelLocalModelInstall() {
+  return useLocalModelMutation((id: string) =>
+    apiPost<LocalModels>(`/settings/local-models/${encodeURIComponent(id)}/cancel`, {}),
+  );
+}
+
+export function useDeleteLocalModel() {
+  return useLocalModelMutation((id: string) =>
+    apiDelete<LocalModels>(`/settings/local-models/${encodeURIComponent(id)}`),
+  );
+}
+
+export function useSetActiveLocalModel() {
+  return useLocalModelMutation((modelId: string) =>
+    apiPut<LocalModels>('/settings/local-models/active', { model_id: modelId }),
+  );
+}
+
+export function useTestLocalModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { model_id: string; text: string; target_lang?: string }) =>
+      apiPost<LocalModelTestResult>('/settings/local-models/test', body),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: LOCAL_MODELS_KEY }),
   });
 }
 

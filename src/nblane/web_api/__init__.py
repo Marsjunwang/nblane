@@ -20,6 +20,7 @@ from fastapi.exceptions import RequestValidationError
 from nblane.web_api.assistant import router as assistant_router
 from nblane.web_api.auth import GitActorMiddleware, LoginRateLimiter
 from nblane.web_api.auth import router as auth_router
+from nblane.web_api.local_models import router as local_models_router
 from nblane.web_api.routes_v1 import (
     ApiError,
     api_error_handler,
@@ -52,6 +53,7 @@ def create_app(
     app.include_router(workshop_router)
     app.include_router(research_router)
     app.include_router(research_papers_router)
+    app.include_router(local_models_router)
     # Mounted last so API routes win over the SPA catch-all fallback.
     mount_spa(app, static_dir=spa_static_dir)
     return app

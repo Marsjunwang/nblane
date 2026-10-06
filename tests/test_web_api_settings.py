@@ -143,6 +143,47 @@ class TestWebApiSettings(unittest.TestCase):
         self.assertEqual(read.json()["code"], "admin_required")
         self.assertEqual(write.status_code, 403)
 
+    def test_local_models_catalog_activate_and_routes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _profile(root)
+            client = self._client(root)
+            with patch.dict(os.environ, {"NBLANE_LOCAL_MODELS_DIR": str(root / "models"), "NBLANE_LOCAL_MT_MODEL": ""}):
+                listing = client.get("/api/v1/settings/local-models")
+                self.assertEqual(listing.status_code, 200)
+                body = listing.json()
+                self.assertEqual({m["tier"] for m in body["models"]}, {"fit", "quality"})
+                self.assertNotIn("sha256", listing.text)
+                unknown = client.post("/api/v1/settings/local-models/nope/install")
+                self.assertEqual(unknown.status_code, 404)
+                not_installed = client.put("/api/v1/settings/local-models/active", json={"model_id": body["models"][0]["id"]})
+                self.assertEqual(not_installed.status_code, 400)
+                empty_test = client.post("/api/v1/settings/local-models/test", json={"model_id": body["models"][0]["id"], "text": " "})
+                self.assertEqual(empty_test.status_code, 400)
+                disable = client.put("/api/v1/settings/local-models/active", json={"model_id": ""})
+                self.assertEqual(disable.status_code, 200)
+                self.assertEqual(disable.json()["active_model_id"], "")
+            routes = client.patch(
+                "/api/v1/profiles/alice/settings",
+                json={"ai": {"local_translation": {"full": "local", "selection": "bogus"}}},
+            )
+            self.assertEqual(
+                routes.json()["preferences"]["ai"]["local_translation"],
+                {"selection": "local", "visible": "local", "full": "local"},
+            )
+
+    def test_member_cannot_manage_local_models(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _profile(root)
+            client = self._client(root, auth=True)
+            client.post("/api/v1/auth/login", json={"username": "member", "password": PASSWORD})
+            read = client.get("/api/v1/settings/local-models")
+            install = client.post("/api/v1/settings/local-models/hy-mt2-1.8b-q4/install")
+        self.assertEqual(read.status_code, 403)
+        self.assertEqual(install.status_code, 403)
+
+
     def test_profile_preferences_round_trip_and_secret_stripping(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

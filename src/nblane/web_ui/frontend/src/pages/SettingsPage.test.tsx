@@ -167,4 +167,46 @@ describe('SettingsPage', () => {
     const body = JSON.parse(String(patchCall?.init?.body));
     expect(body.ai.actions['evidence.crystallize']).toEqual({ backend: 'codex', model: 'codex-crystal-v2' });
   });
+
+  it('installs, enables and trial-translates a local model', async () => {
+    const model = (id: string, tier: string, extra: Record<string, unknown> = {}) => ({
+      id, name: id, tier, description: 'desc', repo: 'tencent/x', revision: 'r', filename: `${id}.gguf`, size: 1_130_000_000,
+      min_ram_mb: 3072, runtime_ram_mb: 2100, license: 'Apache-2.0', homepage: 'https://example.test', installed: false, active: false,
+      install_blocker: '', fits_ram: true, install: { status: '', phase: '', downloaded: 0, total: 0, error: '', started_at: 0 }, ...extra,
+    });
+    const status = (models: unknown[]) => ({
+      resources: { total_ram_mb: 3724, available_ram_mb: 1900, free_disk_mb: 17000, models_dir: '/m', cores: 2, avx2: true, avx512: false },
+      runtime: { tag: 'b1', installed: true, supported: true },
+      server: { running: false, port: 8505, model_id: '', rss_mb: 0, sleeping: false },
+      active_model_id: '', active_ready: false, models,
+    });
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url.endsWith('/auth/me')) return jsonResponse(200, { id: 'admin', display_name: 'Admin', role: 'admin', auth_enabled: true, profiles: [], teams: [] });
+      if (url.endsWith('/profiles')) return jsonResponse(200, [{ name: 'alice' }]);
+      if (url.endsWith('/settings/connection')) return jsonResponse(200, CONNECTION);
+      if (url.endsWith('/settings/local-models/fit/install')) return jsonResponse(200, status([model('fit', 'fit', { install: { status: 'running', phase: 'model', downloaded: 565_000_000, total: 1_130_000_000, error: '', started_at: 1 } }), model('big', 'quality')]));
+      if (url.endsWith('/settings/local-models/test')) return jsonResponse(200, { model_id: 'fit', translated_text: '我们提出了 Transformer。', seconds: 6.2 });
+      if (url.endsWith('/settings/local-models')) return jsonResponse(200, status([
+        model('fit', 'fit', { installed: true }),
+        model('big', 'quality', { install_blocker: '需要约 7GB 以上内存，当前 3.6GB。', fits_ram: false }),
+      ]));
+      if (url.endsWith('/profiles/alice/settings')) return jsonResponse(200, PROFILE_SETTINGS);
+      if (url.endsWith('/profiles/alice/settings/codex')) return jsonResponse(200, CODEX_SETTINGS);
+      if (url.endsWith('/settings/codex/status')) return jsonResponse(200, CODEX_STATUS);
+      return jsonResponse(404, { code: 'not_found', message: url });
+    });
+
+    renderPage(fetchMock);
+    expect(await screen.findByText('本地翻译模型')).toBeInTheDocument();
+    expect(screen.getByText('暂不能安装：需要约 7GB 以上内存，当前 3.6GB。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '安装' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '翻译' }));
+    expect(await screen.findByText('我们提出了 Transformer。')).toBeInTheDocument();
+    const testCall = calls.find((call) => call.url.endsWith('/settings/local-models/test'));
+    expect(JSON.parse(String(testCall?.init?.body)).model_id).toBe('fit');
+    expect(screen.getByRole('radiogroup', { name: '全文翻译翻译方式' })).toBeInTheDocument();
+  });
 });

@@ -1,6 +1,8 @@
-"""Optional CPU-local neural translation for short paper passages.
+"""Optional CPU-local neural translation for paper passages.
 
-The runtime is deliberately optional. A local Marian/OPUS-MT directory is
+Two engines are supported. The preferred one is a curated GGUF model served
+by llama.cpp (installed from the SPA settings page, see
+:mod:`nblane.core.ai.local_models`). The legacy path below is still honored: A local Marian/OPUS-MT directory is
 loaded only when ``NBLANE_LOCAL_TRANSLATION_MODEL`` points at a valid model
 directory. Hugging Face Transformers is the default quality path for raw
 PyTorch model directories; a pre-converted CTranslate2 directory remains
@@ -14,6 +16,8 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from nblane.core.ai import local_models
 
 
 LOCAL_TRANSLATION_BACKEND = "local_translation"
@@ -87,9 +91,18 @@ def status() -> LocalTranslationStatus:
 
 
 def is_available() -> bool:
-    """Return whether the local model is configured and structurally valid."""
+    """Return whether a local translator (llama.cpp or legacy) is usable."""
 
-    return status().available
+    return local_models.active_spec() is not None or status().available
+
+
+def active_label() -> str:
+    """Return the ``generated_by`` marker of the translator that would run."""
+
+    spec = local_models.active_spec()
+    if spec is not None:
+        return f"local:{spec.id}"
+    return "local:opus-mt-en-zh" if status().available else ""
 
 
 def _runtime() -> _Runtime:
@@ -161,6 +174,9 @@ def translate_segments(
 ) -> list[dict[str, Any]]:
     """Translate paper segments with a warm CPU-local model."""
 
+    spec = local_models.active_spec()
+    if spec is not None:
+        return _translate_with_llama(spec, segments, target_lang=target_lang)
     if target_lang.lower() not in {"zh", "zh-cn", "zh-hans", "zh-tw"}:
         raise RuntimeError("local OPUS-MT translator only supports English to Chinese")
     if not segments:
@@ -218,8 +234,50 @@ def translate_segments(
     return translations
 
 
+def _segment_row(segment: dict[str, Any], source_text: str, translated: str, target_lang: str, generated_by: str) -> dict[str, Any]:
+    return {
+        "segment_id": str(segment.get("segment_id") or segment.get("id") or ""),
+        "scope_type": str(segment.get("scope_type") or ""),
+        "scope_ref": str(segment.get("scope_ref") or ""),
+        "page": segment.get("page"),
+        "order": segment.get("order"),
+        "source_hash": str(segment.get("source_hash") or segment.get("text_hash") or ""),
+        "source_text": source_text,
+        "target_lang": target_lang,
+        "translated_text": translated,
+        "generated_by": generated_by,
+    }
+
+
+def _translate_with_llama(
+    spec: local_models.LocalModelSpec,
+    segments: list[dict[str, Any]],
+    *,
+    target_lang: str,
+) -> list[dict[str, Any]]:
+    """Translate segments one by one with the llama.cpp-served model."""
+
+    max_chars = _max_chars()
+    texts: list[str] = []
+    for segment in segments:
+        text = str(segment.get("text") or segment.get("source_text") or "").strip()
+        if not text:
+            raise ValueError("local translation received an empty segment")
+        if len(text) > max_chars:
+            raise ValueError(f"local translation segment exceeds {max_chars} characters")
+        texts.append(text)
+    rows: list[dict[str, Any]] = []
+    for segment, text in zip(segments, texts, strict=True):
+        translated = local_models.translate_text(spec, text, target_lang=target_lang)
+        if not translated:
+            raise RuntimeError("local model returned an empty translation")
+        rows.append(_segment_row(segment, text, translated, target_lang, f"local:{spec.id}"))
+    return rows
+
+
 __all__ = [
     "LOCAL_TRANSLATION_BACKEND",
+    "active_label",
     "LocalTranslationStatus",
     "enabled",
     "is_available",

@@ -6491,6 +6491,7 @@ def _process_translation_batches(
         kwargs: dict[str, object] = {
             "target_lang": target_lang,
             "require_review": require_review,
+            "scope": "full",
         }
         if streaming and stream_callback is not None:
             kwargs["stream_callback"] = lambda chunk, b=batch: stream_callback(b, chunk)

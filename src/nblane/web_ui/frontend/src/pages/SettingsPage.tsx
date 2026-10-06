@@ -9,11 +9,14 @@ import {
   Group,
   Loader,
   PasswordInput,
+  Progress,
+  SegmentedControl,
   Select,
   SimpleGrid,
   Stack,
   Tabs,
   Text,
+  Textarea,
   TextInput,
   Title,
 } from '@mantine/core';
@@ -21,7 +24,12 @@ import { notifications } from '@mantine/notifications';
 import {
   IconCheck,
   IconBook2,
+  IconCpu,
   IconDeviceFloppy,
+  IconDownload,
+  IconLanguage,
+  IconTrash,
+  IconX,
   IconKey,
   IconPlugConnected,
   IconRefresh,
@@ -30,7 +38,13 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 
 import {
+  useCancelLocalModelInstall,
   useCodexStatus,
+  useDeleteLocalModel,
+  useInstallLocalModel,
+  useLocalModels,
+  useSetActiveLocalModel,
+  useTestLocalModel,
   usePatchProfileCodexSettings,
   usePatchProfileSettings,
   useProfileCodexSettings,
@@ -41,7 +55,7 @@ import {
   useVerifySettingsConnection,
   useMe,
 } from '../api/hooks';
-import type { CodexSettingsPatch, LlmConnectionUpdate, ProfileSettingsPatch } from '../api/types';
+import type { CodexSettingsPatch, LlmConnectionUpdate, LocalModel, ProfileSettingsPatch } from '../api/types';
 
 const profileOptions = (profiles: Array<{ name: string }>) =>
   profiles.map((profile) => ({ value: profile.name, label: profile.name }));
@@ -134,6 +148,105 @@ function ConnectionSection({ isAdmin }: { isAdmin: boolean }) {
 
 type ActionConfig = { backend: string; model: string };
 
+const LOCAL_ROUTE_SCOPES = [
+  { key: 'selection', label: '选区翻译', description: '划词、选中句子或单段。' },
+  { key: 'visible', label: '当前页翻译', description: 'Reader 中可见页面的段落。' },
+  { key: 'full', label: '全文翻译', description: '整篇论文；本地 1.8B 较慢，建议用 AI。' },
+];
+const LOCAL_ROUTE_DEFAULTS: Record<string, string> = { selection: 'local', visible: 'local', full: 'ai' };
+
+const TIER_LABEL: Record<string, string> = { fit: '适配当前服务器', quality: '高质量 · 需更大内存' };
+const SAMPLE_TEXT = 'We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.';
+
+function formatGb(bytes: number): string {
+  return `${(bytes / 1e9).toFixed(2)} GB`;
+}
+
+function formatMb(mb: number): string {
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+}
+
+function LocalModelCard({ model, busy }: { model: LocalModel; busy: boolean }) {
+  const install = useInstallLocalModel();
+  const cancel = useCancelLocalModelInstall();
+  const remove = useDeleteLocalModel();
+  const activate = useSetActiveLocalModel();
+  const running = model.install.status === 'running';
+  const percent = model.install.total ? Math.min(100, (model.install.downloaded / model.install.total) * 100) : 0;
+  const phase = model.install.phase === 'runtime' ? '下载 llama.cpp 运行时' : '下载模型';
+  const notify = (title: string) => ({ onError: (error: Error) => notifications.show({ title, message: error.message, color: 'red' }) });
+  return (
+    <Card withBorder radius="sm" padding="md">
+      <Stack gap="xs">
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <div>
+            <Group gap="xs"><Text fw={600}>{model.name}</Text>{model.active && <Badge color="green" variant="light">使用中</Badge>}{model.installed && !model.active && <Badge variant="light">已安装</Badge>}</Group>
+            <Text size="xs" c="dimmed">{TIER_LABEL[model.tier] ?? model.tier}</Text>
+          </div>
+          <Badge variant="outline" color="gray">{model.license}</Badge>
+        </Group>
+        <Text size="sm">{model.description}</Text>
+        <Text size="xs" c="dimmed">文件 {formatGb(model.size)} · 运行约 {formatMb(model.runtime_ram_mb)} 内存 · 建议总内存 ≥ {formatMb(model.min_ram_mb)} · <a href={model.homepage} target="_blank" rel="noreferrer">模型主页</a></Text>
+        {running && <Stack gap={4}><Progress value={percent} animated aria-label={`${model.name}安装进度`} /><Text size="xs" c="dimmed">{phase} {percent.toFixed(0)}%（{formatGb(model.install.downloaded)} / {formatGb(model.install.total)}）</Text></Stack>}
+        {model.install.status === 'failed' && <Alert color="red" variant="light">{model.install.error}</Alert>}
+        {!model.installed && !running && model.install_blocker && <Text size="xs" c="dimmed">暂不能安装：{model.install_blocker}</Text>}
+        <Group gap="xs">
+          {!model.installed && !running && <Button size="xs" leftSection={<IconDownload size={14} />} disabled={busy || Boolean(model.install_blocker)} loading={install.isPending} onClick={() => install.mutate(model.id, notify('安装失败'))}>{model.install.status === 'cancelled' || model.install.status === 'failed' ? '继续安装' : '安装'}</Button>}
+          {running && <Button size="xs" variant="default" leftSection={<IconX size={14} />} loading={cancel.isPending} onClick={() => cancel.mutate(model.id)}>取消</Button>}
+          {model.installed && !model.active && <Button size="xs" leftSection={<IconCheck size={14} />} disabled={!model.fits_ram} loading={activate.isPending} onClick={() => activate.mutate(model.id, { onSuccess: () => notifications.show({ title: '已启用本地模型', message: model.name, color: 'green' }), ...notify('启用失败') })}>启用</Button>}
+          {model.active && <Button size="xs" variant="default" loading={activate.isPending} onClick={() => activate.mutate('', notify('停用失败'))}>停用</Button>}
+          {model.installed && <Button size="xs" variant="subtle" color="red" leftSection={<IconTrash size={14} />} loading={remove.isPending} onClick={() => { if (window.confirm(`删除 ${model.name} 的模型文件（${formatGb(model.size)}）？之后需要重新下载。`)) remove.mutate(model.id, notify('删除失败')); }}>删除</Button>}
+        </Group>
+      </Stack>
+    </Card>
+  );
+}
+
+function LocalModelTest({ models, activeId }: { models: LocalModel[]; activeId: string }) {
+  const installed = models.filter((model) => model.installed);
+  const [modelId, setModelId] = useState('');
+  const [text, setText] = useState(SAMPLE_TEXT);
+  const test = useTestLocalModel();
+  const selected = modelId && installed.some((model) => model.id === modelId) ? modelId : activeId || installed[0]?.id || '';
+  if (installed.length === 0) return null;
+  return (
+    <Stack gap="xs">
+      <Text fw={600} size="sm">试译</Text>
+      <Group align="flex-end" gap="xs">
+        <Select w={260} label="模型" value={selected} onChange={(value) => setModelId(value ?? '')} data={installed.map((model) => ({ value: model.id, label: model.name }))} />
+        <Button leftSection={<IconLanguage size={16} />} loading={test.isPending} disabled={!text.trim()} onClick={() => test.mutate({ model_id: selected, text })}>翻译</Button>
+      </Group>
+      <Textarea aria-label="试译原文" autosize minRows={2} maxRows={6} maxLength={2000} value={text} onChange={(event) => setText(event.currentTarget.value)} />
+      {test.isPending && <Text size="xs" c="dimmed">首次调用需要加载模型，可能要十几秒。</Text>}
+      {test.data && <Card withBorder radius="sm" padding="sm"><Text size="sm">{test.data.translated_text}</Text><Text size="xs" c="dimmed" mt={4}>{test.data.seconds}s · {test.data.model_id}</Text></Card>}
+      <ErrorAlert error={test.error} />
+    </Stack>
+  );
+}
+
+function LocalModelsSection() {
+  const status = useLocalModels();
+  if (status.isPending) return null;
+  if (status.isError) return <ErrorAlert error={status.error} />;
+  const { resources, server, models } = status.data;
+  const busy = models.some((model) => model.install.status === 'running');
+  return (
+    <Card withBorder radius="md" padding="lg">
+      <Stack gap="md">
+        <SectionTitle icon={<IconCpu size={22} />} title="本地翻译模型" description="在服务器上用 llama.cpp 运行开源翻译模型，选区和段落翻译不再消耗 LLM 额度；失败时自动回到 AI 连接。" />
+        <Text size="xs" c="dimmed">
+          本机 {resources.cores} 核{resources.avx2 ? ' · AVX2' : ''} · 内存 {formatMb(resources.total_ram_mb)}（可用 {formatMb(resources.available_ram_mb)}） · 磁盘可用 {formatMb(resources.free_disk_mb)}
+          {server.running ? ` · 模型服务${server.sleeping ? '休眠中（已释放内存）' : `运行中，占用 ${formatMb(server.rss_mb)}`}` : ' · 模型服务未启动（首次翻译时自动启动，空闲 5 分钟后释放内存）'}
+        </Text>
+        <SimpleGrid cols={{ base: 1, md: 2 }}>
+          {models.map((model) => <LocalModelCard key={model.id} model={model} busy={busy} />)}
+        </SimpleGrid>
+        <LocalModelTest models={models} activeId={status.data.active_model_id} />
+      </Stack>
+    </Card>
+  );
+}
+
 const ACTION_GROUPS: Array<{ title: string; description: string; actions: Array<{ key: string; label: string; description: string }> }> = [
   { title: '看板与项目', description: '决定工作流辅助动作使用哪一种 AI 执行路径。', actions: [
     { key: 'kanban.task_alignment', label: '任务对齐', description: '把任务与技能/目标做关联建议。' },
@@ -179,9 +292,11 @@ function ProfileSection({ profile }: { profile: string }) {
   const [replyLang, setReplyLang] = useState('');
   const [kanbanBackend, setKanbanBackend] = useState('');
   const [actions, setActions] = useState<Record<string, ActionConfig>>({});
+  const [localRoutes, setLocalRoutes] = useState<Record<string, string>>(LOCAL_ROUTE_DEFAULTS);
 
   useEffect(() => {
     const value = preferences.data?.preferences;
+    setLocalRoutes(Object.fromEntries(LOCAL_ROUTE_SCOPES.map(({ key }) => [key, preferenceString(value, 'ai', 'local_translation', key) || LOCAL_ROUTE_DEFAULTS[key]])));
     setUiLang(preferenceString(value, 'ai', 'llm', 'ui_lang'));
     setReplyLang(preferenceString(value, 'ai', 'llm', 'reply_lang'));
     setKanbanBackend(preferenceString(value, 'ai', 'kanban_backend'));
@@ -200,6 +315,7 @@ function ProfileSection({ profile }: { profile: string }) {
     ai: {
       llm: { ui_lang: uiLang, reply_lang: replyLang },
       kanban_backend: kanbanBackend,
+      local_translation: localRoutes,
       actions: Object.fromEntries(Object.entries(actions).map(([key, config]) => [key, config])),
     },
   };
@@ -211,6 +327,18 @@ function ProfileSection({ profile }: { profile: string }) {
           <Select label="界面语言" placeholder="跟随默认值" value={uiLang || null} onChange={(value) => setUiLang(value ?? '')} data={[{ value: 'zh', label: '中文' }, { value: 'en', label: 'English' }]} clearable />
           <Select label="AI 回复语言" placeholder="自动" value={replyLang || null} onChange={(value) => setReplyLang(value ?? '')} data={[{ value: 'auto', label: '自动' }, { value: 'zh', label: '中文' }, { value: 'en', label: 'English' }]} clearable />
         </SimpleGrid>
+        <Stack gap={6}>
+          <div><Text fw={700}>论文翻译分工</Text><Text size="xs" c="dimmed">管理员启用本地翻译模型后生效；本地模型失败或未启用时一律走 AI。单词始终先查本地词典。</Text></div>
+          <SimpleGrid cols={{ base: 1, sm: 3 }}>
+            {LOCAL_ROUTE_SCOPES.map((scope) => (
+              <Stack key={scope.key} gap={4}>
+                <Text size="sm" fw={600}>{scope.label}</Text>
+                <SegmentedControl aria-label={`${scope.label}翻译方式`} size="xs" value={localRoutes[scope.key] ?? LOCAL_ROUTE_DEFAULTS[scope.key]} onChange={(next) => setLocalRoutes((current) => ({ ...current, [scope.key]: next }))} data={[{ value: 'local', label: '本地模型' }, { value: 'ai', label: 'AI' }]} />
+                <Text size="xs" c="dimmed">{scope.description}</Text>
+              </Stack>
+            ))}
+          </SimpleGrid>
+        </Stack>
         <Stack gap="md">
           {ACTION_GROUPS.map((group) => <Stack key={group.title} gap="xs"><div><Text fw={700}>{group.title}</Text><Text size="xs" c="dimmed">{group.description}</Text></div><SimpleGrid cols={{ base: 1, lg: 2 }}>{group.actions.map((action) => <ActionRow key={action.key} label={action.label} description={action.description} value={actions[action.key] ?? { backend: '', model: '' }} onChange={(next) => setActions((current) => ({ ...current, [action.key]: next }))} />)}</SimpleGrid></Stack>)}
         </Stack>
@@ -340,10 +468,11 @@ export function SettingsPage() {
   return (
     <Stack gap="lg">
       <Group justify="space-between" align="flex-start">
-        <div><Title order={2}>设置</Title><Text c="dimmed" size="sm">集中管理 AI 连接、档案偏好与 Codex 运行状态。</Text></div>
+        <div><Title order={2}>设置</Title><Text c="dimmed" size="sm">集中管理 AI 连接、本地模型、档案偏好与 Codex 运行状态。</Text></div>
         {availableProfiles.length > 0 && <Select w={{ base: 220, sm: 280 }} label="编辑档案" value={profile} onChange={(value) => setProfile(value ?? '')} data={profileOptions(availableProfiles)} />}
       </Group>
       {isAdmin && <ConnectionSection isAdmin />}
+      {isAdmin && <LocalModelsSection />}
       {!isAdmin && <Alert color="blue" title="部署连接由管理员管理">你可以编辑自己有权限档案的 AI 偏好；部署级 Base URL、模型和 API Key 需要管理员处理。</Alert>}
       <Tabs defaultValue="ai">
         <Tabs.List mb="md">

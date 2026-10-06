@@ -3145,6 +3145,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/local-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Local Models
+         * @description Return the curated catalog, host resources and install progress.
+         */
+        get: operations["get_local_models_api_v1_settings_local_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/local-models/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Active Local Model
+         * @description Select which installed model translates; empty disables local use.
+         */
+        put: operations["set_active_local_model_api_v1_settings_local_models_active_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/local-models/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Local Model
+         * @description Translate a short passage to check speed and quality.
+         */
+        post: operations["test_local_model_api_v1_settings_local_models_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/local-models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Local Model
+         * @description Delete a model file (deactivating it first when active).
+         */
+        delete: operations["delete_local_model_api_v1_settings_local_models__model_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/local-models/{model_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Local Model Install
+         * @description Cancel a running install; the partial file is kept for resume.
+         */
+        post: operations["cancel_local_model_install_api_v1_settings_local_models__model_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/local-models/{model_id}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install Local Model
+         * @description Start downloading the runtime and model in the background.
+         */
+        post: operations["install_local_model_api_v1_settings_local_models__model_id__install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/assistant": {
         parameters: {
             query?: never;
@@ -6947,6 +7067,251 @@ export interface components {
             detail: string;
             /** Ok */
             ok: boolean;
+        };
+        /**
+         * LocalModelActiveRequest
+         * @description Select the active local model; empty disables local translation.
+         */
+        LocalModelActiveRequest: {
+            /**
+             * Model Id
+             * @default
+             */
+            model_id: string;
+        };
+        /**
+         * LocalModelInstallStateModel
+         * @description Progress of a background local model install (process-local).
+         */
+        LocalModelInstallStateModel: {
+            /**
+             * Downloaded
+             * @default 0
+             */
+            downloaded: number;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /**
+             * Phase
+             * @default
+             */
+            phase: string;
+            /**
+             * Started At
+             * @default 0
+             */
+            started_at: number;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * LocalModelModel
+         * @description One curated local translation model and its install state.
+         */
+        LocalModelModel: {
+            /**
+             * Active
+             * @default false
+             */
+            active: boolean;
+            /** Description */
+            description: string;
+            /** Filename */
+            filename: string;
+            /**
+             * Fits Ram
+             * @default true
+             */
+            fits_ram: boolean;
+            /** Homepage */
+            homepage: string;
+            /** Id */
+            id: string;
+            install: components["schemas"]["LocalModelInstallStateModel"];
+            /**
+             * Install Blocker
+             * @default
+             */
+            install_blocker: string;
+            /**
+             * Installed
+             * @default false
+             */
+            installed: boolean;
+            /** License */
+            license: string;
+            /** Min Ram Mb */
+            min_ram_mb: number;
+            /** Name */
+            name: string;
+            /** Repo */
+            repo: string;
+            /** Revision */
+            revision: string;
+            /** Runtime Ram Mb */
+            runtime_ram_mb: number;
+            /** Size */
+            size: number;
+            /** Tier */
+            tier: string;
+        };
+        /**
+         * LocalModelResourcesModel
+         * @description Host resources relevant to local model installs.
+         */
+        LocalModelResourcesModel: {
+            /**
+             * Available Ram Mb
+             * @default 0
+             */
+            available_ram_mb: number;
+            /**
+             * Avx2
+             * @default false
+             */
+            avx2: boolean;
+            /**
+             * Avx512
+             * @default false
+             */
+            avx512: boolean;
+            /**
+             * Cores
+             * @default 0
+             */
+            cores: number;
+            /**
+             * Free Disk Mb
+             * @default 0
+             */
+            free_disk_mb: number;
+            /**
+             * Models Dir
+             * @default
+             */
+            models_dir: string;
+            /**
+             * Total Ram Mb
+             * @default 0
+             */
+            total_ram_mb: number;
+        };
+        /**
+         * LocalModelRuntimeModel
+         * @description Pinned llama.cpp runtime status.
+         */
+        LocalModelRuntimeModel: {
+            /**
+             * Installed
+             * @default false
+             */
+            installed: boolean;
+            /**
+             * Supported
+             * @default false
+             */
+            supported: boolean;
+            /**
+             * Tag
+             * @default
+             */
+            tag: string;
+        };
+        /**
+         * LocalModelServerModel
+         * @description Lazily started llama-server status.
+         */
+        LocalModelServerModel: {
+            /**
+             * Model Id
+             * @default
+             */
+            model_id: string;
+            /**
+             * Port
+             * @default 0
+             */
+            port: number;
+            /**
+             * Rss Mb
+             * @default 0
+             */
+            rss_mb: number;
+            /**
+             * Running
+             * @default false
+             */
+            running: boolean;
+            /**
+             * Sleeping
+             * @default false
+             */
+            sleeping: boolean;
+        };
+        /**
+         * LocalModelTestRequest
+         * @description Trial translation with one installed local model.
+         */
+        LocalModelTestRequest: {
+            /**
+             * Model Id
+             * @default
+             */
+            model_id: string;
+            /**
+             * Target Lang
+             * @default zh
+             */
+            target_lang: string;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+        };
+        /**
+         * LocalModelTestResponse
+         * @description Trial translation result.
+         */
+        LocalModelTestResponse: {
+            /** Model Id */
+            model_id: string;
+            /** Seconds */
+            seconds: number;
+            /** Translated Text */
+            translated_text: string;
+        };
+        /**
+         * LocalModelsResponse
+         * @description Admin view of installable local translation models.
+         */
+        LocalModelsResponse: {
+            /**
+             * Active Model Id
+             * @default
+             */
+            active_model_id: string;
+            /**
+             * Active Ready
+             * @default false
+             */
+            active_ready: boolean;
+            /** Models */
+            models: components["schemas"]["LocalModelModel"][];
+            resources: components["schemas"]["LocalModelResourcesModel"];
+            runtime: components["schemas"]["LocalModelRuntimeModel"];
+            server: components["schemas"]["LocalModelServerModel"];
         };
         /**
          * LoginRequest
@@ -20102,6 +20467,347 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_local_models_api_v1_settings_local_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalModelsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_active_local_model_api_v1_settings_local_models_active_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalModelActiveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalModelsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_local_model_api_v1_settings_local_models_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalModelTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalModelTestResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_local_model_api_v1_settings_local_models__model_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalModelsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_local_model_install_api_v1_settings_local_models__model_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalModelsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    install_local_model_api_v1_settings_local_models__model_id__install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalModelsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

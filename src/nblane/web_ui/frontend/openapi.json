@@ -5460,6 +5460,330 @@
     "title": "LlmConnectionVerifyResponse",
     "type": "object"
    },
+   "LocalModelActiveRequest": {
+    "description": "Select the active local model; empty disables local translation.",
+    "properties": {
+     "model_id": {
+      "default": "",
+      "title": "Model Id",
+      "type": "string"
+     }
+    },
+    "title": "LocalModelActiveRequest",
+    "type": "object"
+   },
+   "LocalModelInstallStateModel": {
+    "description": "Progress of a background local model install (process-local).",
+    "properties": {
+     "downloaded": {
+      "default": 0,
+      "title": "Downloaded",
+      "type": "integer"
+     },
+     "error": {
+      "default": "",
+      "title": "Error",
+      "type": "string"
+     },
+     "phase": {
+      "default": "",
+      "title": "Phase",
+      "type": "string"
+     },
+     "started_at": {
+      "default": 0,
+      "title": "Started At",
+      "type": "number"
+     },
+     "status": {
+      "default": "",
+      "title": "Status",
+      "type": "string"
+     },
+     "total": {
+      "default": 0,
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "title": "LocalModelInstallStateModel",
+    "type": "object"
+   },
+   "LocalModelModel": {
+    "description": "One curated local translation model and its install state.",
+    "properties": {
+     "active": {
+      "default": false,
+      "title": "Active",
+      "type": "boolean"
+     },
+     "description": {
+      "title": "Description",
+      "type": "string"
+     },
+     "filename": {
+      "title": "Filename",
+      "type": "string"
+     },
+     "fits_ram": {
+      "default": true,
+      "title": "Fits Ram",
+      "type": "boolean"
+     },
+     "homepage": {
+      "title": "Homepage",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "install": {
+      "$ref": "#/components/schemas/LocalModelInstallStateModel"
+     },
+     "install_blocker": {
+      "default": "",
+      "title": "Install Blocker",
+      "type": "string"
+     },
+     "installed": {
+      "default": false,
+      "title": "Installed",
+      "type": "boolean"
+     },
+     "license": {
+      "title": "License",
+      "type": "string"
+     },
+     "min_ram_mb": {
+      "title": "Min Ram Mb",
+      "type": "integer"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "repo": {
+      "title": "Repo",
+      "type": "string"
+     },
+     "revision": {
+      "title": "Revision",
+      "type": "string"
+     },
+     "runtime_ram_mb": {
+      "title": "Runtime Ram Mb",
+      "type": "integer"
+     },
+     "size": {
+      "title": "Size",
+      "type": "integer"
+     },
+     "tier": {
+      "title": "Tier",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "name",
+     "tier",
+     "description",
+     "repo",
+     "revision",
+     "filename",
+     "size",
+     "min_ram_mb",
+     "runtime_ram_mb",
+     "license",
+     "homepage",
+     "install"
+    ],
+    "title": "LocalModelModel",
+    "type": "object"
+   },
+   "LocalModelResourcesModel": {
+    "description": "Host resources relevant to local model installs.",
+    "properties": {
+     "available_ram_mb": {
+      "default": 0,
+      "title": "Available Ram Mb",
+      "type": "integer"
+     },
+     "avx2": {
+      "default": false,
+      "title": "Avx2",
+      "type": "boolean"
+     },
+     "avx512": {
+      "default": false,
+      "title": "Avx512",
+      "type": "boolean"
+     },
+     "cores": {
+      "default": 0,
+      "title": "Cores",
+      "type": "integer"
+     },
+     "free_disk_mb": {
+      "default": 0,
+      "title": "Free Disk Mb",
+      "type": "integer"
+     },
+     "models_dir": {
+      "default": "",
+      "title": "Models Dir",
+      "type": "string"
+     },
+     "total_ram_mb": {
+      "default": 0,
+      "title": "Total Ram Mb",
+      "type": "integer"
+     }
+    },
+    "title": "LocalModelResourcesModel",
+    "type": "object"
+   },
+   "LocalModelRuntimeModel": {
+    "description": "Pinned llama.cpp runtime status.",
+    "properties": {
+     "installed": {
+      "default": false,
+      "title": "Installed",
+      "type": "boolean"
+     },
+     "supported": {
+      "default": false,
+      "title": "Supported",
+      "type": "boolean"
+     },
+     "tag": {
+      "default": "",
+      "title": "Tag",
+      "type": "string"
+     }
+    },
+    "title": "LocalModelRuntimeModel",
+    "type": "object"
+   },
+   "LocalModelServerModel": {
+    "description": "Lazily started llama-server status.",
+    "properties": {
+     "model_id": {
+      "default": "",
+      "title": "Model Id",
+      "type": "string"
+     },
+     "port": {
+      "default": 0,
+      "title": "Port",
+      "type": "integer"
+     },
+     "rss_mb": {
+      "default": 0,
+      "title": "Rss Mb",
+      "type": "integer"
+     },
+     "running": {
+      "default": false,
+      "title": "Running",
+      "type": "boolean"
+     },
+     "sleeping": {
+      "default": false,
+      "title": "Sleeping",
+      "type": "boolean"
+     }
+    },
+    "title": "LocalModelServerModel",
+    "type": "object"
+   },
+   "LocalModelTestRequest": {
+    "description": "Trial translation with one installed local model.",
+    "properties": {
+     "model_id": {
+      "default": "",
+      "title": "Model Id",
+      "type": "string"
+     },
+     "target_lang": {
+      "default": "zh",
+      "title": "Target Lang",
+      "type": "string"
+     },
+     "text": {
+      "default": "",
+      "maxLength": 2000,
+      "title": "Text",
+      "type": "string"
+     }
+    },
+    "title": "LocalModelTestRequest",
+    "type": "object"
+   },
+   "LocalModelTestResponse": {
+    "description": "Trial translation result.",
+    "properties": {
+     "model_id": {
+      "title": "Model Id",
+      "type": "string"
+     },
+     "seconds": {
+      "title": "Seconds",
+      "type": "number"
+     },
+     "translated_text": {
+      "title": "Translated Text",
+      "type": "string"
+     }
+    },
+    "required": [
+     "model_id",
+     "translated_text",
+     "seconds"
+    ],
+    "title": "LocalModelTestResponse",
+    "type": "object"
+   },
+   "LocalModelsResponse": {
+    "description": "Admin view of installable local translation models.",
+    "properties": {
+     "active_model_id": {
+      "default": "",
+      "title": "Active Model Id",
+      "type": "string"
+     },
+     "active_ready": {
+      "default": false,
+      "title": "Active Ready",
+      "type": "boolean"
+     },
+     "models": {
+      "items": {
+       "$ref": "#/components/schemas/LocalModelModel"
+      },
+      "title": "Models",
+      "type": "array"
+     },
+     "resources": {
+      "$ref": "#/components/schemas/LocalModelResourcesModel"
+     },
+     "runtime": {
+      "$ref": "#/components/schemas/LocalModelRuntimeModel"
+     },
+     "server": {
+      "$ref": "#/components/schemas/LocalModelServerModel"
+     }
+    },
+    "required": [
+     "resources",
+     "runtime",
+     "server",
+     "models"
+    ],
+    "title": "LocalModelsResponse",
+    "type": "object"
+   },
    "LoginRequest": {
     "description": "Credentials submitted to the login endpoint.",
     "properties": {
@@ -24396,6 +24720,403 @@
      }
     },
     "summary": "Verify Settings Connection"
+   }
+  },
+  "/api/v1/settings/local-models": {
+   "get": {
+    "description": "Return the curated catalog, host resources and install progress.",
+    "operationId": "get_local_models_api_v1_settings_local_models_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LocalModelsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     }
+    },
+    "summary": "Get Local Models"
+   }
+  },
+  "/api/v1/settings/local-models/active": {
+   "put": {
+    "description": "Select which installed model translates; empty disables local use.",
+    "operationId": "set_active_local_model_api_v1_settings_local_models_active_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LocalModelActiveRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LocalModelsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Set Active Local Model"
+   }
+  },
+  "/api/v1/settings/local-models/test": {
+   "post": {
+    "description": "Translate a short passage to check speed and quality.",
+    "operationId": "test_local_model_api_v1_settings_local_models_test_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LocalModelTestRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LocalModelTestResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Test Local Model"
+   }
+  },
+  "/api/v1/settings/local-models/{model_id}": {
+   "delete": {
+    "description": "Delete a model file (deactivating it first when active).",
+    "operationId": "delete_local_model_api_v1_settings_local_models__model_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "model_id",
+      "required": true,
+      "schema": {
+       "title": "Model Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LocalModelsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Delete Local Model"
+   }
+  },
+  "/api/v1/settings/local-models/{model_id}/cancel": {
+   "post": {
+    "description": "Cancel a running install; the partial file is kept for resume.",
+    "operationId": "cancel_local_model_install_api_v1_settings_local_models__model_id__cancel_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "model_id",
+      "required": true,
+      "schema": {
+       "title": "Model Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LocalModelsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Cancel Local Model Install"
+   }
+  },
+  "/api/v1/settings/local-models/{model_id}/install": {
+   "post": {
+    "description": "Start downloading the runtime and model in the background.",
+    "operationId": "install_local_model_api_v1_settings_local_models__model_id__install_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "model_id",
+      "required": true,
+      "schema": {
+       "title": "Model Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LocalModelsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Install Local Model"
    }
   },
   "/api/v1/system/assistant": {

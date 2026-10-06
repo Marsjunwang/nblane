@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-09-26
+last_verified: 2026-10-06
 source_of_truth: true
 ---
 
@@ -624,13 +624,40 @@ sudo docker stop nblane-grobid
 地址 `http://127.0.0.1:8070` 继续探测。Reader 仍能使用已抽取的 page text、
 手工 annotations、chunks、claims、citations 和导出功能。
 
+## 本地翻译模型
+
+可选。部署代码后由管理员在 SPA「设置 → 本地翻译模型」安装和启用，不需要改 systemd 或 `.env`。
+用户侧说明见 [Research 使用说明 · 本地翻译模型](research.md#本地翻译模型)。
+
+- **下载**：后端进程直接下载固定版本的 llama.cpp CPU 运行时（GitHub）和固定 revision 的 GGUF（Hugging Face），
+  校验 SHA-256，支持断点续传。下载走服务的 `https_proxy`（见 [mihomo 部署](mihomo-deployment.md)「让生产 systemd 服务走代理」）；
+  没有代理时可设 `NBLANE_HF_ENDPOINT=https://hf-mirror.com`。安装进度只在 8504 进程内存里，下载中重启服务会丢进度条，
+  已下载部分保留，重新点「安装」会续传。
+- **文件**：默认放在服务用户的 `~/.local/share/nblane/local-models/`（`models/`、`runtime/`、`run/`、`active.json`），
+  可用 `NBLANE_LOCAL_MODELS_DIR` 改到数据盘；两个服务（8502、8504）必须看到同一个目录。不进入 Git。
+- **运行**：第一次翻译时由 8502 或 8504 拉起 `llama-server`，只监听 `127.0.0.1:8505`（`NBLANE_LOCAL_MT_PORT`），
+  每次启动生成随机 API key；空闲 300 秒（`NBLANE_LOCAL_MT_IDLE_SECONDS`）后释放模型内存。和 GROBID 一样，
+  **不要在安全组或 Caddy 中暴露 8505**。
+- **资源**：1.8B 运行约 2.1 GB 内存。2 核 4 GB 机器上 GROBID（约 3 GB，多在 swap）和模型同时满载会变慢；
+  内存紧张时可以把全文翻译保持为 AI（默认）。
+
+维护：
+
+```bash
+ls -lh ~/.local/share/nblane/local-models/models/      # 已安装模型
+tail -f ~/.local/share/nblane/local-models/run/llama-8505.log
+pgrep -af llama-server                                  # 是否在运行（休眠时 RSS 约 50 MB）
+```
+
+停用或删除在设置页操作即可；手动删除 `local-models/` 目录等同于卸载。
+
 ## 腾讯云安全组与备案
 
 安全组只开放必要端口：
 
 - `TCP:80,443`：公网 Web。
 - `TCP:22`：仅允许管理员固定 IP。
-- 不开放 `8501`、数据库端口或全端口。
+- 不开放 `8501`、`8505`（本地翻译模型）、数据库端口或全端口。
 
 腾讯云官方文档：
 

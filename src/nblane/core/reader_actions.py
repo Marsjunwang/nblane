@@ -1528,6 +1528,7 @@ def _handle_reader_action_inner(
                 batch,
                 target_lang=target_lang,
                 require_review=False,
+                scope="visible",
             )
             batch_warnings = [str(item) for item in ai_result.warnings]
             warnings.extend(batch_warnings)
@@ -1819,6 +1820,7 @@ def _handle_reader_action_inner(
             segments,
             target_lang=target_lang,
             require_review=False,
+            scope="selection",
         )
         translations = []
         if isinstance(ai_result.structured, dict):

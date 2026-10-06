@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-09-20
+last_verified: 2026-10-06
 source_of_truth: true
 ---
 
@@ -299,6 +299,11 @@ Direct LLM 的 `research.paper_translate` 默认启用流式请求（`NBLANE_STR
 `NBLANE_PAPER_TRANSLATION_STRUCTURE_BATCH_CHARS`、`NBLANE_PAPER_TRANSLATION_LAYOUT_BATCH_CHARS`、
 `NBLANE_PAPER_TRANSLATION_SEGMENT_BATCH_CHARS`、`NBLANE_PAPER_TRANSLATION_PAGE_BATCH_CHARS` 或通用
 `NBLANE_PAPER_TRANSLATION_BATCH_CHARS` 覆盖字符预算。
+
+### 旧版 OPUS-MT 本地首译（不推荐）
+
+推荐改用 SPA 设置页安装的本地翻译模型（Hy-MT2），见 [Research 使用说明 · 本地翻译模型](research.md#本地翻译模型)。
+实测 OPUS-MT 在论文术语上质量不足（如把 self-attention 译成「自 关心」、长段漏译），仅为兼容保留；两者都配置时优先用 Hy-MT2。
 
 Reader 还支持可选的 CPU 本地首译。安装 `nblane[local-translation]` 后，把 OPUS-MT 英文到中文模型目录配置到
 `NBLANE_LOCAL_TRANSLATION_MODEL`，即可让短句和段落先走本地模型；模型不可用、语言不支持或输入过长时自动回到配置的 LLM。

@@ -199,6 +199,13 @@ if [[ "$mode" == "local" ]]; then
   asset_root="${asset_root_arg:-${NBLANE_RESEARCH_ASSET_ROOT:-$repo_root/.dev-assets/research}}"
 fi
 
+# Local translation models (llama.cpp): isolated runs keep their own model
+# directory and server port so they never share or stop the production one.
+local_models_env=""
+if [[ "$mode" == "isolated" ]]; then
+  local_models_env="NBLANE_LOCAL_MODELS_DIR='$dev_root/local-models' NBLANE_LOCAL_MT_PORT=18505"
+fi
+
 reader_base="http://127.0.0.1:${reader_port}"
 streamlit_base="http://127.0.0.1:${streamlit_port}"
 web_api_base="http://127.0.0.1:${web_api_port}"
@@ -474,7 +481,7 @@ tmux new-session -d -s "$reader_session" -c "$repo_root" \
    NBLANE_ENV_FILE='$env_file' \
    NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
    NBLANE_SPA_BASE_URL='$web_api_base' \
-   ${auth_env} ${grobid_env} ${lang_env} \
+   ${auth_env} ${grobid_env} ${lang_env} ${local_models_env} \
    PYTHONPATH=src .venv/bin/uvicorn ${uvicorn_args}"
 
 if [[ "$use_streamlit" == "1" ]]; then
@@ -504,7 +511,7 @@ if [[ "$use_web_api" == "1" ]]; then
      NBLANE_READER_API_BASE='$reader_base' \
      NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
      NBLANE_WORKSHOP_URL=\"\${NBLANE_WORKSHOP_URL:-http://127.0.0.1:7668/}\" \
-     ${web_api_auth_env} ${lang_env} \
+     ${web_api_auth_env} ${lang_env} ${local_models_env} \
      PYTHONPATH=src .venv/bin/uvicorn ${web_api_uvicorn_args}"
 fi
 

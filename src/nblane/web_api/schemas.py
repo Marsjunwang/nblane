@@ -3083,3 +3083,99 @@ class ResearchAIConfigUpdateRequest(BaseModel):
     """Only research actions are accepted; unknown keys answer 422."""
 
     actions: dict[str, ResearchAIActionUpdate] = Field(default_factory=dict)
+
+
+class LocalModelInstallStateModel(BaseModel):
+    """Progress of a background local model install (process-local)."""
+
+    status: str = ""
+    phase: str = ""
+    downloaded: int = 0
+    total: int = 0
+    error: str = ""
+    started_at: float = 0
+
+
+class LocalModelModel(BaseModel):
+    """One curated local translation model and its install state."""
+
+    id: str
+    name: str
+    tier: str
+    description: str
+    repo: str
+    revision: str
+    filename: str
+    size: int
+    min_ram_mb: int
+    runtime_ram_mb: int
+    license: str
+    homepage: str
+    installed: bool = False
+    active: bool = False
+    install_blocker: str = ""
+    fits_ram: bool = True
+    install: LocalModelInstallStateModel
+
+
+class LocalModelResourcesModel(BaseModel):
+    """Host resources relevant to local model installs."""
+
+    total_ram_mb: int = 0
+    available_ram_mb: int = 0
+    free_disk_mb: int = 0
+    models_dir: str = ""
+    cores: int = 0
+    avx2: bool = False
+    avx512: bool = False
+
+
+class LocalModelRuntimeModel(BaseModel):
+    """Pinned llama.cpp runtime status."""
+
+    tag: str = ""
+    installed: bool = False
+    supported: bool = False
+
+
+class LocalModelServerModel(BaseModel):
+    """Lazily started llama-server status."""
+
+    running: bool = False
+    port: int = 0
+    model_id: str = ""
+    rss_mb: int = 0
+    sleeping: bool = False
+
+
+class LocalModelsResponse(BaseModel):
+    """Admin view of installable local translation models."""
+
+    resources: LocalModelResourcesModel
+    runtime: LocalModelRuntimeModel
+    server: LocalModelServerModel
+    active_model_id: str = ""
+    active_ready: bool = False
+    models: list[LocalModelModel]
+
+
+class LocalModelActiveRequest(BaseModel):
+    """Select the active local model; empty disables local translation."""
+
+    model_id: str = ""
+
+
+class LocalModelTestRequest(BaseModel):
+    """Trial translation with one installed local model."""
+
+    model_id: str = ""
+    text: str = Field(default="", max_length=2000)
+    target_lang: str = "zh"
+
+
+class LocalModelTestResponse(BaseModel):
+    """Trial translation result."""
+
+    model_id: str
+    translated_text: str
+    seconds: float

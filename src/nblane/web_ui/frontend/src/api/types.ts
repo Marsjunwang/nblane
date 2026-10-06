@@ -19,6 +19,9 @@ export type CurrentUser = Schemas['CurrentUser'];
 export type LlmConnection = Schemas['LlmConnectionResponse'];
 export type LlmConnectionUpdate = Schemas['LlmConnectionUpdateRequest'];
 export type LlmConnectionVerify = Schemas['LlmConnectionVerifyResponse'];
+export type LocalModels = Schemas['LocalModelsResponse'];
+export type LocalModel = Schemas['LocalModelModel'];
+export type LocalModelTestResult = Schemas['LocalModelTestResponse'];
 
 /** Profile-scoped non-secret preferences and Codex readiness/configuration. */
 export type ProfileSettings = Schemas['ProfileSettingsResponse'];

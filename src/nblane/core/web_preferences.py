@@ -31,6 +31,15 @@ _READER_PANEL_MODES = {"collapsed", "open"}
 _READER_TABS = {"notes", "translation", "review"}
 _READER_LEFT_TABS = {"outline", "thumbnails"}
 _READER_TRANSLATION_LAYOUTS = {"flow", "overlay"}
+# Which translation scopes may use the installed local model ("local") or
+# must use the configured AI backend ("ai"). Scope keys match
+# ``translate_paper_segments(scope=...)``.
+LOCAL_TRANSLATION_SCOPE_DEFAULTS: dict[str, str] = {
+    "selection": "local",
+    "visible": "local",
+    "full": "ai",
+}
+_LOCAL_TRANSLATION_ROUTES = {"local", "ai"}
 AI_ACTION_DEFAULT_BACKENDS: dict[str, str] = {
     "research.paper_search_codex": "codex",
     "research.paper_translate": "llm",
@@ -160,6 +169,9 @@ def normalize_web_preferences(
                 "deep_read_model": _clean_text(paper.get("deep_read_model")),
             },
             "actions": _normalize_ai_actions(actions, paper, backend),
+            "local_translation": _normalize_local_translation(
+                ai.get("local_translation") if isinstance(ai.get("local_translation"), dict) else {}
+            ),
             "kanban_backend": backend if backend in _AI_BACKENDS else "",
         },
         "kanban": {
@@ -319,6 +331,15 @@ def _bounded_int(value: object, *, default: int, minimum: int, maximum: int) -> 
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+def _normalize_local_translation(raw: dict[str, Any]) -> dict[str, str]:
+    """Normalize per-scope local-model routing (selection/visible/full)."""
+
+    return {
+        scope: _choice(raw.get(scope), _LOCAL_TRANSLATION_ROUTES, default)
+        for scope, default in LOCAL_TRANSLATION_SCOPE_DEFAULTS.items()
+    }
 
 
 def _normalize_reader_preferences(raw: dict[str, Any]) -> dict[str, Any]:

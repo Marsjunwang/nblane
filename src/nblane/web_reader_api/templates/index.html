@@ -1848,7 +1848,7 @@
       translation_structure_incomplete: "Complete paper parsing before full translation.",
       translate_visible_pages: "Translate visible page",
       translation_panel_hint: "Paragraph actions live in the reading flow; this panel only shows progress and starts a visible-page batch.",
-      translation_backend_local: "Local CPU translator",
+      translation_backend_local: "Local model",
       translation_backend_ai: "AI model translator",
       translation_backend_cache: "Cache / dictionary",
       translation_backend_unknown: "Not started",
@@ -2521,7 +2521,7 @@
         ...asArr(asObj(data.structured).translations),
       ];
       const source = text(data.translation_source || rows.find((row) => text(asObj(row).generated_by))?.generated_by || result && result.backend).toLowerCase();
-      if (source.includes("local:opus") || source.includes("local_translation")) return "本地快速翻译";
+      if (source.startsWith("local:") || source.includes("local_translation")) return label("translation_backend_local");
       if (source === "cache" || source === "segment_cache" || source === "local_dict") return "本地缓存";
       if (source.includes("direct_llm") || source === "llm" || source.includes("openai")) return "AI 翻译";
       if (source.includes("rule_fallback")) return "规则回退";
@@ -5788,7 +5788,7 @@
       const generatedBy = asArr(args.translations)
         .map((row) => text(asObj(row).generated_by).toLowerCase())
         .filter(Boolean);
-      const backend = generatedBy.some((value) => value.includes("local:opus") || value.includes("local_translation"))
+      const backend = generatedBy.some((value) => value.startsWith("local:") || value.includes("local_translation"))
         ? label("translation_backend_local")
         : generatedBy.some((value) => value.includes("direct_llm") || value.includes("openai") || value === "llm")
           ? label("translation_backend_ai")

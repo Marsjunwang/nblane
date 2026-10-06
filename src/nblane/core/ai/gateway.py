@@ -17,6 +17,7 @@ from nblane.core.ai.runs import (
 )
 from nblane.core.web_preferences import (
     AI_ACTION_DEFAULT_BACKENDS,
+    LOCAL_TRANSLATION_SCOPE_DEFAULTS,
     load_web_preferences,
 )
 from nblane.core.ai.local_translation import LOCAL_TRANSLATION_BACKEND, is_available as local_translation_available
@@ -259,8 +260,16 @@ def translate_paper_segments(
     model_timeout_seconds: float | None = None,
     context_refs: list[str] | None = None,
     require_review: bool = True,
+    scope: str = "",
 ) -> AIActionResult:
-    """Typed helper for ``research.paper_translate``."""
+    """Typed helper for ``research.paper_translate``.
+
+    ``scope`` is ``selection``, ``visible`` or ``full``. When a local model is
+    installed, the profile's ``ai.local_translation`` routing decides per
+    scope whether it runs locally (falling back to the LLM on failure) or on
+    the configured AI backend. Without a scope the local model is used only
+    when no backend preference is set (legacy behavior).
+    """
 
     body, preferred_backend = _with_action_ai_preferences(
         profile,
@@ -277,7 +286,14 @@ def translate_paper_segments(
         },
         model=model,
     )
-    if not preferred_backend and local_translation_available():
+    clean_scope = str(scope or "").strip().lower()
+    if clean_scope in LOCAL_TRANSLATION_SCOPE_DEFAULTS:
+        if (
+            _local_translation_route(profile, clean_scope) == "local"
+            and local_translation_available()
+        ):
+            preferred_backend = LOCAL_TRANSLATION_BACKEND
+    elif not preferred_backend and local_translation_available():
         preferred_backend = LOCAL_TRANSLATION_BACKEND
     return run_ai_action(
         "research.paper_translate",
@@ -661,6 +677,23 @@ def _with_action_ai_preferences(
         else:
             body["ai_model"] = model_override
     return body, preferred_backend
+
+
+def _local_translation_route(profile: str, scope: str) -> str:
+    """Return ``local`` or ``ai`` for one translation scope of a profile."""
+
+    default = LOCAL_TRANSLATION_SCOPE_DEFAULTS.get(scope, "ai")
+    clean_profile = str(profile or "").strip()
+    if not clean_profile:
+        return default
+    try:
+        prefs = load_web_preferences(clean_profile)
+    except Exception:
+        return default
+    ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
+    routes = ai.get("local_translation") if isinstance(ai.get("local_translation"), dict) else {}
+    value = str(routes.get(scope) or "").strip()
+    return value if value in {"local", "ai"} else default
 
 
 def _action_ai_config(profile: str, action_name: str) -> dict[str, str]:

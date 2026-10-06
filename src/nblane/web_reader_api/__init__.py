@@ -572,7 +572,7 @@ def _reader_ui(ui_lang: str | None = None) -> dict[str, str]:
                 "Paragraph actions live in the reading flow; this panel only shows progress "
                 "and starts a visible-page batch."
             ),
-            "translation_backend_local": "Local CPU translator",
+            "translation_backend_local": "Local model",
             "translation_backend_ai": "AI model translator",
             "translation_backend_cache": "Cache / dictionary",
             "translation_backend_unknown": "Not started",
@@ -608,7 +608,7 @@ def _reader_ui(ui_lang: str | None = None) -> dict[str, str]:
         "translation_structure_incomplete": "请先完成论文结构解析，再进行全文翻译。",
         "translate_visible_pages": "翻译当前可见页",
         "translation_panel_hint": "逐段操作都在中间阅读流完成；这里仅显示进度并启动当前可见页批量翻译。",
-        "translation_backend_local": "本地 CPU 翻译",
+        "translation_backend_local": "本地模型翻译",
         "translation_backend_ai": "AI 模型翻译",
         "translation_backend_cache": "缓存 / 词典",
         "translation_backend_unknown": "尚未开始",

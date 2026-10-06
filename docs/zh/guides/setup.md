@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-09-15
+last_verified: 2026-10-06
 source_of_truth: true
 ---
 
@@ -115,6 +115,13 @@ nblane codex install --upgrade        # 执行 npm i -g @openai/codex@latest
 ```bash
 codex login
 ```
+
+### 可选：本地翻译模型
+
+不需要在安装阶段做任何事。服务跑起来后，管理员在 SPA「设置 → 本地翻译模型」一键安装即可
+（自动下载 llama.cpp 运行时和模型，约 1.2 GB；服务器需要能访问 Hugging Face 和 GitHub，
+国内机器请先配好下面的 mihomo 代理，或设置 `NBLANE_HF_ENDPOINT` 镜像）。
+档位选择和使用方式见 [Research 使用说明 · 本地翻译模型](research.md#本地翻译模型)。
 
 ### 可选：安装 mihomo 代理
 
