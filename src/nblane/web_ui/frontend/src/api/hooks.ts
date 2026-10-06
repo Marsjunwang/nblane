@@ -127,6 +127,13 @@ import type {
   LlmConnection,
   LlmConnectionUpdate,
   LlmConnectionVerify,
+  GrobidLogs,
+  GrobidStatus,
+  BackupKey,
+  BackupRemoteTest,
+  BackupRun,
+  BackupStatus,
+  OpenClawSetupStatus,
   LocalModels,
   LocalModelTestResult,
   ProfileSettings,
@@ -241,6 +248,136 @@ export function useTestLocalModel() {
     mutationFn: (body: { model_id: string; text: string; target_lang?: string }) =>
       apiPost<LocalModelTestResult>('/settings/local-models/test', body),
     onSettled: () => queryClient.invalidateQueries({ queryKey: LOCAL_MODELS_KEY }),
+  });
+}
+
+const GROBID_KEY = ['settings', 'grobid'] as const;
+
+/** Admin-only GROBID status; polls while installing or the JVM is starting. */
+export function useGrobidStatus(enabled = true) {
+  return useQuery({
+    queryKey: GROBID_KEY,
+    queryFn: () => apiGet<GrobidStatus>('/settings/grobid'),
+    enabled,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      return data.install.status === 'running' || data.state === 'starting' ? 3000 : 30000;
+    },
+  });
+}
+
+function useGrobidMutation<TVars>(request: (vars: TVars) => Promise<GrobidStatus>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: request,
+    onSuccess: (value) => queryClient.setQueryData(GROBID_KEY, value),
+  });
+}
+
+export function useGrobidAction() {
+  return useGrobidMutation((action: 'install' | 'start' | 'stop' | 'restart') =>
+    apiPost<GrobidStatus>(`/settings/grobid/${action}`, {}),
+  );
+}
+
+export function useUninstallGrobid() {
+  return useGrobidMutation(() => apiDelete<GrobidStatus>('/settings/grobid'));
+}
+
+export function useSetGrobidBackend() {
+  return useGrobidMutation((backend: string) => apiPut<GrobidStatus>('/settings/grobid/backend', { backend }));
+}
+
+export function useGrobidLogs(enabled: boolean) {
+  return useQuery({
+    queryKey: [...GROBID_KEY, 'logs'],
+    queryFn: () => apiGet<GrobidLogs>('/settings/grobid/logs'),
+    enabled,
+  });
+}
+
+const BACKUP_KEY = ['settings', 'backup'] as const;
+
+/** Admin-only backup targets (data repo + agent workspaces) and the daily timer. */
+export function useBackupStatus(enabled = true) {
+  return useQuery({ queryKey: BACKUP_KEY, queryFn: () => apiGet<BackupStatus>('/settings/backup'), enabled });
+}
+
+function useBackupMutation<TVars>(request: (vars: TVars) => Promise<BackupStatus>) {
+  const queryClient = useQueryClient();
+  return useMutation({ mutationFn: request, onSuccess: (value) => queryClient.setQueryData(BACKUP_KEY, value) });
+}
+
+export function useInitBackupTarget() {
+  return useBackupMutation((targetId: string) => apiPost<BackupStatus>(`/settings/backup/targets/${encodeURIComponent(targetId)}/init`, {}));
+}
+
+export function useGenerateBackupKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (targetId: string) => apiPost<BackupKey>(`/settings/backup/targets/${encodeURIComponent(targetId)}/key`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: BACKUP_KEY }),
+  });
+}
+
+export function useTestBackupRemote() {
+  return useMutation({
+    mutationFn: ({ targetId, url }: { targetId: string; url: string }) =>
+      apiPost<BackupRemoteTest>(`/settings/backup/targets/${encodeURIComponent(targetId)}/remote/test`, { url }),
+  });
+}
+
+export function useSaveBackupRemote() {
+  return useBackupMutation(({ targetId, url }: { targetId: string; url: string }) =>
+    apiPut<BackupStatus>(`/settings/backup/targets/${encodeURIComponent(targetId)}/remote`, { url }));
+}
+
+export function useRunBackup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (targetId?: string) =>
+      apiPost<BackupRun>(`/settings/backup/run${targetId ? `?target_id=${encodeURIComponent(targetId)}` : ''}`, {}),
+    onSuccess: (value) => queryClient.setQueryData(BACKUP_KEY, value.status),
+  });
+}
+
+export function useSetBackupTimer() {
+  return useBackupMutation((enabled: boolean) => apiPut<BackupStatus>('/settings/backup/timer', { enabled }));
+}
+
+const OPENCLAW_SETUP_KEY = ['settings', 'agents', 'openclaw'] as const;
+
+/** Admin-only OpenClaw install/wiring state; polls while a setup job runs. */
+export function useOpenClawSetup(enabled = true) {
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: OPENCLAW_SETUP_KEY,
+    queryFn: async () => {
+      const value = await apiGet<OpenClawSetupStatus>('/settings/agents/openclaw');
+      // A finished job may have created a new backup target (workspace).
+      if (value.job?.status && value.job.status !== 'running') void queryClient.invalidateQueries({ queryKey: BACKUP_KEY });
+      return value;
+    },
+    enabled,
+    refetchInterval: (query) => (query.state.data?.job?.status === 'running' ? 2000 : false),
+  });
+}
+
+export function useStartOpenClawJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ kind, profile, reuseLlm }: { kind: 'install' | 'connect' | 'migrate' | 'weixin'; profile?: string; reuseLlm?: boolean }) =>
+      apiPost<OpenClawSetupStatus>(`/settings/agents/openclaw/${kind}`, { profile: profile ?? '', reuse_llm: reuseLlm ?? true }),
+    onSuccess: (value) => queryClient.setQueryData(OPENCLAW_SETUP_KEY, value),
+  });
+}
+
+export function useOpenClawGateway() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (action: 'start' | 'stop' | 'restart') => apiPost<OpenClawSetupStatus>('/settings/agents/openclaw-gateway', { action }),
+    onSuccess: (value) => queryClient.setQueryData(OPENCLAW_SETUP_KEY, value),
   });
 }
 

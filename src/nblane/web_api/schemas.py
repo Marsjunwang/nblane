@@ -3179,3 +3179,218 @@ class LocalModelTestResponse(BaseModel):
     model_id: str
     translated_text: str
     seconds: float
+
+
+class GrobidUnitStateModel(BaseModel):
+    """systemd --user state of the managed GROBID unit."""
+
+    installed: bool = False
+    active_state: str = ""
+    sub_state: str = ""
+    result: str = ""
+    memory_mb: int = 0
+    since: str = ""
+    restarts: int = 0
+
+
+class GrobidInstallStateModel(BaseModel):
+    """Progress of a background GROBID install (process-local)."""
+
+    status: str = ""
+    phase: str = ""
+    error: str = ""
+    started_at: float = 0
+
+
+class GrobidStatusResponse(BaseModel):
+    """Admin view of the GROBID structure-extraction service."""
+
+    state: str
+    alive: bool
+    version: str = ""
+    url: str
+    manageable: bool
+    port: int = 0
+    unit: str
+    unit_state: GrobidUnitStateModel
+    image: str
+    image_present: bool
+    podman_available: bool
+    user_manager: bool
+    backend: str
+    backend_override: str = ""
+    env_backend: str = ""
+    total_ram_mb: int = 0
+    available_ram_mb: int = 0
+    min_ram_mb: int = 0
+    install: GrobidInstallStateModel
+    blocker: str = ""
+
+
+class GrobidBackendRequest(BaseModel):
+    """PDF structure backend override; empty clears it (env decides)."""
+
+    backend: Literal["", "auto", "grobid", "pymupdf"] = ""
+
+
+class GrobidLogsResponse(BaseModel):
+    """Tail of the managed GROBID unit journal."""
+
+    text: str = ""
+
+
+class BackupRunModel(BaseModel):
+    """Result of the latest backup run for one target."""
+
+    at: str = ""
+    ok: bool = False
+    committed: bool = False
+    pushed: bool = False
+    error: str = ""
+
+
+class BackupTargetModel(BaseModel):
+    """One git repository covered by the daily backup."""
+
+    id: str
+    label: str
+    description: str = ""
+    path: str
+    commit_mode: str
+    exists: bool = False
+    is_git: bool = False
+    remote_url: str = ""
+    branch: str = ""
+    upstream: str = ""
+    ahead: int = 0
+    dirty: int = 0
+    has_commits: bool = False
+    last_commit_at: str = ""
+    last_commit_subject: str = ""
+    key_path: str = ""
+    key_ready: bool = False
+    public_key: str = ""
+    last_run: BackupRunModel = Field(default_factory=BackupRunModel)
+
+
+class BackupTimerModel(BaseModel):
+    """systemd --user timer driving the daily backup."""
+
+    unit: str = ""
+    installed: bool = False
+    enabled: bool = False
+    next_run: str = ""
+    schedule: str = ""
+
+
+class BackupDataGitModel(BaseModel):
+    """Per-write autocommit flags of the nblane data repository."""
+
+    autocommit: bool = False
+    autopush: bool = False
+
+
+class BackupStatusResponse(BaseModel):
+    """Admin view of all backup targets and the daily timer."""
+
+    targets: list[BackupTargetModel]
+    timer: BackupTimerModel
+    backups_dir: str = ""
+    data_git: BackupDataGitModel = Field(default_factory=BackupDataGitModel)
+
+
+class BackupRemoteRequest(BaseModel):
+    """SSH remote URL for one backup target."""
+
+    url: str = Field(default="", max_length=300)
+
+
+class BackupRemoteTestResponse(BaseModel):
+    """Outcome of a non-mutating remote check."""
+
+    ok: bool = False
+    visibility: str = "unknown"
+    reachable: bool = False
+    writable: bool = False
+    remote_empty: bool = False
+    message: str = ""
+
+
+class BackupKeyResponse(BaseModel):
+    """Public half of a target's deploy key."""
+
+    public_key: str
+    key_path: str
+
+
+class BackupTimerRequest(BaseModel):
+    """Enable or disable the daily backup timer."""
+
+    enabled: bool
+
+
+class BackupRunResponse(BaseModel):
+    """Results of an on-demand backup plus the refreshed status."""
+
+    results: list[dict[str, Any]]
+    status: BackupStatusResponse
+
+
+class AgentJobModel(BaseModel):
+    """Background install/connect/migrate job (process-local)."""
+
+    kind: str = ""
+    status: str = ""
+    phase: str = ""
+    error: str = ""
+    log: list[str] = Field(default_factory=list)
+    started_at: float = 0
+    finished_at: float = 0
+
+
+class OpenClawStatusResponse(BaseModel):
+    """Admin view of the local OpenClaw install and its nblane wiring."""
+
+    installed: bool = False
+    version: str = ""
+    pinned_version: str = ""
+    npm_available: bool = False
+    node_version: str = ""
+    node_supported: bool = False
+    profile: str = ""
+    state_dir: str = ""
+    configured: bool = False
+    workspace: str = ""
+    workspace_exists: bool = False
+    workspace_in_agent_root: bool = False
+    agent_data_root: str = ""
+    target_workspace: str = ""
+    gateway_port: int = 0
+    gateway_unit: str = ""
+    gateway_service: str = ""
+    gateway_reachable: bool = False
+    mcp_registered: bool = False
+    mcp_profile: str = ""
+    connected_profile: str = ""
+    foreign_root: str = ""
+    corpus_present: bool = False
+    weixin_installed: bool = False
+    weixin_login_command: str = ""
+    llm_reusable: bool = False
+    llm_model: str = ""
+    llm_base_url: str = ""
+    mcp_entry: dict[str, Any] = Field(default_factory=dict)
+    job: AgentJobModel = Field(default_factory=AgentJobModel)
+
+
+class OpenClawJobRequest(BaseModel):
+    """Options for an OpenClaw setup job."""
+
+    profile: str = ""
+    reuse_llm: bool = True
+
+
+class OpenClawGatewayRequest(BaseModel):
+    """Gateway service action."""
+
+    action: Literal["start", "stop", "restart"]

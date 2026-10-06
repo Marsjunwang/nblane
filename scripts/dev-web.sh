@@ -199,11 +199,19 @@ if [[ "$mode" == "local" ]]; then
   asset_root="${asset_root_arg:-${NBLANE_RESEARCH_ASSET_ROOT:-$repo_root/.dev-assets/research}}"
 fi
 
-# Local translation models (llama.cpp): isolated runs keep their own model
-# directory and server port so they never share or stop the production one.
+# Local translation models (llama.cpp) and the managed GROBID unit: isolated
+# runs keep their own state, ports and unit names so they never share or
+# stop the production ones.
 local_models_env=""
 if [[ "$mode" == "isolated" ]]; then
   local_models_env="NBLANE_LOCAL_MODELS_DIR='$dev_root/local-models' NBLANE_LOCAL_MT_PORT=18505"
+  # GROBID managed from dev Settings gets its own unit, port and settings so
+  # it can never stop or reconfigure the production service.
+  local_models_env="${local_models_env} NBLANE_GROBID_SERVICE_DIR='$dev_root/grobid' NBLANE_GROBID_UNIT=nblane-grobid-dev NBLANE_GROBID_AUTOSTART=0 NBLANE_GROBID_URL=http://127.0.0.1:${grobid_port}"
+  # Personal agent + backup cards: a separate OpenClaw profile (own state dir,
+  # gateway unit and port), agent data root, deploy keys, state and timer so
+  # dev never touches the production gateway, keys or nblane-backup.timer.
+  local_models_env="${local_models_env} NBLANE_OPENCLAW_PROFILE=nblane-dev NBLANE_OPENCLAW_GATEWAY_PORT=19789 NBLANE_AGENT_DATA_ROOT='$dev_root/agent-data' NBLANE_BACKUP_KEY_DIR='$dev_root/backup/keys' NBLANE_BACKUP_STATE_DIR='$dev_root/backup/state' NBLANE_BACKUP_DIR='$dev_root/backup/archives' NBLANE_BACKUP_UNIT=nblane-backup-dev"
 fi
 
 reader_base="http://127.0.0.1:${reader_port}"

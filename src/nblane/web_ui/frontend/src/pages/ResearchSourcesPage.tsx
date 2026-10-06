@@ -40,7 +40,7 @@ import {
   IconRobot,
   IconSearch,
 } from '@tabler/icons-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
@@ -55,14 +55,11 @@ import {
   usePreviewManualItems,
   usePreviewResearchConnector,
   useRefreshAfterConnectorJob,
-  useResearchAIConfig,
   useResearchConnectors,
   useResearchSources,
-  useSaveResearchAIConfig,
   useUpsertResearchConnector,
 } from '../api/researchHooks';
 import type {
-  ResearchAIAction,
   ResearchConnector,
   ResearchConnectorImportResult,
   ResearchConnectorPreview,
@@ -115,18 +112,6 @@ const ORIGIN_LABELS: Record<string, string> = {
   connector: '连接器',
   resume_import: '简历导入',
 };
-const AI_ACTION_LABELS: Record<string, { label: string; description: string }> = {
-  'research.paper_search_codex': { label: '论文搜索', description: '扩展论文库的搜索与检索。' },
-  'research.paper_translate': { label: '论文翻译', description: '翻译论文段落或页面内容。' },
-  'research.paper_explain_selection': { label: '选区解释', description: '解释 Reader 中选中的内容。' },
-  'research.paper_source_guide': { label: '来源导览', description: '给出论文来源和阅读路径提示。' },
-  'research.paper_review_card': { label: '阅读回顾卡', description: '整理阅读回顾，不写入证据池。' },
-  'research.paper_qa': { label: '论文问答', description: '针对当前论文进行问答。' },
-  'research.paper_claim_extract': { label: '观点提取', description: '按需提取论文观点，仅作为 AI 输出。' },
-  'research.paper_deep_read_codex': { label: '论文深读', description: '使用 Codex 做长文档深读。' },
-  'research.paper_compare_codex': { label: '论文比较', description: '比较多篇论文的内容与差异。' },
-};
-
 const label = (map: Record<string, string>, value: string) => map[value] ?? value.replaceAll('_', ' ');
 const options = (values: string[] | undefined, map: Record<string, string>) =>
   (values ?? []).map((value) => ({ value, label: label(map, value) }));
@@ -867,85 +852,19 @@ function ConnectorsTab({ profile }: { profile: string }) {
 
 // --- 研究 AI ----------------------------------------------------------------------
 
-type ActionDraft = { backend: string; llm_model: string; codex_model: string };
-
+// Research AI routing lives in Settings → 档案 → 研究与阅读 (one place for
+// all per-profile AI choices); this tab only points there for old links.
 function AITab({ profile }: { profile: string }) {
-  const config = useResearchAIConfig(profile);
-  const save = useSaveResearchAIConfig(profile);
-  const [drafts, setDrafts] = useState<Record<string, ActionDraft>>({});
-
-  useEffect(() => {
-    if (!config.data) return;
-    setDrafts(Object.fromEntries((config.data.actions ?? []).map((row) => [row.action, { backend: row.backend, llm_model: row.llm_model, codex_model: row.codex_model }])));
-  }, [config.data]);
-
-  const actions = useMemo<ResearchAIAction[]>(() => config.data?.actions ?? [], [config.data]);
-  if (config.isPending) return <Center py="xl"><Loader /></Center>;
-  if (config.isError) return <LoadError title="研究 AI 设置加载失败" error={config.error} onRetry={() => void config.refetch()} />;
-
-  const llmDefault = config.data.llm_default_model;
-  const codexDefault = config.data.codex_default_model;
-
   return (
     <Card withBorder radius="md" p="lg" style={panelStyle}>
       <SectionHeader
         icon={<IconRobot size={17} />}
-        title="研究 AI"
-        description="为论文库和 Reader 里的每个 AI 动作单独选择执行后端与模型；留空沿用部署默认。与设置页「AI 路由」共用同一份配置。"
+        title="研究 AI 已移到设置"
+        description="论文翻译、快速分析、问答、深度研读等动作的执行方式和模型，现在统一在「设置 → 档案 → 研究与阅读」里配置。"
       />
-      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="sm">
-        {actions.map((row) => {
-          const draft = drafts[row.action] ?? { backend: '', llm_model: '', codex_model: '' };
-          const meta = AI_ACTION_LABELS[row.action] ?? { label: row.action, description: '' };
-          const effective = draft.backend || row.default_backend;
-          const modelKey = effective === 'codex' ? 'codex_model' : 'llm_model';
-          const defaultModel = effective === 'codex' ? codexDefault || 'Codex CLI 默认' : llmDefault || '未配置';
-          const update = (patch: Partial<ActionDraft>) => setDrafts((current) => ({ ...current, [row.action]: { ...draft, ...patch } }));
-          return (
-            <Paper key={row.action} withBorder radius="md" p="sm" style={rowStyle}>
-              <Text fw={600} size="sm">{meta.label}</Text>
-              <Text size="xs" c={chrome.dim}>{meta.description}</Text>
-              <SimpleGrid cols={2} mt="xs">
-                <Select
-                  aria-label={`${meta.label}后端`}
-                  label="后端"
-                  value={draft.backend}
-                  onChange={(value) => update({ backend: value ?? '' })}
-                  allowDeselect={false}
-                  data={[
-                    { value: '', label: `跟随默认（${row.default_backend === 'codex' ? 'Codex' : '兼容 API'}）` },
-                    { value: 'llm', label: '兼容 API' },
-                    { value: 'codex', label: 'Codex' },
-                  ]}
-                />
-                <TextInput
-                  aria-label={`${meta.label}模型`}
-                  label={effective === 'codex' ? 'Codex 模型' : '模型'}
-                  placeholder={`默认：${defaultModel}`}
-                  value={draft[modelKey]}
-                  onChange={(event) => update({ [modelKey]: event.currentTarget.value } as Partial<ActionDraft>)}
-                />
-              </SimpleGrid>
-              <Text size="xs" c={chrome.dim} mt={6}>生效：{effective === 'codex' ? 'Codex' : '兼容 API'} · {draft[modelKey] || defaultModel}</Text>
-            </Paper>
-          );
-        })}
-      </SimpleGrid>
-      <Group justify="flex-end" mt="md">
-        <Button
-          leftSection={<IconDeviceFloppy size={15} />}
-          loading={save.isPending}
-          onClick={() =>
-            save.mutate(
-              { actions: Object.fromEntries(Object.entries(drafts).map(([key, value]) => [key, { backend: value.backend as '' | 'llm' | 'codex', llm_model: value.llm_model, codex_model: value.codex_model }])) },
-              {
-                onSuccess: () => notifications.show({ color: 'green', title: '研究 AI 设置已保存', message: profile }),
-                onError: (error) => notifications.show({ color: 'red', title: '保存失败', message: errorMessage(error) }),
-              },
-            )
-          }
-        >
-          保存研究 AI 设置
+      <Group mt="md">
+        <Button component={Link} to={`/settings/research?profile=${encodeURIComponent(profile)}`} leftSection={<IconRobot size={15} />}>
+          打开研究与阅读设置
         </Button>
       </Group>
     </Card>

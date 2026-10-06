@@ -58,6 +58,8 @@ Commands:
                                     (dry-run by default)
     nblane notify <text> [--dry-run]
                                     Push a message via the OpenClaw webhook
+    nblane backup status|run [--target id]
+                                    Snapshot + push the git backup targets
 
 Examples:
     nblane init alice
@@ -1007,6 +1009,13 @@ def main() -> None:
         help="With --apply, also remove undeclared nblane:* jobs",
     )
 
+    p_backup = sub.add_parser(
+        "backup",
+        help="Snapshot and push git backup targets (data + agent workspaces)",
+    )
+    p_backup.add_argument("backup_command", choices=["status", "run"])
+    p_backup.add_argument("--target", default="", help="Only this target id")
+
     p_notify = sub.add_parser(
         "notify",
         help="Push a message to WeChat via the OpenClaw inbound webhook",
@@ -1310,6 +1319,10 @@ def main() -> None:
                     apply=args.apply,
                     prune=args.prune,
                 )
+    elif args.command == "backup":
+        from nblane.commands.backup import cmd_backup
+
+        cmd_backup(args.backup_command, target=args.target)
     elif args.command == "notify":
         cmd_notify(args.text, dry_run=args.dry_run)
     elif args.command == "auth":

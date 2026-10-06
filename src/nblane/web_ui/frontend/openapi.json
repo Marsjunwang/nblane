@@ -405,6 +405,50 @@
     "title": "ActivitySummaryModel",
     "type": "object"
    },
+   "AgentJobModel": {
+    "description": "Background install/connect/migrate job (process-local).",
+    "properties": {
+     "error": {
+      "default": "",
+      "title": "Error",
+      "type": "string"
+     },
+     "finished_at": {
+      "default": 0,
+      "title": "Finished At",
+      "type": "number"
+     },
+     "kind": {
+      "default": "",
+      "title": "Kind",
+      "type": "string"
+     },
+     "log": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Log",
+      "type": "array"
+     },
+     "phase": {
+      "default": "",
+      "title": "Phase",
+      "type": "string"
+     },
+     "started_at": {
+      "default": 0,
+      "title": "Started At",
+      "type": "number"
+     },
+     "status": {
+      "default": "",
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "title": "AgentJobModel",
+    "type": "object"
+   },
    "AgentTaskListResponse": {
     "description": "Agent task list, optionally filtered by status.",
     "properties": {
@@ -653,6 +697,323 @@
      "available"
     ],
     "title": "AssistantStatusResponse",
+    "type": "object"
+   },
+   "BackupDataGitModel": {
+    "description": "Per-write autocommit flags of the nblane data repository.",
+    "properties": {
+     "autocommit": {
+      "default": false,
+      "title": "Autocommit",
+      "type": "boolean"
+     },
+     "autopush": {
+      "default": false,
+      "title": "Autopush",
+      "type": "boolean"
+     }
+    },
+    "title": "BackupDataGitModel",
+    "type": "object"
+   },
+   "BackupKeyResponse": {
+    "description": "Public half of a target's deploy key.",
+    "properties": {
+     "key_path": {
+      "title": "Key Path",
+      "type": "string"
+     },
+     "public_key": {
+      "title": "Public Key",
+      "type": "string"
+     }
+    },
+    "required": [
+     "public_key",
+     "key_path"
+    ],
+    "title": "BackupKeyResponse",
+    "type": "object"
+   },
+   "BackupRemoteRequest": {
+    "description": "SSH remote URL for one backup target.",
+    "properties": {
+     "url": {
+      "default": "",
+      "maxLength": 300,
+      "title": "Url",
+      "type": "string"
+     }
+    },
+    "title": "BackupRemoteRequest",
+    "type": "object"
+   },
+   "BackupRemoteTestResponse": {
+    "description": "Outcome of a non-mutating remote check.",
+    "properties": {
+     "message": {
+      "default": "",
+      "title": "Message",
+      "type": "string"
+     },
+     "ok": {
+      "default": false,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "reachable": {
+      "default": false,
+      "title": "Reachable",
+      "type": "boolean"
+     },
+     "remote_empty": {
+      "default": false,
+      "title": "Remote Empty",
+      "type": "boolean"
+     },
+     "visibility": {
+      "default": "unknown",
+      "title": "Visibility",
+      "type": "string"
+     },
+     "writable": {
+      "default": false,
+      "title": "Writable",
+      "type": "boolean"
+     }
+    },
+    "title": "BackupRemoteTestResponse",
+    "type": "object"
+   },
+   "BackupRunModel": {
+    "description": "Result of the latest backup run for one target.",
+    "properties": {
+     "at": {
+      "default": "",
+      "title": "At",
+      "type": "string"
+     },
+     "committed": {
+      "default": false,
+      "title": "Committed",
+      "type": "boolean"
+     },
+     "error": {
+      "default": "",
+      "title": "Error",
+      "type": "string"
+     },
+     "ok": {
+      "default": false,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "pushed": {
+      "default": false,
+      "title": "Pushed",
+      "type": "boolean"
+     }
+    },
+    "title": "BackupRunModel",
+    "type": "object"
+   },
+   "BackupRunResponse": {
+    "description": "Results of an on-demand backup plus the refreshed status.",
+    "properties": {
+     "results": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "title": "Results",
+      "type": "array"
+     },
+     "status": {
+      "$ref": "#/components/schemas/BackupStatusResponse"
+     }
+    },
+    "required": [
+     "results",
+     "status"
+    ],
+    "title": "BackupRunResponse",
+    "type": "object"
+   },
+   "BackupStatusResponse": {
+    "description": "Admin view of all backup targets and the daily timer.",
+    "properties": {
+     "backups_dir": {
+      "default": "",
+      "title": "Backups Dir",
+      "type": "string"
+     },
+     "data_git": {
+      "$ref": "#/components/schemas/BackupDataGitModel"
+     },
+     "targets": {
+      "items": {
+       "$ref": "#/components/schemas/BackupTargetModel"
+      },
+      "title": "Targets",
+      "type": "array"
+     },
+     "timer": {
+      "$ref": "#/components/schemas/BackupTimerModel"
+     }
+    },
+    "required": [
+     "targets",
+     "timer"
+    ],
+    "title": "BackupStatusResponse",
+    "type": "object"
+   },
+   "BackupTargetModel": {
+    "description": "One git repository covered by the daily backup.",
+    "properties": {
+     "ahead": {
+      "default": 0,
+      "title": "Ahead",
+      "type": "integer"
+     },
+     "branch": {
+      "default": "",
+      "title": "Branch",
+      "type": "string"
+     },
+     "commit_mode": {
+      "title": "Commit Mode",
+      "type": "string"
+     },
+     "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+     },
+     "dirty": {
+      "default": 0,
+      "title": "Dirty",
+      "type": "integer"
+     },
+     "exists": {
+      "default": false,
+      "title": "Exists",
+      "type": "boolean"
+     },
+     "has_commits": {
+      "default": false,
+      "title": "Has Commits",
+      "type": "boolean"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "is_git": {
+      "default": false,
+      "title": "Is Git",
+      "type": "boolean"
+     },
+     "key_path": {
+      "default": "",
+      "title": "Key Path",
+      "type": "string"
+     },
+     "key_ready": {
+      "default": false,
+      "title": "Key Ready",
+      "type": "boolean"
+     },
+     "label": {
+      "title": "Label",
+      "type": "string"
+     },
+     "last_commit_at": {
+      "default": "",
+      "title": "Last Commit At",
+      "type": "string"
+     },
+     "last_commit_subject": {
+      "default": "",
+      "title": "Last Commit Subject",
+      "type": "string"
+     },
+     "last_run": {
+      "$ref": "#/components/schemas/BackupRunModel"
+     },
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
+     "public_key": {
+      "default": "",
+      "title": "Public Key",
+      "type": "string"
+     },
+     "remote_url": {
+      "default": "",
+      "title": "Remote Url",
+      "type": "string"
+     },
+     "upstream": {
+      "default": "",
+      "title": "Upstream",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "label",
+     "path",
+     "commit_mode"
+    ],
+    "title": "BackupTargetModel",
+    "type": "object"
+   },
+   "BackupTimerModel": {
+    "description": "systemd --user timer driving the daily backup.",
+    "properties": {
+     "enabled": {
+      "default": false,
+      "title": "Enabled",
+      "type": "boolean"
+     },
+     "installed": {
+      "default": false,
+      "title": "Installed",
+      "type": "boolean"
+     },
+     "next_run": {
+      "default": "",
+      "title": "Next Run",
+      "type": "string"
+     },
+     "schedule": {
+      "default": "",
+      "title": "Schedule",
+      "type": "string"
+     },
+     "unit": {
+      "default": "",
+      "title": "Unit",
+      "type": "string"
+     }
+    },
+    "title": "BackupTimerModel",
+    "type": "object"
+   },
+   "BackupTimerRequest": {
+    "description": "Enable or disable the daily backup timer.",
+    "properties": {
+     "enabled": {
+      "title": "Enabled",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "enabled"
+    ],
+    "title": "BackupTimerRequest",
     "type": "object"
    },
    "Body_import_profile_career_resume_api_v1_profiles__name__career_import_post": {
@@ -3516,6 +3877,212 @@
     "title": "GoalsResponse",
     "type": "object"
    },
+   "GrobidBackendRequest": {
+    "description": "PDF structure backend override; empty clears it (env decides).",
+    "properties": {
+     "backend": {
+      "default": "",
+      "enum": [
+       "",
+       "auto",
+       "grobid",
+       "pymupdf"
+      ],
+      "title": "Backend",
+      "type": "string"
+     }
+    },
+    "title": "GrobidBackendRequest",
+    "type": "object"
+   },
+   "GrobidInstallStateModel": {
+    "description": "Progress of a background GROBID install (process-local).",
+    "properties": {
+     "error": {
+      "default": "",
+      "title": "Error",
+      "type": "string"
+     },
+     "phase": {
+      "default": "",
+      "title": "Phase",
+      "type": "string"
+     },
+     "started_at": {
+      "default": 0,
+      "title": "Started At",
+      "type": "number"
+     },
+     "status": {
+      "default": "",
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "title": "GrobidInstallStateModel",
+    "type": "object"
+   },
+   "GrobidLogsResponse": {
+    "description": "Tail of the managed GROBID unit journal.",
+    "properties": {
+     "text": {
+      "default": "",
+      "title": "Text",
+      "type": "string"
+     }
+    },
+    "title": "GrobidLogsResponse",
+    "type": "object"
+   },
+   "GrobidStatusResponse": {
+    "description": "Admin view of the GROBID structure-extraction service.",
+    "properties": {
+     "alive": {
+      "title": "Alive",
+      "type": "boolean"
+     },
+     "available_ram_mb": {
+      "default": 0,
+      "title": "Available Ram Mb",
+      "type": "integer"
+     },
+     "backend": {
+      "title": "Backend",
+      "type": "string"
+     },
+     "backend_override": {
+      "default": "",
+      "title": "Backend Override",
+      "type": "string"
+     },
+     "blocker": {
+      "default": "",
+      "title": "Blocker",
+      "type": "string"
+     },
+     "env_backend": {
+      "default": "",
+      "title": "Env Backend",
+      "type": "string"
+     },
+     "image": {
+      "title": "Image",
+      "type": "string"
+     },
+     "image_present": {
+      "title": "Image Present",
+      "type": "boolean"
+     },
+     "install": {
+      "$ref": "#/components/schemas/GrobidInstallStateModel"
+     },
+     "manageable": {
+      "title": "Manageable",
+      "type": "boolean"
+     },
+     "min_ram_mb": {
+      "default": 0,
+      "title": "Min Ram Mb",
+      "type": "integer"
+     },
+     "podman_available": {
+      "title": "Podman Available",
+      "type": "boolean"
+     },
+     "port": {
+      "default": 0,
+      "title": "Port",
+      "type": "integer"
+     },
+     "state": {
+      "title": "State",
+      "type": "string"
+     },
+     "total_ram_mb": {
+      "default": 0,
+      "title": "Total Ram Mb",
+      "type": "integer"
+     },
+     "unit": {
+      "title": "Unit",
+      "type": "string"
+     },
+     "unit_state": {
+      "$ref": "#/components/schemas/GrobidUnitStateModel"
+     },
+     "url": {
+      "title": "Url",
+      "type": "string"
+     },
+     "user_manager": {
+      "title": "User Manager",
+      "type": "boolean"
+     },
+     "version": {
+      "default": "",
+      "title": "Version",
+      "type": "string"
+     }
+    },
+    "required": [
+     "state",
+     "alive",
+     "url",
+     "manageable",
+     "unit",
+     "unit_state",
+     "image",
+     "image_present",
+     "podman_available",
+     "user_manager",
+     "backend",
+     "install"
+    ],
+    "title": "GrobidStatusResponse",
+    "type": "object"
+   },
+   "GrobidUnitStateModel": {
+    "description": "systemd --user state of the managed GROBID unit.",
+    "properties": {
+     "active_state": {
+      "default": "",
+      "title": "Active State",
+      "type": "string"
+     },
+     "installed": {
+      "default": false,
+      "title": "Installed",
+      "type": "boolean"
+     },
+     "memory_mb": {
+      "default": 0,
+      "title": "Memory Mb",
+      "type": "integer"
+     },
+     "restarts": {
+      "default": 0,
+      "title": "Restarts",
+      "type": "integer"
+     },
+     "result": {
+      "default": "",
+      "title": "Result",
+      "type": "string"
+     },
+     "since": {
+      "default": "",
+      "title": "Since",
+      "type": "string"
+     },
+     "sub_state": {
+      "default": "",
+      "title": "Sub State",
+      "type": "string"
+     }
+    },
+    "title": "GrobidUnitStateModel",
+    "type": "object"
+   },
    "HTTPValidationError": {
     "properties": {
      "detail": {
@@ -5907,6 +6474,197 @@
      }
     },
     "title": "OkResponse",
+    "type": "object"
+   },
+   "OpenClawGatewayRequest": {
+    "description": "Gateway service action.",
+    "properties": {
+     "action": {
+      "enum": [
+       "start",
+       "stop",
+       "restart"
+      ],
+      "title": "Action",
+      "type": "string"
+     }
+    },
+    "required": [
+     "action"
+    ],
+    "title": "OpenClawGatewayRequest",
+    "type": "object"
+   },
+   "OpenClawJobRequest": {
+    "description": "Options for an OpenClaw setup job.",
+    "properties": {
+     "profile": {
+      "default": "",
+      "title": "Profile",
+      "type": "string"
+     },
+     "reuse_llm": {
+      "default": true,
+      "title": "Reuse Llm",
+      "type": "boolean"
+     }
+    },
+    "title": "OpenClawJobRequest",
+    "type": "object"
+   },
+   "OpenClawStatusResponse": {
+    "description": "Admin view of the local OpenClaw install and its nblane wiring.",
+    "properties": {
+     "agent_data_root": {
+      "default": "",
+      "title": "Agent Data Root",
+      "type": "string"
+     },
+     "configured": {
+      "default": false,
+      "title": "Configured",
+      "type": "boolean"
+     },
+     "connected_profile": {
+      "default": "",
+      "title": "Connected Profile",
+      "type": "string"
+     },
+     "corpus_present": {
+      "default": false,
+      "title": "Corpus Present",
+      "type": "boolean"
+     },
+     "foreign_root": {
+      "default": "",
+      "title": "Foreign Root",
+      "type": "string"
+     },
+     "gateway_port": {
+      "default": 0,
+      "title": "Gateway Port",
+      "type": "integer"
+     },
+     "gateway_reachable": {
+      "default": false,
+      "title": "Gateway Reachable",
+      "type": "boolean"
+     },
+     "gateway_service": {
+      "default": "",
+      "title": "Gateway Service",
+      "type": "string"
+     },
+     "gateway_unit": {
+      "default": "",
+      "title": "Gateway Unit",
+      "type": "string"
+     },
+     "installed": {
+      "default": false,
+      "title": "Installed",
+      "type": "boolean"
+     },
+     "job": {
+      "$ref": "#/components/schemas/AgentJobModel"
+     },
+     "llm_base_url": {
+      "default": "",
+      "title": "Llm Base Url",
+      "type": "string"
+     },
+     "llm_model": {
+      "default": "",
+      "title": "Llm Model",
+      "type": "string"
+     },
+     "llm_reusable": {
+      "default": false,
+      "title": "Llm Reusable",
+      "type": "boolean"
+     },
+     "mcp_entry": {
+      "additionalProperties": true,
+      "title": "Mcp Entry",
+      "type": "object"
+     },
+     "mcp_profile": {
+      "default": "",
+      "title": "Mcp Profile",
+      "type": "string"
+     },
+     "mcp_registered": {
+      "default": false,
+      "title": "Mcp Registered",
+      "type": "boolean"
+     },
+     "node_supported": {
+      "default": false,
+      "title": "Node Supported",
+      "type": "boolean"
+     },
+     "node_version": {
+      "default": "",
+      "title": "Node Version",
+      "type": "string"
+     },
+     "npm_available": {
+      "default": false,
+      "title": "Npm Available",
+      "type": "boolean"
+     },
+     "pinned_version": {
+      "default": "",
+      "title": "Pinned Version",
+      "type": "string"
+     },
+     "profile": {
+      "default": "",
+      "title": "Profile",
+      "type": "string"
+     },
+     "state_dir": {
+      "default": "",
+      "title": "State Dir",
+      "type": "string"
+     },
+     "target_workspace": {
+      "default": "",
+      "title": "Target Workspace",
+      "type": "string"
+     },
+     "version": {
+      "default": "",
+      "title": "Version",
+      "type": "string"
+     },
+     "weixin_installed": {
+      "default": false,
+      "title": "Weixin Installed",
+      "type": "boolean"
+     },
+     "weixin_login_command": {
+      "default": "",
+      "title": "Weixin Login Command",
+      "type": "string"
+     },
+     "workspace": {
+      "default": "",
+      "title": "Workspace",
+      "type": "string"
+     },
+     "workspace_exists": {
+      "default": false,
+      "title": "Workspace Exists",
+      "type": "boolean"
+     },
+     "workspace_in_agent_root": {
+      "default": false,
+      "title": "Workspace In Agent Root",
+      "type": "boolean"
+     }
+    },
+    "title": "OpenClawStatusResponse",
     "type": "object"
    },
    "PaperAbstractModel": {
@@ -24588,6 +25346,693 @@
     "summary": "Get Profile Summary"
    }
   },
+  "/api/v1/settings/agents/openclaw": {
+   "get": {
+    "description": "Return install state, wiring and the running setup job.",
+    "operationId": "get_openclaw_setup_api_v1_settings_agents_openclaw_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OpenClawStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     }
+    },
+    "summary": "Get Openclaw Setup"
+   }
+  },
+  "/api/v1/settings/agents/openclaw-gateway": {
+   "post": {
+    "description": "Start, stop or restart the gateway service.",
+    "operationId": "openclaw_gateway_action_api_v1_settings_agents_openclaw_gateway_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/OpenClawGatewayRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OpenClawStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Openclaw Gateway Action"
+   }
+  },
+  "/api/v1/settings/agents/openclaw/{kind}": {
+   "post": {
+    "description": "Start ``install`` / ``connect`` / ``migrate`` / ``weixin`` in the background.",
+    "operationId": "start_openclaw_job_api_v1_settings_agents_openclaw__kind__post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "kind",
+      "required": true,
+      "schema": {
+       "title": "Kind",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/OpenClawJobRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OpenClawStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Start Openclaw Job"
+   }
+  },
+  "/api/v1/settings/backup": {
+   "get": {
+    "description": "Return every backup target with remote/push freshness and the timer.",
+    "operationId": "get_backup_api_v1_settings_backup_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BackupStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     }
+    },
+    "summary": "Get Backup"
+   }
+  },
+  "/api/v1/settings/backup/run": {
+   "post": {
+    "description": "Snapshot and push one target (``?target_id=``) or all of them now.",
+    "operationId": "run_backup_now_api_v1_settings_backup_run_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "target_id",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Target Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BackupRunResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Run Backup Now"
+   }
+  },
+  "/api/v1/settings/backup/targets/{target_id}/init": {
+   "post": {
+    "description": "Make the target a git repository (with a .gitignore) if it is not one.",
+    "operationId": "init_backup_target_api_v1_settings_backup_targets__target_id__init_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "target_id",
+      "required": true,
+      "schema": {
+       "title": "Target Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BackupStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Init Backup Target"
+   }
+  },
+  "/api/v1/settings/backup/targets/{target_id}/key": {
+   "post": {
+    "description": "Create the target's deploy key once and return its public half.",
+    "operationId": "generate_backup_key_api_v1_settings_backup_targets__target_id__key_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "target_id",
+      "required": true,
+      "schema": {
+       "title": "Target Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BackupKeyResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Generate Backup Key"
+   }
+  },
+  "/api/v1/settings/backup/targets/{target_id}/remote": {
+   "put": {
+    "description": "Re-test, save the remote and push the existing history.",
+    "operationId": "save_backup_remote_api_v1_settings_backup_targets__target_id__remote_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "target_id",
+      "required": true,
+      "schema": {
+       "title": "Target Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BackupRemoteRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BackupStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Save Backup Remote"
+   }
+  },
+  "/api/v1/settings/backup/targets/{target_id}/remote/test": {
+   "post": {
+    "description": "Check URL shape, privacy, read and write access without saving.",
+    "operationId": "test_backup_remote_api_v1_settings_backup_targets__target_id__remote_test_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "target_id",
+      "required": true,
+      "schema": {
+       "title": "Target Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BackupRemoteRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BackupRemoteTestResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Test Backup Remote"
+   }
+  },
+  "/api/v1/settings/backup/timer": {
+   "put": {
+    "description": "Install/enable or disable the daily systemd --user backup timer.",
+    "operationId": "set_backup_timer_api_v1_settings_backup_timer_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BackupTimerRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BackupStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Set Backup Timer"
+   }
+  },
   "/api/v1/settings/codex/status": {
    "get": {
     "description": "Return non-secret Codex CLI readiness information.",
@@ -24720,6 +26165,332 @@
      }
     },
     "summary": "Verify Settings Connection"
+   }
+  },
+  "/api/v1/settings/grobid": {
+   "delete": {
+    "description": "Stop and remove the managed unit; the image stays for reinstall.",
+    "operationId": "uninstall_grobid_api_v1_settings_grobid_delete",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GrobidStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     }
+    },
+    "summary": "Uninstall Grobid"
+   },
+   "get": {
+    "description": "Return GROBID health, managed-unit state and the PDF backend.",
+    "operationId": "get_grobid_api_v1_settings_grobid_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GrobidStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     }
+    },
+    "summary": "Get Grobid"
+   }
+  },
+  "/api/v1/settings/grobid/backend": {
+   "put": {
+    "description": "Choose how PDFs are structured (shared by Reader and SPA backend).",
+    "operationId": "set_grobid_backend_api_v1_settings_grobid_backend_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/GrobidBackendRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GrobidStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Set Grobid Backend"
+   }
+  },
+  "/api/v1/settings/grobid/install": {
+   "post": {
+    "description": "Pull the pinned image if needed, write the user unit and start it.",
+    "operationId": "install_grobid_api_v1_settings_grobid_install_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GrobidStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     }
+    },
+    "summary": "Install Grobid"
+   }
+  },
+  "/api/v1/settings/grobid/logs": {
+   "get": {
+    "operationId": "grobid_logs_api_v1_settings_grobid_logs_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GrobidLogsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     }
+    },
+    "summary": "Grobid Logs"
+   }
+  },
+  "/api/v1/settings/grobid/restart": {
+   "post": {
+    "operationId": "restart_grobid_api_v1_settings_grobid_restart_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GrobidStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     }
+    },
+    "summary": "Restart Grobid"
+   }
+  },
+  "/api/v1/settings/grobid/start": {
+   "post": {
+    "operationId": "start_grobid_api_v1_settings_grobid_start_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GrobidStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     }
+    },
+    "summary": "Start Grobid"
+   }
+  },
+  "/api/v1/settings/grobid/stop": {
+   "post": {
+    "operationId": "stop_grobid_api_v1_settings_grobid_stop_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GrobidStatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     }
+    },
+    "summary": "Stop Grobid"
    }
   },
   "/api/v1/settings/local-models": {

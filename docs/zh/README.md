@@ -72,6 +72,7 @@ source_of_truth: true
 | [deployment-tencent-cloud.md](guides/deployment-tencent-cloud.md) | 腾讯云小团队部署 |
 | [mihomo-deployment.md](guides/mihomo-deployment.md) | Mihomo 代理完整部署与运维 |
 | [migration.md](guides/migration.md) | 整机迁移 runbook：三树 + OpenClaw 侧 + 系统层的搬迁顺序与验收 |
+| [agent-setup.md](guides/agent-setup.md) | 设置页：个人 Agent（OpenClaw）一键安装/接入/迁移，数据备份私有远端向导与每日备份 |
 | [spa-experience-checklist.md](guides/spa-experience-checklist.md) | 体验官手册：融合 + SPA 全功能走查清单与问题记录表 |
 
 ### Reference

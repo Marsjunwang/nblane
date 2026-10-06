@@ -644,6 +644,11 @@ function artifactLabel(labels, key) {
 
 function artifactEntries(artifacts) {
   return Object.entries(artifacts || {}).filter(([key, value]) => {
+    // Research chunks are a legacy citation unit; only show them when a
+    // paper actually has some.
+    if (key === "chunks") {
+      return Number(value) > 0;
+    }
     if (!optionalArtifactKeys.has(key)) {
       return true;
     }
@@ -2633,14 +2638,6 @@ function PaperDetailPane({ payload, emit, onDeletePaper, onUploadPdf, onExport, 
           }))}
         >
           {label(payload.labels, "force_grobid_upgrade", "Force GROBID upgrade")}
-        </button>
-        <button
-          type="button"
-          className={actionClass("auto_chunk")}
-          disabled={workspaceBusy}
-          onClick={() => emit(makeEvent("paper_library_auto_chunk", { paper_ids: paperIds }))}
-        >
-          {label(payload.labels, "auto_chunk", "Auto chunk")}
         </button>
         <div className="paper-translation-control">
           <select

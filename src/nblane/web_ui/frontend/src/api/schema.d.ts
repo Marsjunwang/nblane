@@ -3081,6 +3081,206 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/agents/openclaw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Openclaw Setup
+         * @description Return install state, wiring and the running setup job.
+         */
+        get: operations["get_openclaw_setup_api_v1_settings_agents_openclaw_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/agents/openclaw-gateway": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Openclaw Gateway Action
+         * @description Start, stop or restart the gateway service.
+         */
+        post: operations["openclaw_gateway_action_api_v1_settings_agents_openclaw_gateway_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/agents/openclaw/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Openclaw Job
+         * @description Start ``install`` / ``connect`` / ``migrate`` / ``weixin`` in the background.
+         */
+        post: operations["start_openclaw_job_api_v1_settings_agents_openclaw__kind__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Backup
+         * @description Return every backup target with remote/push freshness and the timer.
+         */
+        get: operations["get_backup_api_v1_settings_backup_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/backup/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Backup Now
+         * @description Snapshot and push one target (``?target_id=``) or all of them now.
+         */
+        post: operations["run_backup_now_api_v1_settings_backup_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/backup/targets/{target_id}/init": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Init Backup Target
+         * @description Make the target a git repository (with a .gitignore) if it is not one.
+         */
+        post: operations["init_backup_target_api_v1_settings_backup_targets__target_id__init_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/backup/targets/{target_id}/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Backup Key
+         * @description Create the target's deploy key once and return its public half.
+         */
+        post: operations["generate_backup_key_api_v1_settings_backup_targets__target_id__key_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/backup/targets/{target_id}/remote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Backup Remote
+         * @description Re-test, save the remote and push the existing history.
+         */
+        put: operations["save_backup_remote_api_v1_settings_backup_targets__target_id__remote_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/backup/targets/{target_id}/remote/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Backup Remote
+         * @description Check URL shape, privacy, read and write access without saving.
+         */
+        post: operations["test_backup_remote_api_v1_settings_backup_targets__target_id__remote_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/backup/timer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Backup Timer
+         * @description Install/enable or disable the daily systemd --user backup timer.
+         */
+        put: operations["set_backup_timer_api_v1_settings_backup_timer_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/codex/status": {
         parameters: {
             query?: never;
@@ -3139,6 +3339,138 @@ export interface paths {
          * @description Run a bounded provider ping using the current deployment settings.
          */
         post: operations["verify_settings_connection_api_v1_settings_connection_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/grobid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Grobid
+         * @description Return GROBID health, managed-unit state and the PDF backend.
+         */
+        get: operations["get_grobid_api_v1_settings_grobid_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Uninstall Grobid
+         * @description Stop and remove the managed unit; the image stays for reinstall.
+         */
+        delete: operations["uninstall_grobid_api_v1_settings_grobid_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/grobid/backend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Grobid Backend
+         * @description Choose how PDFs are structured (shared by Reader and SPA backend).
+         */
+        put: operations["set_grobid_backend_api_v1_settings_grobid_backend_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/grobid/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install Grobid
+         * @description Pull the pinned image if needed, write the user unit and start it.
+         */
+        post: operations["install_grobid_api_v1_settings_grobid_install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/grobid/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Grobid Logs */
+        get: operations["grobid_logs_api_v1_settings_grobid_logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/grobid/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restart Grobid */
+        post: operations["restart_grobid_api_v1_settings_grobid_restart_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/grobid/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Grobid */
+        post: operations["start_grobid_api_v1_settings_grobid_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/grobid/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Grobid */
+        post: operations["stop_grobid_api_v1_settings_grobid_stop_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3599,6 +3931,44 @@ export interface components {
             };
         };
         /**
+         * AgentJobModel
+         * @description Background install/connect/migrate job (process-local).
+         */
+        AgentJobModel: {
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /**
+             * Finished At
+             * @default 0
+             */
+            finished_at: number;
+            /**
+             * Kind
+             * @default
+             */
+            kind: string;
+            /** Log */
+            log?: string[];
+            /**
+             * Phase
+             * @default
+             */
+            phase: string;
+            /**
+             * Started At
+             * @default 0
+             */
+            started_at: number;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+        };
+        /**
          * AgentTaskListResponse
          * @description Agent task list, optionally filtered by status.
          */
@@ -3755,6 +4125,260 @@ export interface components {
             mcp_nblane_registered?: boolean | null;
             /** Version */
             version?: string | null;
+        };
+        /**
+         * BackupDataGitModel
+         * @description Per-write autocommit flags of the nblane data repository.
+         */
+        BackupDataGitModel: {
+            /**
+             * Autocommit
+             * @default false
+             */
+            autocommit: boolean;
+            /**
+             * Autopush
+             * @default false
+             */
+            autopush: boolean;
+        };
+        /**
+         * BackupKeyResponse
+         * @description Public half of a target's deploy key.
+         */
+        BackupKeyResponse: {
+            /** Key Path */
+            key_path: string;
+            /** Public Key */
+            public_key: string;
+        };
+        /**
+         * BackupRemoteRequest
+         * @description SSH remote URL for one backup target.
+         */
+        BackupRemoteRequest: {
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+        };
+        /**
+         * BackupRemoteTestResponse
+         * @description Outcome of a non-mutating remote check.
+         */
+        BackupRemoteTestResponse: {
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Ok
+             * @default false
+             */
+            ok: boolean;
+            /**
+             * Reachable
+             * @default false
+             */
+            reachable: boolean;
+            /**
+             * Remote Empty
+             * @default false
+             */
+            remote_empty: boolean;
+            /**
+             * Visibility
+             * @default unknown
+             */
+            visibility: string;
+            /**
+             * Writable
+             * @default false
+             */
+            writable: boolean;
+        };
+        /**
+         * BackupRunModel
+         * @description Result of the latest backup run for one target.
+         */
+        BackupRunModel: {
+            /**
+             * At
+             * @default
+             */
+            at: string;
+            /**
+             * Committed
+             * @default false
+             */
+            committed: boolean;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /**
+             * Ok
+             * @default false
+             */
+            ok: boolean;
+            /**
+             * Pushed
+             * @default false
+             */
+            pushed: boolean;
+        };
+        /**
+         * BackupRunResponse
+         * @description Results of an on-demand backup plus the refreshed status.
+         */
+        BackupRunResponse: {
+            /** Results */
+            results: {
+                [key: string]: unknown;
+            }[];
+            status: components["schemas"]["BackupStatusResponse"];
+        };
+        /**
+         * BackupStatusResponse
+         * @description Admin view of all backup targets and the daily timer.
+         */
+        BackupStatusResponse: {
+            /**
+             * Backups Dir
+             * @default
+             */
+            backups_dir: string;
+            data_git?: components["schemas"]["BackupDataGitModel"];
+            /** Targets */
+            targets: components["schemas"]["BackupTargetModel"][];
+            timer: components["schemas"]["BackupTimerModel"];
+        };
+        /**
+         * BackupTargetModel
+         * @description One git repository covered by the daily backup.
+         */
+        BackupTargetModel: {
+            /**
+             * Ahead
+             * @default 0
+             */
+            ahead: number;
+            /**
+             * Branch
+             * @default
+             */
+            branch: string;
+            /** Commit Mode */
+            commit_mode: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Dirty
+             * @default 0
+             */
+            dirty: number;
+            /**
+             * Exists
+             * @default false
+             */
+            exists: boolean;
+            /**
+             * Has Commits
+             * @default false
+             */
+            has_commits: boolean;
+            /** Id */
+            id: string;
+            /**
+             * Is Git
+             * @default false
+             */
+            is_git: boolean;
+            /**
+             * Key Path
+             * @default
+             */
+            key_path: string;
+            /**
+             * Key Ready
+             * @default false
+             */
+            key_ready: boolean;
+            /** Label */
+            label: string;
+            /**
+             * Last Commit At
+             * @default
+             */
+            last_commit_at: string;
+            /**
+             * Last Commit Subject
+             * @default
+             */
+            last_commit_subject: string;
+            last_run?: components["schemas"]["BackupRunModel"];
+            /** Path */
+            path: string;
+            /**
+             * Public Key
+             * @default
+             */
+            public_key: string;
+            /**
+             * Remote Url
+             * @default
+             */
+            remote_url: string;
+            /**
+             * Upstream
+             * @default
+             */
+            upstream: string;
+        };
+        /**
+         * BackupTimerModel
+         * @description systemd --user timer driving the daily backup.
+         */
+        BackupTimerModel: {
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Installed
+             * @default false
+             */
+            installed: boolean;
+            /**
+             * Next Run
+             * @default
+             */
+            next_run: string;
+            /**
+             * Schedule
+             * @default
+             */
+            schedule: string;
+            /**
+             * Unit
+             * @default
+             */
+            unit: string;
+        };
+        /**
+         * BackupTimerRequest
+         * @description Enable or disable the daily backup timer.
+         */
+        BackupTimerRequest: {
+            /** Enabled */
+            enabled: boolean;
         };
         /** Body_import_profile_career_resume_api_v1_profiles__name__career_import_post */
         Body_import_profile_career_resume_api_v1_profiles__name__career_import_post: {
@@ -5743,6 +6367,164 @@ export interface components {
             /** Profile */
             profile: string;
         };
+        /**
+         * GrobidBackendRequest
+         * @description PDF structure backend override; empty clears it (env decides).
+         */
+        GrobidBackendRequest: {
+            /**
+             * Backend
+             * @default
+             * @enum {string}
+             */
+            backend: "" | "auto" | "grobid" | "pymupdf";
+        };
+        /**
+         * GrobidInstallStateModel
+         * @description Progress of a background GROBID install (process-local).
+         */
+        GrobidInstallStateModel: {
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /**
+             * Phase
+             * @default
+             */
+            phase: string;
+            /**
+             * Started At
+             * @default 0
+             */
+            started_at: number;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+        };
+        /**
+         * GrobidLogsResponse
+         * @description Tail of the managed GROBID unit journal.
+         */
+        GrobidLogsResponse: {
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+        };
+        /**
+         * GrobidStatusResponse
+         * @description Admin view of the GROBID structure-extraction service.
+         */
+        GrobidStatusResponse: {
+            /** Alive */
+            alive: boolean;
+            /**
+             * Available Ram Mb
+             * @default 0
+             */
+            available_ram_mb: number;
+            /** Backend */
+            backend: string;
+            /**
+             * Backend Override
+             * @default
+             */
+            backend_override: string;
+            /**
+             * Blocker
+             * @default
+             */
+            blocker: string;
+            /**
+             * Env Backend
+             * @default
+             */
+            env_backend: string;
+            /** Image */
+            image: string;
+            /** Image Present */
+            image_present: boolean;
+            install: components["schemas"]["GrobidInstallStateModel"];
+            /** Manageable */
+            manageable: boolean;
+            /**
+             * Min Ram Mb
+             * @default 0
+             */
+            min_ram_mb: number;
+            /** Podman Available */
+            podman_available: boolean;
+            /**
+             * Port
+             * @default 0
+             */
+            port: number;
+            /** State */
+            state: string;
+            /**
+             * Total Ram Mb
+             * @default 0
+             */
+            total_ram_mb: number;
+            /** Unit */
+            unit: string;
+            unit_state: components["schemas"]["GrobidUnitStateModel"];
+            /** Url */
+            url: string;
+            /** User Manager */
+            user_manager: boolean;
+            /**
+             * Version
+             * @default
+             */
+            version: string;
+        };
+        /**
+         * GrobidUnitStateModel
+         * @description systemd --user state of the managed GROBID unit.
+         */
+        GrobidUnitStateModel: {
+            /**
+             * Active State
+             * @default
+             */
+            active_state: string;
+            /**
+             * Installed
+             * @default false
+             */
+            installed: boolean;
+            /**
+             * Memory Mb
+             * @default 0
+             */
+            memory_mb: number;
+            /**
+             * Restarts
+             * @default 0
+             */
+            restarts: number;
+            /**
+             * Result
+             * @default
+             */
+            result: string;
+            /**
+             * Since
+             * @default
+             */
+            since: string;
+            /**
+             * Sub State
+             * @default
+             */
+            sub_state: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -7398,6 +8180,184 @@ export interface components {
              * @default true
              */
             ok: boolean;
+        };
+        /**
+         * OpenClawGatewayRequest
+         * @description Gateway service action.
+         */
+        OpenClawGatewayRequest: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "start" | "stop" | "restart";
+        };
+        /**
+         * OpenClawJobRequest
+         * @description Options for an OpenClaw setup job.
+         */
+        OpenClawJobRequest: {
+            /**
+             * Profile
+             * @default
+             */
+            profile: string;
+            /**
+             * Reuse Llm
+             * @default true
+             */
+            reuse_llm: boolean;
+        };
+        /**
+         * OpenClawStatusResponse
+         * @description Admin view of the local OpenClaw install and its nblane wiring.
+         */
+        OpenClawStatusResponse: {
+            /**
+             * Agent Data Root
+             * @default
+             */
+            agent_data_root: string;
+            /**
+             * Configured
+             * @default false
+             */
+            configured: boolean;
+            /**
+             * Connected Profile
+             * @default
+             */
+            connected_profile: string;
+            /**
+             * Corpus Present
+             * @default false
+             */
+            corpus_present: boolean;
+            /**
+             * Foreign Root
+             * @default
+             */
+            foreign_root: string;
+            /**
+             * Gateway Port
+             * @default 0
+             */
+            gateway_port: number;
+            /**
+             * Gateway Reachable
+             * @default false
+             */
+            gateway_reachable: boolean;
+            /**
+             * Gateway Service
+             * @default
+             */
+            gateway_service: string;
+            /**
+             * Gateway Unit
+             * @default
+             */
+            gateway_unit: string;
+            /**
+             * Installed
+             * @default false
+             */
+            installed: boolean;
+            job?: components["schemas"]["AgentJobModel"];
+            /**
+             * Llm Base Url
+             * @default
+             */
+            llm_base_url: string;
+            /**
+             * Llm Model
+             * @default
+             */
+            llm_model: string;
+            /**
+             * Llm Reusable
+             * @default false
+             */
+            llm_reusable: boolean;
+            /** Mcp Entry */
+            mcp_entry?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Mcp Profile
+             * @default
+             */
+            mcp_profile: string;
+            /**
+             * Mcp Registered
+             * @default false
+             */
+            mcp_registered: boolean;
+            /**
+             * Node Supported
+             * @default false
+             */
+            node_supported: boolean;
+            /**
+             * Node Version
+             * @default
+             */
+            node_version: string;
+            /**
+             * Npm Available
+             * @default false
+             */
+            npm_available: boolean;
+            /**
+             * Pinned Version
+             * @default
+             */
+            pinned_version: string;
+            /**
+             * Profile
+             * @default
+             */
+            profile: string;
+            /**
+             * State Dir
+             * @default
+             */
+            state_dir: string;
+            /**
+             * Target Workspace
+             * @default
+             */
+            target_workspace: string;
+            /**
+             * Version
+             * @default
+             */
+            version: string;
+            /**
+             * Weixin Installed
+             * @default false
+             */
+            weixin_installed: boolean;
+            /**
+             * Weixin Login Command
+             * @default
+             */
+            weixin_login_command: string;
+            /**
+             * Workspace
+             * @default
+             */
+            workspace: string;
+            /**
+             * Workspace Exists
+             * @default false
+             */
+            workspace_exists: boolean;
+            /**
+             * Workspace In Agent Root
+             * @default false
+             */
+            workspace_in_agent_root: boolean;
         };
         /** PaperAbstractModel */
         PaperAbstractModel: {
@@ -20342,6 +21302,580 @@ export interface operations {
             };
         };
     };
+    get_openclaw_setup_api_v1_settings_agents_openclaw_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenClawStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    openclaw_gateway_action_api_v1_settings_agents_openclaw_gateway_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenClawGatewayRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenClawStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_openclaw_job_api_v1_settings_agents_openclaw__kind__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenClawJobRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenClawStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_backup_api_v1_settings_backup_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_backup_now_api_v1_settings_backup_run_post: {
+        parameters: {
+            query?: {
+                target_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRunResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    init_backup_target_api_v1_settings_backup_targets__target_id__init_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_backup_key_api_v1_settings_backup_targets__target_id__key_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupKeyResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_backup_remote_api_v1_settings_backup_targets__target_id__remote_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupRemoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_backup_remote_api_v1_settings_backup_targets__target_id__remote_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupRemoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRemoteTestResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_backup_timer_api_v1_settings_backup_timer_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupTimerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_codex_status_api_v1_settings_codex_status_get: {
         parameters: {
             query?: never;
@@ -20458,6 +21992,323 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LlmConnectionVerifyResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_grobid_api_v1_settings_grobid_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrobidStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    uninstall_grobid_api_v1_settings_grobid_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrobidStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_grobid_backend_api_v1_settings_grobid_backend_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrobidBackendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrobidStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    install_grobid_api_v1_settings_grobid_install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrobidStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    grobid_logs_api_v1_settings_grobid_logs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrobidLogsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    restart_grobid_api_v1_settings_grobid_restart_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrobidStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    start_grobid_api_v1_settings_grobid_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrobidStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    stop_grobid_api_v1_settings_grobid_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrobidStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Forbidden */

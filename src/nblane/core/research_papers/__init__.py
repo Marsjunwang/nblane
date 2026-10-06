@@ -1672,11 +1672,17 @@ def _pdf_backend() -> str:
     GROBID), and ``pymupdf`` (never probe GROBID). Setting
     ``NBLANE_GROBID_URL`` to ``off``/``none`` (case-insensitive) also forces
     ``pymupdf`` when the backend variable itself is unset or ``auto``.
-    The parsed result is cached and re-parsed when either variable changes.
+    The admin override stored by :mod:`nblane.core.grobid_service` takes
+    precedence over ``NBLANE_RESEARCH_PDF_BACKEND``.
+    The parsed result is cached and re-parsed when either input changes.
     """
 
     global _pdf_backend_cache
-    raw_backend = _clean_text(os.getenv("NBLANE_RESEARCH_PDF_BACKEND")).lower()
+    from nblane.core.grobid_service import backend_override
+
+    # An admin choice in Settings → GROBID wins over the unit's env so the
+    # Reader sidecar and the SPA backend always use the same backend.
+    raw_backend = backend_override() or _clean_text(os.getenv("NBLANE_RESEARCH_PDF_BACKEND")).lower()
     raw_url = _clean_text(os.getenv("NBLANE_GROBID_URL"))
     key = (raw_backend, raw_url)
     if _pdf_backend_cache is not None and _pdf_backend_cache[0] == key:

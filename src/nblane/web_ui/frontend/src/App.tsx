@@ -58,6 +58,7 @@ export function App() {
           <Route path="/" element={<ProfilesPage />} />
           <Route path="/assistant" element={<AssistantPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings/:section" element={<SettingsPage />} />
           <Route path="/workshop" element={<WorkshopPage />} />
           <Route path="/p/:name/home" element={<HomePage />} />
           {/* Legacy route: the health page dissolved — 证据风险 lives under

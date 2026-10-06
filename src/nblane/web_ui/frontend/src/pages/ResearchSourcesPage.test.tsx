@@ -271,20 +271,10 @@ describe('ResearchSourcesPage', () => {
     expect(screen.getByRole('button', { name: /导入选中 1/ })).toBeEnabled();
   });
 
-  it('saves research AI backend/model choices', async () => {
-    const calls = mockApi();
+  it('points the old research AI tab at Settings', async () => {
+    mockApi();
     renderPage('/p/alice/research/sources?tab=ai');
-
-    const model = await screen.findByLabelText('论文翻译模型');
-    expect(model).toHaveAttribute('placeholder', '默认：qwen-plus');
-    fireEvent.change(model, { target: { value: 'qwen-max' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存研究 AI 设置' }));
-
-    await waitFor(() => expect(calls.some((call) => call.method === 'PUT')).toBe(true));
-    const put = calls.find((call) => call.method === 'PUT')!;
-    expect(put.body).toMatchObject({
-      actions: { 'research.paper_translate': { backend: '', llm_model: 'qwen-max', codex_model: '' } },
-    });
-    expect(await screen.findByText('研究 AI 设置已保存')).toBeInTheDocument();
+    const link = await screen.findByRole('link', { name: /打开研究与阅读设置/ });
+    expect(link).toHaveAttribute('href', '/settings/research?profile=alice');
   });
 });

@@ -19,7 +19,7 @@ SPA 暂不提供这两类入口。
 | 论文库 | `/p/<name>/research/library` | 内嵌 sidecar 论文库（`embed=1&ui_lang=zh`）：导入、目录树、批量操作、导出。 |
 | 论文概览 | `/p/<name>/research/papers/<id>` | 单篇论文起始页：摘要与译文、阅读/翻译进度、最近笔记、快速分析与深度研读结果。 |
 | 阅读器 | `/p/<name>/research/papers/<id>/read` | 内嵌 sidecar Reader；`?mode=compare|translation&page=N` 可直达。 |
-| 研究来源 | `/p/<name>/research/sources` | 来源收件箱、手动添加来源、连接器（`?tab=connectors`）、研究 AI 配置（`?tab=ai`）。 |
+| 研究来源 | `/p/<name>/research/sources` | 来源收件箱、手动添加来源、连接器（`?tab=connectors`）。研究 AI 配置已移到「设置 → 档案 → 研究与阅读」。 |
 
 - SPA 后端：`8504`（隔离开发 `18504`）。Reader / Paper Library sidecar：`8502`（隔离 `18502`），
   只通过 SPA 内嵌访问；生产不要把 sidecar 端口直接暴露。
@@ -41,14 +41,14 @@ SPA 暂不提供这两类入口。
 
 ## Research AI 配置
 
-「研究来源 → 研究 AI」只影响 Research 里的论文与 Reader 动作（论文搜索、翻译、快速分析、导读、问答、
+「设置 → 档案 → 研究与阅读 → 研究 AI」（`/settings/research`）只影响 Research 里的论文与 Reader 动作（论文搜索、翻译、快速分析、导读、问答、
 深度研读、论文对比），存放在 `web-preferences.yaml` 的 `ai.actions.research.*`。看板和证据的 AI 配置不在这里。
 
 ## 本地翻译模型
 
 管理员可以在服务器上装一个开源翻译模型，让选区和当前页翻译不再消耗 LLM 额度。没装时一切照旧走 AI 连接。
 
-**安装（只需管理员，无需命令行）**：SPA「设置 → 本地翻译模型」，选一档点「安装」，完成后点「启用」，再用页面下方的「试译」确认效果。
+**安装（只需管理员，无需命令行）**：SPA「设置 → 系统 → 本地服务」（`/settings/local-services`），选一档点「安装」，完成后点「启用」，再用页面下方的「试译」确认效果。
 
 | 档位 | 模型 | 文件 | 运行内存 | 适用 |
 | --- | --- | --- | --- | --- |
@@ -57,11 +57,15 @@ SPA 暂不提供这两类入口。
 
 两档都是腾讯混元 Hy-MT2（Apache-2.0）。内存不够的档位会显示原因并禁止安装；服务器升级后同一页面即可安装 7B 并切换。
 
-**谁用本地模型**：每个档案在「设置 → AI 路由 → 论文翻译分工」按范围选择「本地模型 / AI」。默认选区和当前页用本地模型，全文用 AI（1.8B 翻整篇太慢）。本地模型失败时自动改用 AI；单词始终先查本地词典。Reader 里本地模型的译文标「本地模型翻译」。
+**谁用本地模型**：每个档案在「设置 → 档案 → 研究与阅读 → 翻译」按范围选择「本地模型 / AI」。默认选区和当前页用本地模型，全文用 AI（1.8B 翻整篇太慢）。本地模型失败时自动改用 AI；单词始终先查本地词典。Reader 里本地模型的译文标「本地模型翻译」。
 
 **内存**：模型服务不常驻，第一次翻译时自动启动，空闲 5 分钟后释放内存，再次使用约 3 秒唤醒。部署细节见 [腾讯云部署 · 本地翻译模型](deployment-tencent-cloud.md#本地翻译模型)。
 
 ## GROBID 与坐标
+
+GROBID 的安装、启停和状态在 SPA「设置 → 系统 → 本地服务」（管理员），同一处还能切换 PDF 结构后端：
+「自动」在 GROBID 不可用时退回 PyMuPDF 页面文本，「仅 PyMuPDF」完全不调用 GROBID。部署细节见
+[腾讯云部署 · Paper Reading PDF 后端](deployment-tencent-cloud.md#paper-reading-pdf-后端)。
 
 GROBID 负责结构化学术 PDF。某些 PDF 会返回结构化文本但不返回 segment 级坐标。此时 Reader 会优先使用 layout-grounded structure anchors；如果也没有可用结构锚点，才退回页级定位。这个 warning 通常不是部署失败，而是该 PDF/GROBID 组合缺少细粒度坐标。
 

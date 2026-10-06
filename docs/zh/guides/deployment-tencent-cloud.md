@@ -560,7 +560,36 @@ GROBID 是自托管 REST 服务，不是默认云服务；nblane 只需要能访
 `/api/isalive` 和 `/api/processFulltextDocument`。生产部署建议把 GROBID 只绑定到
 本机回环地址，避免把未公开论文 PDF 发送到不可信服务。
 
-安装 Docker：
+### 推荐：在设置页一键安装（无 root Podman）
+
+管理员在 SPA「设置 → 系统 → 本地服务」的 GROBID 卡片点「安装并启动」（`/settings/local-services`）：nblane 用服务用户自己的
+Podman 拉取固定版本镜像 `docker.io/grobid/grobid:0.9.0-crf`，写入
+`~/.config/containers/systemd/nblane-grobid.container`（Quadlet），交给 `systemd --user` 运行，
+只监听 `127.0.0.1:8070`。之后可以在同一张卡片里启动、停止、重启、看日志、看内存，
+并切换「PDF 结构后端」（自动 / GROBID / 仅 PyMuPDF）。
+
+整个过程不需要 root，网站进程也不接触 Docker socket。一次性准备（需要 sudo）：
+
+```bash
+sudo apt-get install -y podman                 # Ubuntu 24.04 官方源 4.9.x
+sudo loginctl enable-linger <服务用户>          # 无人登录时 systemd --user 也常驻
+grep <服务用户> /etc/subuid /etc/subgid          # 无 root 容器需要的 ID 映射（adduser 默认已分配）
+```
+
+- 镜像约 1.7 GB，走服务的 `https_proxy` 从 Docker Hub 拉取。已有 Docker 镜像时可直接导入，免下载：
+  `sudo docker save grobid/grobid:0.9.0-crf | podman load`（以服务用户执行 `podman load`）。
+- 设置页的「PDF 结构后端」写在 `~/.local/share/nblane/grobid/settings.json`，**优先于** unit 里的
+  `NBLANE_RESEARCH_PDF_BACKEND`，所以 Reader（8502）和 SPA 后端（8504）总是一致。
+- 已经有 root Docker 跑着 GROBID 时，卡片显示「运行中（外部服务）」，只能查看。迁移：
+  `sudo docker stop nblane-grobid && sudo docker update --restart=no nblane-grobid`，再在设置页点
+  「安装并启动」；确认正常后可 `sudo docker rm nblane-grobid`。回滚：设置页「移除服务」，
+  再 `sudo docker start nblane-grobid && sudo docker update --restart=unless-stopped nblane-grobid`。
+- GROBID 运行约占 1.3–2.7 GB 内存，首次启动约 30–60 秒。2 核 4 GB 机器上它和本地翻译模型同时满载会很挤，
+  不导入论文时可以在设置页停掉。
+- 维护：`systemctl --user status nblane-grobid`、`journalctl --user -u nblane-grobid -f`、`podman ps`。
+
+### 备选：root Docker
+
 
 ```bash
 sudo apt-get update
@@ -626,7 +655,7 @@ sudo docker stop nblane-grobid
 
 ## 本地翻译模型
 
-可选。部署代码后由管理员在 SPA「设置 → 本地翻译模型」安装和启用，不需要改 systemd 或 `.env`。
+可选。部署代码后由管理员在 SPA「设置 → 系统 → 本地服务」安装和启用，不需要改 systemd 或 `.env`。
 用户侧说明见 [Research 使用说明 · 本地翻译模型](research.md#本地翻译模型)。
 
 - **下载**：后端进程直接下载固定版本的 llama.cpp CPU 运行时（GitHub）和固定 revision 的 GGUF（Hugging Face），
@@ -657,7 +686,7 @@ pgrep -af llama-server                                  # 是否在运行（休�
 
 - `TCP:80,443`：公网 Web。
 - `TCP:22`：仅允许管理员固定 IP。
-- 不开放 `8501`、`8505`（本地翻译模型）、数据库端口或全端口。
+- 不开放 `8501`、`8505`（本地翻译模型）、`8070`（GROBID）、数据库端口或全端口。
 
 腾讯云官方文档：
 

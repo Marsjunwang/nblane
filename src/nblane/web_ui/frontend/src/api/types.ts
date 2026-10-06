@@ -22,6 +22,14 @@ export type LlmConnectionVerify = Schemas['LlmConnectionVerifyResponse'];
 export type LocalModels = Schemas['LocalModelsResponse'];
 export type LocalModel = Schemas['LocalModelModel'];
 export type LocalModelTestResult = Schemas['LocalModelTestResponse'];
+export type GrobidStatus = Schemas['GrobidStatusResponse'];
+export type GrobidLogs = Schemas['GrobidLogsResponse'];
+export type BackupStatus = Schemas['BackupStatusResponse'];
+export type BackupTarget = Schemas['BackupTargetModel'];
+export type BackupRemoteTest = Schemas['BackupRemoteTestResponse'];
+export type BackupKey = Schemas['BackupKeyResponse'];
+export type BackupRun = Schemas['BackupRunResponse'];
+export type OpenClawSetupStatus = Schemas['OpenClawStatusResponse'];
 
 /** Profile-scoped non-secret preferences and Codex readiness/configuration. */
 export type ProfileSettings = Schemas['ProfileSettingsResponse'];

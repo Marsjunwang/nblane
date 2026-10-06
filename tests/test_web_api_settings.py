@@ -184,6 +184,45 @@ class TestWebApiSettings(unittest.TestCase):
         self.assertEqual(install.status_code, 403)
 
 
+    def test_grobid_status_backend_and_member_forbidden(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _profile(root)
+            client = self._client(root)
+            snapshot = {
+                "state": "external", "alive": True, "version": "0.9.0", "url": "http://127.0.0.1:8070",
+                "manageable": True, "port": 8070, "unit": "nblane-grobid",
+                "unit_state": {"installed": False}, "image": "img", "image_present": True,
+                "podman_available": True, "user_manager": True, "backend": "auto",
+                "install": {}, "blocker": "",
+            }
+            with patch.dict(os.environ, {"NBLANE_GROBID_SERVICE_DIR": str(root / "grobid")}):
+                with patch("nblane.core.grobid_service.status", return_value=snapshot):
+                    listing = client.get("/api/v1/settings/grobid")
+                    self.assertEqual(listing.status_code, 200)
+                    self.assertEqual(listing.json()["state"], "external")
+                    saved = client.put("/api/v1/settings/grobid/backend", json={"backend": "grobid"})
+                    self.assertEqual(saved.status_code, 200)
+                    bad = client.put("/api/v1/settings/grobid/backend", json={"backend": "bogus"})
+                    self.assertEqual(bad.status_code, 422)
+                    stop = client.post("/api/v1/settings/grobid/stop")
+                    self.assertEqual(stop.status_code, 400)
+                    self.assertEqual(stop.json()["code"], "grobid_stop_failed")
+                from nblane.core import grobid_service
+
+                self.assertEqual(grobid_service.backend_override(), "grobid")
+
+    def test_member_cannot_manage_grobid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _profile(root)
+            client = self._client(root, auth=True)
+            client.post("/api/v1/auth/login", json={"username": "member", "password": PASSWORD})
+            read = client.get("/api/v1/settings/grobid")
+            start = client.post("/api/v1/settings/grobid/start")
+        self.assertEqual(read.status_code, 403)
+        self.assertEqual(start.status_code, 403)
+
     def test_profile_preferences_round_trip_and_secret_stripping(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
