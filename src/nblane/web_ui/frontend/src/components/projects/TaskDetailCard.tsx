@@ -298,8 +298,14 @@ export function TaskDetailCard({
   const habitId = project?.habit_id || habits.find((h) => h.project_id === project?.id)?.id || '';
   const habit = habits.find((h) => h.id === habitId);
 
-  const onError = (title: string) => (error: unknown) =>
-    handleLaneMutationError(error, title, onRefresh);
+  // The card renders every mutation error inline (conflict / 重名 / generic
+  // alert below the actions), so a toast on top would say it twice. Only the
+  // 412 side effect — refetching the stale board — is kept here.
+  const onError = (_title: string) => (error: unknown) => {
+    if (error instanceof ApiError && error.status === 412) {
+      onRefresh();
+    }
+  };
 
   const runMove = (targetSection: string) =>
     moveCard.mutate(
@@ -532,7 +538,9 @@ export function TaskDetailCard({
               task={task}
               kanbanEtag={kanbanEtag}
               patchCard={patchCard}
-              onError={onError}
+              // Checklist writes can flush after the card closed (no inline
+              // alert left to show them), so they keep the toast.
+              onError={(title) => (error) => handleLaneMutationError(error, title, onRefresh)}
             />
           </InscriptionRow>
           {editing ? (

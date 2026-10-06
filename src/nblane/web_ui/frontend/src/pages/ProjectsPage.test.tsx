@@ -318,7 +318,7 @@ describe('ProjectsPage board view', () => {
 
     const badge = await screen.findByTestId('stats-tasks_unassigned');
     // Lane truth: 1 visible card; the done one is named, not miscounted.
-    expect(badge).toHaveTextContent('未归属 1(含已完成 1)');
+    expect(badge).toHaveTextContent('未归属 1 · 另有已完成 1');
   });
 
   it('未归属 stats badge without hidden done cards shows the plain count', async () => {
@@ -335,7 +335,60 @@ describe('ProjectsPage board view', () => {
 
     const badge = await screen.findByTestId('stats-tasks_unassigned');
     expect(badge).toHaveTextContent('未归属 1');
-    expect(badge).not.toHaveTextContent('含已完成');
+    expect(badge).not.toHaveTextContent('已完成');
+  });
+
+  it('Done fold count expands an inline, faded list of the lane done cards', async () => {
+    stubFetch((url) => {
+      if (url.endsWith('/profiles/alice/kanban')) {
+        return new Response(
+          JSON.stringify({
+            ...KANBAN_BOARD,
+            sections: [
+              ...KANBAN_BOARD.sections.filter((section) => section.name !== 'Done'),
+              {
+                name: 'Done',
+                tasks: [
+                  { id: 'kb_d1', title: '旧任务甲', project_id: 'p1', completed_on: '2026-09-01' },
+                  { id: 'kb_d2', title: '旧任务乙', project_id: 'p1', completed_on: '2026-09-20' },
+                  { id: 'kb_d3', title: '别处的任务', project_id: 'p2', completed_on: '2026-09-21' },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json', ETag: KANBAN_ETAG } },
+        );
+      }
+      return undefined as unknown as Response;
+    });
+    renderPage();
+
+    const fold = await screen.findByTestId('done-count-p1');
+    expect(fold).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('done-list-p1')).not.toBeInTheDocument();
+
+    fireEvent.click(fold);
+    const list = await screen.findByTestId('done-list-p1');
+    expect(fold).toHaveAttribute('aria-expanded', 'true');
+    // Newest first, own lane only.
+    const items = within(list).getAllByText(/^✓ /);
+    expect(items.map((item) => item.textContent)).toEqual([
+      '✓ 旧任务乙 · 2026-09-20',
+      '✓ 旧任务甲 · 2026-09-01',
+    ]);
+    expect(within(list).queryByText(/别处的任务/)).not.toBeInTheDocument();
+
+    fireEvent.click(fold);
+    expect(screen.queryByTestId('done-list-p1')).not.toBeInTheDocument();
+  });
+
+  it('Enter on a focused card opens its detail card (Space stays the drag key)', async () => {
+    stubFetch();
+    renderPage();
+    const card = await screen.findByRole('button', { name: '拖拽卡片 读 VLA 综述' });
+    card.focus();
+    fireEvent.keyDown(card, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(lastSearch).toContain('task=kb_1'));
   });
 
   it('an empty lane folds to one quick-add row (no empty Queue/Doing blocks)', async () => {
@@ -1196,7 +1249,15 @@ describe('ProjectsPage mutations', () => {
       context?.onDragEnd?.({ active: { id: 'kb_1' }, over: { id: 'lane::p1::doing' } });
     });
 
-    expect(await screen.findByText('已移动')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([input, init]) => String(input).endsWith('/move') && init?.method === 'POST',
+        ),
+      ).toBe(true),
+    );
+    // A successful drag is silent: the card already sits where it was dropped.
+    expect(screen.queryByText('已移动')).not.toBeInTheDocument();
     const moveCall = fetchMock.mock.calls.find(
       ([input, init]) => String(input).endsWith('/move') && init?.method === 'POST',
     );

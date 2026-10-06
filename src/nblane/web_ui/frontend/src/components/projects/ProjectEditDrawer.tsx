@@ -49,12 +49,14 @@ import { ApiError } from '../../api/client';
 import { streamJob } from '../../api/jobs';
 import type {
   ProjectBoard,
+  ProjectBoardOptions,
   ProjectCase,
   ProjectMilestone,
   ProjectRefOption,
   ProjectSuggestRefsResponse,
 } from '../../api/types';
 import { collectProjects, KIND_LABELS, PROJECT_STATUS_LABELS } from './lanes';
+import { PlainDateInput } from './PlainDateInput';
 
 const PROJECT_STATUSES = Object.keys(PROJECT_STATUS_LABELS);
 
@@ -102,6 +104,21 @@ function refSelectData(
     }
   }
   return data;
+}
+
+const SUGGEST_FIELD_OPTIONS: Record<string, keyof ProjectBoardOptions> = {
+  goal_refs: 'goals',
+  task_refs: 'tasks',
+  evidence_refs: 'evidence',
+  source_refs: 'sources',
+  output_refs: 'outputs',
+};
+
+/** Human label for a suggested ref id (raw id only when the pickers lack it). */
+function refLabel(options: ProjectBoardOptions | undefined, field: string, ref: string): string {
+  const key = SUGGEST_FIELD_OPTIONS[field];
+  const rows = (key && (options?.[key] as ProjectRefOption[] | undefined)) || [];
+  return rows.find((row) => row.id === ref)?.label || ref;
 }
 
 interface CaseDraft {
@@ -409,6 +426,7 @@ function BasicsTab({
   );
   const save = useSaveProjectCase(profile);
   const archive = useArchiveProjectCase(profile);
+  const projectBoardQuery = useProjectBoard(profile);
   const createJob = useCreateJob(profile);
   const refreshBoard = useRefreshBoards(profile);
   const stopStreamRef = useRef<(() => void) | null>(null);
@@ -476,6 +494,58 @@ function BasicsTab({
     save.mutate(
       { caseId: projectCase.id, body, etag },
       { onSuccess: () => setDirty(false) },
+    );
+  };
+
+  // 归档 is one click and reversible: the toast carries 撤销, which restores
+  // the previous status against a freshly fetched project-board ETag.
+  const runArchive = () => {
+    const previousStatus = projectCase.status || 'active';
+    const label = projectCase.title || projectCase.id;
+    archive.mutate(
+      { caseId: projectCase.id, etag },
+      {
+        onSuccess: () => {
+          const toastId = `archive-undo-${projectCase.id}`;
+          notifications.show({
+            id: toastId,
+            color: 'gray',
+            title: '已归档',
+            autoClose: 8000,
+            message: (
+              <Group gap="xs" justify="space-between" wrap="nowrap">
+                <Text size="sm">「{label}」已移入归档带。</Text>
+                <Button
+                  size="compact-xs"
+                  variant="light"
+                  data-testid={`archive-undo-${projectCase.id}`}
+                  onClick={async () => {
+                    notifications.hide(toastId);
+                    const fresh = await projectBoardQuery.refetch();
+                    save.mutate(
+                      {
+                        caseId: projectCase.id,
+                        body: { status: previousStatus },
+                        etag: fresh.data?.etag ?? '',
+                      },
+                      {
+                        onError: (error) =>
+                          notifications.show({
+                            color: 'red',
+                            title: '撤销失败',
+                            message: error instanceof Error ? error.message : String(error),
+                          }),
+                      },
+                    );
+                  }}
+                >
+                  撤销
+                </Button>
+              </Group>
+            ),
+          });
+        },
+      },
     );
   };
 
@@ -566,7 +636,14 @@ function BasicsTab({
           onChange={(event) => set('title', event.currentTarget.value)}
           required
         />
-        <TextInput label="ID" value={projectCase.id} disabled />
+        <TextInput
+          label="ID"
+          value={projectCase.id}
+          readOnly
+          variant="unstyled"
+          aria-readonly
+          styles={{ input: { color: 'var(--mantine-color-dimmed)', cursor: 'default' } }}
+        />
       </Group>
       <Group grow align="flex-start">
         <Select
@@ -651,7 +728,21 @@ function BasicsTab({
         onRefetch={refreshBoard}
       />
 
-      <Group gap="sm" wrap="wrap">
+      {/* Pinned to the drawer bottom: the basics form is ~12 fields tall, so
+          the save button must not sit below the fold. */}
+      <Group
+        gap="sm"
+        wrap="wrap"
+        data-testid="basics-actions"
+        style={{
+          position: 'sticky',
+          bottom: 0,
+          zIndex: 2,
+          padding: '10px 0',
+          background: 'var(--mantine-color-body)',
+          borderTop: '1px solid var(--mantine-color-default-border)',
+        }}
+      >
         <Button
           leftSection={<IconDeviceFloppy size={14} />}
           onClick={runSave}
@@ -675,7 +766,7 @@ function BasicsTab({
             variant="outline"
             color="gray"
             leftSection={<IconArchive size={14} />}
-            onClick={() => archive.mutate({ caseId: projectCase.id, etag })}
+            onClick={runArchive}
             loading={archive.isPending}
           >
             归档项目
@@ -739,7 +830,9 @@ function BasicsTab({
                 .filter(([, list]) => list.length > 0)
                 .map(
                   ([field, list]) =>
-                    `${SUGGEST_FIELD_LABELS[field] ?? field}: ${list.join(', ')}`,
+                    `${SUGGEST_FIELD_LABELS[field] ?? field}: ${list
+                      .map((ref) => refLabel(board.options, field, ref))
+                      .join(', ')}`,
                 )
                 .join(' · ') || '无新增建议'}
             </Text>
@@ -776,6 +869,9 @@ function MilestoneEditor({
   const [summary, setSummary] = useState(milestone.summary ?? '');
   const save = useSaveProjectMilestone(profile);
   const remove = useDeleteProjectMilestone(profile);
+  // Deleting a milestone drops it for good (its tasks stay, unlinked):
+  // the first click arms an inline confirm instead of firing the DELETE.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const refreshBoard = useRefreshBoards(profile);
 
   return (
@@ -799,12 +895,7 @@ function MilestoneEditor({
           value={target}
           onChange={(event) => setTarget(event.currentTarget.value)}
         />
-        <TextInput
-          label="日期"
-          type="date"
-          value={date}
-          onChange={(event) => setDate(event.currentTarget.value)}
-        />
+        <PlainDateInput label="日期" value={date} onChange={setDate} />
       </Group>
       <Textarea
         label="摘要"
@@ -834,17 +925,37 @@ function MilestoneEditor({
         >
           保存里程碑
         </Button>
-        <Button
-          size="compact-sm"
-          variant="outline"
-          color="red"
-          loading={remove.isPending}
-          onClick={() =>
-            remove.mutate({ caseId: projectCase.id, milestoneId: milestone.id, etag })
-          }
-        >
-          删除
-        </Button>
+        {confirmingDelete ? (
+          <>
+            <Text size="xs" c="red">
+              删除后不可恢复,确定?
+            </Text>
+            <Button
+              size="compact-sm"
+              color="red"
+              loading={remove.isPending}
+              data-testid={`milestone-delete-confirm-${milestone.id}`}
+              onClick={() =>
+                remove.mutate({ caseId: projectCase.id, milestoneId: milestone.id, etag })
+              }
+            >
+              确认删除
+            </Button>
+            <Button size="compact-sm" variant="subtle" onClick={() => setConfirmingDelete(false)}>
+              取消
+            </Button>
+          </>
+        ) : (
+          <Button
+            size="compact-sm"
+            variant="outline"
+            color="red"
+            data-testid={`milestone-delete-${milestone.id}`}
+            onClick={() => setConfirmingDelete(true)}
+          >
+            删除
+          </Button>
+        )}
       </Group>
     </Stack>
   );
@@ -938,12 +1049,7 @@ function MilestonesTab({
               value={target}
               onChange={(event) => setTarget(event.currentTarget.value)}
             />
-            <TextInput
-              label="日期"
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.currentTarget.value)}
-            />
+            <PlainDateInput label="日期" value={date} onChange={setDate} />
           </Group>
           <MutationErrorAlert error={add.error} title="添加失败" onRefetch={refreshBoard} />
           <Group>

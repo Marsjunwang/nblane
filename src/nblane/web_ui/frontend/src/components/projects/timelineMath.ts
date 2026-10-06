@@ -556,13 +556,20 @@ export function isOverdue(
 
 /** localStorage key for the project multi-select (array of project ids). */
 export const TIMELINE_FILTER_KEY = 'nblane.timeline.projects';
+/** 大事记's own selection — it used to share the timeline key, so filtering
+ * one view silently re-filtered the other. */
+export const CHRONICLE_FILTER_KEY = 'nblane.chronicle.projects';
 
 /**
  * Selected project ids from storage, intersected with the ids that exist
  * now; no stored value (or junk) means 默认全选.
  */
-export function loadProjectFilter(storage: Storage, allIds: string[]): Set<string> {
-  const raw = storage.getItem(TIMELINE_FILTER_KEY);
+export function loadProjectFilter(
+  storage: Storage,
+  allIds: string[],
+  key: string = TIMELINE_FILTER_KEY,
+): Set<string> {
+  const raw = storage.getItem(key);
   if (raw) {
     try {
       const parsed: unknown = JSON.parse(raw);
@@ -577,9 +584,13 @@ export function loadProjectFilter(storage: Storage, allIds: string[]): Set<strin
   return new Set(allIds);
 }
 
-export function saveProjectFilter(storage: Storage, selected: ReadonlySet<string>): void {
+export function saveProjectFilter(
+  storage: Storage,
+  selected: ReadonlySet<string>,
+  key: string = TIMELINE_FILTER_KEY,
+): void {
   try {
-    storage.setItem(TIMELINE_FILTER_KEY, JSON.stringify([...selected]));
+    storage.setItem(key, JSON.stringify([...selected]));
   } catch {
     // storage full / unavailable — filtering still works for the session
   }

@@ -1753,6 +1753,33 @@ export function TimelineView({
             </Stack>
           )}
 
+          {visibleGroups.length === 0 && allProjects.length > 0 && (
+            <Group
+              gap="sm"
+              px="md"
+              py="lg"
+              data-testid="timeline-filter-empty"
+              style={{ position: 'sticky', left: 0, width: 'fit-content' }}
+            >
+              <Text size="sm" style={{ color: boardPalette.dim }}>
+                当前筛选没有选中任何项目。
+              </Text>
+              <Button
+                size="compact-sm"
+                variant="light"
+                onClick={() => {
+                  setFilterSelection(null);
+                  try {
+                    window.localStorage.removeItem(TIMELINE_FILTER_KEY);
+                  } catch {
+                    // storage unavailable — the in-memory reset still applies
+                  }
+                }}
+              >
+                清除筛选
+              </Button>
+            </Group>
+          )}
           {visibleGroups.map((group) => (
             <Stack key={group.id} gap={0} data-testid={`timeline-group-${group.id}`}>
               <Group wrap="nowrap" gap={0}>

@@ -10,6 +10,7 @@
 // the task param.
 
 import {
+  ActionIcon,
   Alert,
   Badge,
   Button,
@@ -262,16 +263,16 @@ export function ProjectsPage() {
             >
               新建计划
             </Button>
-            <Button
-              variant="subtle"
-              size="compact-sm"
-              leftSection={<IconRefresh size={14} />}
-              loading={board.isFetching}
-              onClick={onRefresh}
-              aria-label="刷新"
-            >
-              刷新
-            </Button>
+            <Tooltip label="刷新" openDelay={300} withArrow>
+              <ActionIcon
+                variant="subtle"
+                loading={board.isFetching}
+                onClick={onRefresh}
+                aria-label="刷新"
+              >
+                <IconRefresh size={16} />
+              </ActionIcon>
+            </Tooltip>
           </Group>
         </Group>
       </Paper>
@@ -317,7 +318,7 @@ export function ProjectsPage() {
                   : {})}
               >
                 {STATS_LABELS[key] ?? key} {laneVisible}
-                {hiddenDone > 0 ? `(含已完成 ${hiddenDone})` : ''}
+                {hiddenDone > 0 ? ` · 另有已完成 ${hiddenDone}` : ''}
               </Badge>
             );
           })}

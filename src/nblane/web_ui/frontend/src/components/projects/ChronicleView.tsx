@@ -65,7 +65,7 @@ import {
   sameDayFanOffsets,
   zoomChronicle,
 } from './chronicleMath';
-import { daysBetween, loadProjectFilter, saveProjectFilter, TIMELINE_FILTER_KEY } from './timelineMath';
+import { CHRONICLE_FILTER_KEY, daysBetween, loadProjectFilter, saveProjectFilter } from './timelineMath';
 
 // Row geometry (px). Two label tiers per side at ~24px pitch around the axis.
 const AXIS_Y = 70;
@@ -807,7 +807,7 @@ export function ChronicleView({
   const allProjects = useMemo(() => groups.flatMap((group) => group.projects), [groups]);
   const allProjectIds = useMemo(() => allProjects.map((project) => project.id), [allProjects]);
   const selectedProjects = useMemo(
-    () => filterSelection ?? loadProjectFilter(window.localStorage, allProjectIds),
+    () => filterSelection ?? loadProjectFilter(window.localStorage, allProjectIds, CHRONICLE_FILTER_KEY),
     [filterSelection, allProjectIds],
   );
 
@@ -1053,7 +1053,7 @@ export function ChronicleView({
     const only = filterSelection != null && filterSelection.size === 1 && filterSelection.has(projectId);
     const next = only ? null : new Set([projectId]);
     setFilterSelection(next);
-    saveProjectFilter(window.localStorage, next ?? new Set(allProjectIds));
+    saveProjectFilter(window.localStorage, next ?? new Set(allProjectIds), CHRONICLE_FILTER_KEY);
   };
 
   // 重置视图: default 90 天/行 anchored on today, 全项目, breaks folded,
@@ -1064,7 +1064,7 @@ export function ChronicleView({
     setFilterSelection(null);
     setExpandedBreaks(new Set());
     try {
-      window.localStorage.removeItem(TIMELINE_FILTER_KEY);
+      window.localStorage.removeItem(CHRONICLE_FILTER_KEY);
     } catch {
       // storage unavailable — the in-memory reset still applies
     }
@@ -1123,7 +1123,7 @@ export function ChronicleView({
           onChange={(values) => {
             const next = new Set(values);
             setFilterSelection(next);
-            saveProjectFilter(window.localStorage, next);
+            saveProjectFilter(window.localStorage, next, CHRONICLE_FILTER_KEY);
           }}
           placeholder="筛选项目"
           searchable
@@ -1157,6 +1157,23 @@ export function ChronicleView({
         </Button>
       </Group>
 
+      {allProjectIds.length > 0 && selectedProjects.size === 0 && (
+        <Group gap="sm" data-testid="chronicle-filter-empty">
+          <Text size="sm" style={{ color: boardPalette.dim }}>
+            当前筛选没有选中任何项目,只显示未归属事件。
+          </Text>
+          <Button size="compact-sm" variant="light" onClick={resetView}>
+            清除筛选
+          </Button>
+        </Group>
+      )}
+
+      {/* Keyboard users drive the chronicle from the scrollport (←/→/j/k): it
+          needs a visible ring, but only for keyboard focus. Kept outside the
+          scrollport — its children are the rows rowIndexAtY measures. */}
+      <style>{`.chronicle-scrollport:focus { outline: none; }
+.chronicle-scrollport:focus-visible { outline: 2px solid ${GOLD}; outline-offset: 2px; }`}</style>
+
       {/* The chronicle owns the vertical wheel (pan) — no page scroll chaining.
           Keyboard: ←/↑/k 向现在, →/↓/j 向过去, Enter 铭文卡, Esc 取消. */}
       <Box
@@ -1167,7 +1184,8 @@ export function ChronicleView({
         mih={320}
         onKeyDown={onViewportKeyDown}
         onClick={onViewportClick}
-        style={{ overflow: 'hidden', position: 'relative', outline: 'none' }}
+        className="chronicle-scrollport"
+        style={{ overflow: 'hidden', position: 'relative' }}
       >
         {rows.map((row, rowIndex) => {
           const scale = rowScales[rowIndex];

@@ -39,6 +39,7 @@ import {
 } from './habitPlans';
 import { collectProjects } from './lanes';
 import { daysBetween, shiftDate } from './timelineMath';
+import { PlainDateInput } from './PlainDateInput';
 
 const DEFAULT_DAYS = 28;
 
@@ -183,18 +184,18 @@ export function NewHabitPlanModal({
           data-testid={`habit-plan-title-${habit.id}`}
         />
         <Group grow align="flex-start">
-          <TextInput
+          <PlainDateInput
             label="开始日期"
-            type="date"
             value={start}
-            onChange={(event) => setStart(event.currentTarget.value)}
+            onChange={setStart}
+            clearable={false}
             data-testid={`habit-plan-start-${habit.id}`}
           />
-          <TextInput
+          <PlainDateInput
             label="结束日期"
-            type="date"
             value={end}
-            onChange={(event) => setEnd(event.currentTarget.value)}
+            onChange={setEnd}
+            clearable={false}
             error={invalidRange ? '结束日期需不早于开始日期。' : undefined}
             data-testid={`habit-plan-end-${habit.id}`}
           />

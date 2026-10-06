@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 import { useInstantiatePlanTemplate, usePlanTemplates } from '../../api/hooks';
 import { MutationErrorAlert } from '../ConflictAlert';
 import { boardPalette } from './palette';
+import { PlainDateInput } from './PlainDateInput';
 
 export function NewPlanModal({
   profile,
@@ -173,11 +174,10 @@ export function NewPlanModal({
             placeholder={selected?.title ?? ''}
             data-testid="plan-title-input"
           />
-          <TextInput
+          <PlainDateInput
             label="开始日期(留空为今天)"
-            type="date"
             value={start}
-            onChange={(event) => setStart(event.currentTarget.value)}
+            onChange={setStart}
             data-testid="plan-start-input"
           />
         </Group>

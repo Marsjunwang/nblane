@@ -290,7 +290,13 @@ export function TaskLaneDnd({
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
     // Press-and-hold so touch scrolling the page/columns is not hijacked.
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    // Space picks up / drops a card; Enter is left to the card itself, where
+    // it opens the detail card (dnd-kit's default start keys include Enter,
+    // which swallowed it).
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      keyboardCodes: { start: ['Space'], cancel: ['Escape'], end: ['Space', 'Enter'] },
+    }),
   );
 
   const collisionDetection: CollisionDetection = useCallback(
@@ -429,13 +435,8 @@ export function TaskLaneDnd({
         etag: kanbanEtag,
       },
       {
-        onSuccess: (result) => {
-          notifications.show({
-            color: 'green',
-            title: '已移动',
-            message: `已移动到 ${result.data.section || LANE_SECTIONS[toName]}。`,
-          });
-        },
+        // No success toast: the card already sits where it was dropped — a
+        // toast per drag is noise. Failures still surface below.
         onError: (error) => {
           setPreview(null);
           handleLaneMutationError(error, '移动失败', onRefresh);
@@ -787,6 +788,18 @@ export function ProjectLane({
   onEditProject: (projectId: string) => void;
   onRefresh: () => void;
 }) {
+  const [doneOpen, setDoneOpen] = useState(false);
+  // Live Done cards of this lane (kanban.md Done section); archived ones are
+  // only counted — the timeline 历史 layer is where they are browsed.
+  const doneTasks = useMemo(
+    () =>
+      (kanbanSections ?? [])
+        .filter((section) => section.name === 'Done')
+        .flatMap((section) => section.tasks ?? [])
+        .filter((task) => task.project_id === project.id)
+        .sort((a, b) => (b.completed_on ?? '').localeCompare(a.completed_on ?? '')),
+    [kanbanSections, project.id],
+  );
   const milestones = project.milestones ?? [];
   const milestoneDone = milestones.reduce((sum, m) => sum + (m.done_count ?? 0), 0);
   const milestoneTotal = milestones.reduce((sum, m) => sum + (m.total_count ?? 0), 0);
@@ -865,9 +878,25 @@ export function ProjectLane({
           )}
         </Group>
         <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-          <Text size="xs" style={{ color: boardPalette.goldText }} data-testid={`done-count-${project.id}`}>
+          <Text
+            size="xs"
+            component="button"
+            type="button"
+            aria-expanded={doneOpen}
+            disabled={project.done_count === 0}
+            onClick={() => setDoneOpen((open) => !open)}
+            style={{
+              color: boardPalette.goldText,
+              background: 'transparent',
+              border: 'none',
+              padding: 0,
+              cursor: project.done_count === 0 ? 'default' : 'pointer',
+            }}
+            data-testid={`done-count-${project.id}`}
+          >
             Done · {project.done_count}
-            {(project.archived_done_count ?? 0) > 0 ? `（含归档 ${project.archived_done_count}）` : ''} ▸
+            {(project.archived_done_count ?? 0) > 0 ? `（含归档 ${project.archived_done_count}）` : ''}{' '}
+            {doneOpen ? '▾' : '▸'}
           </Text>
           <ActionIcon
             variant="subtle"
@@ -880,6 +909,28 @@ export function ProjectLane({
           </ActionIcon>
         </Group>
       </Group>
+      {doneOpen && (
+        // 设计宪法: Done 维持折叠计数,展开后卡淡化 — read-only history, newest first.
+        <Stack gap={2} pl="xs" data-testid={`done-list-${project.id}`} style={{ opacity: 0.55 }}>
+          {doneTasks.length === 0 ? (
+            <Text size="xs" style={{ color: boardPalette.dim }}>
+              已完成的任务都已归档,可在时间轴「历史」或大事记中查看。
+            </Text>
+          ) : (
+            doneTasks.slice(0, DONE_LIST_LIMIT).map((task) => (
+              <Text key={task.id} size="xs" style={{ color: boardPalette.dim }} lineClamp={1}>
+                ✓ {task.title}
+                {task.completed_on ? ` · ${task.completed_on}` : ''}
+              </Text>
+            ))
+          )}
+          {doneTasks.length > DONE_LIST_LIMIT && (
+            <Text size="xs" style={{ color: boardPalette.dim }}>
+              另有 {doneTasks.length - DONE_LIST_LIMIT} 项,完整历史见时间轴「历史」。
+            </Text>
+          )}
+        </Stack>
+      )}
       <HabitPlanSection profile={profile} plans={lanePlans} />
       {isEmptyLane(project) ? (
         // Nothing live to show or drag (DnD is lane-local): fold the two empty
@@ -911,6 +962,9 @@ export function ProjectLane({
     </Stack>
   );
 }
+
+/** Expanded Done fold shows at most this many recent cards. */
+const DONE_LIST_LIMIT = 8;
 
 /** A lane with no Queue / Doing / Someday card renders folded. */
 export function isEmptyLane(project: ProjectsBoardProject): boolean {

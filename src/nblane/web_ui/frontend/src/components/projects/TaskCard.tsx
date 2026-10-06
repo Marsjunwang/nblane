@@ -182,6 +182,15 @@ export function SortableTaskCard({
       {...attributes}
       {...listeners}
       aria-label={`拖拽卡片 ${task.title}`}
+      aria-keyshortcuts="Enter Space"
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' && !isDragging) {
+          event.preventDefault();
+          onSelect(task.id);
+          return;
+        }
+        listeners?.onKeyDown?.(event);
+      }}
       onClick={() => {
         if (suppressClickRef.current) {
           suppressClickRef.current = false;
