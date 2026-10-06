@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from functools import lru_cache
+from importlib import resources
 from pathlib import Path
 from urllib.parse import quote, urlparse
 from typing import Any
 
+import yaml
+
+from nblane.core import llm as llm_client
 from nblane.core.auth import mint_reader_token
 from nblane.core.profile_io import profile_dir
 from nblane.core.research_papers import (
@@ -19,6 +24,7 @@ from nblane.core.research_papers import (
     delete_paper_record,
     ensure_paper_pdf_downloaded,
     ensure_paper_reading_artifacts,
+    filter_paper_rows,
     load_paper_annotations,
     load_paper_library_tree,
     load_paper_pages,
@@ -86,6 +92,93 @@ TECHNICAL_TAXONOMY_LABELS: tuple[tuple[str, str], ...] = (
     ("datasets", "Datasets"),
     ("benchmarks", "Benchmarks"),
 )
+
+PAPER_LIBRARY_LANGS = ("en", "zh")
+
+# Internal (English) badge strings produced by ``paper_rows`` -> label keys.
+# Rows keep the English strings for view matching; only display is localized.
+_BADGE_LABEL_KEYS: dict[str, str] = {
+    "Unsorted": "badge_unsorted",
+    "PDF missing": "badge_pdf_missing",
+    "Stale translation": "badge_stale_translation",
+    "Private source": "badge_private_source",
+    "PDF downloading": "badge_pdf_downloading",
+    "PDF download warning": "badge_pdf_download_warning",
+    "AI candidates": "badge_ai_candidates",
+    "GROBID unavailable": "badge_grobid_unavailable",
+    "Needs structured extraction": "badge_needs_structured_extraction",
+    "Fallback ready": "badge_fallback_ready",
+    "Citation broken": "badge_citation_broken",
+    "Duplicate risk": "badge_duplicate_risk",
+}
+
+
+def resolve_paper_library_lang(value: object | None = None) -> str:
+    """Return ``zh`` / ``en``: an explicit request value wins, else ``UI_LANG``."""
+
+    clean = str(value or "").strip().lower().replace("_", "-")
+    if clean.startswith("zh"):
+        return "zh"
+    if clean.startswith("en"):
+        return "en"
+    return llm_client.ui_language()
+
+
+@lru_cache(maxsize=None)
+def _label_table(lang: str) -> dict[str, str]:
+    """Load ``nblane/i18n/<lang>/paper_library.yaml`` (empty when missing)."""
+
+    try:
+        text = resources.files(f"nblane.i18n.{lang}").joinpath("paper_library.yaml").read_text(encoding="utf-8")
+    except (FileNotFoundError, ModuleNotFoundError):
+        return {}
+    data = yaml.safe_load(text) or {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(key): str(value) for key, value in data.items()}
+
+
+def paper_library_labels(lang: object | None = None) -> dict[str, str]:
+    """Return Paper Library UI copy for *lang*, with English as the fallback."""
+
+    clean = resolve_paper_library_lang(lang)
+    labels = dict(_label_table("en"))
+    if clean != "en":
+        labels.update(_label_table(clean))
+    return labels
+
+
+def _fmt(labels: dict[str, str], key: str, fallback: str = "", **values: object) -> str:
+    """Format one label template; plural ``{s}`` is derived from ``count``."""
+
+    template = labels.get(key) or fallback or key
+    if "count" in values and "s" not in values:
+        try:
+            values["s"] = "" if int(values["count"]) == 1 else "s"  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            values["s"] = "s"
+    try:
+        return template.format(**values)
+    except (KeyError, IndexError, ValueError):
+        return template
+
+
+def _view_title(labels: dict[str, str], view_id: str) -> str:
+    return labels.get(f"view_{view_id}") or LIBRARY_VIEW_LABELS.get(view_id, view_id)
+
+
+def _badge_label(labels: dict[str, str], badge: object) -> str:
+    clean = _clean_text(badge)
+    key = _BADGE_LABEL_KEYS.get(clean)
+    return labels.get(key, clean) if key else clean
+
+
+def _tree_path_label(labels: dict[str, str], value: object) -> str:
+    clean = _clean_text(value)
+    if not clean or clean == "Unsorted":
+        return labels.get("unsorted", "Unsorted")
+    return clean
+
 
 PAPER_LIBRARY_RUNTIME_ENV = "NBLANE_PAPER_LIBRARY_RUNTIME"
 PAPER_LIBRARY_RUNTIME_DEFAULT = "fastapi_iframe"
@@ -212,9 +305,13 @@ def _bool_value(value: object, default: bool = False) -> bool:
     return default
 
 
-def _summarize_extraction_result(summaries: list[dict[str, object]]) -> str:
+def _summarize_extraction_result(
+    summaries: list[dict[str, object]],
+    labels: dict[str, str] | None = None,
+) -> str:
+    labels = labels if labels is not None else paper_library_labels("en")
     if not summaries:
-        return "No papers selected for extraction."
+        return _fmt(labels, "srv_extract_none")
     ready_count = sum(1 for item in summaries if bool(item.get("ready")))
     warning_count = sum(len(item.get("warnings") or []) for item in summaries)
     if len(summaries) == 1:
@@ -225,34 +322,38 @@ def _summarize_extraction_result(summaries: list[dict[str, object]]) -> str:
             status = _clean_text(summary.get("status"))
             backend = _clean_text(summary.get("structure_backend"))
             if status == "fallback" or (backend and backend != "grobid"):
-                message = f"Fallback text ready: {pages} page(s), {segments} segment(s)."
+                message = _fmt(labels, "srv_extract_fallback", pages=pages, segments=segments)
             else:
-                message = f"Extraction ready: {pages} page(s), {segments} segment(s)."
+                message = _fmt(labels, "srv_extract_ready", pages=pages, segments=segments)
         else:
             status = _clean_text(summary.get("status")) or "failed"
-            message = f"Extraction did not complete: {status.replace('_', ' ')}."
+            message = _fmt(labels, "srv_extract_incomplete", status=status.replace("_", " "))
     else:
-        message = f"Extraction finished for {len(summaries)} papers: {ready_count} ready."
+        message = _fmt(labels, "srv_extract_batch", count=len(summaries), ready=ready_count)
     if warning_count:
-        message += f" {warning_count} warning(s) need attention."
+        message += _fmt(labels, "srv_warnings_attention", count=warning_count)
     return message
 
 
-def _summarize_translation_result(summaries: list[dict[str, object]]) -> str:
+def _summarize_translation_result(
+    summaries: list[dict[str, object]],
+    labels: dict[str, str] | None = None,
+) -> str:
+    labels = labels if labels is not None else paper_library_labels("en")
     if not summaries:
-        return "No papers selected for translation."
+        return _fmt(labels, "srv_translate_none")
     updated = sum(_int_value(item.get("updated")) for item in summaries)
     stale = sum(_int_value(item.get("stale")) for item in summaries)
     missing = sum(_int_value(item.get("missing")) for item in summaries)
     failed = sum(_int_value(item.get("failed")) for item in summaries)
     warning_count = sum(len(item.get("warnings") or []) for item in summaries)
-    message = f"Translation retry finished: updated {updated} row(s); {stale} stale remaining."
+    message = _fmt(labels, "srv_translate_done", updated=updated, stale=stale)
     if missing:
-        message += f" {missing} missing."
+        message += _fmt(labels, "srv_translate_missing", count=missing)
     if failed:
-        message += f" {failed} failed."
+        message += _fmt(labels, "srv_translate_failed", count=failed)
     if warning_count:
-        message += f" {warning_count} warning(s) need attention."
+        message += _fmt(labels, "srv_warnings_attention", count=warning_count)
     return message
 
 
@@ -263,9 +364,13 @@ def _short_text(value: object, limit: int = 160) -> str:
     return text[: max(0, limit - 3)].rstrip() + "..."
 
 
-def _status_label(value: object) -> str:
+def _status_label(value: object, labels: dict[str, str] | None = None) -> str:
     clean = _clean_text(value)
-    return clean.replace("_", " ").title() if clean else ""
+    if not clean:
+        return ""
+    if labels and labels.get(f"status_{clean}"):
+        return labels[f"status_{clean}"]
+    return clean.replace("_", " ").title()
 
 
 def _reader_view_url(
@@ -299,13 +404,19 @@ def _metadata_explanation_links(metadata: dict[str, object]) -> list[dict[str, s
     )
 
 
-def _paper_reading_card(source: Any, row: dict[str, object], metadata: dict[str, object]) -> dict[str, object]:
+def _paper_reading_card(
+    source: Any,
+    row: dict[str, object],
+    metadata: dict[str, object],
+    labels: dict[str, str] | None = None,
+) -> dict[str, object]:
+    labels = labels if labels is not None else paper_library_labels("en")
     reading = getattr(source, "reading", None)
     candidates = [
-        ("abstract", "Abstract", _metadata_abstract(metadata)),
-        ("summary", "Summary", _clean_text(getattr(source, "summary", "")) or _clean_text(row.get("summary"))),
-        ("reading_summary", "Reading summary", _clean_text(getattr(reading, "summary", ""))),
-        ("notes", "Notes", _clean_text(getattr(source, "notes", "")) or _clean_text(row.get("notes"))),
+        ("abstract", labels["reading_source_abstract"], _metadata_abstract(metadata)),
+        ("summary", labels["reading_source_summary"], _clean_text(getattr(source, "summary", "")) or _clean_text(row.get("summary"))),
+        ("reading_summary", labels["reading_source_reading_summary"], _clean_text(getattr(reading, "summary", ""))),
+        ("notes", labels["reading_source_notes"], _clean_text(getattr(source, "notes", "")) or _clean_text(row.get("notes"))),
     ]
     source_key = ""
     source_label = ""
@@ -324,21 +435,21 @@ def _paper_reading_card(source: Any, row: dict[str, object], metadata: dict[str,
         or metadata.get("paper_search_reason")
     )
     return {
-        "title": "Abstract Preview",
+        "title": labels["abstract_preview"],
         "source": source_key,
         "source_label": source_label,
         "body": body,
         "why_relevant": why_relevant,
         "empty": not bool(body),
-        "empty_message": "No abstract or summary yet.",
+        "empty_message": labels["no_abstract_preview"],
     }
 
 
-def _paper_primary_meta(row: dict[str, object]) -> str:
+def _paper_primary_meta(row: dict[str, object], labels: dict[str, str] | None = None) -> str:
     parts = [
         _clean_text(row.get("authors")),
         _clean_text(row.get("published")),
-        _clean_text(row.get("tree_path")),
+        _tree_path_label(labels or {}, row.get("tree_path")) if labels else _clean_text(row.get("tree_path")),
     ]
     return " · ".join(part for part in parts if part)
 
@@ -392,7 +503,12 @@ def _paper_node_counts(rows: list[dict[str, object]]) -> dict[str, int]:
     return counts
 
 
-def _paper_collection_tree_items(profile: str | Path, rows: list[dict[str, object]]) -> list[dict[str, object]]:
+def _paper_collection_tree_items(
+    profile: str | Path,
+    rows: list[dict[str, object]],
+    labels: dict[str, str] | None = None,
+) -> list[dict[str, object]]:
+    labels = labels if labels is not None else paper_library_labels("en")
     tree = load_paper_library_tree(profile)
     counts = _paper_node_counts(rows)
     paths = paper_library_paths(profile)
@@ -433,7 +549,7 @@ def _paper_collection_tree_items(profile: str | Path, rows: list[dict[str, objec
             "id": "collections:all",
             "type": "collection_root",
             "node_id": "",
-            "title": "All collections",
+            "title": labels["all_collections"],
             "count": len(rows),
             "children": walk(""),
         }
@@ -444,7 +560,7 @@ def _paper_collection_tree_items(profile: str | Path, rows: list[dict[str, objec
                 "id": "collections:trash",
                 "type": "collection_trash_root",
                 "node_id": "",
-                "title": "Trash",
+                "title": labels["trash"],
                 "count": len(trashed_ids),
                 "children": walk("", source=trash_children, item_type="collection_trash"),
             }
@@ -497,7 +613,9 @@ def _paper_component_rows(
     *,
     user_id: str,
     reader_base: str,
+    labels: dict[str, str] | None = None,
 ) -> list[dict[str, object]]:
+    labels = labels if labels is not None else paper_library_labels("en")
     out: list[dict[str, object]] = []
     for row in rows:
         source_id = _clean_text(row.get("id"))
@@ -512,13 +630,14 @@ def _paper_component_rows(
                 "id": source_id,
                 "title": _clean_text(row.get("title")) or source_id,
                 "status": status,
-                "status_label": _status_label(status),
-                "tree_path": _clean_text(row.get("tree_path")) or "Unsorted",
-                "meta": _paper_primary_meta(row),
+                "status_label": _status_label(status, labels),
+                "tree_path": _tree_path_label(labels, row.get("tree_path")),
+                "meta": _paper_primary_meta(row, labels),
                 "summary": _short_text(row.get("summary") or row.get("notes"), 220),
                 "explanation_links": _metadata_explanation_links(source_metadata),
-                "badges": [str(item) for item in row.get("badges", []) if _clean_text(item)],
+                "badges": [_badge_label(labels, item) for item in row.get("badges", []) if _clean_text(item)],
                 "tags": [str(item) for item in row.get("tags", []) if _clean_text(item)],
+                "citation_key": _clean_text(source_metadata.get("citation_key")),
                 "reader_url": _reader_view_url(profile, source_id, user_id=user_id, reader_base=reader_base) if has_pdf else "",
                 "has_pdf": has_pdf,
                 "open_access_pdf_url": _clean_text(row.get("open_access_pdf_url")),
@@ -526,9 +645,13 @@ def _paper_component_rows(
                 "pdf_download_error": _clean_text(row.get("pdf_download_error")),
                 "metrics": " · ".join(
                     [
-                        f"第 {_clean_text(source_metadata.get('last_read_page')) or '—'} 页",
-                        f"标注 {row.get('annotations_count', 0)}",
-                        f"阅读记录 {'有' if row.get('last_read') else '无'}",
+                        _fmt(labels, "card_page", page=_clean_text(source_metadata.get("last_read_page")) or "—"),
+                        _fmt(labels, "card_annotations", count=row.get("annotations_count", 0)),
+                        _fmt(
+                            labels,
+                            "card_read_log",
+                            value=labels["card_read_yes"] if row.get("last_read") else labels["card_read_no"],
+                        ),
                     ]
                 ),
             }
@@ -544,7 +667,9 @@ def _paper_detail_payload(
     *,
     user_id: str,
     reader_base: str,
+    labels: dict[str, str] | None = None,
 ) -> dict[str, object]:
+    labels = labels if labels is not None else paper_library_labels("en")
     candidates = rows or all_rows
     clean_detail = _clean_text(detail_id)
     row = next((item for item in candidates if _clean_text(item.get("id")) == clean_detail), None)
@@ -579,18 +704,19 @@ def _paper_detail_payload(
         "id": source_id,
         "source_id": source_id,
         "title": _clean_text(getattr(source, "title", "")) or _clean_text(row.get("title")) or source_id,
-        "meta": _paper_primary_meta(row),
+        "meta": _paper_primary_meta(row, labels),
         "summary": _clean_text(getattr(source, "summary", "")) or _clean_text(row.get("summary")),
         "notes": _clean_text(getattr(source, "notes", "")) or _clean_text(row.get("notes")),
         "abstract": _metadata_abstract(source_metadata),
-        "reading_card": _paper_reading_card(source, row, source_metadata),
+        "reading_card": _paper_reading_card(source, row, source_metadata, labels),
         "explanation_links": explanation_links,
         "url": _clean_text(getattr(source, "url", "")) or _clean_text(row.get("url")),
         "status": _clean_text(getattr(source, "status", "")) or _clean_text(row.get("status")),
-        "status_label": _status_label(getattr(source, "status", "") or row.get("status")),
+        "status_label": _status_label(getattr(source, "status", "") or row.get("status"), labels),
         "visibility": _clean_text(getattr(source, "visibility", "")) or _clean_text(row.get("visibility")),
         "tags": list(getattr(source, "tags", []) or row.get("tags", []) or []),
-        "badges": [str(item) for item in row.get("badges", []) if _clean_text(item)],
+        "badges": [_badge_label(labels, item) for item in row.get("badges", []) if _clean_text(item)],
+        "citation_key": _clean_text(source_metadata.get("citation_key")),
         "reader_url": reader_url,
         "has_pdf": has_pdf,
         "open_access_pdf_url": open_access_pdf_url,
@@ -602,13 +728,13 @@ def _paper_detail_payload(
         },
         "primary_node_id": collection_refs[0] if collection_refs else "",
         "collection_refs": collection_refs,
-        "tree_path": _clean_text(row.get("tree_path")) or "Unsorted",
+        "tree_path": _tree_path_label(labels, row.get("tree_path")),
         "metrics": [
-            {"label": "PDF", "value": "ready" if has_pdf else "missing"},
-            {"label": "Last page", "value": _clean_text(source_metadata.get("last_read_page")) or "-"},
-            {"label": "Segments", "value": len(segments)},
-            {"label": "Notes", "value": len([ann for ann in annotations if ann.status == "active"])},
-            {"label": "Translations", "value": len(translations)},
+            {"label": labels["metric_pdf"], "value": labels["value_ready"] if has_pdf else labels["value_missing"]},
+            {"label": labels["metric_last_page"], "value": _clean_text(source_metadata.get("last_read_page")) or "-"},
+            {"label": labels["metric_segments"], "value": len(segments)},
+            {"label": labels["metric_notes"], "value": len([ann for ann in annotations if ann.status == "active"])},
+            {"label": labels["metric_translations"], "value": len(translations)},
         ],
         "artifacts": {
             "pdf_asset_ref": _clean_text(source_metadata.get("pdf_asset_ref")),
@@ -633,113 +759,10 @@ def _paper_detail_payload(
     }
 
 
-def _labels() -> dict[str, str]:
-    return {
-        "add_selected_here": "Add selected papers here",
-        "add_to_collection": "Add to collection",
-        "archive": "Archive",
-        "auto_chunk": "Auto chunk",
-        "attach_pdf": "Attach PDF",
-        "back_to_overview": "Back to Overview",
-        "cancel": "Cancel",
-        "collapse": "Collapse",
-        "collapse_all": "Collapse all",
-        "collection_actions": "Collection actions",
-        "collection_title": "Collection title",
-        "delete_collection": "Delete collection",
-        "discard": "Mark as discarded",
-        "danger_zone": "Danger zone",
-        "delete_paper": "Delete paper...",
-        "delete_paper_confirm": "Type the source id to confirm deletion.",
-        "delete_pdf_asset": "Delete PDF asset",
-        "delete_reader_artifacts": "Delete extracted reader artifacts",
-        "delete_paper_blocked": "Deletion blocked by references.",
-        "download_pdf": "Download PDF",
-        "downloading_pdf": "Downloading PDF...",
-        "expand": "Expand",
-        "expand_all": "Expand all",
-        "mark_as_reading": "Mark as reading",
-        "move_collection": "Move collection",
-        "move_down": "Move down",
-        "move_papers_to_collection": "Move papers to collection",
-        "move_papers_to_parent": "Move papers to parent collection",
-        "move_papers_to_unsorted": "Move papers to Unsorted Inbox",
-        "move_selected_here": "Move selected papers here",
-        "move_to_collection": "Move to collection",
-        "move_up": "Move up",
-        "new_collection": "New collection",
-        "new_subcollection": "New subcollection",
-        "abstract_preview": "Abstract Preview",
-        "no_abstract_preview": "No abstract or summary yet.",
-        "preview_source": "From {source}",
-        "why_relevant": "Why it matters",
-        "explainer_links": "Explainers / reading links",
-        "more_links": "+{count}",
-        "open_reader": "Open Reader",
-        "open_remote_pdf": "Open remote PDF",
-        "paper_policy": "Paper policy",
-        "parent_collection": "Parent collection",
-        "purge_collection": "Purge forever",
-        "quick_actions": "Quick actions",
-        "reader_tab": "Reader tab (fallback)",
-        "remove_from_current_collection": "Remove from current collection",
-        "rename": "Rename",
-        "rename_paper": "Rename paper...",
-        "paper_title": "Paper title",
-        "force_grobid_upgrade": "Force GROBID upgrade",
-        "force_grobid_upgrade_hint": "Retry GROBID even when a recent timeout is cooling down.",
-        "restore_collection": "Restore collection",
-        "run_extraction": "Run extraction",
-        "run_extraction_hint": "Prepare reader artifacts and reuse fallback text after recent GROBID timeouts.",
-        "running_grobid_upgrade": "Upgrading with GROBID...",
-        "running_extraction": "Running extraction...",
-        "save": "Save",
-        "search_collections": "Search collections",
-        "selected_papers": "{count} papers selected",
-        "bulk_select": "Bulk select",
-        "select_all": "Select all",
-        "clear_selection": "Clear",
-        "select_paper": "Select paper",
-        "show_details": "Show details",
-        "library_empty": "No papers match this view.",
-        "library_result_count": "{count} papers",
-        "overview_suggested_action": "Suggested from Overview",
-        "claims_focus": "Claims",
-        "claims_focus_hint": "Review AI candidates and promoted evidence for this paper.",
-        "dedupe": "Review duplicates",
-        "fix_citations": "Fix citations",
-        "metadata_focus": "Metadata",
-        "metadata_focus_hint": "Check title, collection placement, duplicate risk, and source metadata.",
-        "review_claims": "Review claims",
-        "review_metadata": "Review metadata",
-        "review_visibility": "Review visibility",
-        "artifact_pdf_asset_ref": "PDF asset",
-        "artifact_pages": "Pages",
-        "artifact_segments": "Segments",
-        "artifact_chunks": "Research chunks",
-        "artifact_translations": "Translations",
-        "artifact_structure_backend": "Structure backend",
-        "artifact_grobid_service": "GROBID service",
-        "artifact_grobid_last_error": "Last GROBID error",
-        "artifact_grobid_last_failed_at": "Last GROBID failure",
-        "artifact_structured_extracted_at": "Structured extracted at",
-        "retry_translation": "Retry translation",
-        "retry_pdf_download": "Retry PDF",
-        "retrying_translation": "Retrying translation...",
-        "translate_full_paper": "Translate full paper",
-        "translate_grobid_text": "GROBID paragraphs",
-        "translation_mode": "Translation mode",
-        "translation_mode_fast_body": "Fast body",
-        "translation_mode_full_paper": "Full paper",
-        "translation_mode_grobid_text": "GROBID paragraphs",
-        "upload_pdf": "Upload PDF",
-        "safety_focus": "Publish safety",
-        "safety_focus_hint": "Check visibility and private-source blockers before export.",
-        "translations_focus": "Translations",
-        "translations_focus_hint": "Refresh stale translation rows after extraction or segment changes.",
-        "target_collection": "Target collection",
-        "top_level": "Top level",
-    }
+def _labels(lang: object | None = None) -> dict[str, str]:
+    """Back-compat alias for :func:`paper_library_labels`."""
+
+    return paper_library_labels(lang)
 
 
 def build_paper_library_payload(
@@ -757,9 +780,18 @@ def build_paper_library_payload(
     return_url: str = "",
     user_id: str = "local",
     reader_base: str = "",
+    ui_lang: str | None = None,
 ) -> dict[str, object]:
-    """Build the complete Paper Library workbench payload."""
+    """Build the complete Paper Library workbench payload.
 
+    ``ui_lang`` (``zh`` / ``en``) selects the UI copy; when empty the
+    process-wide ``UI_LANG`` applies.
+    """
+
+    lang = resolve_paper_library_lang(ui_lang)
+    labels = paper_library_labels(lang)
+    # paper_rows is memoized on input fingerprints; the per-view rows are a
+    # pure filter over the same build, so there is no second full load.
     all_rows = paper_rows(profile, view="all")
     tree = load_paper_library_tree(profile)
     active_node_ids = {node.id for node in tree.nodes if node.status != "trashed"}
@@ -771,7 +803,7 @@ def build_paper_library_payload(
     view_rows = (
         all_rows
         if current_view == "all" and not current_node
-        else paper_rows(profile, view=current_view, node_id=current_node)
+        else filter_paper_rows(all_rows, view=current_view, node_id=current_node)
     )
     rows = filter_paper_library_rows(
         view_rows,
@@ -788,7 +820,7 @@ def build_paper_library_payload(
     clean_return_url = _clean_return_url(return_url)
 
     paths = paper_library_paths(profile)
-    active_label = LIBRARY_VIEW_LABELS.get(current_view, current_view)
+    active_label = _view_title(labels, current_view)
     if current_node:
         active_label = paths.get(current_node, current_node)
 
@@ -797,7 +829,7 @@ def build_paper_library_payload(
             {
                 "id": view_id,
                 "type": "view",
-                "title": LIBRARY_VIEW_LABELS.get(view_id, view_id),
+                "title": _view_title(labels, view_id),
                 "count": _library_view_count(all_rows, view_id),
             }
             for view_id in view_ids
@@ -805,6 +837,7 @@ def build_paper_library_payload(
 
     return {
         "profile": _profile_name(profile),
+        "ui_lang": lang,
         "active_view": current_view,
         "active_node_id": current_node,
         "active_label": active_label,
@@ -829,7 +862,7 @@ def build_paper_library_payload(
             "needs_extraction": _library_view_count(all_rows, "needs_extraction"),
             "claims_need_review": _library_view_count(all_rows, "claims_need_review"),
         },
-        "papers": _paper_component_rows(profile, rows, user_id=user_id, reader_base=reader_base),
+        "papers": _paper_component_rows(profile, rows, user_id=user_id, reader_base=reader_base, labels=labels),
         "detail": _paper_detail_payload(
             profile,
             clean_detail,
@@ -837,26 +870,27 @@ def build_paper_library_payload(
             all_rows,
             user_id=user_id,
             reader_base=reader_base,
+            labels=labels,
         ),
         "sections": [
             {
                 "id": "library",
-                "title": "Library",
+                "title": labels["section_library"],
                 "items": view_items(LIBRARY_VIEW_GROUPS[0][2]),
             },
             {
                 "id": "collections",
-                "title": "Collections",
-                "items": _paper_collection_tree_items(profile, all_rows),
+                "title": labels["section_collections"],
+                "items": _paper_collection_tree_items(profile, all_rows, labels),
             },
             {
                 "id": "technical_taxonomy",
-                "title": "Technical Taxonomy",
+                "title": labels["section_technical_taxonomy"],
                 "items": [
                     {
                         "id": f"technical:{taxonomy_id}",
                         "type": "taxonomy",
-                        "title": fallback,
+                        "title": labels.get(f"taxonomy_{taxonomy_id}", fallback),
                         "count": 0,
                     }
                     for taxonomy_id, fallback in TECHNICAL_TAXONOMY_LABELS
@@ -864,12 +898,12 @@ def build_paper_library_payload(
             },
             {
                 "id": "work_queue",
-                "title": "Work Queue",
+                "title": labels["section_work_queue"],
                 "items": view_items(LIBRARY_VIEW_GROUPS[1][2]),
             },
             {
                 "id": "system",
-                "title": "System",
+                "title": labels["section_system"],
                 "items": view_items(LIBRARY_VIEW_GROUPS[2][2]),
             },
         ],
@@ -883,9 +917,16 @@ def build_paper_library_payload(
             "purge_collection": True,
             "drop_papers": True,
             "delete_papers": True,
+            "export_papers": True,
         },
+        "export_formats": [
+            {"id": "bibtex", "label": labels["format_bibtex"]},
+            {"id": "ris", "label": labels["format_ris"]},
+            {"id": "csl-json", "label": labels["format_csl_json"]},
+            {"id": "markdown", "label": labels["format_markdown"]},
+        ],
         "diagnostics": validate_paper_library(profile),
-        "labels": _labels(),
+        "labels": labels,
     }
 
 
@@ -895,21 +936,27 @@ def handle_paper_library_event(
     *,
     selected_paper_ids: list[str] | None = None,
     progress_callback: Any | None = None,
+    ui_lang: str | None = None,
 ) -> PaperLibraryEventResult:
-    """Apply one Paper Library UI event and return a structured result."""
+    """Apply one Paper Library UI event and return a structured result.
+
+    Result messages follow ``ui_lang`` (else the event's ``ui_lang`` /
+    ``state.ui_lang``, else ``UI_LANG``).
+    """
 
     if not isinstance(event, dict):
-        return PaperLibraryEventResult(ok=False, message="Invalid Paper Library event.")
+        return PaperLibraryEventResult(ok=False, message=paper_library_labels(ui_lang)["srv_invalid_event"])
     action = _clean_text(event.get("action"))
     payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
     state = event.get("state") if isinstance(event.get("state"), dict) else {}
+    labels = paper_library_labels(ui_lang or event.get("ui_lang") or state.get("ui_lang"))
 
     def event_paper_ids() -> list[str]:
         return _clean_list(payload.get("paper_ids")) or list(selected_paper_ids or [])
 
     changed: dict[str, list[str]] = {}
     next_state: dict[str, str] = {}
-    message = "Saved"
+    message = labels["srv_saved"]
     warnings: list[str] = []
     data: dict[str, Any] = {}
 
@@ -941,7 +988,7 @@ def handle_paper_library_event(
     if action == "paper_library_sync_reader_tab":
         source_id = _clean_text(payload.get("source_id"))
         next_state = {"reader_source_id": source_id, "detail_id": source_id}
-        return PaperLibraryEventResult(message="Selected for the Reader tab.", next=next_state)
+        return PaperLibraryEventResult(message=labels["srv_selected_reader_tab"], next=next_state)
     if action == "paper_library_delete_paper_preview":
         preview = build_paper_delete_preview(_profile_root(profile), event_paper_ids())
         return PaperLibraryEventResult(message="", data={"delete_preview": preview})
@@ -1023,13 +1070,17 @@ def handle_paper_library_event(
         if changed_sources:
             save_research_sources(_profile_root(profile), inbox)
         changed["sources"] = changed_sources
-        verb = {
-            "reading": "Marked as reading",
-            "archived": "Archived",
-            "discarded": "Discarded",
-        }.get(next_status, f"Updated to {_status_label(next_status) or next_status}")
-        noun = "paper" if len(changed_sources) == 1 else "papers"
-        message = f"{verb} {len(changed_sources)} {noun}."
+        message_key = {
+            "reading": "srv_marked_reading",
+            "archived": "srv_archived",
+            "discarded": "srv_discarded",
+        }.get(next_status, "srv_status_updated")
+        message = _fmt(
+            labels,
+            message_key,
+            count=len(changed_sources),
+            status=_status_label(next_status, labels) or next_status,
+        )
     elif action == "paper_library_rename_paper":
         source_id = _clean_text(payload.get("source_id")) or (event_paper_ids()[0] if event_paper_ids() else "")
         title = _clean_text(payload.get("title"))
@@ -1042,7 +1093,7 @@ def handle_paper_library_event(
         save_research_sources(_profile_root(profile), inbox)
         changed["sources"] = [source_id]
         next_state["detail_id"] = source_id
-        message = "Renamed paper."
+        message = labels["srv_renamed_paper"]
     elif action == "paper_library_download_pdf":
         changed_sources = []
         download_summaries: list[dict[str, object]] = []
@@ -1052,7 +1103,7 @@ def handle_paper_library_event(
                 {
                     "phase": "pdf_download",
                     "source_id": source_id,
-                    "message": "Downloading PDF.",
+                    "message": labels["srv_downloading_pdf"],
                 }
             )
             summary = ensure_paper_pdf_downloaded(
@@ -1069,11 +1120,11 @@ def handle_paper_library_event(
         downloaded = sum(1 for summary in download_summaries if _clean_text(summary.get("status")) == "downloaded")
         failed = len(download_summaries) - downloaded
         if downloaded and failed:
-            message = f"Downloaded {downloaded} PDF{'s' if downloaded != 1 else ''}; {failed} need attention."
+            message = _fmt(labels, "srv_downloaded_partial", count=downloaded, failed=failed)
         elif downloaded:
-            message = f"Downloaded {downloaded} PDF{'s' if downloaded != 1 else ''}."
+            message = _fmt(labels, "srv_downloaded", count=downloaded)
         else:
-            message = "PDF download did not complete."
+            message = labels["srv_download_incomplete"]
         if len(changed_sources) == 1:
             next_state["detail_id"] = changed_sources[0]
             next_state["focus"] = "artifacts"
@@ -1088,7 +1139,7 @@ def handle_paper_library_event(
                 {
                     "phase": "extraction",
                     "source_id": source_id,
-                    "message": "Extracting reader artifacts.",
+                    "message": labels["srv_extracting"],
                 }
             )
             summary = ensure_paper_reading_artifacts(
@@ -1101,7 +1152,7 @@ def handle_paper_library_event(
             changed_sources.append(source_id)
             warnings.extend(f"{source_id}: {warning}" for warning in summary.get("warnings", []) or [])
         changed["sources"] = changed_sources
-        message = _summarize_extraction_result(extraction_summaries)
+        message = _summarize_extraction_result(extraction_summaries, labels)
         if len(changed_sources) == 1:
             next_state["detail_id"] = changed_sources[0]
             stale_rows = [
@@ -1138,7 +1189,7 @@ def handle_paper_library_event(
                     "scope": scope_strategy,
                     "translation_variant": translation_variant,
                     "include_references": include_references,
-                    "message": "Preparing reader artifacts before translation.",
+                    "message": labels["srv_preparing_translation"],
                 }
             )
             extraction_summary = ensure_paper_reading_artifacts(
@@ -1159,7 +1210,7 @@ def handle_paper_library_event(
                         "scope": scope_strategy,
                         "translation_variant": translation_variant,
                         "include_references": include_references,
-                        "message": "Starting full-paper translation.",
+                        "message": labels["srv_starting_translation"],
                     }
                 )
                 translation_summary = translate_full_paper(
@@ -1199,7 +1250,7 @@ def handle_paper_library_event(
             warnings.extend(f"{source_id}: {warning}" for warning in translation_summary.get("warnings", []) or [])
         changed["sources"] = changed_sources
         changed["translations"] = changed_sources
-        message = _summarize_translation_result(translation_summaries)
+        message = _summarize_translation_result(translation_summaries, labels)
         if len(changed_sources) == 1:
             next_state["detail_id"] = changed_sources[0]
             next_state["focus"] = "translations"
@@ -1236,22 +1287,21 @@ def handle_paper_library_event(
         changed["artifacts"] = [str(item) for item in result.get("deleted_artifacts", [])]
         next_state = {"detail_id": ""}
         count = len(changed["sources"])
-        noun = "paper" if count == 1 else "papers"
-        message = f"Deleted {count} {noun}."
+        message = _fmt(labels, "srv_deleted_papers", count=count)
     elif action == "paper_library_delete_paper_asset":
         changed_assets: list[str] = []
         for source_id in event_paper_ids():
             result = delete_paper_pdf_asset(_profile_root(profile), source_id)
             changed_assets.extend(str(item) for item in result.get("deleted_pdf_assets", []))
         changed["pdf_assets"] = changed_assets
-        message = f"Deleted {len(changed_assets)} PDF asset{'s' if len(changed_assets) != 1 else ''}."
+        message = _fmt(labels, "srv_deleted_assets", count=len(changed_assets))
     elif action == "paper_library_delete_paper_artifacts":
         changed_artifacts: list[str] = []
         for source_id in event_paper_ids():
             result = delete_paper_reader_artifacts(_profile_root(profile), source_id)
             changed_artifacts.extend(str(item) for item in result.get("deleted_artifacts", []))
         changed["artifacts"] = changed_artifacts
-        message = f"Deleted {len(changed_artifacts)} artifact file{'s' if len(changed_artifacts) != 1 else ''}."
+        message = _fmt(labels, "srv_deleted_artifacts", count=len(changed_artifacts))
     elif action == "paper_library_purge_discarded_papers":
         result = purge_discarded_papers(
             _profile_root(profile),
@@ -1263,9 +1313,9 @@ def handle_paper_library_event(
         changed["artifacts"] = [str(item) for item in result.get("deleted_artifacts", [])]
         next_state = {"view": "discarded", "node_id": "", "detail_id": ""}
         count = len(changed["sources"])
-        message = f"Purged {count} discarded paper{'s' if count != 1 else ''}."
+        message = _fmt(labels, "srv_purged", count=count)
     else:
-        return PaperLibraryEventResult(ok=False, message=f"Unknown Paper Library event: {action}")
+        return PaperLibraryEventResult(ok=False, message=_fmt(labels, "srv_unknown_event", action=action))
 
     return PaperLibraryEventResult(
         message=message,
@@ -1279,6 +1329,10 @@ def handle_paper_library_event(
 __all__ = [
     "LIBRARY_VIEW_GROUPS",
     "LIBRARY_VIEW_LABELS",
+    "PAPER_LIBRARY_LANGS",
+    "TECHNICAL_TAXONOMY_LABELS",
+    "paper_library_labels",
+    "resolve_paper_library_lang",
     "PAPER_LIBRARY_RUNTIME_DEFAULT",
     "PAPER_LIBRARY_RUNTIME_ENV",
     "PAPER_LIBRARY_RUNTIMES",

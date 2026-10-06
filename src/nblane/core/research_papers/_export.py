@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -31,6 +32,7 @@ from typing import Any
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_state import FileConflictError, snapshot_file
 from nblane.core.file_write import atomic_write_text
 from nblane.core.profile_io import profile_dir, validate_profile_name
 from nblane.core.research_sources import (
@@ -98,8 +100,461 @@ def save_paper_note(profile: str | Path, source_id: str, body: str, *, metadata:
 
 
 def _bibtex_key(source: ResearchSource, year: str = "") -> str:
+    persisted = _clean_text((source.metadata or {}).get(CITATION_KEY_METADATA))
+    if persisted:
+        return persisted
     author = _slug(source.authors[0].split()[-1] if source.authors else source.title.split()[0], fallback="paper")
     return f"{author}{year or _published_year(source.published) or 'nd'}"
+
+
+# ---------------------------------------------------------------------------
+# Library paper export (BibTeX / RIS / CSL-JSON / Markdown) with stable keys
+# ---------------------------------------------------------------------------
+
+CITATION_KEY_METADATA = "citation_key"
+LIBRARY_EXPORT_FORMATS: dict[str, tuple[str, str]] = {
+    # format -> (file extension, media type)
+    "bibtex": ("bib", "application/x-bibtex; charset=utf-8"),
+    "ris": ("ris", "application/x-research-info-systems; charset=utf-8"),
+    "csl-json": ("json", "application/vnd.citationstyles.csl+json; charset=utf-8"),
+    "markdown": ("md", "text/markdown; charset=utf-8"),
+}
+_LIBRARY_EXPORT_ALIASES = {
+    "bib": "bibtex",
+    "bibtex": "bibtex",
+    "ris": "ris",
+    "csl": "csl-json",
+    "csl-json": "csl-json",
+    "csl_json": "csl-json",
+    "json": "csl-json",
+    "md": "markdown",
+    "markdown": "markdown",
+}
+_CITATION_KEY_STOPWORDS = frozenset(
+    {
+        "a", "an", "the", "on", "of", "in", "for", "to", "and", "with", "from",
+        "by", "at", "as", "is", "are", "via", "towards", "toward",
+    }
+)
+_CONFERENCE_VENUE_RE = re.compile(
+    r"conference|proceedings|\bproc\.|symposium|workshop|congress|\bmeeting\b|"
+    r"\b(?:neurips|nips|icml|iclr|cvpr|iccv|eccv|wacv|bmvc|aaai|ijcai|acl|emnlp|naacl|"
+    r"coling|eacl|siggraph|chi|uist|kdd|www|sigir|wsdm|cikm|icde|vldb|sigmod|icra|iros|"
+    r"rss|corl|humanoids|aistats|uai|colt|interspeech|icassp|miccai|osdi|sosp|nsdi|"
+    r"usenix|ccs|ndss|isca|micro|asplos|pldi|popl|icse|fse)\b",
+    re.IGNORECASE,
+)
+# Full venue names that are conferences even without the word "conference"
+# (as Crossref / Semantic Scholar commonly spell them).
+_CONFERENCE_FULL_NAME_RE = re.compile(
+    r"neural information processing systems|learning representations|"
+    r"computer vision and pattern recognition|robotics: science and systems|"
+    r"robot learning|annual meeting of the association|"
+    r"empirical methods in natural language processing",
+    re.IGNORECASE,
+)
+# Words that mark a periodical; they win over conference keywords
+# ("IEEE Transactions on ...", "Journal of Machine Learning Research").
+_JOURNAL_VENUE_RE = re.compile(r"\b(?:journal|transactions|letters|magazine|review|bulletin)\b", re.IGNORECASE)
+_ARXIV_CATEGORY_RE = re.compile(r"^[a-z\-]+(?:\.[A-Za-z\-]+)?$")
+
+
+def normalize_library_export_format(value: object) -> str:
+    """Return the canonical export format or raise ``ValueError``."""
+
+    clean = _LIBRARY_EXPORT_ALIASES.get(_clean_text(value).lower())
+    if not clean:
+        raise ValueError("Export format must be bibtex, ris, csl-json, or markdown.")
+    return clean
+
+
+def _ascii_fold(value: str) -> str:
+    folded = unicodedata.normalize("NFKD", value)
+    return "".join(char for char in folded if not unicodedata.combining(char))
+
+
+def _author_surname(author: str) -> str:
+    clean = _clean_text(author)
+    if not clean:
+        return ""
+    if "," in clean:
+        return clean.split(",", 1)[0].strip()
+    parts = clean.split()
+    return parts[-1] if parts else clean
+
+
+def _citation_key_base(source: ResearchSource) -> str:
+    """``surname + year + first significant title word``, lowercase ASCII."""
+
+    def token(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", _ascii_fold(value).lower())
+
+    surname = token(_author_surname(source.authors[0])) if source.authors else ""
+    year = _published_year(source.published) or _published_year(
+        _clean_text((source.metadata or {}).get("year"))
+    )
+    word = ""
+    for raw in re.split(r"[\s\-:/]+", _clean_text(source.title)):
+        candidate = token(raw)
+        if candidate and candidate not in _CITATION_KEY_STOPWORDS:
+            word = candidate
+            break
+    base = f"{surname or 'anon'}{year or 'nd'}{word}"
+    return base[:64]
+
+
+def _key_with_suffix(base: str, taken: set[str]) -> str:
+    """Return *base* or the first free ``base + a..z, aa..`` variant."""
+
+    if base not in taken:
+        return base
+    index = 0
+    while True:
+        index += 1
+        letters = ""
+        n = index
+        while n:
+            n, rem = divmod(n - 1, 26)
+            letters = chr(ord("a") + rem) + letters
+        candidate = f"{base}{letters}"
+        if candidate not in taken:
+            return candidate
+
+
+def assign_citation_keys(
+    inbox: ResearchSourceInbox,
+    source_ids: list[str] | None = None,
+) -> tuple[dict[str, str], list[str]]:
+    """Ensure each selected source carries a persisted, unique citation key.
+
+    Existing ``metadata["citation_key"]`` values are never changed. New keys
+    are computed in source-id order so the result does not depend on the
+    selection order, and collisions (with any key already persisted in the
+    inbox) get ``a``, ``b``, ``c`` ... suffixes. Mutates *inbox* in place and
+    returns ``({source_id: key}, [newly keyed source ids])``.
+    """
+
+    by_id = inbox.by_id()
+    wanted = _clean_list(source_ids) if source_ids is not None else list(by_id)
+    taken = {
+        _clean_text((source.metadata or {}).get(CITATION_KEY_METADATA))
+        for source in inbox.sources
+    }
+    taken.discard("")
+    keys: dict[str, str] = {}
+    created: list[str] = []
+    for source_id in sorted(set(wanted)):
+        source = by_id.get(source_id)
+        if source is None:
+            continue
+        existing = _clean_text((source.metadata or {}).get(CITATION_KEY_METADATA))
+        if existing:
+            keys[source_id] = existing
+            continue
+        key = _key_with_suffix(_citation_key_base(source), taken)
+        taken.add(key)
+        metadata = dict(source.metadata or {})
+        metadata[CITATION_KEY_METADATA] = key
+        source.metadata = metadata
+        keys[source_id] = key
+        created.append(source_id)
+    return keys, created
+
+
+def _persist_citation_keys(profile: str | Path, source_ids: list[str]) -> tuple[ResearchSourceInbox, dict[str, str]]:
+    """Load sources, assign missing keys, and save under a conflict check."""
+
+    root = _profile_root(profile)
+    path = root / RESEARCH_DIRNAME / "sources.yaml"
+    for attempt in range(3):
+        snapshot = snapshot_file(path)
+        inbox = load_research_sources(root)
+        keys, created = assign_citation_keys(inbox, source_ids)
+        if not created:
+            return inbox, keys
+        try:
+            save_research_sources(root, inbox, expected_snapshot=snapshot)
+        except FileConflictError:
+            if attempt == 2:
+                raise
+            continue
+        return inbox, keys
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
+def _paper_venue_kind(source: ResearchSource) -> str:
+    """Classify a paper as ``journal`` / ``conference`` / ``arxiv`` / ``misc``."""
+
+    metadata = source.metadata or {}
+    venue = _clean_text(metadata.get("venue") or metadata.get("journal") or metadata.get("booktitle"))
+    arxiv_id = _clean_text(metadata.get("arxiv_id"))
+    doi = _clean_text(metadata.get("doi"))
+    if venue and "arxiv" not in venue.lower() and "corr" != venue.strip().lower():
+        if _clean_text(metadata.get("booktitle")):
+            return "conference"
+        if _JOURNAL_VENUE_RE.search(venue) and not re.search(r"proceedings|conference", venue, re.IGNORECASE):
+            return "journal"
+        if _CONFERENCE_VENUE_RE.search(venue) or _CONFERENCE_FULL_NAME_RE.search(venue):
+            return "conference"
+        return "journal"
+    if arxiv_id and (not doi or doi.lower().startswith("10.48550/arxiv")):
+        return "arxiv"
+    if venue and arxiv_id:
+        return "arxiv"
+    return "misc"
+
+
+def _paper_export_fields(source: ResearchSource) -> dict[str, str]:
+    metadata = source.metadata or {}
+    arxiv_id = _clean_text(metadata.get("arxiv_id"))
+    url = _clean_text(source.url or metadata.get("canonical_url"))
+    if not url and arxiv_id:
+        url = f"https://arxiv.org/abs/{arxiv_id}"
+    category = ""
+    for candidate in [metadata.get("primary_category"), *(_clean_list(metadata.get("categories")))]:
+        clean = _clean_text(candidate)
+        if clean and _ARXIV_CATEGORY_RE.match(clean):
+            category = clean
+            break
+    return {
+        "title": _clean_text(source.title),
+        "year": _published_year(source.published) or _published_year(_clean_text(metadata.get("year"))),
+        "venue": _clean_text(metadata.get("venue") or metadata.get("journal") or metadata.get("booktitle")),
+        "doi": _clean_text(metadata.get("doi")),
+        "arxiv_id": arxiv_id,
+        "primary_class": category,
+        "url": url,
+        "volume": _clean_text(metadata.get("volume")),
+        "issue": _clean_text(metadata.get("issue") or metadata.get("number")),
+        "pages": _clean_text(metadata.get("pages") or metadata.get("page")),
+        "publisher": _clean_text(metadata.get("publisher")),
+        "abstract": _clean_text(metadata.get("abstract") or source.summary),
+    }
+
+
+def _bibtex_escape(value: str) -> str:
+    text = _clean_text(value).replace("\\", r"\textbackslash{}")
+    text = re.sub(r"([&%$#_])", r"\\\1", text)
+    text = text.replace("{", r"\{").replace("}", r"\}")
+    text = text.replace(r"\textbackslash\{\}", r"\textbackslash{}")
+    return re.sub(r"\s+", " ", text)
+
+
+def _bibtex_author(author: str) -> str:
+    clean = _clean_text(author)
+    if not clean:
+        return ""
+    if "," in clean:
+        return _bibtex_escape(clean)
+    parts = clean.split()
+    if len(parts) == 1:
+        # Single-token / CJK names: brace so BibTeX does not split them.
+        return "{" + _bibtex_escape(clean) + "}"
+    return f"{_bibtex_escape(parts[-1])}, {_bibtex_escape(' '.join(parts[:-1]))}"
+
+
+def _bibtex_entry(source: ResearchSource, key: str) -> str:
+    fields = _paper_export_fields(source)
+    kind = _paper_venue_kind(source)
+    entry_type = {"journal": "article", "conference": "inproceedings"}.get(kind, "misc")
+    rows: list[tuple[str, str]] = [
+        ("title", "{" + _bibtex_escape(fields["title"]) + "}"),
+        ("author", " and ".join(name for name in (_bibtex_author(a) for a in source.authors) if name)),
+        ("year", fields["year"]),
+    ]
+    if kind == "journal":
+        rows.append(("journal", _bibtex_escape(fields["venue"])))
+    elif kind == "conference":
+        rows.append(("booktitle", _bibtex_escape(fields["venue"])))
+    if kind in {"journal", "conference"}:
+        rows.extend(
+            [
+                ("volume", _bibtex_escape(fields["volume"])),
+                ("number", _bibtex_escape(fields["issue"])),
+                ("pages", _bibtex_escape(fields["pages"]).replace("-", "--").replace("----", "--")),
+                ("publisher", _bibtex_escape(fields["publisher"])),
+            ]
+        )
+    if fields["arxiv_id"] and kind in {"arxiv", "misc"}:
+        rows.extend(
+            [
+                ("eprint", fields["arxiv_id"]),
+                ("archivePrefix", "arXiv"),
+                ("primaryClass", fields["primary_class"]),
+            ]
+        )
+    rows.extend(
+        [
+            ("doi", fields["doi"].replace("{", "").replace("}", "")),
+            ("url", fields["url"].replace("{", "").replace("}", "")),
+        ]
+    )
+    body = ",\n".join(f"  {name} = {{{value}}}" for name, value in rows if value)
+    return f"@{entry_type}{{{key},\n{body}\n}}"
+
+
+def _ris_entry(source: ResearchSource, key: str) -> str:
+    fields = _paper_export_fields(source)
+    kind = _paper_venue_kind(source)
+    lines = [f"TY  - {({'journal': 'JOUR', 'conference': 'CPAPER'}).get(kind, 'GEN')}", f"ID  - {key}"]
+    if fields["title"]:
+        lines.append(f"TI  - {fields['title']}")
+    lines.extend(f"AU  - {author}" for author in source.authors if _clean_text(author))
+    if fields["year"]:
+        lines.append(f"PY  - {fields['year']}")
+    if kind == "journal" and fields["venue"]:
+        lines.append(f"JO  - {fields['venue']}")
+    elif kind == "conference" and fields["venue"]:
+        lines.append(f"T2  - {fields['venue']}")
+    if fields["volume"]:
+        lines.append(f"VL  - {fields['volume']}")
+    if fields["issue"]:
+        lines.append(f"IS  - {fields['issue']}")
+    if fields["pages"]:
+        start, _, end = fields["pages"].replace("--", "-").partition("-")
+        lines.append(f"SP  - {start.strip()}")
+        if end.strip():
+            lines.append(f"EP  - {end.strip()}")
+    if fields["publisher"]:
+        lines.append(f"PB  - {fields['publisher']}")
+    if fields["arxiv_id"]:
+        lines.append(f"AN  - arXiv:{fields['arxiv_id']}")
+    if fields["doi"]:
+        lines.append(f"DO  - {fields['doi']}")
+    if fields["url"]:
+        lines.append(f"UR  - {fields['url']}")
+    if fields["abstract"]:
+        abstract = re.sub(r"\s+", " ", fields["abstract"])
+        lines.append(f"AB  - {abstract}")
+    lines.append("ER  - ")
+    return "\n".join(lines)
+
+
+def _csl_entry(source: ResearchSource, key: str) -> dict[str, object]:
+    fields = _paper_export_fields(source)
+    kind = _paper_venue_kind(source)
+    row: dict[str, object] = {
+        "id": key,
+        "citation-key": key,
+        "type": {"journal": "article-journal", "conference": "paper-conference"}.get(kind, "article"),
+        "title": fields["title"],
+    }
+    authors: list[dict[str, str]] = []
+    for author in source.authors:
+        clean = _clean_text(author)
+        if not clean:
+            continue
+        if "," in clean:
+            family, given = (part.strip() for part in clean.split(",", 1))
+            authors.append({"family": family, "given": given})
+            continue
+        parts = clean.split()
+        if len(parts) >= 2:
+            authors.append({"family": parts[-1], "given": " ".join(parts[:-1])})
+        else:
+            authors.append({"literal": clean})
+    if authors:
+        row["author"] = authors
+    if fields["year"]:
+        row["issued"] = {"date-parts": [[int(fields["year"])]]}
+    if fields["venue"] and kind in {"journal", "conference"}:
+        row["container-title"] = fields["venue"]
+    if kind == "arxiv":
+        row["publisher"] = "arXiv"
+        row["number"] = fields["arxiv_id"]
+    for csl_key, field_key in (("volume", "volume"), ("issue", "issue"), ("page", "pages"), ("DOI", "doi"), ("URL", "url")):
+        if fields[field_key] and not (kind == "arxiv" and csl_key in {"volume", "issue", "page"}):
+            row[csl_key] = fields[field_key]
+    if fields["publisher"] and "publisher" not in row:
+        row["publisher"] = fields["publisher"]
+    if fields["abstract"]:
+        row["abstract"] = fields["abstract"]
+    return row
+
+
+def _markdown_entry(source: ResearchSource, key: str) -> str:
+    fields = _paper_export_fields(source)
+    head = f"- **{fields['title'] or source.id}**"
+    bits = [", ".join(source.authors)] if source.authors else []
+    if fields["year"]:
+        bits.append(f"({fields['year']})")
+    line = head + (" — " + " ".join(bits) if bits else "")
+    if fields["venue"]:
+        line += f". *{fields['venue']}*"
+    links: list[str] = []
+    if fields["doi"]:
+        links.append(f"[DOI](https://doi.org/{fields['doi']})")
+    if fields["arxiv_id"]:
+        links.append(f"[arXiv:{fields['arxiv_id']}](https://arxiv.org/abs/{fields['arxiv_id']})")
+    if fields["url"] and not links:
+        links.append(f"<{fields['url']}>")
+    if links:
+        line += ". " + " · ".join(links)
+    return line + f" `@{key}`"
+
+
+def format_library_papers(
+    sources: list[ResearchSource],
+    keys: dict[str, str],
+    *,
+    format: str,
+    heading: str = "Papers",
+) -> str:
+    """Render library sources (already keyed) in one export format."""
+
+    clean_format = normalize_library_export_format(format)
+    keyed = [(source, keys.get(source.id) or _citation_key_base(source)) for source in sources]
+    if clean_format == "bibtex":
+        entries = [_bibtex_entry(source, key) for source, key in keyed]
+        return "\n\n".join(entries) + ("\n" if entries else "")
+    if clean_format == "ris":
+        entries = [_ris_entry(source, key) for source, key in keyed]
+        return "\n\n".join(entries) + ("\n" if entries else "")
+    if clean_format == "csl-json":
+        return json.dumps([_csl_entry(source, key) for source, key in keyed], ensure_ascii=False, indent=2) + "\n"
+    lines = [f"# {_clean_text(heading) or 'Papers'}", ""]
+    lines.extend(_markdown_entry(source, key) for source, key in keyed)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def export_library_papers(
+    profile: str | Path,
+    source_ids: list[str],
+    *,
+    format: str,
+    persist_keys: bool = True,
+    heading: str = "Papers",
+) -> dict[str, object]:
+    """Export selected library papers and persist their citation keys.
+
+    Returns ``{"body", "filename", "media_type", "format", "count", "keys"}``.
+    Selection order is preserved in the output; unknown ids are skipped.
+    """
+
+    clean_format = normalize_library_export_format(format)
+    wanted = _clean_list(source_ids)
+    if not wanted:
+        raise ValueError("Select at least one paper to export.")
+    if persist_keys:
+        inbox, keys = _persist_citation_keys(profile, wanted)
+    else:
+        inbox = load_research_sources(_profile_root(profile))
+        keys, _ = assign_citation_keys(inbox, wanted)
+    by_id = inbox.by_id()
+    sources = [by_id[source_id] for source_id in wanted if source_id in by_id]
+    if not sources:
+        raise ValueError("None of the selected papers exist.")
+    body = format_library_papers(sources, keys, format=clean_format, heading=heading)
+    extension, media_type = LIBRARY_EXPORT_FORMATS[clean_format]
+    stem = keys.get(sources[0].id, "paper") if len(sources) == 1 else f"papers-{_today()}"
+    return {
+        "body": body,
+        "filename": f"{stem}.{extension}",
+        "media_type": media_type,
+        "format": clean_format,
+        "count": len(sources),
+        "keys": {source.id: keys.get(source.id, "") for source in sources},
+    }
 
 
 def _bibliography_line(source: ResearchSource, citation: ResearchCitation | None = None) -> str:

@@ -382,8 +382,207 @@ def paper_diagnostics(
     }
 
 
+_PAPER_ROWS_CACHE: dict[tuple[str, str], dict[str, object]] = {}
+_PAPER_ROWS_CACHE_LOCK = threading.Lock()
+_PAPER_ROWS_CACHE_MAX = 16
+_PAPER_ROWS_CACHE_STATS = {"hits": 0, "misses": 0}
+
+
+def _stat_signature(path: Path) -> tuple[object, ...]:
+    """Return ``(name, inode, mtime_ns, size)`` or a missing marker.
+
+    The inode matters: ``atomic_write_text`` installs a fresh inode on every
+    write, so even two same-size writes inside one timestamp tick differ.
+    """
+
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return (path.name, None)
+    except OSError:
+        return (path.name, "error")
+    return (path.name, stat.st_ino, stat.st_mtime_ns, stat.st_size)
+
+
+def _dir_signature(path: Path, suffix: str) -> tuple[object, ...]:
+    """Signature of every ``*suffix`` file directly inside *path*."""
+
+    try:
+        entries = sorted(
+            (entry for entry in os.scandir(path) if entry.name.endswith(suffix)),
+            key=lambda entry: entry.name,
+        )
+    except FileNotFoundError:
+        return (path.name, None)
+    except OSError:
+        return (path.name, "error")
+    rows: list[tuple[object, ...]] = [(path.name,)]
+    for entry in entries:
+        try:
+            stat = entry.stat()
+        except OSError:
+            rows.append((entry.name, None))
+            continue
+        rows.append((entry.name, stat.st_ino, stat.st_mtime_ns, stat.st_size))
+    return tuple(rows)
+
+
+def _paper_rows_input_signature(profile: str | Path) -> tuple[object, ...]:
+    """Fingerprint every profile file ``paper_rows`` reads."""
+
+    from nblane.core.research_workspace import (  # local: avoid widening module imports
+        RESEARCH_CITATIONS_FILENAME,
+        RESEARCH_CLAIMS_FILENAME,
+    )
+    from ._constants import (
+        LIBRARY_TREE_FILENAME,
+        PAPER_ANNOTATIONS_DIRNAME,
+        PAPER_SEGMENTS_DIRNAME,
+        PAPER_TRANSLATIONS_DIRNAME,
+    )
+
+    root = _research_root(profile)
+    return (
+        _stat_signature(root / "sources.yaml"),
+        _stat_signature(root / LIBRARY_TREE_FILENAME),
+        _stat_signature(root / RESEARCH_CLAIMS_FILENAME),
+        _stat_signature(root / RESEARCH_CITATIONS_FILENAME),
+        _dir_signature(root / RESEARCH_CHUNKS_DIRNAME, ".jsonl"),
+        _dir_signature(root / PAPER_ANNOTATIONS_DIRNAME, ".jsonl"),
+        _dir_signature(root / PAPER_TRANSLATIONS_DIRNAME, ".jsonl"),
+        _dir_signature(root / PAPER_SEGMENTS_DIRNAME, ".jsonl"),
+    )
+
+
+def _asset_signature(asset_paths: tuple[str, ...]) -> tuple[object, ...]:
+    """PDF assets live outside the profile; track the ones rows depend on."""
+
+    return tuple((path, Path(path).is_file()) for path in asset_paths)
+
+
+def clear_paper_rows_cache() -> None:
+    """Drop every memoized ``paper_rows`` build (test / maintenance hook)."""
+
+    with _PAPER_ROWS_CACHE_LOCK:
+        _PAPER_ROWS_CACHE.clear()
+
+
+def paper_rows_cache_stats() -> dict[str, int]:
+    """Return cache hit/miss counters (diagnostics and tests)."""
+
+    with _PAPER_ROWS_CACHE_LOCK:
+        return dict(_PAPER_ROWS_CACHE_STATS)
+
+
+def _paper_rows_base(profile: str | Path) -> list[dict[str, object]]:
+    """Return unfiltered rows for every source, memoized on input fingerprints.
+
+    The cache key is the resolved research root plus the asset root; an entry
+    is reused only while the signature of every input file (sources, tree,
+    claims, citations, chunks / annotations / translations / segments) and
+    the existence of each referenced PDF asset are unchanged. Any write
+    through ``atomic_write_text`` changes the signature, so writes invalidate
+    without explicit hooks.
+    """
+
+    key = (
+        str(_research_root(profile).resolve(strict=False)),
+        os.getenv("NBLANE_RESEARCH_ASSET_ROOT", ""),
+    )
+    signature = _paper_rows_input_signature(profile)
+    with _PAPER_ROWS_CACHE_LOCK:
+        entry = _PAPER_ROWS_CACHE.get(key)
+    if (
+        entry is not None
+        and entry.get("signature") == signature
+        and entry.get("asset_signature") == _asset_signature(entry.get("asset_paths", ()))  # type: ignore[arg-type]
+    ):
+        with _PAPER_ROWS_CACHE_LOCK:
+            _PAPER_ROWS_CACHE_STATS["hits"] += 1
+        return entry["rows"]  # type: ignore[return-value]
+    rows, asset_paths = _build_paper_rows_base(profile)
+    entry = {
+        "signature": signature,
+        "asset_paths": asset_paths,
+        "asset_signature": _asset_signature(asset_paths),
+        "rows": rows,
+    }
+    with _PAPER_ROWS_CACHE_LOCK:
+        _PAPER_ROWS_CACHE_STATS["misses"] += 1
+        _PAPER_ROWS_CACHE.pop(key, None)
+        _PAPER_ROWS_CACHE[key] = entry
+        while len(_PAPER_ROWS_CACHE) > _PAPER_ROWS_CACHE_MAX:
+            _PAPER_ROWS_CACHE.pop(next(iter(_PAPER_ROWS_CACHE)))
+    return rows
+
+
 def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> list[dict[str, object]]:
-    """Return display-ready Paper Library rows."""
+    """Return display-ready Paper Library rows.
+
+    Rows are deep copies of a memoized build, so callers may mutate them.
+    """
+
+    return filter_paper_rows(_paper_rows_base(profile), view=view, node_id=node_id)
+
+
+def filter_paper_rows(
+    rows: list[dict[str, object]],
+    *,
+    view: str = "all",
+    node_id: str = "",
+) -> list[dict[str, object]]:
+    """Filter unfiltered base rows to one Library view (returns deep copies)."""
+
+    out: list[dict[str, object]] = []
+    for row in rows:
+        if _paper_row_matches(row, view=view, node_id=node_id):
+            out.append(copy.deepcopy(row))
+    return out
+
+
+def _paper_row_matches(row: dict[str, object], *, view: str, node_id: str) -> bool:
+    source = row["source"]
+    is_paper = source.kind == "paper"  # type: ignore[union-attr]
+    if view == "other" and is_paper:
+        return False
+    if view != "other" and not is_paper:
+        return False
+    refs = list(source.library_node_refs)  # type: ignore[union-attr]
+    badge_set = set(row.get("badges") or [])
+    match = True
+    if view == "unsorted":
+        match = is_paper and not refs
+    elif view in {"reading", "archived", "discarded", "candidate_ready"}:
+        match = source.status == view  # type: ignore[union-attr]
+    elif view == "annotated":
+        match = bool(row["annotations_count"] or row["chunks_count"] or not source.reading.empty)  # type: ignore[union-attr]
+    elif view == "no_pdf":
+        match = is_paper and not row["has_pdf"]
+    elif view in {"needs_extraction", "ready_to_parse"}:
+        match = (
+            is_paper
+            and bool(row["has_pdf"])
+            and PAPER_DIAGNOSTIC_BADGES["needs_structured_extraction"] in badge_set
+        )
+    elif view in {"claims_need_review", "review_queue"}:
+        match = source.status == "candidate_ready" or "AI candidates" in badge_set  # type: ignore[union-attr]
+    elif view == "duplicate_risk":
+        match = PAPER_DIAGNOSTIC_BADGES["duplicate_risk"] in badge_set
+    elif view == "stale_translation":
+        match = "Stale translation" in badge_set or PAPER_DIAGNOSTIC_BADGES["stale_translation"] in badge_set
+    elif view in {"recent", "recently_read"}:
+        match = bool(row["last_read"])
+    elif view == "private":
+        match = source.visibility == "private"  # type: ignore[union-attr]
+    elif view in {"reviewed", "summarized"}:
+        match = source.status == "summarized"  # type: ignore[union-attr]
+    if node_id and node_id not in refs:
+        match = False
+    return match
+
+
+def _build_paper_rows_base(profile: str | Path) -> tuple[list[dict[str, object]], tuple[str, ...]]:
+    """Compute rows for every source (no view filter) plus checked asset paths."""
 
     inbox = load_research_sources(_profile_root(profile))
     paths = paper_library_paths(profile)
@@ -410,18 +609,20 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
         if citation.source_id:
             citation_counts[citation.source_id] = citation_counts.get(citation.source_id, 0) + 1
     rows: list[dict[str, object]] = []
+    asset_paths: list[str] = []
     for source in inbox.sources:
         is_paper = source.kind == "paper"
-        if view == "other" and is_paper:
-            continue
-        if view != "other" and not is_paper:
-            continue
         metadata = source.metadata or {}
         pdf_download_status = _clean_text(metadata.get("pdf_download_status"))
         pdf_download_error = _clean_text(metadata.get("pdf_download_error"))
         pdf_asset_ref = _clean_text(metadata.get("pdf_asset_ref"))
         try:
-            has_pdf = bool(pdf_asset_ref) and _asset_path(profile, pdf_asset_ref).is_file()
+            if pdf_asset_ref:
+                asset_file = _asset_path(profile, pdf_asset_ref)
+                asset_paths.append(str(asset_file))
+                has_pdf = asset_file.is_file()
+            else:
+                has_pdf = False
         except (OSError, ValueError):
             has_pdf = False
         open_access_pdf_url = _clean_text(metadata.get("open_access_pdf_url") or metadata.get("pdf_url"))
@@ -495,39 +696,8 @@ def paper_rows(profile: str | Path, *, view: str = "all", node_id: str = "") -> 
             label = _clean_text(badge)
             if label and label not in badges:
                 badges.append(label)
-        badge_set = set(badges)
-        match = True
-        if view == "unsorted":
-            match = is_paper and not refs
-        elif view in {"reading", "archived", "discarded", "candidate_ready"}:
-            match = source.status == view
-        elif view == "annotated":
-            match = bool(row["annotations_count"] or row["chunks_count"] or not source.reading.empty)
-        elif view == "no_pdf":
-            match = is_paper and not row["has_pdf"]
-        elif view in {"needs_extraction", "ready_to_parse"}:
-            match = (
-                is_paper
-                and bool(row["has_pdf"])
-                and PAPER_DIAGNOSTIC_BADGES["needs_structured_extraction"] in badge_set
-            )
-        elif view in {"claims_need_review", "review_queue"}:
-            match = source.status == "candidate_ready" or "AI candidates" in badge_set
-        elif view == "duplicate_risk":
-            match = PAPER_DIAGNOSTIC_BADGES["duplicate_risk"] in badge_set
-        elif view == "stale_translation":
-            match = "Stale translation" in badge_set or PAPER_DIAGNOSTIC_BADGES["stale_translation"] in badge_set
-        elif view in {"recent", "recently_read"}:
-            match = bool(row["last_read"])
-        elif view == "private":
-            match = source.visibility == "private"
-        elif view in {"reviewed", "summarized"}:
-            match = source.status == "summarized"
-        if node_id and node_id not in refs:
-            match = False
-        if match:
-            rows.append(row)
-    return rows
+        rows.append(row)
+    return rows, tuple(asset_paths)
 
 
 def paper_overview(

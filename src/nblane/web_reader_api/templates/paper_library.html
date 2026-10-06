@@ -1,26 +1,39 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ 'zh-CN' if ui_lang == 'zh' else 'en' }}"{% if embed %} class="is-embed"{% endif %}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Paper Library · nblane</title>
+    <meta name="color-scheme" content="dark" />
+    <title>{{ page_title }}</title>
     {% for href in styles %}
     <link rel="stylesheet" href="{{ href }}" />
     {% endfor %}
     <style>
+      /* Paint the SPA page color before the bundle loads (no light flash). */
       html,
       body {
         min-height: 100%;
-        background: #f5f7fa;
+        margin: 0;
+        background: #0f1930;
+        color: #f2ede0;
+      }
+
+      html.is-embed,
+      html.is-embed body {
+        height: 100%;
+        overflow: hidden;
       }
     </style>
   </head>
-  <body>
+  <body{% if embed %} class="is-embed"{% endif %}>
     <div id="root"></div>
     <script>
       window.__NBLANE_PAPER_LIBRARY_BOOTSTRAP__ = {
         runtime: "standalone",
-        profile: {{ profile_json | safe }}
+        profile: {{ profile_json | safe }},
+        uiLang: {{ ui_lang_json | safe }},
+        embed: {{ embed_json | safe }},
+        labels: {{ labels_json | safe }}
       };
     </script>
     {% for src in scripts %}

@@ -6,6 +6,7 @@ import copy
 import base64
 import contextlib
 import difflib
+import functools
 import hashlib
 from html import unescape
 from html.parser import HTMLParser
@@ -31,6 +32,8 @@ from typing import Any
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_state import FileSnapshot, assert_unchanged, snapshot_file
 from nblane.core.file_write import atomic_write_text
 from nblane.core.profile_io import profile_dir, validate_profile_name
 from nblane.core.research_sources import (
@@ -79,14 +82,83 @@ def load_paper_library_tree(profile: str | Path) -> PaperLibraryTree:
     return tree
 
 
-def save_paper_library_tree(profile: str | Path, tree: PaperLibraryTree | dict) -> Path:
+# Lock paths held by the current thread. ``locked_profile_write`` is not
+# reentrant, so nested tree transactions (a mutation calling
+# ``save_paper_library_tree``) must skip re-acquiring the same sidecar lock.
+_TREE_LOCKS_HELD = threading.local()
+
+
+def _held_tree_locks() -> set[str]:
+    held = getattr(_TREE_LOCKS_HELD, "paths", None)
+    if held is None:
+        held = set()
+        _TREE_LOCKS_HELD.paths = held
+    return held
+
+
+@contextlib.contextmanager
+def paper_library_tree_lock(profile: str | Path):
+    """Serialize read-modify-write of ``research/library-tree.yaml``.
+
+    Holds the advisory ``library-tree.yaml.lock`` sidecar lock (same pattern
+    as ``research_sources.save_research_sources``) for the whole block, so a
+    concurrent tree mutation cannot load the tree between our load and save
+    and silently drop our update. Reentrant per thread.
+    """
+
+    path = _library_tree_path(profile)
+    key = str(path.resolve(strict=False))
+    held = _held_tree_locks()
+    if key in held:
+        yield path
+        return
+    with locked_profile_write(path.parent, path.name):
+        held.add(key)
+        try:
+            yield path
+        finally:
+            held.discard(key)
+
+
+def _with_tree_lock(func):
+    """Run a ``(profile, ...)`` tree mutation under ``paper_library_tree_lock``."""
+
+    @functools.wraps(func)
+    def wrapper(profile, *args, **kwargs):
+        with paper_library_tree_lock(profile):
+            return func(profile, *args, **kwargs)
+
+    return wrapper
+
+
+def paper_library_tree_snapshot(profile: str | Path) -> FileSnapshot:
+    """Fingerprint ``library-tree.yaml`` for later ``expected_snapshot`` checks."""
+
+    return snapshot_file(_library_tree_path(profile))
+
+
+def save_paper_library_tree(
+    profile: str | Path,
+    tree: PaperLibraryTree | dict,
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> Path:
+    """Write ``research/library-tree.yaml`` under the tree sidecar lock.
+
+    When *expected_snapshot* is given, the file is re-checked after the lock
+    is acquired and ``file_state.FileConflictError`` is raised if it changed.
+    """
+
     path = _library_tree_path(profile)
     doc = tree if isinstance(tree, PaperLibraryTree) else PaperLibraryTree.from_dict(tree)
     doc.profile = doc.profile or _profile_name(profile)
     doc.updated = _today()
     path.parent.mkdir(parents=True, exist_ok=True)
     body = yaml.dump(doc.to_dict(), allow_unicode=True, default_flow_style=False, sort_keys=False)
-    atomic_write_text(path, f"# Paper library tree for {doc.profile}\n\n" + body)
+    with paper_library_tree_lock(profile):
+        if expected_snapshot is not None:
+            assert_unchanged(path, expected_snapshot, label=path.name)
+        atomic_write_text(path, f"# Paper library tree for {doc.profile}\n\n" + body)
     git_backup.record_change([path], action=f"update {doc.profile}/research/library-tree.yaml")
     return path
 
@@ -276,6 +348,7 @@ def _apply_paper_library_delete_policy(
     return changed
 
 
+@_with_tree_lock
 def create_paper_library_node(
     profile: str | Path,
     title: str,
@@ -304,6 +377,7 @@ def create_paper_library_node(
     return node
 
 
+@_with_tree_lock
 def rename_paper_library_node(
     profile: str | Path,
     node_id: str,
@@ -319,6 +393,7 @@ def rename_paper_library_node(
     return node
 
 
+@_with_tree_lock
 def position_paper_library_node(
     profile: str | Path,
     node_id: str,
@@ -376,6 +451,7 @@ def position_paper_library_node(
     return node
 
 
+@_with_tree_lock
 def reorder_paper_library_node(
     profile: str | Path,
     node_id: str,
@@ -403,6 +479,7 @@ def reorder_paper_library_node(
     return node
 
 
+@_with_tree_lock
 def trash_paper_library_node(
     profile: str | Path,
     node_id: str,
@@ -432,6 +509,7 @@ def trash_paper_library_node(
     return node
 
 
+@_with_tree_lock
 def restore_paper_library_node(
     profile: str | Path,
     node_id: str,
@@ -461,6 +539,7 @@ def restore_paper_library_node(
     return node
 
 
+@_with_tree_lock
 def purge_paper_library_node(
     profile: str | Path,
     node_id: str,
@@ -483,6 +562,7 @@ def purge_paper_library_node(
     return node
 
 
+@_with_tree_lock
 def upsert_paper_library_node(
     profile: str | Path,
     title: str,

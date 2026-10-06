@@ -1,0 +1,357 @@
+# 论文库（FastAPI sidecar + React 工作台）界面文案。
+# 由 nblane.core.paper_library_workspace.paper_library_labels() 加载。
+# 占位符为 Python str.format 名称（{count}；{s} 在中文中为空）。
+page_title: 论文库 · nblane
+view_all: 全部论文
+view_unsorted: 未归类收件箱
+view_recent: 最近阅读
+view_reading: 在读
+view_no_pdf: 缺少 PDF
+view_needs_extraction: 待结构化提取
+view_claims_need_review: 断言待审阅
+view_duplicate_risk: 疑似重复
+view_stale_translation: 译文过期
+view_private: 私有来源
+view_reviewed: 已整理
+view_archived: 已归档
+view_discarded: 已弃用
+section_library: 论文库
+section_collections: 分组
+section_technical_taxonomy: 技术分类
+section_work_queue: 待办队列
+section_system: 系统
+taxonomy_topics: 主题
+taxonomy_methods: 方法
+taxonomy_datasets: 数据集
+taxonomy_benchmarks: 基准
+all_collections: 全部分组
+trash: 回收站
+unsorted: 未归类
+unsorted_inbox: 未归类收件箱
+status_inbox: 收件箱
+status_reading: 在读
+status_summarized: 已整理
+status_candidate_ready: 候选待审
+status_archived: 已归档
+status_discarded: 已弃用
+visibility_private: 私有
+visibility_public: 公开
+badge_unsorted: 未归类
+badge_pdf_missing: 缺少 PDF
+badge_stale_translation: 译文过期
+badge_private_source: 私有来源
+badge_pdf_downloading: PDF 下载中
+badge_pdf_download_warning: PDF 下载异常
+badge_ai_candidates: AI 候选
+badge_grobid_unavailable: GROBID 不可用
+badge_needs_structured_extraction: 待结构化提取
+badge_fallback_ready: 后备文本就绪
+badge_citation_broken: 引用失效
+badge_duplicate_risk: 疑似重复
+reading_source_abstract: 摘要
+reading_source_summary: 概要
+reading_source_reading_summary: 阅读总结
+reading_source_notes: 笔记
+metric_pdf: PDF
+metric_last_page: 上次页码
+metric_segments: 段落
+metric_notes: 标注
+metric_translations: 译文
+value_ready: 就绪
+value_missing: 缺失
+card_page: 第 {page} 页
+card_annotations: 标注 {count}
+card_read_log: 阅读记录 {value}
+card_read_yes: 有
+card_read_no: 无
+metric_papers: 论文
+metric_reading: 在读
+metric_no_pdf: 缺少 PDF
+metric_needs_extraction: 待提取
+papers: 论文
+search_library: 搜索标题、作者、标签、笔记…
+sort_recent: 最近阅读
+sort_added: 最近添加
+sort_title: 标题
+sort_status: 状态
+sort_label: 排序
+apply: 应用
+loading: 加载中…
+working: 处理中…
+add_selected_here: 将所选论文加入此处
+add_to_collection: 加入分组
+archive: 归档
+auto_chunk: 自动切块
+attach_pdf: 补充 PDF
+back_to_overview: 返回总览
+cancel: 取消
+collapse: 收起
+collapse_all: 全部收起
+collection_actions: 分组操作
+collection_title: 分组名称
+delete_collection: 删除分组
+discard: 标记为弃用
+danger_zone: 危险操作
+delete_paper: 删除论文…
+delete_paper_confirm: 输入来源 ID 以确认删除。
+delete_pdf_asset: 同时删除 PDF 文件
+delete_reader_artifacts: 同时删除阅读器提取产物
+delete_paper_blocked: 存在引用，无法删除。
+download_pdf: 下载 PDF
+downloading_pdf: 正在下载 PDF…
+expand: 展开
+expand_all: 全部展开
+mark_as_reading: 标记为在读
+move_collection: 移动分组
+move_down: 下移
+move_papers_to_collection: 将论文移到指定分组
+move_papers_to_parent: 将论文移到上级分组
+move_papers_to_unsorted: 将论文移到未归类收件箱
+move_selected_here: 将所选论文移到此处
+move_to_collection: 移到分组
+move_up: 上移
+new_collection: 新建分组
+new_subcollection: 新建子分组
+abstract_preview: 摘要预览
+no_abstract_preview: 暂无摘要或概要。
+preview_source: 来自{source}
+why_relevant: 为什么重要
+explainer_links: 解读 / 延伸阅读
+more_links: +{count}
+open_reader: 打开阅读器
+open_remote_pdf: 打开远程 PDF
+open_source: 打开来源页
+paper_policy: 论文处理方式
+parent_collection: 上级分组
+purge_collection: 彻底删除
+quick_actions: 快捷操作
+reader_tab: 阅读器标签页（备用）
+remove_from_current_collection: 移出当前分组
+rename: 重命名
+rename_paper: 重命名论文…
+paper_title: 论文标题
+force_grobid_upgrade: 强制 GROBID 升级
+force_grobid_upgrade_hint: 即使最近超时仍在冷却期，也重新尝试 GROBID。
+restore_collection: 恢复分组
+run_extraction: 运行提取
+run_extraction_hint: 准备阅读器产物；GROBID 最近超时时复用后备文本。
+running_grobid_upgrade: 正在用 GROBID 升级…
+running_extraction: 正在提取…
+save: 保存
+search_collections: 搜索分组
+selected_papers: 已选 {count} 篇
+bulk_select: 批量选择
+select_all: 全选
+clear_selection: 清除
+select_paper: 选择论文
+select_paper_detail_hint: 选择一篇论文查看详情与操作。
+show_details: 查看详情
+library_empty: 当前视图下没有论文。
+library_result_count: 共 {count} 篇
+overview_suggested_action: 总览建议操作
+claims_focus: 断言
+claims_focus_hint: 审阅这篇论文的 AI 候选与已采纳证据。
+dedupe: 检查重复
+fix_citations: 修复引用
+metadata_focus: 元数据
+metadata_focus_hint: 检查标题、分组位置、重复风险与来源元数据。
+review_claims: 审阅断言
+review_metadata: 检查元数据
+review_visibility: 检查可见性
+notes: 笔记
+artifacts: 提取产物
+artifact_pdf_asset_ref: PDF 文件
+artifact_open_access_pdf_url: 远程 PDF 地址
+artifact_pdf_download_status: PDF 下载状态
+artifact_pdf_download_error: PDF 下载错误
+artifact_pdf_download_attempted_at: PDF 下载时间
+artifact_pages: 页数
+artifact_segments: 段落
+artifact_chunks: 研究切块
+artifact_translations: 译文
+artifact_structure_backend: 结构后端
+artifact_grobid_service: GROBID 服务
+artifact_grobid_last_error: 最近 GROBID 错误
+artifact_grobid_last_failed_at: 最近 GROBID 失败
+artifact_structured_extracted_at: 结构化提取时间
+retry_translation: 重新翻译
+retry_pdf_download: 重试 PDF
+retrying_translation: 正在重新翻译…
+translate_full_paper: 翻译全文
+translate_grobid_text: GROBID 段落
+translation_mode: 翻译模式
+translation_mode_fast_body: 快速正文
+translation_mode_full_paper: 全文
+translation_mode_grobid_text: GROBID 段落
+upload_pdf: 上传 PDF
+safety_focus: 发布安全
+safety_focus_hint: 导出前检查可见性与私有来源限制。
+translations_focus: 译文
+translations_focus_hint: 提取或段落变化后刷新过期译文。
+target_collection: 目标分组
+top_level: 顶层
+loading_delete_preview: 正在加载删除预览…
+delete_preview_required: 需要先加载删除预览才能执行此操作。
+delete_artifact_files: 产物文件
+delete_active_annotations: 有效标注
+delete_chunks: 切块
+delete_claims: 断言
+delete_citations: 引用
+export_selected: 导出所选
+export_citation: 导出引用
+export_format: 导出格式
+format_bibtex: BibTeX
+format_ris: RIS
+format_csl_json: CSL-JSON
+format_markdown: Markdown
+msg_streamlit_export: 请在 8502 论文库工作台中导出论文。
+msg_export_none: 请至少选择一篇论文再导出。
+exporting: 正在导出…
+msg_exported: 已导出 {count} 篇（{format}）。
+find_import_papers: 查找并导入论文
+search_mode: 搜索方式
+mode_codex: Codex
+mode_model: 模型
+mode_provider: 数据源
+mode_url: 链接 / DOI
+mode_upload: 上传
+query: 检索词
+query_placeholder: VLA 记忆
+providers: 数据源
+codex_depth: Codex 深度
+depth_fast: 快速
+depth_deep: 深入
+limit: 数量
+year_from: 起始年份
+year_to: 截止年份
+searching: 搜索中…
+action_running: 有操作进行中
+search_pdfs: 搜索 PDF
+pdf_required: 需要 PDF
+policy_provider: 数据源 + arXiv 网页兜底
+policy_model: 模型优先 + arXiv 网页兜底
+codex_budget: Codex {effort} · {budget}
+budget_adaptive: 自适应
+budget_manual: 手动上限 {seconds} 秒
+advanced: 高级设置
+codex_max_s: Codex 上限（秒）
+idle_s: 空闲超时（秒）
+provider_budget_s: 数据源总预算（秒）
+provider_request_s: 单次请求（秒）
+placeholder_auto: 自动
+placeholder_default: 默认
+paper_url: 论文链接 / DOI / arXiv ID
+paper_url_placeholder: https://arxiv.org/abs/… · 10.1145/… · 2407.08693
+title_hint: 标题提示
+optional: 可选
+collection: 分组
+status: 状态
+visibility: 可见性
+importing: 导入中…
+import_url: 导入
+title: 标题
+title_placeholder_filename: 默认使用文件名
+pdf_file: PDF 文件
+uploading: 上传中…
+searching_papers: 正在搜索论文…
+import_update_selected: 导入 / 更新所选（{count}）
+update_local: 更新本地
+pdf_ready: PDF 可用
+overview: 概览
+why_selected: 入选理由
+pdf_link: PDF
+paper_page: 论文页
+doi_link: DOI
+kept: 保留 {accepted}/{raw}
+step_ok: 成功
+step_failed: 失败
+live: 实时
+max_seconds: 上限 {seconds} 秒
+trace_web_search: 网页搜索
+trace_organizing: 整理结果
+trace_codex_setup: Codex 准备
+trace_codex_usage: Codex 用量
+msg_candidates_found: 找到 {count} 篇可下载 PDF 的候选。
+msg_no_candidates: 没有找到可下载 PDF 的候选。
+msg_busy_search: 论文库有其他操作正在进行，完成后再搜索。
+msg_busy_import: 论文库有其他操作正在进行，完成后再导入。
+msg_busy_upload: 论文库有其他操作正在进行，完成后再上传。
+msg_missing_profile: 缺少 profile。
+msg_missing_profile_url: URL 中缺少 profile。
+msg_enter_query: 请先输入检索词。
+msg_starting_codex: 正在启动 Codex {depth} 搜索。
+msg_starting_search: 正在启动论文搜索。
+msg_search_not_started: 搜索任务未能启动。
+msg_search_cancelled: 搜索已取消。
+msg_search_failed: 搜索失败。
+msg_cancelling: 正在取消搜索…
+msg_cancelling_detail: 正在取消论文搜索。
+msg_select_candidate: 请至少选择一个候选。
+msg_imported_count: 已导入 {count} 篇论文。
+msg_paste_url: 请先粘贴论文链接、DOI 或 arXiv ID。
+msg_imported_url: 已从链接导入论文。
+msg_choose_pdf: 请先选择 PDF 文件。
+msg_uploaded_imported: 已上传并导入 PDF。
+msg_uploaded_pdf: 已上传 PDF。
+msg_uploading: 正在上传 {name}…
+msg_action_running: 论文库有其他操作正在进行。
+msg_queued: 论文库操作已排队。
+msg_job_not_started: 论文库任务未能启动。
+msg_action_finished: 论文库操作已完成。
+msg_action_failed: 论文库操作失败。
+msg_interrupted_progress: 论文库操作在保存部分进度后中断（{progress}）。已保存的译文会保留，重试即可继续剩余部分。
+msg_interrupted: 论文库操作中断，已重新加载最新保存的状态，可重试继续。
+msg_lost_progress: 与论文库任务的连接在保存部分进度后中断（{progress}）。已保存的译文会保留，8502 恢复后重试。
+msg_lost: 与论文库任务失去连接已 {seconds} 秒。
+msg_reconnecting: 正在重新连接任务状态…剩余 {seconds} 秒
+msg_missing_paper: 缺少 profile 或论文 ID。
+msg_streamlit_upload: 请在 8502 论文库工作台中上传 PDF。
+msg_streamlit_delete: 请在 8502 论文库工作台中预览并删除论文。
+msg_request_timeout: 请求超时（{seconds} 秒）。
+msg_request_failed: 请求失败：{status}
+progress_updated: 已更新 {count}
+progress_processed: 已处理 {done}/{total}
+progress_saved: 已保存 {count}
+progress_warnings: 警告 {count}
+progress_batches: 批次 {done}/{total}
+progress_steps: 步骤 {done}/{total}
+progress_units: 单元 {done}/{total}
+srv_invalid_event: 无效的论文库事件。
+srv_unknown_event: 未知的论文库事件：{action}
+srv_saved: 已保存
+srv_selected_reader_tab: 已在阅读器标签页中选中。
+srv_marked_reading: 已将 {count} 篇标记为在读。
+srv_archived: 已归档 {count} 篇。
+srv_discarded: 已弃用 {count} 篇。
+srv_status_updated: 已将 {count} 篇更新为「{status}」。
+srv_renamed_paper: 已重命名论文。
+srv_downloading_pdf: 正在下载 PDF。
+srv_downloaded_partial: 已下载 {count} 个 PDF；{failed} 个需要处理。
+srv_downloaded: 已下载 {count} 个 PDF。
+srv_download_incomplete: PDF 下载未完成。
+srv_extracting: 正在提取阅读器产物。
+srv_preparing_translation: 翻译前正在准备阅读器产物。
+srv_starting_translation: 开始全文翻译。
+srv_deleted_papers: 已删除 {count} 篇论文。
+srv_deleted_assets: 已删除 {count} 个 PDF 文件。
+srv_deleted_artifacts: 已删除 {count} 个产物文件。
+srv_purged: 已彻底删除 {count} 篇弃用论文。
+srv_extract_none: 未选择需要提取的论文。
+srv_extract_fallback: 后备文本就绪：{pages} 页，{segments} 段。
+srv_extract_ready: 提取完成：{pages} 页，{segments} 段。
+srv_extract_incomplete: 提取未完成：{status}。
+srv_extract_batch: 已完成 {count} 篇论文的提取，{ready} 篇就绪。
+srv_warnings_attention: 另有 {count} 条警告需要处理。
+srv_translate_none: 未选择需要翻译的论文。
+srv_translate_done: 重新翻译完成：更新 {updated} 行，剩余 {stale} 行过期。
+srv_translate_missing: 缺失 {count} 行。
+srv_translate_failed: 失败 {count} 行。
+srv_imported_updated: 已导入 {created} 篇，更新 {updated} 篇。
+srv_updated_local: 已更新 {count} 篇本地论文。
+srv_imported: 已导入 {count} 篇论文。
+srv_no_change: 所选论文没有变化。
+srv_pdf_attention: "{message}PDF 需要处理：{warning}"
+srv_imported_url: 已从链接导入论文。
+srv_uploaded_imported: 已上传并导入 PDF。
+srv_upload_duplicate: 已导入过，沿用现有论文。
+srv_uploaded_pdf: 已上传 PDF。

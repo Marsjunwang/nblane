@@ -112,6 +112,86 @@ def _normalize_arxiv_id(arxiv: object) -> str:
     return text.strip().strip("/")
 
 
+# Modern arXiv ids (``2407.08693`` / ``2407.08693v2``) and old-style
+# ``archive[.subject]/YYMMNNN`` ids (``hep-th/9901001``, ``math.GT/0309136``).
+_ARXIV_NEW_ID_RE = re.compile(r"^(\d{4}\.\d{4,5})(v\d+)?$", re.IGNORECASE)
+_ARXIV_OLD_ID_RE = re.compile(r"^([a-z][a-z\-]*(?:\.[a-z]{2})?/\d{7})(v\d+)?$", re.IGNORECASE)
+_DOI_RE = re.compile(r"^10\.\d{4,9}/\S+$")
+_SEMANTIC_SCHOLAR_ID_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
+
+
+def _bare_arxiv_id(text: str) -> str:
+    """Return a normalized arXiv id when *text* is exactly one, else ``""``."""
+
+    clean = re.sub(r"^arxiv:\s*", "", _clean_text(text), flags=re.IGNORECASE).strip()
+    if _ARXIV_NEW_ID_RE.match(clean) or _ARXIV_OLD_ID_RE.match(clean):
+        return clean
+    return ""
+
+
+def _bare_doi(text: str) -> str:
+    """Return a normalized DOI when *text* is a bare ``10.x/...`` or ``doi:`` DOI."""
+
+    clean = _clean_text(text)
+    if clean.lower().startswith("doi:"):
+        clean = clean[4:].strip()
+    clean = clean.rstrip(".,;")
+    return clean if _DOI_RE.match(clean) else ""
+
+
+def parse_paper_identifier(value: object) -> dict[str, str]:
+    """Classify a pasted paper reference without touching the network.
+
+    Accepts DOI / arXiv / Semantic Scholar URLs as well as bare identifiers
+    (``10.1145/...``, ``doi:10...``, ``2407.08693v2``, ``arXiv:2407.08693``,
+    ``hep-th/9901001``). Returns ``{"kind", "doi", "arxiv_id",
+    "semantic_scholar_id", "url"}``; ``kind`` is ``doi`` / ``arxiv`` /
+    ``semantic_scholar`` / ``url`` / ``""``. ``url`` is the canonical landing
+    URL for bare ids, or the original URL otherwise.
+    """
+
+    clean = _clean_text(value)
+    out = {"kind": "", "doi": "", "arxiv_id": "", "semantic_scholar_id": "", "url": ""}
+    if not clean:
+        return out
+    arxiv = _bare_arxiv_id(clean)
+    if arxiv:
+        out.update(kind="arxiv", arxiv_id=arxiv, url=f"https://arxiv.org/abs/{arxiv}")
+        return out
+    doi = _bare_doi(clean)
+    if doi:
+        out.update(kind="doi", doi=doi, url=f"https://doi.org/{doi}")
+        return out
+    parsed = urllib.parse.urlparse(clean)
+    host = parsed.netloc.lower()
+    path = urllib.parse.unquote(parsed.path)
+    out["url"] = clean
+    if not host:
+        return out
+    out["kind"] = "url"
+    if host.endswith("arxiv.org"):
+        # /abs/<id>, /pdf/<id>[.pdf], /html/<id>; old-style ids contain one slash.
+        match = re.match(r"^/(?:abs|pdf|html|format)/(.+?)/?$", path)
+        candidate = _normalize_arxiv_id(match.group(1)) if match else ""
+        arxiv = _bare_arxiv_id(candidate)
+        if arxiv:
+            out.update(kind="arxiv", arxiv_id=arxiv)
+        return out
+    if host.endswith("doi.org"):
+        doi = _bare_doi(path.lstrip("/"))
+        if doi:
+            out.update(kind="doi", doi=doi)
+        return out
+    if host.endswith("semanticscholar.org"):
+        segments = [segment for segment in path.split("/") if segment]
+        if segments and segments[0] == "paper":
+            paper_id = segments[-1]
+            if _SEMANTIC_SCHOLAR_ID_RE.match(paper_id):
+                out.update(kind="semantic_scholar", semantic_scholar_id=paper_id.lower())
+        return out
+    return out
+
+
 def _metadata_cache_get(key: str) -> dict[str, object] | None:
     if not key:
         return None
@@ -269,22 +349,78 @@ def fetch_arxiv_metadata(arxiv_id: str, *, timeout: float | None = None) -> dict
     return out
 
 
-def lookup_paper_metadata(*, doi: str = "", arxiv_id: str = "", url: str = "") -> dict[str, object]:
-    """Best-effort metadata lookup combining Crossref and arXiv signals."""
+def fetch_semantic_scholar_metadata(paper_id: str, *, timeout: float | None = None) -> dict[str, object]:
+    """Fetch one paper from the Semantic Scholar Graph API. Returns ``{}`` on failure."""
+
+    clean = _clean_text(paper_id).lower()
+    if not _SEMANTIC_SCHOLAR_ID_RE.match(clean):
+        return {}
+    if os.environ.get("NBLANE_DISABLE_NETWORK_LOOKUPS"):
+        return {}
+    cache_key = f"s2:{clean}"
+    cached = _metadata_cache_get(cache_key)
+    if cached is not None:
+        return cached
+    fields = "title,abstract,authors,year,venue,externalIds,url,openAccessPdf"
+    url = (
+        f"https://api.semanticscholar.org/graph/v1/paper/{clean}?"
+        + urllib.parse.urlencode({"fields": fields})
+    )
+    try:
+        payload = json.loads(_http_get_text(url, accept="application/json", timeout=timeout))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    external = payload.get("externalIds") if isinstance(payload.get("externalIds"), dict) else {}
+    pdf = payload.get("openAccessPdf") if isinstance(payload.get("openAccessPdf"), dict) else {}
+    authors = [
+        _clean_text(entry.get("name"))
+        for entry in payload.get("authors") or []
+        if isinstance(entry, dict) and _clean_text(entry.get("name"))
+    ]
+    out: dict[str, object] = {
+        "semantic_scholar_id": clean,
+        "title": _clean_text(payload.get("title")),
+        "abstract": _clean_text(payload.get("abstract")),
+        "authors": authors,
+        "year": _clean_text(payload.get("year")),
+        "venue": _clean_text(payload.get("venue")),
+        "doi": _normalize_doi(external.get("DOI")),
+        "arxiv_id": _normalize_arxiv_id(external.get("ArXiv")),
+        "canonical_url": _clean_text(payload.get("url")) or f"https://www.semanticscholar.org/paper/{clean}",
+        "pdf_url": _clean_text(pdf.get("url")),
+    }
+    out = {key: value for key, value in out.items() if value not in ("", [], None)}
+    _metadata_cache_set(cache_key, out)
+    return out
+
+
+def lookup_paper_metadata(
+    *,
+    doi: str = "",
+    arxiv_id: str = "",
+    url: str = "",
+    semantic_scholar_id: str = "",
+) -> dict[str, object]:
+    """Best-effort metadata lookup combining Crossref, arXiv and Semantic Scholar."""
 
     found: dict[str, object] = {}
-    arxiv = _normalize_arxiv_id(arxiv_id)
-    if not arxiv:
-        parsed = urllib.parse.urlparse(_clean_text(url))
-        if "arxiv.org" in parsed.netloc:
-            arxiv = _normalize_arxiv_id(parsed.path.rsplit("/", 1)[-1])
+    parsed_ref = parse_paper_identifier(url) if url else {}
+    s2_id = _clean_text(semantic_scholar_id) or _clean_text(parsed_ref.get("semantic_scholar_id"))
+    if s2_id:
+        # Semantic Scholar resolves external ids, which feed the arXiv/Crossref lookups below.
+        found.update(fetch_semantic_scholar_metadata(s2_id))
+        arxiv_id = arxiv_id or _clean_text(found.get("arxiv_id"))
+        doi = doi or _clean_text(found.get("doi"))
+    arxiv = _normalize_arxiv_id(arxiv_id) or _clean_text(parsed_ref.get("arxiv_id"))
     if arxiv:
-        found.update(fetch_arxiv_metadata(arxiv))
+        for key, value in fetch_arxiv_metadata(arxiv).items():
+            if value and not found.get(key):
+                found[key] = value
     clean_doi = _normalize_doi(doi)
     if not clean_doi and not found:
-        parsed = urllib.parse.urlparse(_clean_text(url))
-        if "doi.org" in parsed.netloc:
-            clean_doi = _normalize_doi(parsed.path.lstrip("/"))
+        clean_doi = _clean_text(parsed_ref.get("doi"))
     if clean_doi:
         crossref = fetch_crossref_metadata(clean_doi)
         for key, value in crossref.items():

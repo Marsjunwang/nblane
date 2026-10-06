@@ -20,8 +20,97 @@ function eventId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+// Active UI copy. Seeded from the server bootstrap (first paint already in
+// the right language) and refreshed from every payload's ``labels`` map.
+let ACTIVE_LABELS = (typeof window !== "undefined" && window.__NBLANE_PAPER_LIBRARY_BOOTSTRAP__?.labels) || {};
+
+function setActiveLabels(labels) {
+  if (labels && typeof labels === "object" && Object.keys(labels).length) {
+    ACTIVE_LABELS = labels;
+  }
+}
+
+function formatLabel(text, vars) {
+  if (!vars) {
+    return text;
+  }
+  const values = { ...vars };
+  if ("count" in values && !("s" in values)) {
+    values.s = Number(values.count) === 1 ? "" : "s";
+  }
+  return text.replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
+
+// Translate a key from the active label table; ``fallback`` is English.
+function t(key, fallback = "", vars = null) {
+  return formatLabel(cleanText(ACTIVE_LABELS?.[key]) || fallback || key, vars);
+}
+
 function label(labels, key, fallback) {
-  return cleanText(labels?.[key]) || fallback;
+  return cleanText(labels?.[key]) || cleanText(ACTIVE_LABELS?.[key]) || fallback;
+}
+
+function bootstrapConfig() {
+  return (typeof window !== "undefined" && window.__NBLANE_PAPER_LIBRARY_BOOTSTRAP__) || {};
+}
+
+// ``ui_lang`` query param wins; otherwise the server-rendered bootstrap value.
+function uiLang() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const fromQuery = cleanText(new URLSearchParams(window.location.search).get("ui_lang")).toLowerCase();
+  if (fromQuery === "zh" || fromQuery === "en") {
+    return fromQuery;
+  }
+  return cleanText(bootstrapConfig().uiLang);
+}
+
+function isEmbedMode() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const raw = cleanText(new URLSearchParams(window.location.search).get("embed")).toLowerCase();
+  return bootstrapConfig().embed === true || raw === "1" || raw === "true" || raw === "yes";
+}
+
+// True when this standalone page is framed by another window (the SPA).
+function isFramed() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return window.parent && window.parent !== window;
+  } catch {
+    return true;
+  }
+}
+
+// Embedding contract with the SPA host (see report / docs):
+//   -> parent: {type: "nblane.library.ready", profile}
+//   -> parent: {type: "nblane.library.open_reader", source_id, profile}
+function postToParent(message) {
+  if (!isFramed()) {
+    return false;
+  }
+  try {
+    window.parent.postMessage(message, "*");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function openPaperReader(item, profile) {
+  const sourceId = cleanText(item?.source_id || item?.id);
+  const readerUrl = cleanText(item?.reader_url);
+  if (runtimeMode() !== "streamlit" && isFramed()) {
+    postToParent({ type: "nblane.library.open_reader", source_id: sourceId, profile: cleanText(profile) });
+    return;
+  }
+  if (readerUrl) {
+    window.open(readerUrl, "_blank", "noopener,noreferrer");
+  }
 }
 
 function makeEvent(action, payload = {}) {
@@ -69,6 +158,7 @@ const WORKSPACE_JOB_RECONNECT_GRACE_MS = 180000;
 function isTransientWorkspaceJobPollError(error) {
   const message = cleanText(error?.message || error);
   return (
+    error?.code === "timeout" ||
     message.includes("Request timed out after") ||
     message.includes("Failed to fetch") ||
     message.includes("NetworkError")
@@ -77,7 +167,25 @@ function isTransientWorkspaceJobPollError(error) {
 
 function isWorkspaceJobLostError(error) {
   const message = cleanText(error?.message || error).toLowerCase();
-  return message.includes("event job not found") || message.includes("request failed: 404");
+  return error?.status === 404 || message.includes("event job not found") || message.includes("request failed: 404");
+}
+
+function timeoutError(timeoutMs) {
+  const error = new Error(t("msg_request_timeout", "Request timed out after {seconds}s.", { seconds: Math.round(timeoutMs / 1000) }));
+  error.code = "timeout";
+  return error;
+}
+
+function responseError(response, payload) {
+  const error = new Error(
+    payload?.detail?.message ||
+      payload?.detail ||
+      payload?.message ||
+      payload?.error ||
+      t("msg_request_failed", "Request failed: {status}", { status: response.status }),
+  );
+  error.status = response.status;
+  return error;
 }
 
 function workspaceJobSavedProgressText(job) {
@@ -88,13 +196,13 @@ function workspaceJobSavedProgressText(job) {
   const processed = Number(job.segments_processed || 0);
   const selected = Number(job.segments_selected || 0);
   if (updated > 0 && selected > 0) {
-    return `${updated} updated, ${processed}/${selected} processed`;
+    return `${t("progress_updated", "{count} updated", { count: updated })}, ${t("progress_processed", "{done}/{total} processed", { done: processed, total: selected })}`;
   }
   if (updated > 0) {
-    return `${updated} updated`;
+    return t("progress_updated", "{count} updated", { count: updated });
   }
   if (processed > 0 && selected > 0) {
-    return `${processed}/${selected} processed`;
+    return t("progress_processed", "{done}/{total} processed", { done: processed, total: selected });
   }
   return "";
 }
@@ -177,14 +285,23 @@ function withSidecarAuth(url) {
   }
 }
 
+function withUiLang(url) {
+  const lang = uiLang();
+  if (!lang) {
+    return url;
+  }
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}ui_lang=${encodeURIComponent(lang)}`;
+}
+
 function paperLibraryApiUrl(profile, suffix = "") {
   const encoded = encodeURIComponent(profile);
-  return withSidecarAuth(`/api/research/${encoded}/paper-library${suffix}`);
+  return withSidecarAuth(withUiLang(`/api/research/${encoded}/paper-library${suffix}`));
 }
 
 function paperApiUrl(profile, sourceId, suffix = "") {
   return withSidecarAuth(
-    `/api/research/${encodeURIComponent(profile)}/papers/${encodeURIComponent(sourceId)}${suffix}`,
+    withUiLang(`/api/research/${encodeURIComponent(profile)}/papers/${encodeURIComponent(sourceId)}${suffix}`),
   );
 }
 
@@ -223,7 +340,7 @@ async function jsonRequest(url, options = {}) {
     },
   }).catch((error) => {
     if (error?.name === "AbortError") {
-      throw new Error(`Request timed out after ${Math.round((Number(timeoutMs) || 60000) / 1000)}s.`);
+      throw timeoutError(Number(timeoutMs) || 60000);
     }
     throw error;
   }).finally(() => {
@@ -233,7 +350,7 @@ async function jsonRequest(url, options = {}) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.ok === false) {
-    throw new Error(payload?.detail || payload?.message || payload?.error || `Request failed: ${response.status}`);
+    throw responseError(response, payload);
   }
   return payload;
 }
@@ -252,7 +369,7 @@ async function formRequest(url, formData, options = {}) {
     body: formData,
   }).catch((error) => {
     if (error?.name === "AbortError") {
-      throw new Error(`Request timed out after ${Math.round((Number(timeoutMs) || 180000) / 1000)}s.`);
+      throw timeoutError(Number(timeoutMs) || 180000);
     }
     throw error;
   }).finally(() => {
@@ -262,9 +379,71 @@ async function formRequest(url, formData, options = {}) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.ok === false) {
-    throw new Error(payload?.detail || payload?.message || payload?.error || `Request failed: ${response.status}`);
+    throw responseError(response, payload);
   }
   return payload;
+}
+
+function filenameFromDisposition(header, fallback) {
+  const value = cleanText(header);
+  const star = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch {
+      // fall through to the plain filename
+    }
+  }
+  const plain = value.match(/filename="?([^";]+)"?/i);
+  return plain ? plain[1].trim() : fallback;
+}
+
+// POST JSON and save the attachment response as a file download.
+async function downloadRequest(url, body, fallbackName = "papers.txt") {
+  const response = await fetch(url, {
+    credentials: "same-origin",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw responseError(response, payload);
+  }
+  const blob = await response.blob();
+  const filename = filenameFromDisposition(response.headers.get("Content-Disposition"), fallbackName);
+  const href = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+  return { filename, count: Number(response.headers.get("X-Nblane-Export-Count") || 0) };
+}
+
+const EXPORT_FORMATS = [
+  ["bibtex", "format_bibtex", "BibTeX"],
+  ["ris", "format_ris", "RIS"],
+  ["csl-json", "format_csl_json", "CSL-JSON"],
+  ["markdown", "format_markdown", "Markdown"],
+];
+
+function ExportFormatSelect({ value, onChange, disabled = false }) {
+  return (
+    <select
+      aria-label={t("export_format", "Export format")}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      {EXPORT_FORMATS.map(([id, key, fallback]) => (
+        <option key={id} value={id}>{t(key, fallback)}</option>
+      ))}
+    </select>
+  );
 }
 
 function sleep(ms) {
@@ -324,8 +503,8 @@ function searchStepText(step) {
   const accepted = cleanText(step?.accepted_count);
   const raw = cleanText(step?.raw_count);
   const elapsed = cleanText(step?.elapsed_ms);
-  const status = step?.ok === false ? "failed" : "ok";
-  const counts = accepted || raw ? `${accepted || 0}/${raw || accepted || 0} kept` : "";
+  const status = step?.ok === false ? t("step_failed", "failed") : t("step_ok", "ok");
+  const counts = accepted || raw ? t("kept", "{accepted}/{raw} kept", { accepted: accepted || 0, raw: raw || accepted || 0 }) : "";
   return [stage, name, status, counts, elapsed ? `${elapsed} ms` : ""].filter(Boolean).join(" · ");
 }
 
@@ -341,16 +520,16 @@ function searchEventText(event) {
     return searchStepText(event.step);
   }
   if (outputKind === "web_search") {
-    return ["web search", message || detail, elapsed].filter(Boolean).join(" · ");
+    return [t("trace_web_search", "web search"), message || detail, elapsed].filter(Boolean).join(" · ");
   }
   if (outputKind === "structured_result") {
-    return ["organizing", message, elapsed].filter(Boolean).join(" · ");
+    return [t("trace_organizing", "organizing"), message, elapsed].filter(Boolean).join(" · ");
   }
   if (outputKind === "plugin_warning") {
-    return ["codex setup", message, elapsed].filter(Boolean).join(" · ");
+    return [t("trace_codex_setup", "codex setup"), message, elapsed].filter(Boolean).join(" · ");
   }
   if (outputKind === "usage") {
-    return ["codex usage", message, elapsed].filter(Boolean).join(" · ");
+    return [t("trace_codex_usage", "codex usage"), message, elapsed].filter(Boolean).join(" · ");
   }
   if (event?.event === "output") {
     return [phase, message, elapsed].filter(Boolean).join(" · ");
@@ -366,9 +545,9 @@ function searchProgressText(progress) {
   const budgetMode = cleanText(progress?.budget_mode || progress?.codex_budget_mode);
   const transport = cleanText(progress?.transport);
   const elapsed = elapsedMs > 0 ? `${Math.round(elapsedMs / 1000)}s` : "";
-  const timeout = budgetMode === "manual" && timeoutSeconds > 0 ? `max ${Math.round(timeoutSeconds)}s` : "";
-  const budget = budgetMode === "auto" ? "adaptive" : "";
-  const live = transport === "stream" ? "live" : "";
+  const timeout = budgetMode === "manual" && timeoutSeconds > 0 ? t("max_seconds", "max {seconds}s", { seconds: Math.round(timeoutSeconds) }) : "";
+  const budget = budgetMode === "auto" ? t("budget_adaptive", "adaptive") : "";
+  const live = transport === "stream" ? t("live", "live") : "";
   return [status, phase, elapsed, live, budget, timeout].filter(Boolean).join(" · ");
 }
 
@@ -379,13 +558,13 @@ function workspaceProgressText(progress) {
   const elapsed = elapsedMs > 0 ? `${Math.round(elapsedMs / 1000)}s` : "";
   const batches = Number(progress?.batches || 0);
   const batchesCompleted = Number(progress?.batches_completed || 0);
-  const batchText = batches > 0 ? `${Math.min(batchesCompleted, batches)}/${batches} batches` : "";
+  const batchText = batches > 0 ? t("progress_batches", "{done}/{total} batches", { done: Math.min(batchesCompleted, batches), total: batches }) : "";
   const stepTotal = Number(progress?.step_total || 0);
   const stepCurrent = Number(progress?.step_current || 0);
-  const stepText = stepTotal > 0 ? `${Math.min(stepCurrent, stepTotal)}/${stepTotal} steps` : "";
+  const stepText = stepTotal > 0 ? t("progress_steps", "{done}/{total} steps", { done: Math.min(stepCurrent, stepTotal), total: stepTotal }) : "";
   const selected = Number(progress?.segments_selected || 0);
   const processed = Number(progress?.segments_processed || 0);
-  const segmentText = selected > 0 ? `${Math.min(processed, selected)}/${selected} units` : "";
+  const segmentText = selected > 0 ? t("progress_units", "{done}/{total} units", { done: Math.min(processed, selected), total: selected }) : "";
   return [status, phase, elapsed, batchText || stepText, segmentText].filter(Boolean).join(" · ");
 }
 
@@ -430,8 +609,10 @@ function codexReasoningEffort(depth) {
 
 function codexBudgetLabel(depth, maxSeconds = "") {
   const manualMax = optionalPositiveSeconds(maxSeconds);
-  const budget = manualMax ? `manual max ${Math.round(manualMax)}s` : "adaptive";
-  return `Codex ${codexReasoningEffort(depth)} · ${budget}`;
+  const budget = manualMax
+    ? t("budget_manual", "manual max {seconds}s", { seconds: Math.round(manualMax) })
+    : t("budget_adaptive", "adaptive");
+  return t("codex_budget", "Codex {effort} · {budget}", { effort: codexReasoningEffort(depth), budget });
 }
 
 function candidateMeta(candidate) {
@@ -596,7 +777,7 @@ function ContextMenu({ menu, payload, onClose, onAction }) {
       addRow(
         "open-reader",
         label(payload.labels, "open_reader", "Open Reader"),
-        () => window.open(cleanText(item.reader_url), "_blank", "noopener,noreferrer"),
+        () => openPaperReader(item, payload.profile),
       );
     }
     addRow(
@@ -1079,7 +1260,10 @@ function PaperList({
   setDragPayload,
   emit,
   onPaperMenu,
+  onExport,
+  workspaceBusy = false,
 }) {
+  const [exportFormat, setExportFormat] = useState("bibtex");
   const activeQuery = cleanText(payload.query || currentUrlQuery());
   const papers = asArray(payload.papers).filter((paper) => paperMatchesQuery(paper, activeQuery));
   const selected = selectedPaperIds;
@@ -1121,6 +1305,25 @@ function PaperList({
           {selectedCount > 0 ? label(payload.labels, "clear_selection", "Clear") : label(payload.labels, "bulk_select", "Bulk select")}
         </button>
       </div>
+      {selectedCount > 0 && typeof onExport === "function" && payload.capabilities.export_papers !== false ? (
+        <div className="paper-bulk-bar" role="toolbar" aria-label={t("export_selected", "Export selected")}>
+          <span className="paper-bulk-count">
+            {label(payload.labels, "selected_papers", "{count} papers selected").replace("{count}", selectedCount)}
+          </span>
+          <ExportFormatSelect value={exportFormat} onChange={setExportFormat} disabled={workspaceBusy} />
+          <button
+            type="button"
+            className="is-primary"
+            disabled={workspaceBusy}
+            onClick={() => onExport([...selected], exportFormat)}
+          >
+            {t("export_selected", "Export selected")}
+          </button>
+          <button type="button" onClick={() => setSelectedPaperIds(new Set())}>
+            {label(payload.labels, "clear_selection", "Clear")}
+          </button>
+        </div>
+      ) : null}
       {!papers.length ? (
         <div className="paper-list-empty">{label(payload.labels, "library_empty", "No papers match this view.")}</div>
       ) : (
@@ -1276,10 +1479,10 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
         return data.result || {};
       }
       if (job.status === "cancelled") {
-        throw new Error("Search cancelled.");
+        throw new Error(t("msg_search_cancelled", "Search cancelled."));
       }
       if (job.status === "failed") {
-        throw new Error(cleanText(job.error || job.message) || "Search failed.");
+        throw new Error(cleanText(job.error || job.message) || t("msg_search_failed", "Search failed."));
       }
     }
   };
@@ -1327,9 +1530,9 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
         if (job.status === "done" && (event.type === "result" || data.result)) {
           settle(resolve, data.result || {});
         } else if (job.status === "cancelled") {
-          settle(reject, new Error("Search cancelled."));
+          settle(reject, new Error(t("msg_search_cancelled", "Search cancelled.")));
         } else if (job.status === "failed") {
-          settle(reject, new Error(cleanText(job.error || job.message) || "Search failed."));
+          settle(reject, new Error(cleanText(job.error || job.message) || t("msg_search_failed", "Search failed.")));
         }
       };
       try {
@@ -1359,8 +1562,8 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
     ));
     setMessage(
       nextResults.length
-        ? `${nextResults.length} PDF-ready candidates found.`
-        : warnings[0] || "No PDF-ready candidates found.",
+        ? t("msg_candidates_found", "{count} PDF-ready candidates found.", { count: nextResults.length })
+        : warnings[0] || t("msg_no_candidates", "No PDF-ready candidates found."),
     );
     setOpen(true);
   };
@@ -1368,11 +1571,11 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
   const runSearch = async () => {
     const cleanQuery = query.trim();
     if (workspaceBusy) {
-      setMessage("Another Paper Library action is still running. Wait for it to finish, then search.");
+      setMessage(t("msg_busy_search", "Another Paper Library action is still running. Wait for it to finish, then search."));
       return;
     }
     if (!cleanQuery || !profile) {
-      setMessage(cleanQuery ? "Missing profile." : "Enter a query first.");
+      setMessage(cleanQuery ? t("msg_missing_profile", "Missing profile.") : t("msg_enter_query", "Enter a query first."));
       return;
     }
     setBusy(true);
@@ -1387,7 +1590,9 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
     setProgress({
       status: "starting",
       phase: mode,
-      message: mode === "codex" ? `Starting Codex ${codexDepth} search.` : "Starting paper search.",
+      message: mode === "codex"
+        ? t("msg_starting_codex", "Starting Codex {depth} search.", { depth: codexDepth === "deep" ? t("depth_deep", "Deep") : t("depth_fast", "Fast") })
+        : t("msg_starting_search", "Starting paper search."),
       elapsed_ms: 0,
       budget_mode: mode === "codex" ? (codexTimeout ? "manual" : "auto") : "",
       timeout_seconds: mode === "codex" ? codexTimeout || 0 : providerBudget || 0,
@@ -1433,7 +1638,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
       }
       const jobId = cleanText(started.job_id || started.job?.job_id);
       if (!jobId) {
-        throw new Error("Search job did not start.");
+        throw new Error(t("msg_search_not_started", "Search job did not start."));
       }
       setCurrentJobId(jobId);
       const data = await waitForSearchJob(jobId);
@@ -1441,7 +1646,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
     } catch (error) {
       setDiagnostics({});
       const errorMessage = error.message || String(error);
-      const cancelled = errorMessage.toLowerCase().includes("cancelled");
+      const cancelled = errorMessage === t("msg_search_cancelled", "Search cancelled.") || errorMessage.toLowerCase().includes("cancelled");
       setProgress((current) => ({
         ...(current || {}),
         status: cancelled ? "cancelled" : "failed",
@@ -1460,8 +1665,8 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
     if (!jobId || !profile) {
       return;
     }
-    setMessage("Cancelling search...");
-    setProgress((current) => ({ ...(current || {}), status: "cancelling", phase: "cancelling", message: "Cancelling paper search." }));
+    setMessage(t("msg_cancelling", "Cancelling search..."));
+    setProgress((current) => ({ ...(current || {}), status: "cancelling", phase: "cancelling", message: t("msg_cancelling_detail", "Cancelling paper search.") }));
     try {
       const data = await jsonRequest(paperLibraryApiUrl(profile, `/search/jobs/${jobId}/cancel`), {
         method: "POST",
@@ -1478,7 +1683,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
 
   const importSelected = async () => {
     if (!selectedCount) {
-      setMessage("Select at least one candidate.");
+      setMessage(t("msg_select_candidate", "Select at least one candidate."));
       return;
     }
     setBusy(true);
@@ -1510,7 +1715,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
       setSelectedIds(new Set());
       const importWarnings = asArray(data.warnings).map(cleanText).filter(Boolean);
       setMessage([
-        data.message || `Imported ${imported.length} papers.`,
+        data.message || t("msg_imported_count", "Imported {count} papers.", { count: imported.length }),
         ...importWarnings.slice(0, 2),
       ].filter(Boolean).join(" "));
       onImported(data);
@@ -1524,11 +1729,11 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
   const importManualUrl = async () => {
     const cleanUrl = manualUrl.trim();
     if (workspaceBusy) {
-      setMessage("Another Paper Library action is still running. Wait for it to finish, then import.");
+      setMessage(t("msg_busy_import", "Another Paper Library action is still running. Wait for it to finish, then import."));
       return;
     }
     if (!cleanUrl || !profile) {
-      setMessage(cleanUrl ? "Missing profile." : "Paste a paper URL first.");
+      setMessage(cleanUrl ? t("msg_missing_profile", "Missing profile.") : t("msg_paste_url", "Paste a paper URL, DOI or arXiv ID first."));
       return;
     }
     setBusy(true);
@@ -1551,7 +1756,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
       setManualTitle("");
       setResults([]);
       setSelectedIds(new Set());
-      setMessage(data.message || "Imported paper from URL.");
+      setMessage(data.message || t("msg_imported_url", "Imported paper from URL."));
       onImported(data);
     } catch (error) {
       setMessage(error.message || String(error));
@@ -1562,11 +1767,11 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
 
   const uploadLocalPdf = async () => {
     if (workspaceBusy) {
-      setMessage("Another Paper Library action is still running. Wait for it to finish, then upload.");
+      setMessage(t("msg_busy_upload", "Another Paper Library action is still running. Wait for it to finish, then upload."));
       return;
     }
     if (!profile || !uploadFile) {
-      setMessage(profile ? "Choose a PDF file first." : "Missing profile.");
+      setMessage(profile ? t("msg_choose_pdf", "Choose a PDF file first.") : t("msg_missing_profile", "Missing profile."));
       return;
     }
     setBusy(true);
@@ -1588,7 +1793,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
       }
       setResults([]);
       setSelectedIds(new Set());
-      setMessage(data.message || "Uploaded and imported PDF.");
+      setMessage(data.message || t("msg_uploaded_imported", "Uploaded and imported PDF."));
       onImported(data);
     } catch (error) {
       setMessage(error.message || String(error));
@@ -1614,22 +1819,24 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
           <span>{open ? "v" : ">"}</span>
           <strong>{label(payload.labels, "find_import_papers", "Find and import papers")}</strong>
         </button>
-        <div className="paper-discovery-mode" role="group" aria-label="Search mode">
-          <button type="button" className={mode === "codex" ? "is-active" : ""} onClick={() => switchMode("codex")}>
-            Codex
-          </button>
-          <button type="button" className={mode === "model" ? "is-active" : ""} onClick={() => switchMode("model")}>
-            Model
-          </button>
-          <button type="button" className={mode === "provider" ? "is-active" : ""} onClick={() => switchMode("provider")}>
-            Provider
-          </button>
-          <button type="button" className={mode === "url" ? "is-active" : ""} onClick={() => switchMode("url")}>
-            URL
-          </button>
-          <button type="button" className={mode === "upload" ? "is-active" : ""} onClick={() => switchMode("upload")}>
-            Upload
-          </button>
+        <div className="paper-discovery-mode" role="group" aria-label={t("search_mode", "Search mode")}>
+          {[
+            ["codex", "mode_codex", "Codex"],
+            ["model", "mode_model", "Model"],
+            ["provider", "mode_provider", "Provider"],
+            ["url", "mode_url", "URL / DOI"],
+            ["upload", "mode_upload", "Upload"],
+          ].map(([id, key, fallback]) => (
+            <button
+              type="button"
+              key={id}
+              className={mode === id ? "is-active" : ""}
+              aria-pressed={mode === id}
+              onClick={() => switchMode(id)}
+            >
+              {t(key, fallback)}
+            </button>
+          ))}
         </div>
       </div>
       {open ? (
@@ -1638,7 +1845,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
             <>
           <div className="paper-discovery-form">
             <label className="paper-discovery-query">
-              <span>Query</span>
+              <span>{t("query", "Query")}</span>
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -1647,12 +1854,12 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                     runSearch();
                   }
                 }}
-                placeholder="VLA memory"
+                placeholder={t("query_placeholder", "VLA memory")}
               />
             </label>
             {mode === "provider" ? (
               <label>
-                <span>Providers</span>
+                <span>{t("providers", "Providers")}</span>
                 <input
                   value={providerText}
                   onChange={(event) => setProviderText(event.target.value)}
@@ -1662,27 +1869,27 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
             ) : null}
             {mode === "codex" ? (
               <label className="paper-discovery-depth">
-                <span>Codex depth</span>
-                <span className="paper-discovery-depth-options" role="group" aria-label="Codex search depth">
+                <span>{t("codex_depth", "Codex depth")}</span>
+                <span className="paper-discovery-depth-options" role="group" aria-label={t("codex_depth", "Codex depth")}>
                   <button
                     type="button"
                     className={codexDepth === "quick" ? "is-active" : ""}
                     onClick={() => setCodexDepth("quick")}
                   >
-                    Fast
+                    {t("depth_fast", "Fast")}
                   </button>
                   <button
                     type="button"
                     className={codexDepth === "deep" ? "is-active" : ""}
                     onClick={() => setCodexDepth("deep")}
                   >
-                    Deep
+                    {t("depth_deep", "Deep")}
                   </button>
                 </span>
               </label>
             ) : null}
             <label>
-              <span>Limit</span>
+              <span>{t("limit", "Limit")}</span>
               <input
                 type="number"
                 min="1"
@@ -1692,32 +1899,32 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
               />
             </label>
             <label>
-              <span>Year from</span>
+              <span>{t("year_from", "Year from")}</span>
               <input value={yearFrom} onChange={(event) => setYearFrom(event.target.value)} inputMode="numeric" />
             </label>
             <label>
-              <span>Year to</span>
+              <span>{t("year_to", "Year to")}</span>
               <input value={yearTo} onChange={(event) => setYearTo(event.target.value)} inputMode="numeric" />
             </label>
             <div className="paper-discovery-actions">
               <button type="button" className="paper-discovery-search" disabled={busy || workspaceBusy || !query.trim()} onClick={runSearch}>
-                {busy ? "Searching..." : workspaceBusy ? "Action running" : "Search PDFs"}
+                {busy ? t("searching", "Searching...") : workspaceBusy ? t("action_running", "Action running") : t("search_pdfs", "Search PDFs")}
               </button>
               {busy && currentJobId ? (
                 <button type="button" className="paper-discovery-cancel" onClick={cancelSearch}>
-                  Cancel
+                  {t("cancel", "Cancel")}
                 </button>
               ) : null}
             </div>
           </div>
           <div className="paper-discovery-policy">
-            <span>PDF required</span>
+            <span>{t("pdf_required", "PDF required")}</span>
             <span>
               {mode === "provider"
-                ? "Provider + arXiv web fallback"
+                ? t("policy_provider", "Provider + arXiv web fallback")
                 : mode === "codex"
                   ? codexBudgetLabel(codexDepth, codexMaxSeconds)
-                  : "Model-first + arXiv web fallback"}
+                  : t("policy_model", "Model-first + arXiv web fallback")}
             </span>
           </div>
           <div className={`paper-discovery-advanced ${advancedOpen ? "is-open" : ""}`}>
@@ -1728,14 +1935,14 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
               onClick={() => setAdvancedOpen(!advancedOpen)}
             >
               <span>{advancedOpen ? "v" : ">"}</span>
-              <strong>Advanced</strong>
+              <strong>{t("advanced", "Advanced")}</strong>
             </button>
             {advancedOpen ? (
               <div className="paper-discovery-advanced-grid">
                 {mode === "codex" ? (
                   <>
                     <label>
-                      <span>Codex max s</span>
+                      <span>{t("codex_max_s", "Codex max s")}</span>
                       <input
                         type="number"
                         min="1"
@@ -1743,11 +1950,11 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                         inputMode="numeric"
                         value={codexMaxSeconds}
                         onChange={(event) => setCodexMaxSeconds(event.target.value)}
-                        placeholder="auto"
+                        placeholder={t("placeholder_auto", "auto")}
                       />
                     </label>
                     <label>
-                      <span>Idle s</span>
+                      <span>{t("idle_s", "Idle s")}</span>
                       <input
                         type="number"
                         min="1"
@@ -1755,13 +1962,13 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                         inputMode="numeric"
                         value={codexIdleSeconds}
                         onChange={(event) => setCodexIdleSeconds(event.target.value)}
-                        placeholder="auto"
+                        placeholder={t("placeholder_auto", "auto")}
                       />
                     </label>
                   </>
                 ) : null}
                 <label>
-                  <span>Provider budget s</span>
+                  <span>{t("provider_budget_s", "Provider budget s")}</span>
                   <input
                     type="number"
                     min="1"
@@ -1769,11 +1976,11 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                     inputMode="numeric"
                     value={providerBudgetSeconds}
                     onChange={(event) => setProviderBudgetSeconds(event.target.value)}
-                    placeholder="default"
+                    placeholder={t("placeholder_default", "default")}
                   />
                 </label>
                 <label>
-                  <span>Provider request s</span>
+                  <span>{t("provider_request_s", "Provider request s")}</span>
                   <input
                     type="number"
                     min="1"
@@ -1781,7 +1988,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                     inputMode="numeric"
                     value={providerRequestSeconds}
                     onChange={(event) => setProviderRequestSeconds(event.target.value)}
-                    placeholder="default"
+                    placeholder={t("placeholder_default", "default")}
                   />
                 </label>
               </div>
@@ -1791,7 +1998,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
           ) : mode === "url" ? (
             <div className="paper-discovery-form is-direct">
               <label className="paper-discovery-query">
-                <span>Paper URL</span>
+                <span>{t("paper_url", "Paper URL / DOI / arXiv ID")}</span>
                 <input
                   value={manualUrl}
                   onChange={(event) => setManualUrl(event.target.value)}
@@ -1800,15 +2007,15 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                       importManualUrl();
                     }
                   }}
-                  placeholder="https://arxiv.org/abs/..."
+                  placeholder={t("paper_url_placeholder", "https://arxiv.org/abs/... · 10.1145/... · 2407.08693")}
                 />
               </label>
               <label>
-                <span>Title hint</span>
-                <input value={manualTitle} onChange={(event) => setManualTitle(event.target.value)} placeholder="optional" />
+                <span>{t("title_hint", "Title hint")}</span>
+                <input value={manualTitle} onChange={(event) => setManualTitle(event.target.value)} placeholder={t("optional", "optional")} />
               </label>
               <label>
-                <span>Collection</span>
+                <span>{t("collection", "Collection")}</span>
                 <select value={nodeIdValue} onChange={(event) => setNodeIdValue(event.target.value)}>
                   {collections.map((item) => (
                     <option key={item.id || "inbox"} value={item.id}>{item.title}</option>
@@ -1816,38 +2023,38 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                 </select>
               </label>
               <label>
-                <span>Status</span>
+                <span>{t("status", "Status")}</span>
                 <select value={statusValue} onChange={(event) => setStatusValue(event.target.value)}>
-                  <option value="inbox">Inbox</option>
-                  <option value="reading">Reading</option>
-                  <option value="candidate_ready">Candidate ready</option>
+                  <option value="inbox">{t("status_inbox", "Inbox")}</option>
+                  <option value="reading">{t("status_reading", "Reading")}</option>
+                  <option value="candidate_ready">{t("status_candidate_ready", "Candidate ready")}</option>
                 </select>
               </label>
               <label>
-                <span>Visibility</span>
+                <span>{t("visibility", "Visibility")}</span>
                 <select value={visibilityValue} onChange={(event) => setVisibilityValue(event.target.value)}>
-                  <option value="private">Private</option>
-                  <option value="public">Public</option>
+                  <option value="private">{t("visibility_private", "Private")}</option>
+                  <option value="public">{t("visibility_public", "Public")}</option>
                 </select>
               </label>
               <div className="paper-discovery-actions">
                 <label className="paper-discovery-check">
                   <input type="checkbox" checked={downloadPdf} onChange={(event) => setDownloadPdf(event.target.checked)} />
-                  <span>Download PDF</span>
+                  <span>{t("download_pdf", "Download PDF")}</span>
                 </label>
                 <button type="button" className="paper-discovery-search" disabled={busy || workspaceBusy || !manualUrl.trim()} onClick={importManualUrl}>
-                  {busy ? "Importing..." : workspaceBusy ? "Action running" : "Import URL"}
+                  {busy ? t("importing", "Importing...") : workspaceBusy ? t("action_running", "Action running") : t("import_url", "Import")}
                 </button>
               </div>
             </div>
           ) : (
             <div className="paper-discovery-form is-direct">
               <label>
-                <span>Title</span>
-                <input value={uploadTitle} onChange={(event) => setUploadTitle(event.target.value)} placeholder="defaults to filename" />
+                <span>{t("title", "Title")}</span>
+                <input value={uploadTitle} onChange={(event) => setUploadTitle(event.target.value)} placeholder={t("title_placeholder_filename", "defaults to filename")} />
               </label>
               <label className="paper-discovery-query">
-                <span>PDF file</span>
+                <span>{t("pdf_file", "PDF file")}</span>
                 <input
                   ref={uploadInputRef}
                   type="file"
@@ -1856,7 +2063,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                 />
               </label>
               <label>
-                <span>Collection</span>
+                <span>{t("collection", "Collection")}</span>
                 <select value={nodeIdValue} onChange={(event) => setNodeIdValue(event.target.value)}>
                   {collections.map((item) => (
                     <option key={item.id || "inbox"} value={item.id}>{item.title}</option>
@@ -1864,23 +2071,23 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                 </select>
               </label>
               <label>
-                <span>Status</span>
+                <span>{t("status", "Status")}</span>
                 <select value={uploadStatusValue} onChange={(event) => setUploadStatusValue(event.target.value)}>
-                  <option value="inbox">Inbox</option>
-                  <option value="reading">Reading</option>
-                  <option value="candidate_ready">Candidate ready</option>
+                  <option value="inbox">{t("status_inbox", "Inbox")}</option>
+                  <option value="reading">{t("status_reading", "Reading")}</option>
+                  <option value="candidate_ready">{t("status_candidate_ready", "Candidate ready")}</option>
                 </select>
               </label>
               <label>
-                <span>Visibility</span>
+                <span>{t("visibility", "Visibility")}</span>
                 <select value={visibilityValue} onChange={(event) => setVisibilityValue(event.target.value)}>
-                  <option value="private">Private</option>
-                  <option value="public">Public</option>
+                  <option value="private">{t("visibility_private", "Private")}</option>
+                  <option value="public">{t("visibility_public", "Public")}</option>
                 </select>
               </label>
               <div className="paper-discovery-actions">
                 <button type="button" className="paper-discovery-search" disabled={busy || workspaceBusy || !uploadFile} onClick={uploadLocalPdf}>
-                  {busy ? "Uploading..." : workspaceBusy ? "Action running" : "Upload PDF"}
+                  {busy ? t("uploading", "Uploading...") : workspaceBusy ? t("action_running", "Action running") : t("upload_pdf", "Upload PDF")}
                 </button>
               </div>
             </div>
@@ -1889,7 +2096,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
           {searchMode && progress ? (
             <div className="paper-discovery-progress">
               <div className="paper-discovery-progress-top">
-                <strong>{cleanText(progress.message) || "Searching papers..."}</strong>
+                <strong>{cleanText(progress.message) || t("searching_papers", "Searching papers...")}</strong>
                 <span>{searchProgressText(progress)}</span>
               </div>
               {isJobRunning(progress) ? (
@@ -1937,26 +2144,26 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
           {searchMode && results.length ? (
             <div className="paper-discovery-results">
               <div className="paper-discovery-importbar">
-                <select value={nodeIdValue} onChange={(event) => setNodeIdValue(event.target.value)}>
+                <select aria-label={t("collection", "Collection")} value={nodeIdValue} onChange={(event) => setNodeIdValue(event.target.value)}>
                   {collections.map((item) => (
                     <option key={item.id || "inbox"} value={item.id}>{item.title}</option>
                   ))}
                 </select>
-                <select value={statusValue} onChange={(event) => setStatusValue(event.target.value)}>
-                  <option value="inbox">Inbox</option>
-                  <option value="reading">Reading</option>
-                  <option value="candidate_ready">Candidate ready</option>
+                <select aria-label={t("status", "Status")} value={statusValue} onChange={(event) => setStatusValue(event.target.value)}>
+                  <option value="inbox">{t("status_inbox", "Inbox")}</option>
+                  <option value="reading">{t("status_reading", "Reading")}</option>
+                  <option value="candidate_ready">{t("status_candidate_ready", "Candidate ready")}</option>
                 </select>
-                <select value={visibilityValue} onChange={(event) => setVisibilityValue(event.target.value)}>
-                  <option value="private">Private</option>
-                  <option value="public">Public</option>
+                <select aria-label={t("visibility", "Visibility")} value={visibilityValue} onChange={(event) => setVisibilityValue(event.target.value)}>
+                  <option value="private">{t("visibility_private", "Private")}</option>
+                  <option value="public">{t("visibility_public", "Public")}</option>
                 </select>
                 <label className="paper-discovery-check">
                   <input type="checkbox" checked={downloadPdf} onChange={(event) => setDownloadPdf(event.target.checked)} />
-                  <span>Download PDF</span>
+                  <span>{t("download_pdf", "Download PDF")}</span>
                 </label>
                 <button type="button" className="paper-discovery-import" disabled={busy || !selectedCount} onClick={importSelected}>
-                  Import / update selected ({selectedCount})
+                  {t("import_update_selected", "Import / update selected ({count})", { count: selectedCount })}
                 </button>
               </div>
               <div className="paper-discovery-card-list">
@@ -1972,6 +2179,7 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                       <label className="paper-discovery-card-check">
                         <input
                           type="checkbox"
+                          aria-label={cleanText(candidate.title || candidateId)}
                           checked={selectedIds.has(candidateId)}
                           disabled={disabled}
                           onChange={(event) => toggleCandidate(candidateId, event.target.checked)}
@@ -1980,25 +2188,25 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                       <div className="paper-discovery-card-body">
                         <div className="paper-discovery-card-top">
                           <strong>{cleanText(candidate.title || candidateId)}</strong>
-                          <span>{importedId ? "Update local" : "PDF ready"}</span>
+                          <span className={importedId ? "is-update" : "is-ready"}>{importedId ? t("update_local", "Update local") : t("pdf_ready", "PDF ready")}</span>
                         </div>
                         {candidateMeta(candidate) ? <p className="paper-discovery-meta">{candidateMeta(candidate)}</p> : null}
                         {overview ? (
                           <div className="paper-discovery-card-section">
-                            <span>Overview</span>
+                            <span>{t("overview", "Overview")}</span>
                             <p>{overview}</p>
                           </div>
                         ) : null}
                         {selectionReason ? (
                           <div className="paper-discovery-card-section is-reason">
-                            <span>Why selected</span>
+                            <span>{t("why_selected", "Why selected")}</span>
                             <p>{selectionReason}</p>
                           </div>
                         ) : null}
                         {cleanText(candidate.abstract) ? <p>{cleanText(candidate.abstract).slice(0, 520)}</p> : null}
                         {explanationLinks.length ? (
                           <div className="paper-discovery-explainers">
-                            <span>Explainers / reading links</span>
+                            <span>{t("explainer_links", "Explainers / reading links")}</span>
                             <div className="paper-discovery-explainer-list">
                               {explanationLinks.map((link) => (
                                 <a
@@ -2018,13 +2226,13 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
                         ) : null}
                         <div className="paper-discovery-links">
                           {cleanText(candidate.pdf_url) ? (
-                            <a href={cleanText(candidate.pdf_url)} target="_blank" rel="noreferrer">PDF</a>
+                            <a href={cleanText(candidate.pdf_url)} target="_blank" rel="noreferrer">{t("pdf_link", "PDF")}</a>
                           ) : null}
                           {cleanText(candidate.canonical_url) ? (
-                            <a href={cleanText(candidate.canonical_url)} target="_blank" rel="noreferrer">Paper page</a>
+                            <a href={cleanText(candidate.canonical_url)} target="_blank" rel="noreferrer">{t("paper_page", "Paper page")}</a>
                           ) : null}
                           {cleanText(candidate.doi) ? (
-                            <a href={`https://doi.org/${cleanText(candidate.doi)}`} target="_blank" rel="noreferrer">DOI</a>
+                            <a href={`https://doi.org/${cleanText(candidate.doi)}`} target="_blank" rel="noreferrer">{t("doi_link", "DOI")}</a>
                           ) : null}
                         </div>
                       </div>
@@ -2043,10 +2251,10 @@ function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false })
 function WorkspaceHeader({ payload, paperQuery, setPaperQuery, sortMode, setSortMode, onApply }) {
   const metrics = payload.metrics || {};
   const metricRows = [
-    ["papers", "Papers"],
-    ["reading", "Reading"],
-    ["no_pdf", "PDF missing"],
-    ["needs_extraction", "Needs extraction"],
+    ["papers", t("metric_papers", "Papers")],
+    ["reading", t("metric_reading", "Reading")],
+    ["no_pdf", t("metric_no_pdf", "PDF missing")],
+    ["needs_extraction", t("metric_needs_extraction", "Needs extraction")],
   ];
   return (
     <header className="paper-workspace-head">
@@ -2074,18 +2282,19 @@ function WorkspaceHeader({ payload, paperQuery, setPaperQuery, sortMode, setSort
             }
           }}
           placeholder={label(payload.labels, "search_library", "Search title, author, tag, note...")}
+          aria-label={label(payload.labels, "search_library", "Search title, author, tag, note...")}
         />
-        <select value={sortMode} onChange={(event) => {
+        <select aria-label={t("sort_label", "Sort papers")} value={sortMode} onChange={(event) => {
           setSortMode(event.target.value);
           window.setTimeout(() => onApply({ sortMode: event.target.value }), 0);
         }}>
-          <option value="recent">Recently read</option>
-          <option value="added">Recently added</option>
-          <option value="title">Title</option>
-          <option value="status">Status</option>
+          <option value="recent">{t("sort_recent", "Recently read")}</option>
+          <option value="added">{t("sort_added", "Recently added")}</option>
+          <option value="title">{t("sort_title", "Title")}</option>
+          <option value="status">{t("sort_status", "Status")}</option>
         </select>
         <button type="button" onClick={() => onApply({ query: paperQuery })}>
-          Apply
+          {t("apply", "Apply")}
         </button>
       </div>
       {payload.diagnostics.length ? (
@@ -2134,23 +2343,23 @@ function DeletePaperDialog({ dialog, payload, onClose, onConfirm }) {
         {dialog.error ? <div className="paper-delete-warning">{cleanText(dialog.error)}</div> : null}
         {cleanText(pdf.warning) ? <div className="paper-delete-warning">{cleanText(pdf.warning)}</div> : null}
         {dialog.pending ? (
-          <div className="paper-delete-preview">Loading deletion preview...</div>
+          <div className="paper-delete-preview">{t("loading_delete_preview", "Loading deletion preview...")}</div>
         ) : !previewReady ? (
-          <div className="paper-delete-preview">Deletion preview is required before this action can run.</div>
+          <div className="paper-delete-preview">{t("delete_preview_required", "Deletion preview is required before this action can run.")}</div>
         ) : (
           <div className="paper-delete-preview">
             <div className="paper-delete-grid">
-              <span>PDF asset</span>
+              <span>{t("artifact_pdf_asset_ref", "PDF asset")}</span>
               <strong>{cleanText(pdf.asset_ref) || "-"}</strong>
-              <span>Artifact files</span>
+              <span>{t("delete_artifact_files", "Artifact files")}</span>
               <strong>{cleanText(totals.artifact_files ?? 0)}</strong>
-              <span>Active annotations</span>
+              <span>{t("delete_active_annotations", "Active annotations")}</span>
               <strong>{cleanText(totals.active_annotations ?? 0)}</strong>
-              <span>Chunks</span>
+              <span>{t("delete_chunks", "Chunks")}</span>
               <strong>{cleanText(totals.chunks ?? 0)}</strong>
-              <span>Claims</span>
+              <span>{t("delete_claims", "Claims")}</span>
               <strong>{cleanText(totals.claims ?? 0)}</strong>
-              <span>Citations</span>
+              <span>{t("delete_citations", "Citations")}</span>
               <strong>{cleanText(totals.citations ?? 0)}</strong>
             </div>
             {blockers.length ? (
@@ -2165,7 +2374,7 @@ function DeletePaperDialog({ dialog, payload, onClose, onConfirm }) {
             ) : null}
             {artifacts.some((item) => item.exists) ? (
               <details className="paper-delete-artifacts">
-                <summary>Artifact files</summary>
+                <summary>{t("delete_artifact_files", "Artifact files")}</summary>
                 {artifacts.filter((item) => item.exists).map((item) => (
                   <span key={`${cleanText(item.kind)}-${cleanText(item.path)}`}>
                     {cleanText(item.kind)}: {cleanText(item.path)}
@@ -2208,8 +2417,9 @@ function DeletePaperDialog({ dialog, payload, onClose, onConfirm }) {
   );
 }
 
-function PaperDetailPane({ payload, emit, onDeletePaper, onUploadPdf, workspaceBusy = false }) {
+function PaperDetailPane({ payload, emit, onDeletePaper, onUploadPdf, onExport, workspaceBusy = false }) {
   const [translationMode, setTranslationMode] = useState(TRANSLATION_MODE_DEFAULT);
+  const [exportFormat, setExportFormat] = useState("bibtex");
   const uploadInputRef = useRef(null);
   const detail = payload.detail || {};
   const sourceId = cleanText(detail.source_id || detail.id);
@@ -2362,7 +2572,7 @@ function PaperDetailPane({ payload, emit, onDeletePaper, onUploadPdf, workspaceB
           disabled={!canOpenReader}
           onClick={() => {
             if (canOpenReader) {
-              window.open(cleanText(detail.reader_url), "_blank", "noopener,noreferrer");
+              openPaperReader(detail, payload.profile);
             }
           }}
         >
@@ -2452,17 +2662,30 @@ function PaperDetailPane({ payload, emit, onDeletePaper, onUploadPdf, workspaceB
             {label(payload.labels, "retry_translation", "Retry translation")}
           </button>
         </div>
+        {typeof onExport === "function" && payload.capabilities.export_papers !== false ? (
+          <div className="paper-export-control">
+            <ExportFormatSelect value={exportFormat} onChange={setExportFormat} disabled={workspaceBusy} />
+            <button
+              type="button"
+              disabled={workspaceBusy}
+              title={cleanText(detail.citation_key) ? `@${cleanText(detail.citation_key)}` : undefined}
+              onClick={() => onExport([sourceId], exportFormat)}
+            >
+              {t("export_citation", "Export citation")}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {showSummaryNote || showNotesBody || detail.url || remotePdfUrl || pdfDownloadError ? (
         <section className={sectionClass("metadata")} data-focus-section="metadata">
-          <div className="paper-detail-section-title">Notes</div>
+          <div className="paper-detail-section-title">{t("notes", "Notes")}</div>
           {showSummaryNote ? <p>{notesSummary}</p> : null}
           {showNotesBody ? <p>{notesBody}</p> : null}
           {pdfDownloadError ? <p>{pdfDownloadError}</p> : null}
           {detail.url ? (
             <a href={cleanText(detail.url)} target="_blank" rel="noreferrer">
-              Open source
+              {t("open_source", "Open source")}
             </a>
           ) : null}
           {remotePdfUrl ? (
@@ -2481,7 +2704,7 @@ function PaperDetailPane({ payload, emit, onDeletePaper, onUploadPdf, workspaceB
       ) : null}
 
       <section className={sectionClass("artifacts")} data-focus-section="artifacts">
-        <div className="paper-detail-section-title">Artifacts</div>
+        <div className="paper-detail-section-title">{t("artifacts", "Artifacts")}</div>
         <dl className="paper-detail-artifacts">
           {artifactRows.map(([key, value]) => (
             <React.Fragment key={key}>
@@ -2494,7 +2717,7 @@ function PaperDetailPane({ payload, emit, onDeletePaper, onUploadPdf, workspaceB
 
       <section className="paper-detail-section paper-detail-danger">
         <div className="paper-detail-section-title">{label(payload.labels, "danger_zone", "Danger zone")}</div>
-        <button type="button" onClick={() => onDeletePaper({ sourceId, title: cleanText(detail.title || sourceId) })}>
+        <button type="button" className="is-danger" onClick={() => onDeletePaper({ sourceId, title: cleanText(detail.title || sourceId) })}>
           {label(payload.labels, "delete_paper", "Delete paper...")}
         </button>
       </section>
@@ -2513,7 +2736,7 @@ function WorkspaceTaskProgress({ job }) {
   return (
     <div className={`paper-workspace-task-progress is-${cleanText(job.status || "running")}`}>
       <div className="paper-workspace-task-progress-top">
-        <strong>{cleanText(job.message) || "Working..."}</strong>
+        <strong>{cleanText(job.message) || t("working", "Working...")}</strong>
         <span>{workspaceProgressText(job)}</span>
       </div>
       <div className="paper-workspace-task-progress-track">
@@ -2522,9 +2745,9 @@ function WorkspaceTaskProgress({ job }) {
       <div className="paper-workspace-task-progress-meta">
         {cleanText(job.source_id) ? <span>{cleanText(job.source_id)}</span> : null}
         {cleanText(job.scope) ? <span>{cleanText(job.scope)}</span> : null}
-        {updated ? <span>{updated} updated</span> : null}
-        {!updated && saved ? <span>{saved} saved</span> : null}
-        {warnings ? <span>{warnings} warnings</span> : null}
+        {updated ? <span>{t("progress_updated", "{count} updated", { count: updated })}</span> : null}
+        {!updated && saved ? <span>{t("progress_saved", "{count} saved", { count: saved })}</span> : null}
+        {warnings ? <span>{t("progress_warnings", "{count} warnings", { count: warnings })}</span> : null}
         {warningItems.map((item) => (
           <span className="paper-workspace-task-warning" key={item}>{item}</span>
         ))}
@@ -2552,6 +2775,9 @@ function App() {
   const [dragPayload, setDragPayload] = useState(null);
   const [dragTarget, setDragTarget] = useState(null);
   const payload = useMemo(() => normalizePayload(args.payload), [args.payload]);
+  // Refresh the module label table before children render (t() reads it).
+  setActiveLabels(payload.labels);
+  const embed = useMemo(() => standalone && isEmbedMode(), [standalone]);
   const activePayload = useMemo(
     () => ({ ...payload, selectedPaperIds: [...selectedPaperIds] }),
     [payload, selectedPaperIds],
@@ -2592,7 +2818,7 @@ function App() {
     const preserveNoticeOnError = options.preserveNoticeOnError === true;
     if (!profile) {
       if (!preserveNoticeOnError) {
-        setNotice("Missing profile in URL.");
+        setNotice(t("msg_missing_profile_url", "Missing profile in URL."));
       }
       return;
     }
@@ -2651,6 +2877,26 @@ function App() {
   };
 
   useEffect(() => {
+    if (!embed) {
+      return undefined;
+    }
+    // Embed mode: the iframe owns its height; panes scroll internally.
+    document.documentElement.classList.add("is-embed");
+    document.body.classList.add("is-embed");
+    return () => {
+      document.documentElement.classList.remove("is-embed");
+      document.body.classList.remove("is-embed");
+    };
+  }, [embed]);
+
+  useEffect(() => {
+    if (standalone) {
+      // Tell an embedding host (the SPA) that the library is mounted.
+      postToParent({ type: "nblane.library.ready", profile });
+    }
+  }, [standalone, profile]);
+
+  useEffect(() => {
     if (standalone) {
       const bootstrapPayload = window.__NBLANE_PAPER_LIBRARY_BOOTSTRAP__?.payload;
       if (bootstrapPayload) {
@@ -2701,6 +2947,7 @@ function App() {
   }, [filteredSections, menu, dialog, deleteDialog, expanded, workspaceJob, standalone]);
 
   const eventState = () => ({
+    ui_lang: uiLang(),
     query: paperQuery,
     sort_mode: sortMode,
     view: payload.activeView,
@@ -2730,8 +2977,8 @@ function App() {
         if (isWorkspaceJobLostError(error)) {
           const progress = workspaceJobSavedProgressText(lastJob);
           const message = progress
-            ? `Paper Library action was interrupted after saved progress (${progress}). The saved translations are kept; retry to continue the remaining units.`
-            : "Paper Library action was interrupted. Reloaded the latest saved paper state; retry to continue.";
+            ? t("msg_interrupted_progress", "Paper Library action was interrupted after saved progress ({progress}). The saved translations are kept; retry to continue the remaining units.", { progress })
+            : t("msg_interrupted", "Paper Library action was interrupted. Reloaded the latest saved paper state; retry to continue.");
           const interrupted = new Error(message);
           interrupted.recoverPayload = true;
           throw interrupted;
@@ -2748,8 +2995,8 @@ function App() {
         if (statusMisses >= WORKSPACE_JOB_MAX_STATUS_MISSES && offlineMs >= WORKSPACE_JOB_RECONNECT_GRACE_MS) {
           const progress = workspaceJobSavedProgressText(lastJob);
           const message = progress
-            ? `Lost connection to the Paper Library action after saved progress (${progress}). The saved translations are kept; retry once 8502 is back.`
-            : `Lost connection to the Paper Library action for ${Math.round(WORKSPACE_JOB_RECONNECT_GRACE_MS / 1000)}s.`;
+            ? t("msg_lost_progress", "Lost connection to the Paper Library action after saved progress ({progress}). The saved translations are kept; retry once 8502 is back.", { progress })
+            : t("msg_lost", "Lost connection to the Paper Library action for {seconds}s.", { seconds: Math.round(WORKSPACE_JOB_RECONNECT_GRACE_MS / 1000) });
           const disconnected = new Error(message);
           disconnected.recoverPayload = true;
           throw disconnected;
@@ -2761,7 +3008,7 @@ function App() {
                 ...current,
                 status: "running",
                 phase: cleanText(current.phase || "waiting"),
-                message: `Reconnecting to job status... ${remainingSeconds}s grace remaining`,
+                message: t("msg_reconnecting", "Reconnecting to job status... {seconds}s grace remaining", { seconds: remainingSeconds }),
               }
             : current
         ));
@@ -2774,7 +3021,7 @@ function App() {
         return data.result || {};
       }
       if (job.status === "failed") {
-        throw new Error(cleanText(job.error || job.message) || "Paper Library action failed.");
+        throw new Error(cleanText(job.error || job.message) || t("msg_action_failed", "Paper Library action failed."));
       }
     }
   };
@@ -2806,11 +3053,11 @@ function App() {
       return { ok: true };
     }
     if (!profile) {
-      setNotice("Missing profile in URL.");
+      setNotice(t("msg_missing_profile_url", "Missing profile in URL."));
       return { ok: false };
     }
     if (workspaceBusy) {
-      setNotice("Another Paper Library action is still running.");
+      setNotice(t("msg_action_running", "Another Paper Library action is still running."));
       return { ok: false };
     }
     setLoading(true);
@@ -2824,7 +3071,7 @@ function App() {
           status: "queued",
           phase: "queued",
           event_action: cleanText(event.action),
-          message: busyNotice || "Queued Paper Library action.",
+          message: busyNotice || t("msg_queued", "Queued Paper Library action."),
           elapsed_ms: 0,
         });
         const started = await jsonRequest(paperLibraryApiUrl(profile, "/events/jobs"), {
@@ -2840,10 +3087,10 @@ function App() {
         }
         const jobId = cleanText(started.job_id || started.job?.job_id);
         if (!jobId) {
-          throw new Error("Paper Library action job did not start.");
+          throw new Error(t("msg_job_not_started", "Paper Library action job did not start."));
         }
         const data = await waitForWorkspaceJob(jobId);
-        applyEventResponse(data, "Paper Library action finished.");
+        applyEventResponse(data, t("msg_action_finished", "Paper Library action finished."));
         return { ok: data.ok !== false, data };
       }
       setWorkspaceJob(null);
@@ -2875,23 +3122,23 @@ function App() {
   const uploadPdf = async (sourceId, file) => {
     const cleanSourceId = cleanText(sourceId);
     if (!standalone) {
-      setNotice("Open the 8502 Paper Library Workspace to upload PDFs.");
+      setNotice(t("msg_streamlit_upload", "Open the 8502 Paper Library Workspace to upload PDFs."));
       return { ok: false };
     }
     if (!profile || !cleanSourceId) {
-      setNotice("Missing profile or paper id.");
+      setNotice(t("msg_missing_paper", "Missing profile or paper id."));
       return { ok: false };
     }
     if (!file) {
-      setNotice("Choose a PDF file first.");
+      setNotice(t("msg_choose_pdf", "Choose a PDF file first."));
       return { ok: false };
     }
     if (workspaceBusy) {
-      setNotice("Another Paper Library action is still running.");
+      setNotice(t("msg_action_running", "Another Paper Library action is still running."));
       return { ok: false };
     }
     setLoading(true);
-    setNotice(`Uploading ${cleanText(file.name) || "PDF"}...`);
+    setNotice(t("msg_uploading", "Uploading {name}...", { name: cleanText(file.name) || "PDF" }));
     try {
       const formData = new FormData();
       formData.append("file", file, file.name || "paper.pdf");
@@ -2900,7 +3147,7 @@ function App() {
         formData,
         { timeoutMs: 180000 },
       );
-      applyEventResponse(data, "Uploaded PDF.");
+      applyEventResponse(data, t("msg_uploaded_pdf", "Uploaded PDF."));
       return { ok: data.ok !== false, data };
     } catch (error) {
       setNotice(error.message || String(error));
@@ -2916,7 +3163,7 @@ function App() {
       setDeleteDialog({
         ...base,
         pending: false,
-        error: "Open the 8502 Paper Library Workspace to preview and delete papers.",
+        error: t("msg_streamlit_delete", "Open the 8502 Paper Library Workspace to preview and delete papers."),
       });
       return;
     }
@@ -2929,6 +3176,7 @@ function App() {
           event_id: eventId(),
           payload: { paper_ids: [sourceId] },
           state: {
+            ui_lang: uiLang(),
             query: paperQuery,
             sort_mode: sortMode,
             view: payload.activeView,
@@ -2957,6 +3205,39 @@ function App() {
     }));
     if (result?.ok !== false) {
       setDeleteDialog(null);
+    }
+  };
+  const exportPapers = async (paperIds, format) => {
+    const ids = asArray(paperIds).map(cleanText).filter(Boolean);
+    if (!standalone) {
+      setNotice(t("msg_streamlit_export", "Open the 8502 Paper Library Workspace to export papers."));
+      return { ok: false };
+    }
+    if (!profile) {
+      setNotice(t("msg_missing_profile_url", "Missing profile in URL."));
+      return { ok: false };
+    }
+    if (!ids.length) {
+      setNotice(t("msg_export_none", "Select at least one paper to export."));
+      return { ok: false };
+    }
+    const formatLabelText = t(
+      EXPORT_FORMATS.find(([id]) => id === format)?.[1] || "format_bibtex",
+      EXPORT_FORMATS.find(([id]) => id === format)?.[2] || "BibTeX",
+    );
+    setNotice(t("exporting", "Exporting..."));
+    try {
+      const result = await downloadRequest(
+        paperLibraryApiUrl(profile, "/export"),
+        { paper_ids: ids, format, ui_lang: uiLang() },
+        "papers.txt",
+      );
+      const count = result.count || ids.length;
+      setNotice(t("msg_exported", "Exported {count} paper{s} as {format}.", { count, format: formatLabelText }));
+      return { ok: true, ...result };
+    } catch (error) {
+      setNotice(error.message || String(error));
+      return { ok: false, error };
     }
   };
   const handleSelect = (item) => {
@@ -3071,7 +3352,7 @@ function App() {
     </>
   );
   return (
-    <div className={`paper-tree-shell ${hasPapers ? "has-papers" : ""} ${standalone ? "is-standalone" : ""}`}>
+    <div className={`paper-tree-shell ${hasPapers ? "has-papers" : ""} ${standalone ? "is-standalone" : ""} ${embed ? "is-embed" : ""}`}>
       {standalone ? (
         <>
           <DiscoveryPanel
@@ -3090,9 +3371,9 @@ function App() {
           />
         </>
       ) : null}
-      {notice ? <div className="paper-workspace-notice">{notice}</div> : null}
+      {notice ? <div className="paper-workspace-notice" role="status" aria-live="polite">{notice}</div> : null}
       <WorkspaceTaskProgress job={workspaceJob} />
-      {loading && !workspaceJob ? <div className="paper-workspace-loading">Loading...</div> : null}
+      {loading && !workspaceJob ? <div className="paper-workspace-loading" role="status">{t("loading", "Loading...")}</div> : null}
       {hasPapers ? (
         <div className="paper-workbench">
           <aside className="paper-tree-pane">{treePane}</aside>
@@ -3102,6 +3383,8 @@ function App() {
             setSelectedPaperIds={setSelectedPaperIds}
             setDragPayload={setDragPayload}
             emit={emit}
+            onExport={standalone ? exportPapers : undefined}
+            workspaceBusy={workspaceBusy}
             onPaperMenu={(event, paper, paperIds) => setMenu({
               item: { ...paper, type: "paper" },
               paperIds,
@@ -3114,6 +3397,7 @@ function App() {
             emit={emit}
             onDeletePaper={requestDeletePreview}
             onUploadPdf={uploadPdf}
+            onExport={standalone ? exportPapers : undefined}
             workspaceBusy={workspaceBusy}
           />
         </div>

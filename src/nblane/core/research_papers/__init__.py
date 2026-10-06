@@ -195,11 +195,15 @@ from ._metadata import (
     _metadata_cache_clear,
     fetch_crossref_metadata,
     fetch_arxiv_metadata,
+    fetch_semantic_scholar_metadata,
     lookup_paper_metadata,
+    parse_paper_identifier,
 )
 from ._library_tree import (
     _library_tree_path,
     load_paper_library_tree,
+    paper_library_tree_lock,
+    paper_library_tree_snapshot,
     save_paper_library_tree,
     _paper_library_root_parent,
     _paper_library_require_node,
@@ -231,7 +235,13 @@ from ._export import (
     save_paper_note,
     _bibtex_key,
     _bibliography_line,
+    CITATION_KEY_METADATA,
+    LIBRARY_EXPORT_FORMATS,
+    assign_citation_keys,
+    export_library_papers,
+    format_library_papers,
     format_research_citations,
+    normalize_library_export_format,
     save_research_export,
     create_reading_note_markdown,
     create_reading_note_pack_markdown,
@@ -260,6 +270,9 @@ from ._diagnostics import (
     paper_source_badges,
     paper_diagnostics,
     paper_rows,
+    filter_paper_rows,
+    clear_paper_rows_cache,
+    paper_rows_cache_stats,
     paper_overview,
 )
 # --- end submodule re-imports ---
@@ -8560,29 +8573,47 @@ def check_paper_links(results: list[PaperSearchResult | dict]) -> list[PaperSear
 
 
 def _result_from_url(url: str, *, enrich: bool = True) -> PaperSearchResult:
-    clean = _clean_text(url)
+    """Build an import candidate from a pasted URL or bare DOI / arXiv id."""
+
+    raw = _clean_text(url)
+    ref = parse_paper_identifier(raw)
+    # Bare identifiers resolve to their canonical landing page.
+    clean = ref.get("url") or raw
     parsed = urllib.parse.urlparse(clean)
     title = clean
     metadata: dict[str, object] = {}
     pdf_url = clean if parsed.path.lower().endswith(".pdf") else ""
-    arxiv_id = ""
-    doi = ""
-    if "arxiv.org" in parsed.netloc:
-        arxiv_id = _normalize_arxiv_id(parsed.path.rsplit("/", 1)[-1])
-        title = f"arXiv {arxiv_id}" if arxiv_id else clean
-        if not pdf_url and arxiv_id:
+    arxiv_id = ref.get("arxiv_id", "")
+    doi = ref.get("doi", "")
+    semantic_scholar_id = ref.get("semantic_scholar_id", "")
+    if arxiv_id:
+        title = f"arXiv {arxiv_id}"
+        if not pdf_url:
             pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
         metadata["provider_refs"] = ["arxiv"]
-    if "doi.org" in parsed.netloc:
-        doi = _normalize_doi(parsed.path.lstrip("/"))
-        title = f"DOI {doi}" if doi else clean
+    elif "arxiv.org" in parsed.netloc:
+        metadata["provider_refs"] = ["arxiv"]
+    if doi:
+        title = f"DOI {doi}"
+    if semantic_scholar_id:
+        title = f"Semantic Scholar {semantic_scholar_id[:10]}"
+        metadata["provider_refs"] = ["semantic_scholar"]
     abstract = ""
     authors: list[str] = []
     year = ""
     venue = ""
     canonical_url = clean
-    if enrich and (arxiv_id or doi):
-        looked_up = lookup_paper_metadata(doi=doi, arxiv_id=arxiv_id, url=clean)
+    if enrich and (arxiv_id or doi or semantic_scholar_id):
+        looked_up = lookup_paper_metadata(
+            doi=doi,
+            arxiv_id=arxiv_id,
+            url=clean,
+            semantic_scholar_id=semantic_scholar_id,
+        )
+        if not doi and looked_up.get("doi"):
+            doi = _normalize_doi(looked_up.get("doi"))
+        if not arxiv_id and looked_up.get("arxiv_id"):
+            arxiv_id = _normalize_arxiv_id(looked_up.get("arxiv_id"))
         if looked_up.get("title"):
             title = _clean_text(looked_up.get("title"))
         if looked_up.get("abstract"):
@@ -8601,6 +8632,7 @@ def _result_from_url(url: str, *, enrich: bool = True) -> PaperSearchResult:
         title=title,
         doi=doi,
         arxiv_id=arxiv_id,
+        semantic_scholar_id=semantic_scholar_id,
         canonical_url=canonical_url,
         pdf_url=pdf_url,
         open_access_pdf=bool(pdf_url),
@@ -8639,9 +8671,8 @@ def _duplicate_keys_for_source(source: ResearchSource) -> set[str]:
     canonical = _canonical_url(source.url).lower()
     if canonical:
         keys.add(f"url:{canonical}")
-    title_year = "|".join([source.title.lower(), _published_year(source.published)])
     if source.title:
-        keys.add(f"title_year:{title_year}")
+        keys.add(f"title_year:{source.title.lower()}|{_published_year(source.published)}")
     return keys
 
 
@@ -8658,7 +8689,12 @@ def _duplicate_keys_for_result(result: PaperSearchResult) -> set[str]:
     canonical = _canonical_url(result.canonical_url).lower()
     if canonical:
         keys.add(f"url:{canonical}")
-    keys.add(f"title_year:{result.title.lower()}|{result.year}")
+    # Same key shape as ``_duplicate_keys_for_source``: the year is normalized
+    # with ``_published_year`` on both sides (a raw "2024-05" or "May 2024"
+    # previously never matched the stored "2024"). An empty year still keys on
+    # the title alone so undated same-title papers keep flagging as duplicates.
+    if result.title:
+        keys.add(f"title_year:{result.title.lower()}|{_published_year(result.year)}")
     return keys
 
 
@@ -9008,6 +9044,12 @@ __all__ = [
     "extract_paper_pages",
     "extract_paper_segments",
     "format_research_citations",
+    "CITATION_KEY_METADATA",
+    "LIBRARY_EXPORT_FORMATS",
+    "assign_citation_keys",
+    "export_library_papers",
+    "format_library_papers",
+    "normalize_library_export_format",
     "grobid_available",
     "grobid_readiness",
     "grobid_tei_to_bibliography",
@@ -9054,6 +9096,13 @@ __all__ = [
     "save_paper_analysis",
     "save_paper_annotations",
     "save_paper_library_tree",
+    "paper_library_tree_lock",
+    "paper_library_tree_snapshot",
+    "parse_paper_identifier",
+    "filter_paper_rows",
+    "clear_paper_rows_cache",
+    "paper_rows_cache_stats",
+    "fetch_semantic_scholar_metadata",
     "save_paper_note",
     "save_paper_pages",
     "save_paper_segments",

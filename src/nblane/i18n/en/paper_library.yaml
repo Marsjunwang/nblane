@@ -1,0 +1,368 @@
+# Paper Library (FastAPI sidecar + React workbench) UI copy.
+# Loaded by nblane.core.paper_library_workspace.paper_library_labels().
+# Placeholders use Python str.format names ({count}, {s} = plural "s").
+page_title: Paper Library · nblane
+# Library views / sections
+view_all: All Papers
+view_unsorted: Unsorted Inbox
+view_recent: Recently Read
+view_reading: Reading
+view_no_pdf: PDF Missing
+view_needs_extraction: Needs Extraction
+view_claims_need_review: Claims Need Review
+view_duplicate_risk: Duplicate Risk
+view_stale_translation: Stale Translation
+view_private: Private Sources
+view_reviewed: Reviewed
+view_archived: Archived
+view_discarded: Discarded
+section_library: Library
+section_collections: Collections
+section_technical_taxonomy: Technical Taxonomy
+section_work_queue: Work Queue
+section_system: System
+taxonomy_topics: Topics
+taxonomy_methods: Methods
+taxonomy_datasets: Datasets
+taxonomy_benchmarks: Benchmarks
+all_collections: All collections
+trash: Trash
+unsorted: Unsorted
+unsorted_inbox: Unsorted Inbox
+# Source status / visibility
+status_inbox: Inbox
+status_reading: Reading
+status_summarized: Summarized
+status_candidate_ready: Candidate Ready
+status_archived: Archived
+status_discarded: Discarded
+visibility_private: Private
+visibility_public: Public
+# Row badges
+badge_unsorted: Unsorted
+badge_pdf_missing: PDF missing
+badge_stale_translation: Stale translation
+badge_private_source: Private source
+badge_pdf_downloading: PDF downloading
+badge_pdf_download_warning: PDF download warning
+badge_ai_candidates: AI candidates
+badge_grobid_unavailable: GROBID unavailable
+badge_needs_structured_extraction: Needs structured extraction
+badge_fallback_ready: Fallback ready
+badge_citation_broken: Citation broken
+badge_duplicate_risk: Duplicate risk
+# Reading card / detail metrics
+reading_source_abstract: Abstract
+reading_source_summary: Summary
+reading_source_reading_summary: Reading summary
+reading_source_notes: Notes
+metric_pdf: PDF
+metric_last_page: Last page
+metric_segments: Segments
+metric_notes: Notes
+metric_translations: Translations
+value_ready: ready
+value_missing: missing
+card_page: Page {page}
+card_annotations: "{count} notes"
+card_read_log: "Read: {value}"
+card_read_yes: "yes"
+card_read_no: "no"
+# Workspace header
+metric_papers: Papers
+metric_reading: Reading
+metric_no_pdf: PDF missing
+metric_needs_extraction: Needs extraction
+papers: Papers
+search_library: Search title, author, tag, note...
+sort_recent: Recently read
+sort_added: Recently added
+sort_title: Title
+sort_status: Status
+sort_label: Sort papers
+apply: Apply
+loading: Loading...
+working: Working...
+# Tree / menus / dialogs
+add_selected_here: Add selected papers here
+add_to_collection: Add to collection
+archive: Archive
+auto_chunk: Auto chunk
+attach_pdf: Attach PDF
+back_to_overview: Back to Overview
+cancel: Cancel
+collapse: Collapse
+collapse_all: Collapse all
+collection_actions: Collection actions
+collection_title: Collection title
+delete_collection: Delete collection
+discard: Mark as discarded
+danger_zone: Danger zone
+delete_paper: Delete paper...
+delete_paper_confirm: Type the source id to confirm deletion.
+delete_pdf_asset: Delete PDF asset
+delete_reader_artifacts: Delete extracted reader artifacts
+delete_paper_blocked: Deletion blocked by references.
+download_pdf: Download PDF
+downloading_pdf: Downloading PDF...
+expand: Expand
+expand_all: Expand all
+mark_as_reading: Mark as reading
+move_collection: Move collection
+move_down: Move down
+move_papers_to_collection: Move papers to collection
+move_papers_to_parent: Move papers to parent collection
+move_papers_to_unsorted: Move papers to Unsorted Inbox
+move_selected_here: Move selected papers here
+move_to_collection: Move to collection
+move_up: Move up
+new_collection: New collection
+new_subcollection: New subcollection
+abstract_preview: Abstract Preview
+no_abstract_preview: No abstract or summary yet.
+preview_source: From {source}
+why_relevant: Why it matters
+explainer_links: Explainers / reading links
+more_links: +{count}
+open_reader: Open Reader
+open_remote_pdf: Open remote PDF
+open_source: Open source
+paper_policy: Paper policy
+parent_collection: Parent collection
+purge_collection: Purge forever
+quick_actions: Quick actions
+reader_tab: Reader tab (fallback)
+remove_from_current_collection: Remove from current collection
+rename: Rename
+rename_paper: Rename paper...
+paper_title: Paper title
+force_grobid_upgrade: Force GROBID upgrade
+force_grobid_upgrade_hint: Retry GROBID even when a recent timeout is cooling down.
+restore_collection: Restore collection
+run_extraction: Run extraction
+run_extraction_hint: Prepare reader artifacts and reuse fallback text after recent GROBID timeouts.
+running_grobid_upgrade: Upgrading with GROBID...
+running_extraction: Running extraction...
+save: Save
+search_collections: Search collections
+selected_papers: "{count} papers selected"
+bulk_select: Bulk select
+select_all: Select all
+clear_selection: Clear
+select_paper: Select paper
+select_paper_detail_hint: Select a paper to see details and actions.
+show_details: Show details
+library_empty: No papers match this view.
+library_result_count: "{count} papers"
+overview_suggested_action: Suggested from Overview
+claims_focus: Claims
+claims_focus_hint: Review AI candidates and promoted evidence for this paper.
+dedupe: Review duplicates
+fix_citations: Fix citations
+metadata_focus: Metadata
+metadata_focus_hint: Check title, collection placement, duplicate risk, and source metadata.
+review_claims: Review claims
+review_metadata: Review metadata
+review_visibility: Review visibility
+notes: Notes
+artifacts: Artifacts
+artifact_pdf_asset_ref: PDF asset
+artifact_open_access_pdf_url: Remote PDF URL
+artifact_pdf_download_status: PDF download status
+artifact_pdf_download_error: PDF download error
+artifact_pdf_download_attempted_at: PDF download attempted at
+artifact_pages: Pages
+artifact_segments: Segments
+artifact_chunks: Research chunks
+artifact_translations: Translations
+artifact_structure_backend: Structure backend
+artifact_grobid_service: GROBID service
+artifact_grobid_last_error: Last GROBID error
+artifact_grobid_last_failed_at: Last GROBID failure
+artifact_structured_extracted_at: Structured extracted at
+retry_translation: Retry translation
+retry_pdf_download: Retry PDF
+retrying_translation: Retrying translation...
+translate_full_paper: Translate full paper
+translate_grobid_text: GROBID paragraphs
+translation_mode: Translation mode
+translation_mode_fast_body: Fast body
+translation_mode_full_paper: Full paper
+translation_mode_grobid_text: GROBID paragraphs
+upload_pdf: Upload PDF
+safety_focus: Publish safety
+safety_focus_hint: Check visibility and private-source blockers before export.
+translations_focus: Translations
+translations_focus_hint: Refresh stale translation rows after extraction or segment changes.
+target_collection: Target collection
+top_level: Top level
+# Delete preview
+loading_delete_preview: Loading deletion preview...
+delete_preview_required: Deletion preview is required before this action can run.
+delete_artifact_files: Artifact files
+delete_active_annotations: Active annotations
+delete_chunks: Chunks
+delete_claims: Claims
+delete_citations: Citations
+# Export
+export_selected: Export selected
+export_citation: Export citation
+export_format: Export format
+format_bibtex: BibTeX
+format_ris: RIS
+format_csl_json: CSL-JSON
+format_markdown: Markdown
+msg_streamlit_export: Open the 8502 Paper Library Workspace to export papers.
+msg_export_none: Select at least one paper to export.
+exporting: Exporting...
+msg_exported: Exported {count} paper{s} as {format}.
+# Discovery / import panel
+find_import_papers: Find and import papers
+search_mode: Search mode
+mode_codex: Codex
+mode_model: Model
+mode_provider: Provider
+mode_url: URL / DOI
+mode_upload: Upload
+query: Query
+query_placeholder: VLA memory
+providers: Providers
+codex_depth: Codex depth
+depth_fast: Fast
+depth_deep: Deep
+limit: Limit
+year_from: Year from
+year_to: Year to
+searching: Searching...
+action_running: Action running
+search_pdfs: Search PDFs
+pdf_required: PDF required
+policy_provider: Provider + arXiv web fallback
+policy_model: Model-first + arXiv web fallback
+codex_budget: Codex {effort} · {budget}
+budget_adaptive: adaptive
+budget_manual: manual max {seconds}s
+advanced: Advanced
+codex_max_s: Codex max s
+idle_s: Idle s
+provider_budget_s: Provider budget s
+provider_request_s: Provider request s
+placeholder_auto: auto
+placeholder_default: default
+paper_url: Paper URL / DOI / arXiv ID
+paper_url_placeholder: https://arxiv.org/abs/... · 10.1145/... · 2407.08693
+title_hint: Title hint
+optional: optional
+collection: Collection
+status: Status
+visibility: Visibility
+importing: Importing...
+import_url: Import
+title: Title
+title_placeholder_filename: defaults to filename
+pdf_file: PDF file
+uploading: Uploading...
+searching_papers: Searching papers...
+import_update_selected: Import / update selected ({count})
+update_local: Update local
+pdf_ready: PDF ready
+overview: Overview
+why_selected: Why selected
+pdf_link: PDF
+paper_page: Paper page
+doi_link: DOI
+kept: "{accepted}/{raw} kept"
+step_ok: ok
+step_failed: failed
+live: live
+max_seconds: max {seconds}s
+trace_web_search: web search
+trace_organizing: organizing
+trace_codex_setup: codex setup
+trace_codex_usage: codex usage
+# Client-side messages
+msg_candidates_found: "{count} PDF-ready candidates found."
+msg_no_candidates: No PDF-ready candidates found.
+msg_busy_search: Another Paper Library action is still running. Wait for it to finish, then search.
+msg_busy_import: Another Paper Library action is still running. Wait for it to finish, then import.
+msg_busy_upload: Another Paper Library action is still running. Wait for it to finish, then upload.
+msg_missing_profile: Missing profile.
+msg_missing_profile_url: Missing profile in URL.
+msg_enter_query: Enter a query first.
+msg_starting_codex: Starting Codex {depth} search.
+msg_starting_search: Starting paper search.
+msg_search_not_started: Search job did not start.
+msg_search_cancelled: Search cancelled.
+msg_search_failed: Search failed.
+msg_cancelling: Cancelling search...
+msg_cancelling_detail: Cancelling paper search.
+msg_select_candidate: Select at least one candidate.
+msg_imported_count: Imported {count} papers.
+msg_paste_url: Paste a paper URL, DOI or arXiv ID first.
+msg_imported_url: Imported paper from URL.
+msg_choose_pdf: Choose a PDF file first.
+msg_uploaded_imported: Uploaded and imported PDF.
+msg_uploaded_pdf: Uploaded PDF.
+msg_uploading: Uploading {name}...
+msg_action_running: Another Paper Library action is still running.
+msg_queued: Queued Paper Library action.
+msg_job_not_started: Paper Library action job did not start.
+msg_action_finished: Paper Library action finished.
+msg_action_failed: Paper Library action failed.
+msg_interrupted_progress: Paper Library action was interrupted after saved progress ({progress}). The saved translations are kept; retry to continue the remaining units.
+msg_interrupted: Paper Library action was interrupted. Reloaded the latest saved paper state; retry to continue.
+msg_lost_progress: Lost connection to the Paper Library action after saved progress ({progress}). The saved translations are kept; retry once 8502 is back.
+msg_lost: Lost connection to the Paper Library action for {seconds}s.
+msg_reconnecting: Reconnecting to job status... {seconds}s grace remaining
+msg_missing_paper: Missing profile or paper id.
+msg_streamlit_upload: Open the 8502 Paper Library Workspace to upload PDFs.
+msg_streamlit_delete: Open the 8502 Paper Library Workspace to preview and delete papers.
+msg_request_timeout: Request timed out after {seconds}s.
+msg_request_failed: "Request failed: {status}"
+progress_updated: "{count} updated"
+progress_processed: "{done}/{total} processed"
+progress_saved: "{count} saved"
+progress_warnings: "{count} warnings"
+progress_batches: "{done}/{total} batches"
+progress_steps: "{done}/{total} steps"
+progress_units: "{done}/{total} units"
+# Server-side event / import messages
+srv_invalid_event: Invalid Paper Library event.
+srv_unknown_event: "Unknown Paper Library event: {action}"
+srv_saved: Saved
+srv_selected_reader_tab: Selected for the Reader tab.
+srv_marked_reading: Marked as reading {count} paper{s}.
+srv_archived: Archived {count} paper{s}.
+srv_discarded: Discarded {count} paper{s}.
+srv_status_updated: Updated to {status} {count} paper{s}.
+srv_renamed_paper: Renamed paper.
+srv_downloading_pdf: Downloading PDF.
+srv_downloaded_partial: Downloaded {count} PDF{s}; {failed} need attention.
+srv_downloaded: Downloaded {count} PDF{s}.
+srv_download_incomplete: PDF download did not complete.
+srv_extracting: Extracting reader artifacts.
+srv_preparing_translation: Preparing reader artifacts before translation.
+srv_starting_translation: Starting full-paper translation.
+srv_deleted_papers: Deleted {count} paper{s}.
+srv_deleted_assets: Deleted {count} PDF asset{s}.
+srv_deleted_artifacts: Deleted {count} artifact file{s}.
+srv_purged: Purged {count} discarded paper{s}.
+srv_extract_none: No papers selected for extraction.
+srv_extract_fallback: "Fallback text ready: {pages} page(s), {segments} segment(s)."
+srv_extract_ready: "Extraction ready: {pages} page(s), {segments} segment(s)."
+srv_extract_incomplete: "Extraction did not complete: {status}."
+srv_extract_batch: "Extraction finished for {count} papers: {ready} ready."
+srv_warnings_attention: " {count} warning(s) need attention."
+srv_translate_none: No papers selected for translation.
+srv_translate_done: "Translation retry finished: updated {updated} row(s); {stale} stale remaining."
+srv_translate_missing: " {count} missing."
+srv_translate_failed: " {count} failed."
+srv_imported_updated: Imported {created} and updated {updated} paper{s}.
+srv_updated_local: Updated {count} local paper{s}.
+srv_imported: Imported {count} paper{s}.
+srv_no_change: No selected papers changed.
+srv_pdf_attention: "{message} PDF needs attention: {warning}"
+srv_imported_url: Imported paper from URL.
+srv_uploaded_imported: Uploaded and imported PDF.
+srv_upload_duplicate: Already imported. Reusing the existing paper.
+srv_uploaded_pdf: Uploaded PDF.
