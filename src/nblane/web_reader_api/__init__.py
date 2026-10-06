@@ -10,6 +10,7 @@ import ipaddress
 import json
 import mimetypes
 import os
+import re
 import threading
 import time
 import uuid
@@ -28,6 +29,8 @@ from nblane.core.home_dashboard import dashboard_payload
 from nblane.core.paper_library_workspace import (
     build_paper_library_payload,
     handle_paper_library_event,
+    paper_library_labels,
+    resolve_paper_library_lang,
 )
 from nblane.core.profile_io import list_profiles, profile_dir
 from nblane.core.web_preferences import load_web_preferences
@@ -62,6 +65,7 @@ from nblane.core.research_papers import (
     search_papers,
     search_papers_with_codex,
     upload_paper_library_pdf,
+    export_library_papers,
 )
 from nblane.core.research_sources import add_research_source, load_research_sources, save_research_sources
 from nblane.research_paper_reader_component.events import ANNOTATION_UPDATE
@@ -413,6 +417,27 @@ def _paper_library_assets() -> dict[str, list[str]]:
     return {"scripts": scripts, "styles": styles}
 
 
+def _paper_library_ui_lang(request: Request, body: dict[str, object] | None = None) -> str:
+    """Paper Library copy language: request ``ui_lang`` (query/body/state) wins, else UI_LANG."""
+
+    raw = request.query_params.get("ui_lang") or ""
+    if not raw and isinstance(body, dict):
+        state = body.get("state") if isinstance(body.get("state"), dict) else {}
+        raw = str(body.get("ui_lang") or state.get("ui_lang") or "")
+    return resolve_paper_library_lang(raw)
+
+
+def _paper_library_attachment_headers(filename: str) -> dict[str, str]:
+    """Content-Disposition for a download, with an RFC 5987 UTF-8 fallback."""
+
+    ascii_name = re.sub(r"[^A-Za-z0-9._-]+", "_", filename).strip("_") or "papers.txt"
+    return {
+        "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+
+
 def _home_dashboard_assets() -> dict[str, list[str]]:
     if not HOME_DASHBOARD_ASSET_DIR.exists():
         return {"scripts": [], "styles": []}
@@ -686,6 +711,75 @@ def _reader_ui(ui_lang: str | None = None) -> dict[str, str]:
             "连接器在研究工作台的「收件箱与连接器」中配置；Reader 只消费已导入的来源。"
         ),
         "translation_sync_failed": "翻译数据同步失败，正在重新拉取...",
+        "task_status_retrying": "连接中断，正在重试获取任务状态...",
+        "pdf_retry": "重试 PDF",
+        "refs": "引用",
+        "refs_more": "还有 {count} 条引用",
+        "refs_show_all": "显示全部引用",
+        "refs_show_less": "收起引用",
+        "front_matter": "标题与作者",
+        "analysis_key_points": "要点",
+        "analysis_method": "方法",
+        "analysis_experiments": "实验",
+        "analysis_limitations": "局限",
+        "analysis_usefulness": "价值",
+        "analysis_project_relevance": "项目相关性",
+        "analysis_reading_plan": "阅读建议",
+        "analysis_open_questions": "待解问题",
+        "analysis_rationale": "评分依据",
+        "resize_compare": "拖动调整对照宽度",
+        "task_cancelled": "已取消",
+        "task_failed": "任务失败",
+        "request_failed": "请求失败",
+        "ai_menu": "AI 研读",
+        "analysis_coverage": "引用 {count} 处原文",
+        "analysis_not_started": "尚未生成",
+        "analyze_paper_help": "TL;DR、贡献、方法、局限，判断是否值得细读",
+        "ask_paper_help": "带页码引用的论文问答",
+        "back_to_page": "返回第 {page} 页",
+        "deep_read_help": "逐节深度研读笔记（需要几分钟）",
+        "deep_read_not_started": "尚未开始",
+        "generated_at": "生成于 {time}",
+        "link_external": "外部链接",
+        "link_internal": "跳转到论文内位置",
+        "link_jump": "跳到第 {page} 页",
+        "link_preview_failed": "无法预览",
+        "link_preview_loading": "正在加载预览...",
+        "link_search_reference": "搜索这篇文献",
+        "more_actions": "更多",
+        "page_navigation": "翻页与缩放",
+        "page_preview_fallback": "图片预览降级",
+        "page_preview_fallback_hint": "PDF.js 未能渲染此页，正在显示服务端生成的页面图片。",
+        "pdfjs_missing": "PDF.js 渲染库加载失败。",
+        "reader_toolbar": "阅读器工具栏",
+        "reading_mode": "阅读模式",
+        "rerun": "重新生成",
+        "start": "开始",
+        "save_progress_help": "记下当前页码与布局",
+        "search_count": "第 {current} / {total} 处",
+        "search_hint": "全文搜索：Enter 下一处，Shift+Enter 上一处",
+        "search_next": "下一处",
+        "search_prev": "上一处",
+        "search_other_hits": "目录与译文",
+        "search_page_hits": "{count} 处",
+        "search_placeholder": "搜索论文全文",
+        "search_scanning": "扫描中 {done}/{total}",
+        "search_text_hits": "正文命中",
+        "shortcut_back": "跳转后返回",
+        "shortcut_click": "单击段落",
+        "shortcut_click_action": "段落翻译",
+        "shortcut_close": "关闭浮层",
+        "shortcut_dblclick": "双击单词",
+        "shortcut_dblclick_action": "单词释义",
+        "shortcut_drag": "拖选文字",
+        "shortcut_drag_action": "选区工具条（翻译、笔记、提问）",
+        "shortcut_pages": "上一页 / 下一页",
+        "shortcut_search": "搜索",
+        "shortcut_search_next": "下一处 / 上一处命中",
+        "shortcut_wheel": "滚轮",
+        "shortcut_zoom": "缩放",
+        "shortcuts": "快捷键",
+        "zoom": "缩放",
         "page_load_failed": "页面加载失败",
     }
 
@@ -1074,18 +1168,28 @@ def _paper_page_text_layer(profile_path: Path, source_id: str, page: int) -> dic
 
 
 @app.get("/paper-library")
-async def paper_library_view(request: Request, profile: str = ""):
+async def paper_library_view(request: Request, profile: str = "", embed: str = "", ui_lang: str = ""):
     clean_profile = str(profile or "").strip()
     if not clean_profile:
         clean_profile = _default_profile_name()
     if clean_profile:
         _paper_library_profile_dir(clean_profile, request)
     assets = _paper_library_assets()
+    lang = resolve_paper_library_lang(ui_lang)
+    is_embed = str(embed or "").strip().lower() in {"1", "true", "yes"}
     response = TEMPLATES.TemplateResponse(
         request,
         "paper_library.html",
         {
             "profile_json": json.dumps(clean_profile, ensure_ascii=False),
+            "ui_lang": lang,
+            "ui_lang_json": json.dumps(lang),
+            "embed": is_embed,
+            "embed_json": json.dumps(is_embed),
+            "page_title": paper_library_labels(lang).get("page_title", "Paper Library · nblane"),
+            # Inline labels so the first paint is already in the right language;
+            # ``<`` is escaped so the JSON can never close the <script> element.
+            "labels_json": json.dumps(paper_library_labels(lang), ensure_ascii=False).replace("<", "\\u003c"),
             "scripts": assets["scripts"],
             "styles": assets["styles"],
         },
@@ -1412,12 +1516,14 @@ async def paper_library_payload(
     action: str = "",
     return_to: str = "",
     return_url: str = "",
+    ui_lang: str = "",
 ):
     profile_path = _paper_library_profile_dir(profile, request)
     user = _paper_library_user(profile, request)
     payload = await asyncio.to_thread(
         build_paper_library_payload,
         profile_path,
+        ui_lang=resolve_paper_library_lang(ui_lang),
         current_view=view,
         current_node=node_id,
         query=query,
@@ -1450,6 +1556,7 @@ def _paper_library_event_response(
     return_url = str(next_state.get("return_url") if "return_url" in next_state else state.get("return_url") or "")
     payload = build_paper_library_payload(
         profile_path,
+        ui_lang=resolve_paper_library_lang(body.get("ui_lang") or state.get("ui_lang")),
         current_view=view,
         current_node=node_id,
         query=str(state.get("query") or ""),
@@ -1471,6 +1578,8 @@ async def paper_library_events(request: Request, profile: str):
     profile_path = _paper_library_profile_dir(profile, request)
     user = _paper_library_user(profile, request)
     body = await _json_body(request)
+    if request.query_params.get("ui_lang") and not body.get("ui_lang"):
+        body["ui_lang"] = request.query_params.get("ui_lang")
     try:
         result = await asyncio.to_thread(handle_paper_library_event, profile_path, body)
     except ValueError as exc:
@@ -1573,19 +1682,22 @@ async def paper_library_event_start_job(request: Request, profile: str):
     profile_path = _paper_library_profile_dir(profile, request)
     user = _paper_library_user(profile, request)
     body = await _json_body(request)
+    if request.query_params.get("ui_lang") and not body.get("ui_lang"):
+        body["ui_lang"] = request.query_params.get("ui_lang")
     action = _clean_text(body.get("action"))
     if not action:
         raise HTTPException(status_code=400, detail="action is required")
     _prune_paper_library_event_jobs()
     job_id = uuid.uuid4().hex
     now = time.time()
+    job_labels = paper_library_labels(_paper_library_ui_lang(request, body))
     job: dict[str, object] = {
         "job_id": job_id,
         "profile": profile,
         "event_action": action,
         "status": "queued",
         "phase": "queued",
-        "message": "Queued Paper Library action.",
+        "message": job_labels["msg_queued"],
         "created_at": now,
         "started_at": 0.0,
         "finished_at": 0.0,
@@ -1616,7 +1728,7 @@ async def paper_library_event_start_job(request: Request, profile: str):
             job_id,
             status="running",
             phase="starting",
-            message="Starting Paper Library action.",
+            message=job_labels["working"],
             started_at=time.time(),
             _started_monotonic=started,
         )
@@ -2258,19 +2370,30 @@ async def paper_library_import(request: Request, profile: str):
     updated = [source_id for source_id in imported if source_id in selected_existing_ids]
     created = [source_id for source_id in imported if source_id not in set(updated)]
     pdf_warnings = await asyncio.to_thread(_paper_library_pdf_download_warnings, profile_path, imported)
+    lang = _paper_library_ui_lang(request, body)
+    labels = paper_library_labels(lang)
+
+    def plural(count: int) -> str:
+        return "" if count == 1 or lang == "zh" else "s"
+
     if created and updated:
-        message = f"Imported {len(created)} and updated {len(updated)} paper{'s' if len(imported) != 1 else ''}."
+        message = labels["srv_imported_updated"].format(
+            created=len(created), updated=len(updated), s=plural(len(imported))
+        )
     elif updated:
-        message = f"Updated {len(updated)} local paper{'s' if len(updated) != 1 else ''}."
+        message = labels["srv_updated_local"].format(count=len(updated), s=plural(len(updated)))
     elif created:
-        message = f"Imported {len(created)} paper{'s' if len(created) != 1 else ''}."
+        message = labels["srv_imported"].format(count=len(created), s=plural(len(created)))
     else:
-        message = "No selected papers changed."
+        message = labels["srv_no_change"]
     if pdf_warnings:
-        message = f"{message} PDF needs attention: {pdf_warnings[0]}"
+        message = labels["srv_pdf_attention"].format(
+            message=message + ("" if lang == "zh" else " "), warning=pdf_warnings[0]
+        )
     payload = await asyncio.to_thread(
         build_paper_library_payload,
         profile_path,
+        ui_lang=lang,
         current_view="all",
         current_node=node_id,
         sort_mode="recent",
@@ -2325,12 +2448,17 @@ async def paper_library_import_url(request: Request, profile: str):
         ) from exc
     imported = [source_id] if source_id else []
     pdf_warnings = await asyncio.to_thread(_paper_library_pdf_download_warnings, profile_path, imported)
-    message = "Imported paper from URL."
+    lang = _paper_library_ui_lang(request, body)
+    labels = paper_library_labels(lang)
+    message = labels["srv_imported_url"]
     if pdf_warnings:
-        message = f"{message} PDF needs attention: {pdf_warnings[0]}"
+        message = labels["srv_pdf_attention"].format(
+            message=message + ("" if lang == "zh" else " "), warning=pdf_warnings[0]
+        )
     payload = await asyncio.to_thread(
         build_paper_library_payload,
         profile_path,
+        ui_lang=lang,
         current_view="all",
         current_node=node_id,
         sort_mode="recent",
@@ -2375,6 +2503,7 @@ async def paper_library_pdf_retry(request: Request, profile: str, source_id: str
     library_payload = await asyncio.to_thread(
         build_paper_library_payload,
         profile_path,
+        ui_lang=_paper_library_ui_lang(request, body),
         current_view="all",
         detail_id=source_id,
         focus="artifacts",
@@ -2402,6 +2531,7 @@ async def paper_library_paper(request: Request, profile: str, source_id: str):
     user = _paper_library_user(profile, request)
     payload = build_paper_library_payload(
         profile_path,
+        ui_lang=_paper_library_ui_lang(request),
         detail_id=source_id,
         user_id=user.id,
         reader_base="",
@@ -2410,6 +2540,41 @@ async def paper_library_paper(request: Request, profile: str, source_id: str):
     if detail.get("source_id") != source_id and detail.get("id") != source_id:
         raise HTTPException(status_code=404, detail="source not found")
     return JSONResponse({"ok": True, "paper": detail})
+
+
+@app.post("/api/research/{profile}/paper-library/export")
+async def paper_library_export(request: Request, profile: str):
+    """Download selected library papers as BibTeX / RIS / CSL-JSON / Markdown.
+
+    Body: ``{"paper_ids": [...], "format": "bibtex"|"ris"|"csl-json"|"markdown"}``.
+    Persists each paper's stable ``metadata.citation_key`` on first export,
+    hence a same-origin mutation. Responds with an attachment.
+    """
+
+    _same_origin_mutation(request)
+    profile_path = _paper_library_profile_dir(profile, request)
+    body = await _json_body(request)
+    paper_ids = _clean_list(body.get("paper_ids") or body.get("source_ids"))
+    export_format = _clean_text(body.get("format")) or "bibtex"
+    lang = _paper_library_ui_lang(request, body)
+    try:
+        exported = await asyncio.to_thread(
+            export_library_papers,
+            profile_path,
+            paper_ids,
+            format=export_format,
+            heading=paper_library_labels(lang).get("papers", "Papers"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    headers = _paper_library_attachment_headers(str(exported["filename"]))
+    headers["X-Nblane-Export-Count"] = str(exported["count"])
+    headers["Access-Control-Expose-Headers"] = "Content-Disposition, X-Nblane-Export-Count"
+    return Response(
+        content=str(exported["body"]).encode("utf-8"),
+        media_type=str(exported["media_type"]),
+        headers=headers,
+    )
 
 
 @app.post("/api/research/{profile}/papers/{source_id}/reader-token")
@@ -2476,6 +2641,7 @@ async def paper_library_upload_pdf(
     library_payload = await asyncio.to_thread(
         build_paper_library_payload,
         profile_path,
+        ui_lang=_paper_library_ui_lang(request),
         current_view="all",
         current_node=_clean_text(node_id),
         sort_mode="recent",
@@ -2484,11 +2650,8 @@ async def paper_library_upload_pdf(
         user_id=user.id,
         reader_base="",
     )
-    message = (
-        "Already imported. Reusing the existing paper."
-        if duplicate
-        else "Uploaded and imported PDF."
-    )
+    upload_labels = paper_library_labels(_paper_library_ui_lang(request))
+    message = upload_labels["srv_upload_duplicate"] if duplicate else upload_labels["srv_uploaded_imported"]
     return JSONResponse(
         {
             "ok": True,
@@ -2542,6 +2705,7 @@ async def paper_library_pdf_upload(
     library_payload = await asyncio.to_thread(
         build_paper_library_payload,
         profile_path,
+        ui_lang=_paper_library_ui_lang(request),
         current_view="all",
         detail_id=source_id,
         focus="artifacts",
@@ -2552,7 +2716,7 @@ async def paper_library_pdf_upload(
         {
             "ok": True,
             "source_id": source_id,
-            "message": "Uploaded PDF.",
+            "message": paper_library_labels(_paper_library_ui_lang(request))["srv_uploaded_pdf"],
             "payload": library_payload,
         }
     )
@@ -2721,8 +2885,15 @@ async def reader_payload(request: Request, source_id: str, page: int | None = No
 @app.get(f"{READER_PREFIX}/api/{{source_id}}/page-preview/{{page}}")
 async def reader_page_preview(request: Request, source_id: str, page: int):
     ctx = _request_context(request, source_id)
+    # The Reader asks for its current page width x devicePixelRatio so the
+    # fallback image stays sharp at 1.5x/2x zoom; clamp to keep renders cheap.
+    try:
+        max_width = int(request.query_params.get("max_width") or 1800)
+    except (TypeError, ValueError):
+        max_width = 1800
+    max_width = max(800, min(2200, max_width))
     return JSONResponse(
-        render_paper_page_preview(ctx.profile_path, source_id, max(1, page), max_width=1800),
+        render_paper_page_preview(ctx.profile_path, source_id, max(1, page), max_width=max_width),
         headers={"Cache-Control": "private, max-age=86400"},
     )
 

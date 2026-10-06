@@ -5,28 +5,56 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
-      color-scheme: light;
-      --ink: #1b2524;
-      --muted: #697571;
-      --line: #3a4d6e;
-      --paper: #fbfaf5;
-      --soft: #f1f3ef;
-      --soft-strong: #e7ece7;
+      /* Interface chrome follows the SPA theme (web_ui/frontend/src/theme.ts
+         `chrome`): indigo ground, moon-white type, clay-gold accents. Green is
+         reserved for success/health semantics. Reading surfaces (PDF pages,
+         translation cards) re-scope these tokens to paper below. */
+      color-scheme: dark;
       --ground: #0f1930;
       --ground-soft: #101d30;
+      --gutter: #0c1526;
+      --card: #16263d;
+      --card-hover: #1d3450;
       --ground-line: rgba(220, 174, 85, .22);
+      --ink: #f2ede0;
+      --muted: #b0a78c;
+      --line: #3a4d6e;
+      --paper: #16263d;
+      --soft: #101d30;
+      --soft-strong: #1d3450;
       --accent: #dcae55;
-      --accent-strong: #a67a2c;
-      --accent-soft: rgba(220, 174, 85, .16);
+      --accent-strong: #eac57e;
+      --accent-soft: rgba(220, 174, 85, .14);
       --gold: #dcae55;
-      --warn: #93651a;
-      --danger: #a62b2b;
+      --warn: #eac57e;
+      --warn-soft: rgba(220, 174, 85, .12);
+      --danger: #e08a7e;
+      --danger-soft: rgba(176, 84, 74, .18);
       --mark: rgba(255, 214, 102, .42);
       --select: rgba(220, 174, 85, .20);
-      /* Locator overlays must preserve the PDF text underneath. */
-      --locator-fill: rgba(33, 104, 91, .055);
-      --locator-fill-focus: rgba(33, 104, 91, .085);
-      --locator-line: rgba(33, 104, 91, .72);
+      /* Locator overlays: thin clay-gold frame, near-transparent fill, so the
+         PDF glyphs underneath stay fully legible. */
+      --locator-fill: rgba(220, 174, 85, .05);
+      --locator-fill-focus: rgba(220, 174, 85, .09);
+      --locator-line: rgba(166, 122, 44, .82);
+      --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", Helvetica, Arial, sans-serif;
+    }
+    /* Paper reading surfaces: PDF pages and translation cards. */
+    .pr-page-wrap,
+    .pr-translation-page,
+    .pr-translation-block,
+    .pr-translation-unit {
+      --ink: #1b2524;
+      --muted: #6b665a;
+      --line: #ddd6c4;
+      --paper: #fbfaf5;
+      --soft: #f3f0e6;
+      --accent-strong: #8a6420;
+      --accent-soft: rgba(220, 174, 85, .16);
+      --warn: #93651a;
+      --warn-soft: #fbf3df;
+      --danger: #a62b2b;
+      --danger-soft: #fff3f3;
     }
     * { box-sizing: border-box; }
     html, body, #root {
@@ -37,7 +65,7 @@
       overflow: hidden;
       background: var(--ground);
       color: var(--ink);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: var(--font-ui);
       letter-spacing: 0;
     }
     button, input, textarea, select { font: inherit; letter-spacing: 0; }
@@ -57,38 +85,56 @@
       inset: 0;
       z-index: 999999;
       padding: 8px;
-      background: var(--paper);
+      background: var(--ground);
     }
     .pr-shell:fullscreen {
       padding: 8px;
-      background: var(--paper);
+      background: var(--ground);
     }
     .pr-toolbar {
       position: sticky;
       top: 0;
       z-index: 30;
       display: grid;
-      grid-template-columns: minmax(190px, .8fr) minmax(0, 1.65fr) auto;
-      grid-template-areas:
-        "title controls mode"
-        "title actions actions";
-      gap: 6px;
+      grid-template-columns: minmax(160px, 1fr) auto auto auto;
+      grid-template-areas: "title controls mode actions";
+      gap: 10px;
       align-items: center;
-      padding: 8px 10px;
+      padding: 6px 10px;
       border: 1px solid var(--ground-line);
       border-radius: 7px;
       background: var(--ground-soft);
-      color: #f4f0e6;
+      color: var(--ink);
       box-shadow: 0 8px 22px rgba(3, 10, 19, .2);
     }
-    .pr-title {
+    .pr-title-block {
       grid-area: title;
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+    .pr-title-meta {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .pr-title-meta .pr-prep-status {
+      min-height: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      font-size: .7rem;
+      font-weight: 700;
+    }
+    .pr-title-meta .pr-status { font-size: .7rem; overflow: hidden; text-overflow: ellipsis; }
+    .pr-title {
       align-self: center;
       min-width: 0;
       overflow: hidden;
-      color: #f5f0e4;
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: 1rem;
+      color: var(--ink);
+      font-size: .98rem;
       font-weight: 850;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -100,26 +146,213 @@
       align-items: center;
       justify-content: flex-end;
     }
-    .pr-controls { grid-area: controls; justify-content: flex-start; }
-    .pr-mode { grid-area: mode; justify-content: flex-end; }
-    .pr-actions { grid-area: actions; justify-content: flex-start; }
+    .pr-controls { grid-area: controls; flex-wrap: nowrap; gap: 4px; justify-content: flex-start; }
+    .pr-mode { grid-area: mode; flex-wrap: nowrap; justify-content: flex-end; }
+    .pr-actions { grid-area: actions; flex-wrap: nowrap; justify-content: flex-end; }
+    .pr-toolbar-sep { width: 1px; height: 18px; margin: 0 4px; background: rgba(242, 237, 224, .14); }
+    .pr-zoom-select { width: auto; min-width: 118px; padding: 3px 6px; }
+    .pr-toolbar .pr-select {
+      border-color: rgba(242, 237, 224, .2);
+      background: rgba(255, 255, 255, .06);
+      color: var(--ink);
+    }
+    .pr-toolbar .pr-select option { background: var(--card); color: var(--ink); }
+    .pr-segmented {
+      display: inline-flex;
+      padding: 2px;
+      border: 1px solid rgba(242, 237, 224, .16);
+      border-radius: 7px;
+      background: rgba(3, 10, 19, .25);
+    }
+    .pr-toolbar .pr-segmented .pr-button {
+      min-height: 25px;
+      border-color: transparent;
+      background: transparent;
+    }
+    .pr-toolbar .pr-segmented .pr-button.active {
+      border-color: transparent;
+      background: var(--accent);
+      color: #0f1930;
+    }
+    .pr-shell:not([data-reader-mode="compare"]) .pr-compare-only { display: none; }
+    .pr-menu { position: relative; }
+    .pr-menu > summary { list-style: none; }
+    .pr-menu > summary::-webkit-details-marker { display: none; }
+    .pr-menu-trigger { gap: 4px; user-select: none; }
+    .pr-menu[open] > .pr-menu-trigger { border-color: rgba(220, 174, 85, .75); background: rgba(220, 174, 85, .14); }
+    .pr-menu-trigger.busy::after {
+      content: "";
+      width: .7em;
+      height: .7em;
+      margin-left: 4px;
+      border: 2px solid rgba(220, 174, 85, .3);
+      border-top-color: var(--accent);
+      border-radius: 999px;
+      animation: pr-spin .8s linear infinite;
+    }
+    .pr-menu-list {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      z-index: 90;
+      display: grid;
+      gap: 2px;
+      width: 260px;
+      padding: 5px;
+      border: 1px solid var(--ground-line);
+      border-radius: 8px;
+      background: var(--card);
+      box-shadow: 0 16px 36px rgba(3, 10, 19, .55);
+    }
+    .pr-menu-list.align-right { left: auto; right: 0; }
+    .pr-menu-item {
+      display: grid;
+      gap: 2px;
+      width: 100%;
+      padding: 7px 9px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ink);
+      text-align: left;
+    }
+    .pr-menu-item strong { font-size: .8rem; font-weight: 780; }
+    .pr-menu-item span { color: var(--muted); font-size: .7rem; line-height: 1.35; }
+    .pr-menu-item:hover, .pr-menu-item:focus-visible { background: rgba(220, 174, 85, .12); outline: 0; }
+    .pr-menu-item.busy strong::after { content: " …"; color: var(--accent); }
+    .pr-search-meta { margin: -2px 0 8px; color: var(--muted); font-size: .7rem; }
+    .pr-search-group-title { margin: 6px 0 2px; color: var(--accent-strong); font-size: .7rem; font-weight: 800; }
+    .pr-search-results .pr-item.active { border-color: rgba(220, 174, 85, .6); }
+    .pr-search-mark { padding: 0 1px; border-radius: 2px; background: rgba(220, 174, 85, .35); color: inherit; }
+    .pr-search-hit {
+      position: absolute;
+      border-radius: 2px;
+      background: rgba(255, 200, 60, .32);
+      mix-blend-mode: multiply;
+      pointer-events: none;
+    }
+    .pr-search-hit.current {
+      background: rgba(255, 140, 0, .42);
+      outline: 2px solid rgba(201, 120, 20, .9);
+      outline-offset: 1px;
+    }
+    .pr-link-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+    .pr-link {
+      position: absolute;
+      display: block;
+      border-radius: 2px;
+      pointer-events: auto;
+      cursor: pointer;
+    }
+    .pr-link:hover, .pr-link:focus-visible {
+      background: rgba(220, 174, 85, .16);
+      outline: 1px solid rgba(166, 122, 44, .6);
+    }
+    .pr-link-target {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 4px;
+      z-index: 5;
+      background: var(--accent);
+      box-shadow: 0 0 12px rgba(220, 174, 85, .8);
+      animation: pr-link-target-fade 1.6s ease-out forwards;
+      pointer-events: none;
+    }
+    @keyframes pr-link-target-fade { from { opacity: 1; } to { opacity: 0; } }
+    .pr-link-card {
+      position: fixed;
+      z-index: 120;
+      display: grid;
+      gap: 8px;
+      width: min(440px, calc(100vw - 24px));
+      max-height: min(420px, calc(100vh - 24px));
+      overflow: auto;
+      padding: 8px;
+      border: 1px solid var(--ground-line);
+      border-radius: 8px;
+      background: var(--card);
+      color: var(--ink);
+      box-shadow: 0 18px 40px rgba(3, 10, 19, .6);
+    }
+    .pr-link-card[hidden] { display: none; }
+    .pr-link-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--muted); font-size: .72rem; font-weight: 760; }
+    .pr-link-card img { display: block; width: 100%; border-radius: 5px; background: #fff; }
+    .pr-link-card-ref { display: grid; gap: 3px; padding: 6px 2px 2px; border-top: 1px solid rgba(220, 174, 85, .14); font-size: .76rem; }
+    .pr-link-card-ref strong { line-height: 1.35; }
+    .pr-link-card-ref span { color: var(--muted); font-size: .7rem; }
+    .pr-link-card-ref a { color: var(--accent-strong); font-size: .72rem; }
+    .pr-back-pill {
+      position: fixed;
+      z-index: 70;
+      padding: 6px 12px;
+      border: 1px solid rgba(220, 174, 85, .55);
+      border-radius: 999px;
+      background: var(--card);
+      color: var(--accent-strong);
+      font-size: .76rem;
+      font-weight: 780;
+      box-shadow: 0 8px 22px rgba(3, 10, 19, .5);
+    }
+    .pr-back-pill[hidden] { display: none; }
+    .pr-fallback-badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 6;
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      padding: 3px 4px 3px 8px;
+      border: 1px solid rgba(220, 174, 85, .45);
+      border-radius: 999px;
+      background: rgba(16, 29, 48, .88);
+      color: #eac57e;
+      font-size: .68rem;
+      font-weight: 760;
+    }
+    .pr-fallback-badge button {
+      padding: 1px 8px;
+      border: 1px solid rgba(220, 174, 85, .45);
+      border-radius: 999px;
+      background: transparent;
+      color: #f2ede0;
+      font-size: .66rem;
+    }
+    .pr-review-actions { display: grid; gap: 6px; }
+    .pr-review-action {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+    .pr-review-action > div { display: grid; gap: 2px; min-width: 0; }
+    .pr-review-action strong { font-size: .8rem; }
+    .pr-review-action span { color: var(--muted); font-size: .7rem; }
+    .pr-shortcuts { position: fixed; right: 18px; bottom: 18px; z-index: 130; }
+    .pr-shortcuts:empty { display: none; }
+    .pr-shortcuts-card {
+      width: min(380px, calc(100vw - 36px));
+      padding: 10px 12px;
+      border: 1px solid var(--ground-line);
+      border-radius: 10px;
+      background: var(--card);
+      color: var(--ink);
+      box-shadow: 0 18px 40px rgba(3, 10, 19, .6);
+    }
+    .pr-shortcuts-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .pr-shortcuts-card dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 0; font-size: .74rem; }
+    .pr-shortcuts-card dt { color: var(--accent-strong); font-family: ui-monospace, SFMono-Regular, monospace; white-space: nowrap; }
+    .pr-shortcuts-card dd { margin: 0; color: var(--muted); }
     .pr-action-group {
       display: inline-flex;
       flex-wrap: wrap;
       align-items: center;
       gap: 6px;
-    }
-    .pr-ai-group {
-      padding-right: 8px;
-      border-right: 1px solid rgba(219, 231, 225, .18);
-    }
-    .pr-toolbar-note {
-      width: auto;
-      margin-left: auto;
-      color: rgba(244, 240, 230, .58);
-      font-size: .72rem;
-      line-height: 1.25;
-      text-align: left;
     }
     .pr-search { flex-wrap: nowrap; justify-content: stretch; }
     .pr-mode { justify-content: flex-end; }
@@ -144,7 +377,7 @@
     .pr-icon-button { width: 30px; padding: 0; font-size: .88rem; }
     .pr-toolbar .pr-button,
     .pr-toolbar .pr-icon-button {
-      border-color: rgba(219, 231, 225, .2);
+      border-color: rgba(242, 237, 224, .2);
       background: rgba(255, 255, 255, .06);
       color: #f4f0e6;
     }
@@ -152,28 +385,28 @@
     .pr-toolbar .pr-icon-button:hover {
       border-color: rgba(199, 164, 94, .75);
       background: rgba(199, 164, 94, .14);
-      color: #fff8e7;
+      color: var(--ink);
     }
     .pr-toolbar .pr-button.active {
       border-color: rgba(199, 164, 94, .72);
       background: rgba(199, 164, 94, .18);
-      color: #fff2c9;
+      color: var(--accent-strong);
     }
     .pr-button.primary {
       border-color: var(--accent);
       background: var(--accent);
       color: #0f1930;
     }
-    .pr-toolbar .pr-status { color: rgba(244, 240, 230, .72); }
+    .pr-toolbar .pr-status { color: rgba(242, 237, 224, .72); }
     .pr-toolbar .pr-prep-status {
-      border-color: rgba(219, 231, 225, .2);
+      border-color: rgba(242, 237, 224, .2);
       background: rgba(255, 255, 255, .06);
-      color: rgba(244, 240, 230, .72);
+      color: rgba(242, 237, 224, .72);
     }
     .pr-toolbar .pr-prep-status.ready {
-      border-color: rgba(92, 184, 148, .42);
-      background: rgba(59, 138, 115, .2);
-      color: #bfe8d8;
+      border-color: rgba(242, 237, 224, .14);
+      background: transparent;
+      color: var(--muted);
     }
     .pr-toolbar .pr-prep-status.pending {
       border-color: rgba(199, 164, 94, .42);
@@ -181,18 +414,18 @@
       color: #f3d99d;
     }
     .pr-toolbar .pr-action-status {
-      border-color: rgba(219, 231, 225, .2);
+      border-color: rgba(242, 237, 224, .2);
       background: rgba(255, 255, 255, .06);
-      color: rgba(244, 240, 230, .78);
+      color: rgba(242, 237, 224, .78);
     }
     .pr-button:hover, .pr-icon-button:hover {
-      border-color: rgba(33, 104, 91, .55);
+      border-color: rgba(201, 150, 53, .55);
       background: var(--accent-soft);
       color: var(--accent-strong);
     }
     .pr-button.primary:hover {
       background: var(--accent-strong);
-      color: #fff;
+      color: #0f1930;
     }
     .pr-button.active {
       border-color: var(--accent);
@@ -200,7 +433,7 @@
       color: var(--accent-strong);
     }
     .pr-button.busy {
-      border-color: rgba(33, 104, 91, .55);
+      border-color: rgba(201, 150, 53, .55);
       background: var(--accent-soft);
       color: var(--accent-strong);
     }
@@ -220,13 +453,13 @@
     }
     .pr-action-status.visible { display: inline-flex; }
     .pr-action-status.pending {
-      border-color: rgba(33, 104, 91, .35);
+      border-color: rgba(201, 150, 53, .35);
       background: var(--accent-soft);
       color: var(--accent-strong);
     }
     .pr-action-status.error {
-      border-color: rgba(159, 29, 29, .28);
-      background: #fff3f3;
+      border-color: rgba(224, 138, 126, .28);
+      background: var(--danger-soft);
       color: var(--danger);
     }
     .pr-translation-progress-shell {
@@ -254,10 +487,10 @@
       border: none;
       border-radius: 999px;
       overflow: hidden;
-      background: rgba(33, 104, 91, .12);
+      background: rgba(201, 150, 53, .12);
     }
     .pr-translation-progress::-webkit-progress-bar {
-      background: rgba(33, 104, 91, .12);
+      background: rgba(201, 150, 53, .12);
       border-radius: 999px;
     }
     .pr-translation-progress::-webkit-progress-value {
@@ -272,7 +505,7 @@
     .pr-translation-progress-shell.indeterminate .pr-translation-progress {
       animation: pr-progress-indeterminate 1.4s linear infinite;
       background-size: 200% 100%;
-      background-image: linear-gradient(90deg, rgba(33, 104, 91, .12) 0%, rgba(33, 104, 91, .12) 35%, rgba(33, 104, 91, .55) 50%, rgba(33, 104, 91, .12) 65%, rgba(33, 104, 91, .12) 100%);
+      background-image: linear-gradient(90deg, rgba(201, 150, 53, .12) 0%, rgba(201, 150, 53, .12) 35%, rgba(201, 150, 53, .55) 50%, rgba(201, 150, 53, .12) 65%, rgba(201, 150, 53, .12) 100%);
     }
     @keyframes pr-progress-indeterminate {
       from { background-position: 200% 0; }
@@ -284,8 +517,8 @@
       font-size: .8rem;
     }
     .pr-input:focus, .pr-select:focus, .pr-textarea:focus {
-      border-color: rgba(33, 104, 91, .65);
-      box-shadow: 0 0 0 3px rgba(33, 104, 91, .11);
+      border-color: rgba(201, 150, 53, .65);
+      box-shadow: 0 0 0 3px rgba(201, 150, 53, .11);
     }
     .pr-page-input { width: 58px; text-align: center; }
     .pr-status {
@@ -309,18 +542,18 @@
       white-space: nowrap;
     }
     .pr-prep-status.ready {
-      border-color: rgba(33, 104, 91, .25);
+      border-color: rgba(201, 150, 53, .25);
       background: var(--accent-soft);
       color: var(--accent-strong);
     }
     .pr-prep-status.pending {
       border-color: rgba(138, 91, 18, .25);
-      background: #fff8e8;
+      background: var(--warn-soft);
       color: var(--warn);
     }
     .pr-prep-status.failed {
-      border-color: rgba(159, 29, 29, .28);
-      background: #fff3f3;
+      border-color: rgba(224, 138, 126, .28);
+      background: var(--danger-soft);
       color: var(--danger);
     }
     .pr-workspace {
@@ -360,14 +593,14 @@
       min-height: 0;
       cursor: col-resize;
       border-radius: 999px;
-      background: linear-gradient(90deg, transparent 2px, rgba(33, 104, 91, .28) 2px, rgba(33, 104, 91, .28) 6px, transparent 6px);
+      background: linear-gradient(90deg, transparent 2px, rgba(201, 150, 53, .28) 2px, rgba(201, 150, 53, .28) 6px, transparent 6px);
       touch-action: none;
     }
     .pr-compare-divider:hover,
     .pr-compare-divider.resizing,
     .pr-panel-resize:hover,
     .pr-panel-resize.resizing {
-      background: linear-gradient(90deg, transparent 1px, rgba(33, 104, 91, .46) 1px, rgba(33, 104, 91, .46) 7px, transparent 7px);
+      background: linear-gradient(90deg, transparent 1px, rgba(201, 150, 53, .46) 1px, rgba(201, 150, 53, .46) 7px, transparent 7px);
     }
     .pr-workspace.panel-collapsed .pr-panel-resize { display: none; }
     .pr-left-rail {
@@ -440,7 +673,7 @@
       text-align: left;
     }
     .pr-outline-item:hover, .pr-outline-item.active {
-      border-color: rgba(33, 104, 91, .32);
+      border-color: rgba(201, 150, 53, .32);
       background: var(--accent-soft);
     }
     .pr-outline-title {
@@ -468,7 +701,7 @@
       text-align: left;
     }
     .pr-page-thumb.active {
-      border-color: rgba(33, 104, 91, .52);
+      border-color: rgba(201, 150, 53, .52);
       background: var(--accent-soft);
     }
     .pr-page-thumb img {
@@ -481,7 +714,7 @@
     }
     .pr-search-box {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(0, 1fr) 30px 30px;
       gap: 6px;
       margin-bottom: 8px;
     }
@@ -493,7 +726,7 @@
       padding: 14px 14px 10px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: var(--soft);
+      background: var(--gutter);
       scroll-behavior: smooth;
     }
     .pr-continuous-document {
@@ -521,7 +754,7 @@
       padding: 2px 8px;
       border: 1px solid var(--line);
       border-radius: 999px;
-      background: rgba(255, 255, 255, .9);
+      background: var(--ground-soft);
       color: var(--muted);
       font-size: .72rem;
       font-weight: 780;
@@ -530,7 +763,7 @@
       position: relative;
       width: max-content;
       background: var(--paper);
-      box-shadow: 0 4px 20px rgba(23, 33, 31, .10);
+      box-shadow: 0 6px 24px rgba(3, 10, 19, .45);
     }
     .pr-page-wrap.loading {
       overflow: hidden;
@@ -620,7 +853,7 @@
     .pr-highlight-layer { pointer-events: none; }
     .pr-highlight-layer { z-index: 3; }
     .pr-text-layer ::selection {
-      background: rgba(33, 104, 91, .22);
+      background: rgba(201, 150, 53, .22);
       color: transparent;
     }
     .pr-highlight {
@@ -631,7 +864,7 @@
       pointer-events: auto;
       cursor: pointer;
     }
-    .pr-highlight.has-note { outline: 2px solid rgba(33, 104, 91, .62); }
+    .pr-highlight.has-note { outline: 2px solid rgba(201, 150, 53, .62); }
     .pr-highlight.segment-anchor {
       background: var(--locator-fill);
       outline: 1px solid var(--locator-line);
@@ -640,22 +873,26 @@
     .pr-highlight.focus {
       background: var(--locator-fill-focus);
       outline: 1.5px solid var(--locator-line);
-      box-shadow: 0 0 0 2px rgba(33, 104, 91, .09);
+      box-shadow: 0 0 0 2px rgba(201, 150, 53, .09);
     }
     .pr-highlight.pending {
-      background: rgba(33, 104, 91, .045);
-      outline: 1px dashed rgba(33, 104, 91, .48);
+      background: rgba(201, 150, 53, .045);
+      outline: 1px dashed rgba(201, 150, 53, .48);
     }
     .pr-page-error {
+      --danger: #e08a7e;
+      --danger-soft: rgba(176, 84, 74, .18);
+      --card: #16263d;
+      --ink: #f2ede0;
       position: absolute;
       left: 12px;
       right: 12px;
       top: 12px;
       z-index: 4;
       padding: 9px;
-      border: 1px solid rgba(159, 29, 29, .32);
+      border: 1px solid rgba(224, 138, 126, .32);
       border-radius: 8px;
-      background: #fff3f3;
+      background: rgba(16, 29, 48, .94);
       color: var(--danger);
       font-size: .8rem;
       line-height: 1.35;
@@ -676,8 +913,8 @@
     }
     .pr-page-error-btn {
       cursor: pointer;
-      border: 1px solid rgba(159, 29, 29, .42);
-      background: #fff;
+      border: 1px solid rgba(224, 138, 126, .42);
+      background: var(--card);
       color: var(--danger);
       padding: 3px 9px;
       border-radius: 6px;
@@ -685,7 +922,7 @@
       line-height: 1.2;
     }
     .pr-page-error-btn:hover {
-      background: #fef2f2;
+      background: var(--danger-soft);
     }
     .pr-translation-reader {
       display: none;
@@ -693,7 +930,7 @@
       overflow: auto;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: var(--paper);
+      background: var(--gutter);
     }
     .pr-workspace.reader-mode-compare .pr-translation-reader,
     .pr-workspace.reader-mode-translation .pr-translation-reader {
@@ -756,8 +993,8 @@
       transform-origin: 0 0;
       overflow: hidden;
       border: 1px solid rgba(23, 33, 31, .12);
-      background: #fff;
-      box-shadow: 0 4px 20px rgba(23, 33, 31, .10);
+      background: var(--paper);
+      box-shadow: 0 6px 24px rgba(3, 10, 19, .45);
       contain: layout paint;
     }
     .pr-translation-layer {
@@ -796,7 +1033,7 @@
       margin: 18px 0;
       padding: 8px 10px;
       border-radius: 6px;
-      background: rgba(255, 255, 255, .94);
+      background: var(--paper);
       color: var(--ink);
       font-size: .94rem;
       line-height: 1.68;
@@ -817,14 +1054,14 @@
     }
     .pr-translation-page.overlay .pr-translation-block.layout.placeholder {
       padding: 0;
-      border: 1px dashed rgba(33, 104, 91, .18);
+      border: 1px dashed rgba(201, 150, 53, .18);
       background: transparent;
       color: transparent;
     }
     .pr-translation-page.overlay .pr-translation-block.layout.placeholder:hover,
     .pr-translation-page.overlay .pr-translation-block.layout.placeholder.active {
-      border-color: rgba(33, 104, 91, .42);
-      background: rgba(227, 242, 238, .16);
+      border-color: rgba(201, 150, 53, .42);
+      background: rgba(220, 174, 85, .10);
     }
     .pr-translation-page.overlay .pr-translation-block.placed.overflowing::after {
       content: "";
@@ -843,11 +1080,11 @@
     }
     .pr-translation-block.missing {
       color: var(--muted);
-      background: rgba(247, 249, 246, .94);
+      background: var(--soft);
     }
     .pr-translation-block.active {
-      outline: 2px solid rgba(33, 104, 91, .32);
-      background: rgba(235, 247, 242, .96);
+      outline: 2px solid rgba(201, 150, 53, .42);
+      background: var(--warn-soft);
     }
     .pr-translation-flow {
       display: grid;
@@ -862,7 +1099,7 @@
       gap: 10px;
       scroll-margin-top: 52px;
       padding: 0 0 16px;
-      border-bottom: 1px solid rgba(33, 104, 91, .20);
+      border-bottom: 1px solid rgba(201, 150, 53, .20);
     }
     .pr-translation-flow-page:last-child { border-bottom: 0; }
     .pr-translation-flow-page-label {
@@ -871,9 +1108,9 @@
       z-index: 2;
       width: fit-content;
       padding: 4px 9px;
-      border: 1px solid rgba(33, 104, 91, .22);
+      border: 1px solid rgba(201, 150, 53, .22);
       border-radius: 999px;
-      background: rgba(244, 249, 246, .97);
+      background: var(--ground-soft);
       color: var(--accent-strong);
       font-size: .72rem;
       font-weight: 850;
@@ -882,7 +1119,7 @@
       display: grid;
       gap: 8px;
       padding: 2px 0 10px;
-      border-bottom: 1px solid rgba(216, 224, 220, .72);
+      border-bottom: 1px solid rgba(220, 174, 85, .12);
     }
     .pr-translation-section:last-child { border-bottom: 0; }
     .pr-translation-section-title {
@@ -890,7 +1127,7 @@
       top: 0;
       z-index: 1;
       padding: 7px 2px;
-      background: rgba(255, 255, 255, .96);
+      background: var(--gutter);
       color: var(--accent-strong);
       font-size: .82rem;
       font-weight: 850;
@@ -902,19 +1139,19 @@
       padding: 10px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fff;
+      background: var(--paper);
       color: var(--ink);
       text-align: left;
       scroll-margin-top: 62px;
     }
     .pr-translation-unit:hover {
-      border-color: rgba(33, 104, 91, .45);
-      background: #fbfdfc;
+      border-color: rgba(201, 150, 53, .55);
+      background: #fffdf6;
     }
     .pr-translation-unit.active {
-      border-color: rgba(33, 104, 91, .62);
-      background: rgba(235, 247, 242, .72);
-      box-shadow: 0 0 0 2px rgba(33, 104, 91, .10);
+      border-color: rgba(201, 150, 53, .78);
+      background: var(--warn-soft);
+      box-shadow: 0 0 0 2px rgba(201, 150, 53, .10);
     }
     .pr-translation-unit-head {
       display: flex;
@@ -937,19 +1174,19 @@
       text-transform: uppercase;
     }
     .pr-translation-unit-status.translated {
-      border-color: rgba(33, 104, 91, .22);
+      border-color: rgba(201, 150, 53, .22);
       background: var(--accent-soft);
       color: var(--accent-strong);
     }
     .pr-translation-unit-status.stale,
     .pr-translation-unit-status.missing {
       border-color: rgba(138, 91, 18, .26);
-      background: #fff8e8;
+      background: var(--warn-soft);
       color: var(--warn);
     }
     .pr-translation-unit-status.failed {
-      border-color: rgba(159, 29, 29, .28);
-      background: #fff3f3;
+      border-color: rgba(224, 138, 126, .28);
+      background: var(--danger-soft);
       color: var(--danger);
     }
     .pr-translation-locator {
@@ -986,7 +1223,7 @@
       padding: 9px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fff;
+      background: var(--paper);
     }
     .pr-translation-source {
       color: var(--muted);
@@ -1027,10 +1264,10 @@
       overflow: auto;
       margin: 0;
       padding: 8px;
-      border: 1px solid rgba(33, 104, 91, .26);
+      border: 1px solid rgba(201, 150, 53, .26);
       border-radius: 8px;
-      background: rgba(255, 255, 255, .97);
-      box-shadow: 0 12px 30px rgba(23, 33, 31, .16);
+      background: var(--card);
+      box-shadow: 0 14px 34px rgba(3, 10, 19, .5);
     }
     .pr-dock.dragging {
       cursor: grabbing;
@@ -1100,7 +1337,7 @@
       width: .72em;
       height: .72em;
       margin-right: 5px;
-      border: 2px solid rgba(33, 104, 91, .25);
+      border: 2px solid rgba(201, 150, 53, .25);
       border-top-color: var(--accent);
       border-radius: 999px;
       vertical-align: -.1em;
@@ -1148,10 +1385,10 @@
       display: grid;
       gap: 8px;
       padding: 10px;
-      border: 1px solid rgba(33, 104, 91, .24);
+      border: 1px solid rgba(201, 150, 53, .24);
       border-radius: 8px;
-      background: rgba(255, 255, 255, .98);
-      box-shadow: 0 14px 34px rgba(23, 33, 31, .18);
+      background: var(--card);
+      box-shadow: 0 14px 34px rgba(3, 10, 19, .5);
     }
     .pr-annotation-popover .pr-textarea { min-height: 86px; }
     .pr-annotation-read {
@@ -1219,14 +1456,14 @@
     }
     .pr-side .pr-panel {
       overflow: visible;
-      box-shadow: 0 8px 18px rgba(23, 33, 31, .06);
+      box-shadow: 0 8px 18px rgba(3, 10, 19, .25);
     }
     .pr-panel-context {
       display: grid;
       gap: 3px;
       padding: 10px 10px 8px;
       border-bottom: 1px solid var(--line);
-      background: linear-gradient(180deg, #f7f8f4 0%, var(--paper) 100%);
+      background: linear-gradient(180deg, var(--card-hover) 0%, var(--paper) 100%);
     }
     .pr-panel-context-kicker {
       color: var(--accent-strong);
@@ -1277,8 +1514,8 @@
       justify-self: end;
       padding: 6px 9px;
       border-radius: 10px 10px 2px 10px;
-      background: var(--accent, #21685b);
-      color: #fff;
+      background: var(--accent);
+      color: #0f1930;
       font-size: .8rem;
       line-height: 1.35;
       white-space: pre-wrap;
@@ -1400,17 +1637,17 @@
       align-items: center;
       padding: 2px 8px;
       border-radius: 999px;
-      background: rgba(70, 158, 130, .12);
-      color: var(--accent-strong, #21685b);
+      background: rgba(201, 150, 53, .12);
+      color: var(--accent-strong);
       font-size: .68rem;
       line-height: 1.4;
-      border: 1px solid rgba(70, 158, 130, .35);
+      border: 1px solid rgba(201, 150, 53, .35);
       cursor: pointer;
       font-family: ui-monospace, SFMono-Regular, monospace;
     }
-    .pr-ref-chip:hover { background: rgba(70, 158, 130, .22); }
-    .pr-ref-chip[data-ref-kind="chunk"] { background: rgba(192, 132, 252, .12); border-color: rgba(192, 132, 252, .35); color: #6d28d9; }
-    .pr-ref-chip[data-ref-kind="annotation"] { background: rgba(251, 191, 36, .15); border-color: rgba(251, 191, 36, .45); color: #92400e; }
+    .pr-ref-chip:hover { background: rgba(201, 150, 53, .22); }
+    .pr-ref-chip[data-ref-kind="chunk"] { background: rgba(192, 132, 252, .12); border-color: rgba(192, 132, 252, .35); color: #d8c8fb; }
+    .pr-ref-chip[data-ref-kind="annotation"] { background: rgba(251, 191, 36, .12); border-color: rgba(251, 191, 36, .4); color: #f3d99d; }
     .pr-ref-more {
       border: 1px dashed var(--line);
       border-radius: 999px;
@@ -1445,7 +1682,7 @@
       color: var(--ink);
       text-align: left;
     }
-    .pr-item:hover { border-color: rgba(33, 104, 91, .45); background: #fbfdfc; }
+    .pr-item:hover { border-color: rgba(201, 150, 53, .45); background: var(--card-hover); }
     .pr-item-title { font-size: .8rem; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; white-space: pre-wrap; }
     .pr-item-meta { color: var(--muted); font-size: .73rem; line-height: 1.25; overflow-wrap: anywhere; }
     .pr-item-snippet {
@@ -1459,8 +1696,8 @@
       gap: 7px;
     }
     .pr-warning-item {
-      border-color: rgba(138, 91, 18, .26);
-      background: #fff8e8;
+      border-color: rgba(220, 174, 85, .3);
+      background: var(--warn-soft);
     }
     .pr-figure-list {
       display: grid;
@@ -1481,18 +1718,18 @@
     }
     .pr-figure-card:hover,
     .pr-figure-card.active {
-      border-color: rgba(33, 104, 91, .52);
-      background: #fbfdfc;
+      border-color: rgba(201, 150, 53, .52);
+      background: var(--card-hover);
     }
     .pr-figure-card.active {
-      box-shadow: inset 3px 0 0 rgba(33, 104, 91, .64);
+      box-shadow: inset 3px 0 0 rgba(201, 150, 53, .64);
     }
     .pr-figure-card img {
       display: block;
       width: 100%;
       max-height: 210px;
       object-fit: contain;
-      border: 1px solid rgba(216, 224, 220, .72);
+      border: 1px solid var(--line);
       border-radius: 6px;
       background: #fff;
     }
@@ -1513,17 +1750,17 @@
     .pr-danger-button {
       min-height: 30px;
       width: 30px;
-      border: 1px solid rgba(159, 29, 29, .24);
+      border: 1px solid rgba(224, 138, 126, .24);
       border-radius: 8px;
-      background: #fff7f7;
+      background: var(--danger-soft);
       color: var(--danger);
       font-size: .86rem;
       font-weight: 850;
       line-height: 1;
     }
     .pr-danger-button:hover {
-      border-color: rgba(159, 29, 29, .5);
-      background: #ffecec;
+      border-color: rgba(224, 138, 126, .5);
+      background: rgba(176, 84, 74, .3);
     }
     .pr-empty {
       color: var(--muted);
@@ -1532,20 +1769,26 @@
     }
     .pr-error {
       padding: 12px;
-      border: 1px solid rgba(159, 29, 29, .32);
+      border: 1px solid rgba(224, 138, 126, .32);
       border-radius: 8px;
-      background: #fff3f3;
+      background: var(--danger-soft);
       color: var(--danger);
       font-size: .86rem;
       line-height: 1.4;
     }
+    @media (max-width: 1380px) {
+      .pr-toolbar {
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        grid-template-areas: "title mode actions" "controls controls controls";
+      }
+      .pr-controls { justify-content: flex-start; }
+    }
     @media (max-width: 1080px) {
       .pr-toolbar {
-        grid-template-columns: 1fr;
-        grid-template-areas: "title" "controls" "mode" "actions";
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "title actions" "controls mode";
       }
-      .pr-controls, .pr-actions { justify-content: flex-start; }
-      .pr-ai-group { padding-right: 0; border-right: 0; }
+      .pr-controls { flex-wrap: wrap; }
       .pr-workspace,
       .pr-workspace.panel-collapsed,
       .pr-workspace.reader-mode-compare,
@@ -1711,6 +1954,70 @@
       reader_workflow_hint: "Translate, annotate, cite, then review before promotion.",
       connector_scope_hint: "Connectors live in Research > Inbox & Connectors; Reader consumes imported sources.",
       translation_sync_failed: "Translation sync failed; refreshing...",
+      task_status_retrying: "Connection interrupted; retrying task status...",
+      front_matter: "Front matter",
+      analysis_key_points: "Key points",
+      analysis_method: "Method",
+      analysis_experiments: "Experiments",
+      analysis_limitations: "Limitations",
+      analysis_usefulness: "Usefulness",
+      analysis_project_relevance: "Project relevance",
+      analysis_reading_plan: "Reading plan",
+      analysis_open_questions: "Open questions",
+      analysis_rationale: "Rationale",
+      resize_compare: "Resize compare panes",
+      task_cancelled: "Cancelled",
+      task_failed: "Reader task failed",
+      request_failed: "Reader request failed",
+      ai_menu: "AI",
+      analysis_coverage: "{count} cited passages",
+      analysis_not_started: "Not generated yet",
+      analyze_paper_help: "TL;DR, contributions, method, limits and whether to keep reading",
+      ask_paper_help: "Ask questions answered with page citations",
+      back_to_page: "Back to p. {page}",
+      deep_read_help: "Section-by-section study notes (takes a few minutes)",
+      deep_read_not_started: "Not started",
+      generated_at: "Generated {time}",
+      link_external: "External link",
+      link_internal: "Jump inside this paper",
+      link_jump: "Go to p. {page}",
+      link_preview_failed: "Preview unavailable",
+      link_preview_loading: "Loading preview...",
+      link_search_reference: "Search this reference",
+      more_actions: "More",
+      page_navigation: "Page navigation",
+      page_preview_fallback: "Image preview",
+      page_preview_fallback_hint: "PDF.js could not render this page; showing a server-rendered image instead.",
+      pdfjs_missing: "The PDF.js library failed to load.",
+      reader_toolbar: "Reader toolbar",
+      reading_mode: "Reading mode",
+      rerun: "Run again",
+      start: "Start",
+      save_progress_help: "Pin the current page and layout",
+      search_count: "{current} / {total}",
+      search_hint: "Search the full text. Enter for next, Shift+Enter for previous.",
+      search_next: "Next match",
+      search_prev: "Previous match",
+      search_other_hits: "Outline and translations",
+      search_page_hits: "{count} matches",
+      search_placeholder: "Search this paper",
+      search_scanning: "scanning {done}/{total}",
+      search_text_hits: "In the paper",
+      shortcut_back: "Back after following a link",
+      shortcut_click: "Click a paragraph",
+      shortcut_click_action: "Paragraph translation",
+      shortcut_close: "Close popovers",
+      shortcut_dblclick: "Double-click a word",
+      shortcut_dblclick_action: "Word lookup",
+      shortcut_drag: "Drag to select",
+      shortcut_drag_action: "Selection toolbar (translate, note, ask)",
+      shortcut_pages: "Previous / next page",
+      shortcut_search: "Search",
+      shortcut_search_next: "Next / previous match",
+      shortcut_wheel: "wheel",
+      shortcut_zoom: "Zoom",
+      shortcuts: "Keyboard shortcuts",
+      zoom: "Zoom",
       page_load_failed: "Page failed to load",
     };
     let args = {};
@@ -1752,6 +2059,20 @@
     let debugOverlayActive = false;
     let searchResults = [];
     let lastSearchQuery = "";
+    // Full-text search: every occurrence in the PDF text, in document order.
+    let searchHits = [];
+    let searchHitIndex = -1;
+    let searchGeneration = 0;
+    let searchScanState = { done: 0, total: 0, running: false };
+    // PDF link annotations (internal destinations + external URLs) per page.
+    const pageLinkCache = new Map();
+    const destPreviewCache = new Map();
+    let navHistory = [];
+    let linkPreviewTimer = 0;
+    let linkPreviewToken = 0;
+    let linkCardHovered = false;
+    let wheelZoomTimer = 0;
+    let wheelZoomDelta = 0;
     let annotationPopover = { open: false, mode: "read", annotation: null, pending: false, dirty: false, x: 16, y: 16 };
     let readerMode = "pdf";
     let fullscreenActive = false;
@@ -1780,6 +2101,11 @@
     let queryActionStarted = false;
     let activeTaskSource = null;
     let activeTaskPollTimer = null;
+    let activeTaskSseWatchdog = null;
+    let taskWatchGeneration = 0;
+    const handledTerminalTaskIds = new Set();
+    const TASK_SSE_FIRST_SNAPSHOT_MS = 8000;
+    const TASK_POLL_MAX_NETWORK_RETRIES = 5;
     const PANEL_MIN_WIDTH = 220;
     const PANEL_DEFAULT_WIDTH = 340;
     const PANEL_MAX_WIDTH = 920;
@@ -2302,7 +2628,8 @@
     function actionButtonSelector(action) {
       if (action === "translate_full_paper") return '[data-action="translateFull"]';
       if (action === "translate_visible_pages" || action === "retry_translation_scope") return '[data-action="translateVisible"]';
-      if (action === "codex_deep_read") return '[data-action="deepRead"]';
+      if (action === "codex_deep_read") return '[data-action="deepRead"], [data-review-action="deepRead"]';
+      if (action === "analyze_paper" || action === "generate_review_card") return '[data-action="analyzePaper"], [data-review-action="analyzePaper"]';
       if (action === "ask_paper") return '[data-action="askQuestion"]';
       return "";
     }
@@ -2338,7 +2665,8 @@
         prepEl.textContent = preparationStatusText();
         prepEl.setAttribute("title", preparationStatusText());
       }
-      document.querySelectorAll("[data-action]").forEach((button) => {
+      window.setTimeout(refreshMenuBusyState, 0);
+      document.querySelectorAll("[data-action], [data-review-action]").forEach((button) => {
         const selector = actionButtonSelector(actionState.action);
         const busy = Boolean(selector) && button.matches(selector) && actionState.phase === "pending";
         button.classList.toggle("busy", busy);
@@ -2434,6 +2762,9 @@
       refreshActionStatus();
     }
     function stopTaskWatchers() {
+      // Bumping the generation invalidates every callback (SSE listener,
+      // poll timer, in-flight fetch) captured by the previous watcher.
+      taskWatchGeneration += 1;
       if (activeTaskSource) {
         try { activeTaskSource.close(); } catch {}
         activeTaskSource = null;
@@ -2441,6 +2772,10 @@
       if (activeTaskPollTimer) {
         window.clearTimeout(activeTaskPollTimer);
         activeTaskPollTimer = null;
+      }
+      if (activeTaskSseWatchdog) {
+        window.clearTimeout(activeTaskSseWatchdog);
+        activeTaskSseWatchdog = null;
       }
       activeTaskStartedAt = 0;
     }
@@ -2480,7 +2815,7 @@
         }
         const result = await response.json().catch(() => ({}));
         if (!response.ok || result.ok === false) {
-          const message = text(result.detail || result.message || response.statusText || "Reader task failed");
+          const message = text(result.detail || result.message || response.statusText || label("task_failed"));
           setActionState(action, "error", message, { event_id: eventIdValue });
           return result;
         }
@@ -2503,44 +2838,82 @@
       const action = text(asObj(task).action || actionState.action);
       if (!taskId) return;
       stopTaskWatchers();
+      handledTerminalTaskIds.delete(taskId);
       activeTaskStartedAt = Date.now();
+      const generation = taskWatchGeneration;
+      // SSE is the primary channel; polling is only a fallback. They never
+      // run together, so a finished task is handled exactly once.
+      const fallBackToPolling = () => {
+        if (generation !== taskWatchGeneration) return;
+        stopTaskWatchers();
+        activeTaskStartedAt = Date.now();
+        pollReaderTask(taskId, action, taskWatchGeneration);
+      };
       if ("EventSource" in window) {
         try {
           activeTaskSource = new EventSource(apiPath(`/api/${sourcePath()}/tasks/${encodeURIComponent(taskId)}/events`));
           activeTaskSource.addEventListener("snapshot", (event) => {
-            const snapshot = JSON.parse(event.data || "{}");
+            if (generation !== taskWatchGeneration) return;
+            if (activeTaskSseWatchdog) {
+              window.clearTimeout(activeTaskSseWatchdog);
+              activeTaskSseWatchdog = null;
+            }
+            let snapshot = {};
+            try {
+              snapshot = JSON.parse(event.data || "{}");
+            } catch (parseError) {
+              try { console.warn("Reader task snapshot was not valid JSON; falling back to polling", parseError); } catch {}
+              fallBackToPolling();
+              return;
+            }
             handleTaskSnapshot(asObj(snapshot.task || snapshot), action);
           });
-          activeTaskSource.onerror = () => {
-            stopTaskWatchers();
-            activeTaskStartedAt = Date.now();
-            pollReaderTask(taskId, action);
-          };
-          activeTaskPollTimer = window.setTimeout(() => pollReaderTask(taskId, action), readerPollDelayMs());
+          activeTaskSource.onerror = fallBackToPolling;
+          // A buffering proxy can hold the stream open without delivering
+          // anything; the server always sends a first snapshot immediately.
+          activeTaskSseWatchdog = window.setTimeout(fallBackToPolling, TASK_SSE_FIRST_SNAPSHOT_MS);
           return;
         } catch (sseError) {
           try { console.warn("EventSource init failed; falling back to polling", sseError); } catch {}
         }
       }
-      pollReaderTask(taskId, action);
+      pollReaderTask(taskId, action, generation);
     }
-    async function pollReaderTask(taskId, action) {
+    async function pollReaderTask(taskId, action, generation = taskWatchGeneration, networkFailures = 0) {
+      if (generation !== taskWatchGeneration) return;
       if (!activeTaskStartedAt) activeTaskStartedAt = Date.now();
+      const scheduleNext = (failures) => {
+        if (generation !== taskWatchGeneration) return;
+        activeTaskPollTimer = window.setTimeout(
+          () => pollReaderTask(taskId, action, generation, failures),
+          readerPollDelayMs() * (failures ? Math.min(4, failures + 1) : 1),
+        );
+      };
       try {
         const response = await fetch(apiPath(`/api/${sourcePath()}/tasks/${encodeURIComponent(taskId)}`), {
           credentials: "same-origin",
         });
+        if (generation !== taskWatchGeneration) return;
         if (response.status === 401) {
           showExpiredSession();
           return;
         }
+        if (!response.ok && response.status >= 500) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json().catch(() => ({}));
-        handleTaskSnapshot(asObj(payload.task || payload), action);
-        const statusValue = text(asObj(payload.task || payload).status);
-        if (!["done", "failed", "cancelled"].includes(statusValue)) {
-          activeTaskPollTimer = window.setTimeout(() => pollReaderTask(taskId, action), readerPollDelayMs());
-        }
+        if (generation !== taskWatchGeneration) return;
+        const task = asObj(payload.task || payload);
+        handleTaskSnapshot(task, action);
+        if (!["done", "failed", "cancelled"].includes(text(task.status))) scheduleNext(0);
       } catch (error) {
+        if (generation !== taskWatchGeneration) return;
+        // Transient network errors (sleep, Wi-Fi switch, sidecar restart)
+        // must not strand a running task: retry a few times before giving up.
+        if (networkFailures + 1 < TASK_POLL_MAX_NETWORK_RETRIES) {
+          try { console.warn("Reader task poll failed; retrying", error); } catch {}
+          status(label("task_status_retrying"));
+          scheduleNext(networkFailures + 1);
+          return;
+        }
         setActionState(action, "error", error && error.message ? error.message : text(error));
       }
     }
@@ -2557,6 +2930,11 @@
         maybeRefreshTranslationProgress(task, action);
         return;
       }
+      const terminalTaskId = text(task.task_id);
+      if (terminalTaskId) {
+        if (handledTerminalTaskIds.has(terminalTaskId)) return;
+        handledTerminalTaskIds.add(terminalTaskId);
+      }
       stopTaskWatchers();
       if (statusValue === "done") {
         const result = asObj(task.result);
@@ -2572,7 +2950,7 @@
         persistLocalState();
         return;
       }
-      const errorMessage = text(task.error || message || (statusValue === "cancelled" ? "Cancelled" : "Reader task failed"));
+      const errorMessage = text(task.error || message || (statusValue === "cancelled" ? label("task_cancelled") : label("task_failed")));
       setActionState(action, "error", errorMessage, {
         task_id: text(task.task_id),
         progress: asObj(task.progress),
@@ -2705,7 +3083,7 @@
         }
         const result = await response.json().catch(() => ({}));
         if (!response.ok || result.ok === false) {
-          const message = text(result.detail || result.message || response.statusText || "Reader request failed");
+          const message = text(result.detail || result.message || response.statusText || label("request_failed"));
           status(message);
           dockState.pending = false;
           dockState.status = message;
@@ -2814,6 +3192,11 @@
       const raw = Number(settings().pdf_text_layer_timeout_ms);
       return Number.isFinite(raw) ? Math.max(6000, Math.min(60000, raw)) : 12000;
     }
+    function uiLanguage() {
+      const explicit = text(READER_BOOT.uiLang).toLowerCase();
+      if (explicit === "zh" || explicit === "en") return explicit;
+      return /[\u4e00-\u9fff]/.test(label("search")) ? "zh" : "en";
+    }
     function targetLang() {
       return text(settings().target_lang || "zh") || "zh";
     }
@@ -2831,9 +3214,11 @@
         return actionState.message || label("pdf_ready");
       }
       const prep = readerPreparation();
-      const labelText = text(prep.label);
-      if (labelText) return labelText;
-      return preparationLabelFromStatus(text(prep.status || ""), text(prep.structure_backend || ""));
+      const statusValue = text(prep.status || "");
+      if (["ready", "fallback", "failed", "missing_pdf"].includes(statusValue)) {
+        return preparationLabelFromStatus(statusValue, text(prep.structure_backend || ""));
+      }
+      return text(prep.label) || preparationLabelFromStatus(statusValue, text(prep.structure_backend || ""));
     }
     function preparationStatusClass() {
       if (actionState.action === "prepare_reader_artifacts" && actionState.phase === "pending") return "pending";
@@ -3160,44 +3545,57 @@
       panelWidth = clampPanelWidth(panelWidth);
       const workspaceStyle = `--pr-compare-left:${Math.max(20, Math.min(80, compareSplitRatio))}%;--pr-panel-width:${panelWidth}px;`;
       document.getElementById("root").innerHTML = `
-        <section class="pr-shell ${fullscreenActive ? "fullscreen" : ""}" id="readerShell">
-          <header class="pr-toolbar">
-            <div class="pr-title" title="${attr(title)}">${esc(title)}</div>
-            <div class="pr-controls">
-              <button class="pr-icon-button" data-action="prev" title="${attr(label("previous_page"))}">&lt;</button>
-              <span class="pr-status pr-status-main">${esc(message || label("pdf_loading"))}</span>
-              <span class="pr-prep-status ${attr(preparationStatusClass())}" title="${attr(preparationStatusText())}">${esc(preparationStatusText())}</span>
-              <input class="pr-input pr-page-input" id="pageInput" value="${currentPage || 1}" inputmode="numeric" />
-              <span class="pr-status">/ ${totalPages || "?"}</span>
-              <button class="pr-icon-button" data-action="next" title="${attr(label("next_page"))}">&gt;</button>
-              <button class="pr-icon-button" data-action="zoomOut" title="${attr(label("zoom_out"))}">-</button>
-              <button class="pr-icon-button" data-action="zoomIn" title="${attr(label("zoom_in"))}">+</button>
-              <button class="pr-button" data-action="fitWidth">${esc(label("fit_width"))}</button>
-              <button class="pr-button" data-action="fitPage">${esc(label("fit_page"))}</button>
-              <button class="pr-button" data-action="actualSize">${esc(label("actual_size"))}</button>
+        <section class="pr-shell ${fullscreenActive ? "fullscreen" : ""}" id="readerShell" data-reader-mode="${attr(readerMode)}">
+          <header class="pr-toolbar" role="toolbar" aria-label="${attr(label("reader_toolbar"))}">
+            <div class="pr-title-block">
+              <div class="pr-title" title="${attr(title)}">${esc(title)}</div>
+              <div class="pr-title-meta">
+                <span class="pr-prep-status ${attr(preparationStatusClass())}" title="${attr(preparationStatusText())}">${esc(preparationStatusText())}</span>
+                <span class="pr-status pr-status-main" aria-live="polite">${esc(message || label("pdf_loading"))}</span>
+              </div>
             </div>
-            <div class="pr-mode">
-              <button class="pr-button ${readerMode === "pdf" ? "active" : ""}" data-mode="pdf">${esc(label("mode_pdf"))}</button>
-              <button class="pr-button ${readerMode === "compare" ? "active" : ""}" data-mode="compare">${esc(label("mode_compare"))}</button>
-              <button class="pr-button ${readerMode === "translation" ? "active" : ""}" data-mode="translation">${esc(label("mode_translation"))}</button>
-              <button class="pr-button ${compareDualScrollLockEnabled() ? "active" : ""}" data-action="toggleCompareLock" title="${attr(label("compare_lock_scroll") || "Follow source")}" aria-pressed="${compareDualScrollLockEnabled() ? "true" : "false"}">${esc(label("compare_lock_scroll") || "Follow source")} ${compareDualScrollLockEnabled() ? "●" : "○"}</button>
+            <div class="pr-controls" role="group" aria-label="${attr(label("page_navigation"))}">
+              <button class="pr-icon-button" data-action="prev" title="${attr(label("previous_page"))} (←)" aria-label="${attr(label("previous_page"))}">‹</button>
+              <input class="pr-input pr-page-input" id="pageInput" value="${currentPage || 1}" inputmode="numeric" aria-label="${attr(label("page"))}" />
+              <span class="pr-status pr-page-total">/ ${totalPages || "?"}</span>
+              <button class="pr-icon-button" data-action="next" title="${attr(label("next_page"))} (→)" aria-label="${attr(label("next_page"))}">›</button>
+              <span class="pr-toolbar-sep" aria-hidden="true"></span>
+              <button class="pr-icon-button" data-action="zoomOut" title="${attr(label("zoom_out"))} (−)" aria-label="${attr(label("zoom_out"))}">−</button>
+              <select class="pr-select pr-zoom-select" id="zoomSelect" aria-label="${attr(label("zoom"))}">${zoomSelectOptionsHtml()}</select>
+              <button class="pr-icon-button" data-action="zoomIn" title="${attr(label("zoom_in"))} (+)" aria-label="${attr(label("zoom_in"))}">+</button>
+            </div>
+            <div class="pr-mode" role="group" aria-label="${attr(label("reading_mode"))}">
+              <div class="pr-segmented">
+                <button class="pr-button ${readerMode === "pdf" ? "active" : ""}" data-mode="pdf" aria-pressed="${readerMode === "pdf"}">${esc(label("mode_pdf"))}</button>
+                <button class="pr-button ${readerMode === "compare" ? "active" : ""}" data-mode="compare" aria-pressed="${readerMode === "compare"}">${esc(label("mode_compare"))}</button>
+                <button class="pr-button ${readerMode === "translation" ? "active" : ""}" data-mode="translation" aria-pressed="${readerMode === "translation"}">${esc(label("mode_translation"))}</button>
+              </div>
+              <button class="pr-button pr-compare-only ${compareDualScrollLockEnabled() ? "active" : ""}" data-action="toggleCompareLock" title="${attr(label("compare_lock_scroll"))}" aria-pressed="${compareDualScrollLockEnabled() ? "true" : "false"}">${esc(label("compare_lock_scroll"))} ${compareDualScrollLockEnabled() ? "●" : "○"}</button>
             </div>
             <div class="pr-actions">
-              <div class="pr-action-group pr-ai-group">
-                <button class="pr-button" data-action="translateFull" title="${attr(fullTranslationBlocked ? label("translation_structure_incomplete") : label("translate_full_paper_help"))}" ${fullTranslationBlocked ? "disabled" : ""}>${esc(label("translate_full_paper"))}</button>
-                <button class="pr-button" data-action="deepRead">${esc(label("deep_read"))}</button>
-              </div>
-              <div class="pr-action-group">
-                <button class="pr-button" data-action="saveProgress">${esc(label("save_progress"))}</button>
-                <button class="pr-button" data-action="fullscreen">${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</button>
-                <button class="pr-button" data-action="togglePanel">${esc(label("panel"))}</button>
-              </div>
+              <button class="pr-button" data-action="translateFull" title="${attr(fullTranslationBlocked ? label("translation_structure_incomplete") : label("translate_full_paper_help"))}" ${fullTranslationBlocked ? "disabled" : ""}>${esc(label("translate_full_paper"))}</button>
+              <details class="pr-menu" data-menu="ai">
+                <summary class="pr-button pr-menu-trigger" aria-haspopup="menu">${esc(label("ai_menu"))} <span aria-hidden="true">▾</span></summary>
+                <div class="pr-menu-list align-right" role="menu">
+                  <button class="pr-menu-item" role="menuitem" data-action="analyzePaper"><strong>${esc(label("analyze_paper"))}</strong><span>${esc(label("analyze_paper_help"))}</span></button>
+                  <button class="pr-menu-item" role="menuitem" data-action="deepRead"><strong>${esc(label("deep_read"))}</strong><span>${esc(label("deep_read_help"))}</span></button>
+                  <button class="pr-menu-item" role="menuitem" data-action="ask"><strong>${esc(label("ask_paper"))}</strong><span>${esc(label("ask_paper_help"))}</span></button>
+                </div>
+              </details>
+              <details class="pr-menu" data-menu="more">
+                <summary class="pr-icon-button pr-menu-trigger" aria-haspopup="menu" aria-label="${attr(label("more_actions"))}" title="${attr(label("more_actions"))}">⋯</summary>
+                <div class="pr-menu-list align-right" role="menu">
+                  <button class="pr-menu-item" role="menuitem" data-action="saveProgress" title="${attr(label("reader_workflow_hint"))}"><strong>${esc(label("save_progress"))}</strong><span>${esc(label("save_progress_help"))}</span></button>
+                  <button class="pr-menu-item" role="menuitem" data-action="fullscreen"><strong>${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</strong></button>
+                  <button class="pr-menu-item" role="menuitem" data-action="togglePanel"><strong>${esc(label("panel"))}</strong></button>
+                  <button class="pr-menu-item" role="menuitem" data-action="shortcuts"><strong>${esc(label("shortcuts"))}</strong><span>?</span></button>
+                </div>
+              </details>
               <span class="pr-action-status" aria-live="polite"></span>
               <span class="pr-translation-progress-shell" id="translationProgressShell" aria-hidden="true">
                 <span class="pr-progress-label" id="translationProgressLabel">0%</span>
                 <progress class="pr-translation-progress" id="translationProgress" max="100" value="0"></progress>
               </span>
-              <span class="pr-toolbar-note">${esc(label("reader_workflow_hint"))}</span>
             </div>
           </header>
           <main class="pr-workspace reader-mode-${attr(readerMode)} ${sidePanelCollapsed ? "panel-collapsed" : ""} ${leftRailCollapsed ? "left-rail-collapsed" : ""}" style="${attr(workspaceStyle)}">
@@ -3206,7 +3604,7 @@
               <div class="pr-continuous-document" id="continuousDocument">${startupPdfSkeletonHtml()}</div>
             </section>
             <section class="pr-dock pr-selection-popover ${dockVisible ? "" : "idle"}" id="selectionDock">${dockHtml()}</section>
-            <div class="pr-compare-divider" id="compareDivider" data-resize="compare" title="Resize compare panes"></div>
+            <div class="pr-compare-divider" id="compareDivider" data-resize="compare" title="${attr(label("resize_compare"))}"></div>
             <section class="pr-translation-reader" id="translationReader">${translationReaderHtml()}</section>
             <div class="pr-panel-resize" id="panelResize" data-resize="panel" title="${attr(label("panel"))}"></div>
             <aside class="pr-side ${sidePanelCollapsed ? "collapsed" : ""}">
@@ -3294,22 +3692,102 @@
       }).join("")}</div>`;
     }
     function searchRailHtml() {
-      const rows = asArr(searchResults).map((row) => asObj(row));
       return `
         <div class="pr-search-box">
-          <input class="pr-input" id="searchInput" value="${attr(lastSearchQuery)}" placeholder="${attr(label("search"))}" />
-          <button class="pr-button" data-action="search">${esc(label("search"))}</button>
+          <input class="pr-input" id="searchInput" type="search" value="${attr(lastSearchQuery)}" placeholder="${attr(label("search_placeholder"))}" aria-label="${attr(label("search"))}" />
+          <button class="pr-icon-button" data-search-step="-1" title="${attr(label("search_prev"))} (Shift+Enter)" aria-label="${attr(label("search_prev"))}">↑</button>
+          <button class="pr-icon-button" data-search-step="1" title="${attr(label("search_next"))} (Enter)" aria-label="${attr(label("search_next"))}">↓</button>
         </div>
-        <div class="pr-search-results">
-          ${rows.length ? rows.map((row) => `
-            <button class="pr-item" data-page="${Number(row.page || 0)}">
-              <div class="pr-item-title">${esc(text(row.title || row.locator || `${label("page")} ${Number(row.page || 0)}`).slice(0, 120))}</div>
-              ${text(row.snippet) ? `<div class="pr-item-snippet">${esc(text(row.snippet).slice(0, 220))}</div>` : ""}
-              <div class="pr-item-meta">${esc(text(row.locator || `${label("page")} ${Number(row.page || 0)}`))}</div>
-            </button>
-          `).join("") : `<div class="pr-empty">${esc(label("empty"))}</div>`}
-        </div>
+        <div class="pr-search-meta" id="searchCount" aria-live="polite">${esc(searchCountText())}</div>
+        <div class="pr-search-results" id="searchResults">${searchResultsHtml()}</div>
       `;
+    }
+    function searchCountText() {
+      if (!lastSearchQuery) return label("search_hint");
+      const scanning = searchScanState.running
+        ? ` · ${label("search_scanning").replace("{done}", String(searchScanState.done)).replace("{total}", String(searchScanState.total || "?"))}`
+        : "";
+      if (!searchHits.length) return `${searchScanState.running ? "" : label("no_match")}${scanning}`.replace(/^ · /, "");
+      const current = searchHitIndex >= 0 ? searchHitIndex + 1 : 0;
+      return `${label("search_count").replace("{current}", String(current)).replace("{total}", String(searchHits.length))}${scanning}`;
+    }
+    function markSearchSnippet(value) {
+      const body = esc(value);
+      const query = text(lastSearchQuery).trim();
+      if (!query) return body;
+      const escaped = esc(query).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      try {
+        return body.replace(new RegExp(escaped, "ig"), (match) => `<mark class="pr-search-mark">${match}</mark>`);
+      } catch {
+        return body;
+      }
+    }
+    function searchResultsHtml() {
+      if (!lastSearchQuery) return "";
+      const byPage = new Map();
+      searchHits.forEach((hit, index) => {
+        if (!byPage.has(hit.page)) byPage.set(hit.page, { page: hit.page, first: index, count: 0, snippet: hit.snippet });
+        byPage.get(hit.page).count += 1;
+      });
+      const currentPageHit = searchHits[searchHitIndex];
+      const pageRows = Array.from(byPage.values()).slice(0, 200).map((row) => `
+        <button class="pr-item ${currentPageHit && currentPageHit.page === row.page ? "active" : ""}" data-search-hit="${row.first}">
+          <div class="pr-item-meta">${esc(label("page"))} ${row.page} · ${esc(label("search_page_hits").replace("{count}", String(row.count)))}</div>
+          ${text(row.snippet) ? `<div class="pr-item-snippet">${markSearchSnippet(text(row.snippet).slice(0, 220))}</div>` : ""}
+        </button>
+      `).join("");
+      const others = asArr(searchResults).map((row) => asObj(row));
+      const otherRows = others.map((row) => `
+        <button class="pr-item" data-page="${Number(row.page || 0)}">
+          <div class="pr-item-title">${esc(text(row.title || row.locator || `${label("page")} ${Number(row.page || 0)}`).slice(0, 120))}</div>
+          ${text(row.snippet) ? `<div class="pr-item-snippet">${markSearchSnippet(text(row.snippet).slice(0, 220))}</div>` : ""}
+          <div class="pr-item-meta">${esc(text(row.locator || `${label("page")} ${Number(row.page || 0)}`))}</div>
+        </button>
+      `).join("");
+      if (!pageRows && !otherRows) return searchScanState.running ? "" : `<div class="pr-empty">${esc(label("no_match"))}</div>`;
+      return `
+        ${pageRows ? `<div class="pr-search-group-title">${esc(label("search_text_hits"))}</div>${pageRows}` : ""}
+        ${otherRows ? `<div class="pr-search-group-title">${esc(label("search_other_hits"))}</div>${otherRows}` : ""}
+      `;
+    }
+    function refreshSearchUi() {
+      const count = document.getElementById("searchCount");
+      if (count) count.textContent = searchCountText();
+      const results = document.getElementById("searchResults");
+      if (results) {
+        results.innerHTML = searchResultsHtml();
+        wireSearchResults(results);
+      }
+    }
+    function wireSearchResults(root) {
+      root.querySelectorAll("[data-search-hit]").forEach((button) => {
+        button.addEventListener("click", () => {
+          searchHitIndex = Number(button.dataset.searchHit || 0);
+          focusSearchHit();
+        });
+      });
+      root.querySelectorAll(".pr-item[data-page]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const page = Number(button.dataset.page || 0);
+          if (page) scrollToPage(page);
+        });
+      });
+    }
+    function openSearchRail() {
+      if (leftRailCollapsed) {
+        leftRailCollapsed = false;
+        document.querySelector(".pr-workspace")?.classList.remove("left-rail-collapsed");
+        updateWorkspaceSizing();
+      }
+      if (activeLeftTab !== "search") {
+        activeLeftTab = "search";
+      }
+      refreshLeftRail();
+      const input = document.getElementById("searchInput");
+      if (input) {
+        input.focus();
+        input.select?.();
+      }
     }
     function tabButton(tab, title) {
       return `<button class="pr-tab ${activeTab === tab ? "active" : ""}" data-tab="${attr(tab)}">${esc(title)}</button>`;
@@ -3614,7 +4092,7 @@
       const path = asArr(obj.section_path).map((row) => text(row)).filter(Boolean);
       const nearPath = asArr(asObj(obj.metadata).near_section_path).map((row) => text(row)).filter(Boolean);
       const kind = text(obj.kind || obj.scope_type || "Text");
-      if (kind === "title") return "Front Matter";
+      if (kind === "title") return label("front_matter");
       if (path.length) return path.join(" / ");
       if (nearPath.length) return nearPath.join(" / ");
       if (kind === "table" || kind === "caption") return "Captions";
@@ -4627,35 +5105,78 @@
       if (chunks.length) return chunks.join("");
       return `<section class="pr-review-section"><div class="pr-panel-head">${esc(label("deep_read"))}</div><div class="pr-list"><div class="pr-item"><div class="pr-item-title">${esc(label("deep_read_empty"))}</div></div></div></section>`;
     }
+    function formatGeneratedAt(value) {
+      const raw = text(value);
+      if (!raw) return "";
+      const date = new Date(raw);
+      if (Number.isNaN(date.getTime())) return raw;
+      try {
+        return date.toLocaleString(uiLanguage() === "zh" ? "zh-CN" : "en-US", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+      } catch {
+        return raw;
+      }
+    }
+    function analysisRefCount(analysis) {
+      const refs = new Set();
+      Object.values(asObj(analysis)).forEach((value) => {
+        asArr(value).forEach((row) => asArr(asObj(row).refs).forEach((ref) => refs.add(text(ref))));
+      });
+      return refs.size;
+    }
+    function reviewActionsHtml(analysis) {
+      const obj = asObj(analysis);
+      const deep = asObj(obj.codex_deep_read);
+      const hasQuick = Boolean(text(obj.tldr || obj.summary) || asArr(obj.key_points).length);
+      const hasDeep = Object.keys(deep).length > 0;
+      const quickAt = formatGeneratedAt(obj.updated || obj.generated_at);
+      const deepAt = formatGeneratedAt(obj.codex_deep_read_updated || deep.updated || deep.generated_at);
+      const refCount = analysisRefCount(obj);
+      const quickMeta = hasQuick
+        ? [quickAt ? label("generated_at").replace("{time}", quickAt) : "", refCount ? label("analysis_coverage").replace("{count}", String(refCount)) : ""].filter(Boolean).join(" · ")
+        : label("analysis_not_started");
+      const deepMeta = hasDeep ? (deepAt ? label("generated_at").replace("{time}", deepAt) : label("deep_read")) : label("deep_read_not_started");
+      return `
+        <div class="pr-review-actions">
+          <div class="pr-review-action">
+            <div><strong>${esc(label("analyze_paper"))}</strong><span>${esc(quickMeta)}</span></div>
+            <button class="pr-button ${hasQuick ? "" : "primary"}" data-review-action="analyzePaper">${esc(hasQuick ? label("rerun") : label("start"))}</button>
+          </div>
+          <div class="pr-review-action">
+            <div><strong>${esc(label("deep_read"))}</strong><span>${esc(deepMeta)}</span></div>
+            <button class="pr-button ${hasDeep ? "" : "primary"}" data-review-action="deepRead">${esc(hasDeep ? label("rerun") : label("start"))}</button>
+          </div>
+        </div>
+      `;
+    }
     function analysisBodyHtml() {
       const analysis = analysisObj();
       const hasAnalysis = Object.keys(analysis).length > 0;
       const latest = latestAiText();
-      if (!hasAnalysis && !latest && figureRows().length) return "";
-      if (!hasAnalysis && !latest) return `<div class="pr-empty">${esc(label("empty"))}</div>`;
-      const chunks = [];
+      const actions = reviewActionsHtml(analysis);
+      if (!hasAnalysis && !latest) return `<div class="pr-review-flow">${actions}</div>`;
+      const chunks = [actions];
       if (text(analysis.tldr || analysis.summary)) {
         chunks.push(`<div class="pr-item"><div class="pr-item-title">${esc(text(analysis.tldr || analysis.summary))}</div></div>`);
       }
       const scores = scoreHtml(analysis.scores);
       if (scores) chunks.push(scores);
       for (const [title, values] of [
-        ["Key points", analysis.key_points],
-        ["Method", analysis.method || analysis.methods],
-        ["Experiments", analysis.experiments || analysis.evaluation],
-        ["Limitations", analysis.limitations],
-        ["Usefulness", analysis.usefulness],
-        ["Project relevance", analysis.project_relevance],
-        ["Reading plan", analysis.reading_plan],
-        ["Open questions", analysis.open_questions],
+        [label("analysis_key_points"), analysis.key_points],
+        [label("analysis_method"), analysis.method || analysis.methods],
+        [label("analysis_experiments"), analysis.experiments || analysis.evaluation],
+        [label("analysis_limitations"), analysis.limitations],
+        [label("analysis_usefulness"), analysis.usefulness],
+        [label("analysis_project_relevance"), analysis.project_relevance],
+        [label("analysis_reading_plan"), analysis.reading_plan],
+        [label("analysis_open_questions"), analysis.open_questions],
       ]) {
         const body = reviewSectionHtml(title, values);
         if (body) chunks.push(body);
       }
       if (Array.isArray(analysis.score_rationale)) {
-        chunks.push(`<div class="pr-panel-head">Rationale</div>${listHtml(analysis.score_rationale)}`);
+        chunks.push(`<div class="pr-panel-head">${esc(label("analysis_rationale"))}</div>${listHtml(analysis.score_rationale)}`);
       } else if (text(analysis.score_rationale)) {
-        chunks.push(`<div class="pr-item"><div class="pr-item-meta">Rationale</div><div class="pr-item-title">${esc(analysis.score_rationale)}</div></div>`);
+        chunks.push(`<div class="pr-item"><div class="pr-item-meta">${esc(label("analysis_rationale"))}</div><div class="pr-item-title">${esc(analysis.score_rationale)}</div></div>`);
       }
       const citedRefs = [
         ...asArr(analysis.cited_refs),
@@ -4673,8 +5194,7 @@
       if (latest && !hasAnalysis) {
         chunks.push(`<div class="pr-item"><div class="pr-item-title">${esc(latest)}</div></div>`);
       }
-      const body = chunks.join("") || `<div class="pr-empty">${esc(label("empty"))}</div>`;
-      return `<div class="pr-review-flow">${body}</div>`;
+      return `<div class="pr-review-flow">${chunks.join("")}</div>`;
     }
     function aiRows() {
       return asArr(args.ai_results || args.ai_responses || args.analysis || args.ai);
@@ -5401,14 +5921,48 @@
       if (pageInput) {
         pageInput.addEventListener("change", () => scrollToPage(Number(pageInput.value || currentPage)));
       }
+      document.getElementById("zoomSelect")?.addEventListener("change", (event) => {
+        const value = text(event.target && event.target.value);
+        const map = { "fit-width": "fitWidth", "fit-page": "fitPage", "actual-size": "actualSize" };
+        if (map[value]) handleAction(map[value]);
+      });
+      document.querySelectorAll("details.pr-menu").forEach((menu) => {
+        menu.addEventListener("toggle", () => { if (menu.open) closeMenus(menu); });
+        menu.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") { menu.open = false; menu.querySelector("summary")?.focus(); }
+        });
+      });
+      document.querySelectorAll(".pr-menu [data-action]").forEach((button) => {
+        button.addEventListener("click", () => { const menu = button.closest("details"); if (menu) menu.open = false; });
+      });
       const viewer = document.getElementById("viewer");
       if (viewer) {
         viewer.addEventListener("scroll", () => {
           scheduleViewportUpdate();
           syncCompareScroll("pdf");
           placeSelectionDock();
+          hideLinkPreview();
         }, { passive: true });
+        viewer.addEventListener("wheel", (event) => {
+          if (!event.ctrlKey && !event.metaKey) return;
+          event.preventDefault();
+          wheelZoomDelta += Number(event.deltaY || 0);
+          if (wheelZoomTimer) return;
+          wheelZoomTimer = window.setTimeout(() => {
+            const factor = Math.exp(-Math.max(-300, Math.min(300, wheelZoomDelta)) * .0025);
+            wheelZoomDelta = 0;
+            wheelZoomTimer = 0;
+            customScale = Math.max(.45, Math.min(3, Math.round(scaleForPage(currentPage) * factor * 100) / 100));
+            scaleMode = "custom";
+            scheduleReaderStateChanged(true);
+            rerenderForScale();
+          }, 120);
+        }, { passive: false });
       }
+      document.getElementById("sideBody")?.addEventListener("click", (event) => {
+        const button = event.target && event.target.closest ? event.target.closest("[data-review-action]") : null;
+        if (button && !button.disabled) handleAction(button.dataset.reviewAction);
+      });
       const translationReader = document.getElementById("translationReader");
       if (translationReader) {
         wireTranslationScroll();
@@ -5451,7 +6005,7 @@
       document.querySelectorAll("[data-page-thumb]").forEach((button) => {
         button.addEventListener("click", () => scrollToPage(Number(button.dataset.pageThumb || currentPage)));
       });
-      document.querySelectorAll(".pr-left-rail .pr-item[data-page]").forEach((button) => {
+      document.querySelectorAll(".pr-left-rail .pr-item[data-page]:not(#searchResults .pr-item)").forEach((button) => {
         button.addEventListener("click", () => {
           const page = Number(button.dataset.page || 0);
           if (page) scrollToPage(page);
@@ -5462,10 +6016,29 @@
         if (pageThumbTimer) window.clearTimeout(pageThumbTimer);
         pageThumbTimer = window.setTimeout(requestVisiblePageThumbPreviews, 120);
       }, { passive: true });
-      document.querySelector(".pr-left-rail #searchInput")?.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") runSearch();
+      const searchInput = document.querySelector(".pr-left-rail #searchInput");
+      searchInput?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          runSearch({ direction: event.shiftKey ? -1 : 1 });
+        } else if (event.key === "Escape" && text(searchInput.value)) {
+          event.stopPropagation();
+          searchInput.value = "";
+          clearSearch();
+        }
       });
-      document.querySelector('.pr-left-rail [data-action="search"]')?.addEventListener("click", runSearch);
+      searchInput?.addEventListener("input", () => {
+        if (!text(searchInput.value).trim() && lastSearchQuery) clearSearch();
+      });
+      document.querySelectorAll(".pr-left-rail [data-search-step]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const value = text(document.getElementById("searchInput")?.value).trim().toLowerCase();
+          if (value && value !== lastSearchQuery) runSearch({ force: true });
+          else stepSearchHit(Number(button.dataset.searchStep || 1));
+        });
+      });
+      const resultsRoot = document.getElementById("searchResults");
+      if (resultsRoot) wireSearchResults(resultsRoot);
       if (pageThumbRailVisible()) requestVisiblePageThumbPreviews();
     }
     function requestVisiblePageThumbPreviews() {
@@ -5512,6 +6085,8 @@
       if (readerMode === next) return;
       const anchorPage = Math.max(1, Number(currentPage || 1));
       readerMode = next;
+      const shell = shellEl();
+      if (shell) shell.dataset.readerMode = readerMode;
       const workspace = document.querySelector(".pr-workspace");
       if (workspace) {
         workspace.classList.toggle("reader-mode-pdf", readerMode === "pdf");
@@ -5521,6 +6096,7 @@
       }
       document.querySelectorAll("[data-mode]").forEach((button) => {
         button.classList.toggle("active", button.dataset.mode === readerMode);
+        button.setAttribute("aria-pressed", button.dataset.mode === readerMode ? "true" : "false");
       });
       refreshTranslationReader();
       refreshLeftRail();
@@ -5940,6 +6516,7 @@
         return rerenderForScale();
       }
       if (action === "fullscreen") return toggleFullscreen();
+      if (action === "shortcuts") return toggleShortcutHelp();
       if (action === "toggleCompareLock") {
         const next = !compareDualScrollLockEnabled();
         setCompareDualScrollLock(next);
@@ -5947,7 +6524,7 @@
         if (btn) {
           btn.classList.toggle("active", next);
           btn.setAttribute("aria-pressed", next ? "true" : "false");
-          btn.textContent = `${label("compare_lock_scroll") || "Follow source"} ${next ? "●" : "○"}`;
+          btn.textContent = `${label("compare_lock_scroll")} ${next ? "●" : "○"}`;
         }
         return;
       }
@@ -6343,6 +6920,10 @@
         }
         if (textLayer) textLayer.innerHTML = "";
         if (highlightLayer) highlightLayer.innerHTML = "";
+        document.getElementById(`linkLayer-${pageNumber}`)?.remove();
+        if (pdfDoc) {
+          pdfDoc.getPage(pageNumber).then((page) => page.cleanup()).catch(() => {});
+        }
         pageRenderStates.delete(pageNumber);
       }
     }
@@ -6423,6 +7004,7 @@
           await withTimeout(state.renderTask.promise, pdfPageRenderTimeoutMs(), "PDF.js render timed out; using image preview fallback.");
           clearPagePreview(pageNumber);
           clearPageError(pageNumber);
+          markPageRenderSource(pageNumber, "pdfjs");
           renderedOk = true;
           state.status = "rendered";
           state.renderedScale = pageScale;
@@ -6434,6 +7016,7 @@
           if (hasPreview) {
             state.status = "preview";
             state.previewScale = pageScale;
+            markPageRenderSource(pageNumber, "preview", error && error.message ? error.message : text(error));
           } else {
             state.status = "error";
             state.error = error && error.message ? error.message : text(error);
@@ -6444,24 +7027,38 @@
         state.renderTask = null;
         const textBody = await textLayerPromise;
         renderHighlights(pageNumber);
-        try {
-          if (!renderedOk) return;
-          writePageCache({
-            key: cacheKey,
-            source_id: sourceId(),
-            pdf: pdfCacheIdentity(),
-            page: pageNumber,
-            scale: pageScale,
-            dpr,
-            bitmap: canvas.toDataURL("image/png"),
-            textBody,
-          });
-        } catch {}
+        renderLinkLayer(pageNumber, page, viewport).catch((error) => {
+          try { console.warn("Reader link layer failed", pageNumber, error); } catch {}
+        });
+        if (renderedOk) {
+          const encode = () => {
+            try {
+              if (!canvas.isConnected || canvas.width < 8) return;
+              let bitmap = canvas.toDataURL("image/webp", .9);
+              if (!bitmap.startsWith("data:image/webp")) bitmap = canvas.toDataURL("image/png");
+              writePageCache({
+                key: cacheKey,
+                source_id: sourceId(),
+                pdf: pdfCacheIdentity(),
+                page: pageNumber,
+                scale: pageScale,
+                dpr,
+                bitmap,
+                textBody,
+              });
+            } catch (error) {
+              try { console.warn("Reader page cache write skipped", pageNumber, error); } catch {}
+            }
+          };
+          if ("requestIdleCallback" in window) window.requestIdleCallback(encode, { timeout: 2500 });
+          else window.setTimeout(encode, 400);
+        }
       } catch (error) {
         if (applyPagePreview(pageNumber, viewportSize)) {
           state.status = "preview";
           state.previewScale = currentScale;
           clearPageError(pageNumber);
+          markPageRenderSource(pageNumber, "preview", error && error.message ? error.message : text(error));
         } else {
           state.status = "error";
           state.error = error && error.message ? error.message : text(error);
@@ -6750,6 +7347,7 @@
         requestedPreviews.add(pageNumber);
         fetchPagePreview(pageNumber);
       }
+      if (!pdfDocumentLoading) markPageRenderSource(pageNumber, "preview", label("pdf_error"));
       if (state) {
         state.status = pageDomReady(pageNumber, "preview") ? "preview" : "preview_requested";
         state.previewScale = size.scale;
@@ -6772,6 +7370,7 @@
       const layer = document.getElementById(`highlightLayer-${pageNumber}`);
       if (!layer) return;
       layer.innerHTML = "";
+      if (lastSearchQuery) renderSearchHits(pageNumber);
       const activeUnit = activeTranslationAnchor ? buildAnchorIndex().get(activeTranslationAnchor) : null;
       if (activeUnit && unitCoversPage(activeUnit, pageNumber)) {
         asArr(activeUnit.rects).forEach((rect) => {
@@ -6913,15 +7512,20 @@
       };
       renderSelectionBar();
       if (emitPassiveEvents()) emitAction("selection_created", currentSelection);
-      // Auto-translate a single word after the double-click window closes.
-      // This prevents the first mouseup of a double-click from racing the
-      // paragraph/word interaction handlers.
+      // Auto-translate a single word once the double-click settles. The
+      // double-click suppression only guards the paragraph click; it must not
+      // block the word lookup itself (a double-click is how a word is picked).
+      if (wordTranslateTimer) window.clearTimeout(wordTranslateTimer);
+      wordTranslateTimer = 0;
       if (isSingleWordSelection(selectedText)) {
-        window.setTimeout(() => {
-          if (Date.now() < suppressParagraphClickUntil) return;
-          if (currentSelection && text(currentSelection.selected_text).trim() === selectedText) {
-            handleAction("translate");
-          }
+        const wordHash = text(currentSelection.selected_text_hash);
+        wordTranslateTimer = window.setTimeout(() => {
+          wordTranslateTimer = 0;
+          if (!currentSelection || text(currentSelection.selected_text_hash) !== wordHash) return;
+          if (lastAutoWordTranslateHash === wordHash && Date.now() - lastAutoWordTranslateAt < 1200) return;
+          lastAutoWordTranslateHash = wordHash;
+          lastAutoWordTranslateAt = Date.now();
+          handleAction("translate");
         }, 240);
       }
     }
@@ -7011,10 +7615,16 @@
     }
     let textClickTimer = 0;
     let suppressParagraphClickUntil = 0;
+    let wordTranslateTimer = 0;
+    let lastAutoWordTranslateHash = "";
+    let lastAutoWordTranslateAt = 0;
     function handleTextClick(event) {
-      // Delay the paragraph action so a native double-click can finish word
-      // selection first. In PDF mode the browser selection remains untouched.
-      if (readerMode === "pdf" || Date.now() < suppressParagraphClickUntil) return;
+      // Same semantics in every mode: single click = paragraph translation,
+      // double click = word lookup, drag = selection toolbar. The paragraph
+      // action is delayed so a native double-click can finish first.
+      if (Date.now() < suppressParagraphClickUntil) return;
+      if (event.detail > 1) return;
+      if (event.target && event.target.closest && event.target.closest("a, .pr-link-layer, .pr-search-hit")) return;
       if (textClickTimer) window.clearTimeout(textClickTimer);
       textClickTimer = window.setTimeout(() => {
         textClickTimer = 0;
@@ -7060,12 +7670,48 @@
       const suffix = end < clean.length ? "..." : "";
       return `${prefix}${clean.slice(start, end)}${suffix}`;
     }
-    async function runSearch() {
-      const query = text(document.getElementById("searchInput")?.value).trim().toLowerCase();
-      if (!query) return;
-      lastSearchQuery = query;
+    function normalizeSearchText(value) {
+      return text(value).toLowerCase().replace(/\s+/g, "");
+    }
+    function countOccurrences(haystack, needle) {
+      if (!needle) return 0;
+      let count = 0;
+      let index = haystack.indexOf(needle);
+      while (index !== -1) {
+        count += 1;
+        index = haystack.indexOf(needle, index + needle.length);
+      }
+      return count;
+    }
+    function clearSearch() {
+      searchGeneration += 1;
+      lastSearchQuery = "";
+      searchHits = [];
+      searchHitIndex = -1;
       searchResults = [];
-      status(label("searching"));
+      searchScanState = { done: 0, total: 0, running: false };
+      document.querySelectorAll(".pr-search-hit").forEach((node) => node.remove());
+      refreshSearchUi();
+    }
+    async function runSearch(options = {}) {
+      const input = document.getElementById("searchInput");
+      const query = text(input ? input.value : lastSearchQuery).trim().toLowerCase();
+      if (!query) {
+        clearSearch();
+        return;
+      }
+      if (query === lastSearchQuery && (searchHits.length || searchScanState.running) && !options.force) {
+        stepSearchHit(Number(options.direction || 1));
+        return;
+      }
+      const generation = ++searchGeneration;
+      lastSearchQuery = query;
+      searchHits = [];
+      searchHitIndex = -1;
+      searchResults = [];
+      const needle = normalizeSearchText(query);
+      // Outline titles and translation units: the only way to find Chinese
+      // terms, which exist in the translation but not in the PDF text.
       for (const outline of outlineRows()) {
         const title = text(outline.title);
         if (title.toLowerCase().includes(query)) {
@@ -7074,18 +7720,15 @@
         }
       }
       for (const unit of translationUnits()) {
-        const source = normalizeSourceText(unit.source_text);
         const translated = flowText(unit.translated_text);
-        const body = `${source} ${translated}`.toLowerCase();
-        if (body.includes(query)) {
-          const page = Number(unit.page || 0);
-          searchResults.push({
-            page,
-            title: text(unit.locator || `${label("page")} ${page || ""}`),
-            locator: text(unit.locator || (page ? `${label("page")} ${page}` : "")),
-            snippet: searchSnippet(translated || source, query),
-          });
-        }
+        if (!translated.toLowerCase().includes(query)) continue;
+        const page = Number(unit.page || 0);
+        searchResults.push({
+          page,
+          title: text(unit.locator || `${label("page")} ${page || ""}`),
+          locator: text(unit.locator || (page ? `${label("page")} ${page}` : "")),
+          snippet: searchSnippet(translated, query),
+        });
       }
       const seen = new Set();
       searchResults = searchResults.filter((row) => {
@@ -7094,32 +7737,557 @@
         seen.add(key);
         return true;
       }).slice(0, 40);
-      activeLeftTab = "search";
-      refreshLeftRail();
-      if (searchResults.length) status(`${label("search")} · ${searchResults.length}`);
-      for (let page = currentPage; page <= (totalPages || knownPageCount(currentPage)); page += 1) {
-        const body = await pageText(page);
-        if (body.toLowerCase().includes(query)) {
-          searchResults.unshift({ page, title: `${label("page")} ${page}`, locator: `${label("page")} ${page}`, snippet: searchSnippet(body, query) });
-          activeLeftTab = "search";
-          refreshLeftRail();
-          status(`${label("search")} · ${searchResults.length}`);
-          return scrollToPage(page);
+      const total = totalPages || knownPageCount(currentPage);
+      const startPage = Math.max(1, currentPage || 1);
+      searchScanState = { done: 0, total, running: true };
+      document.querySelectorAll(".pr-search-hit").forEach((node) => node.remove());
+      refreshSearchUi();
+      for (let page = 1; page <= total; page += 1) {
+        if (generation !== searchGeneration) return;
+        let body = "";
+        try {
+          body = await pageText(page);
+        } catch (error) {
+          try { console.warn("Reader search could not read page text", page, error); } catch {}
+        }
+        if (generation !== searchGeneration) return;
+        const hits = countOccurrences(normalizeSearchText(body), needle);
+        for (let ordinal = 0; ordinal < hits; ordinal += 1) {
+          searchHits.push({ page, ordinal, snippet: ordinal === 0 ? searchSnippet(body, query) : "" });
+        }
+        searchScanState.done = page;
+        if (hits && searchHitIndex < 0 && page >= startPage) {
+          searchHitIndex = searchHits.length - hits;
+          focusSearchHit();
+        } else if (hits) {
+          renderSearchHits(page);
+        }
+        if (hits || page % 5 === 0) refreshSearchUi();
+      }
+      searchScanState.running = false;
+      if (searchHitIndex < 0 && searchHits.length) {
+        searchHitIndex = 0;
+        focusSearchHit();
+      }
+      refreshSearchUi();
+      status(searchHits.length || searchResults.length ? searchCountText() : label("no_match"));
+    }
+    function stepSearchHit(direction = 1) {
+      if (!searchHits.length) return;
+      const count = searchHits.length;
+      searchHitIndex = ((searchHitIndex < 0 ? (direction > 0 ? -1 : 0) : searchHitIndex) + (direction > 0 ? 1 : -1) + count) % count;
+      focusSearchHit();
+    }
+    async function focusSearchHit() {
+      const hit = searchHits[searchHitIndex];
+      if (!hit) return;
+      refreshSearchUi();
+      document.querySelectorAll(".pr-search-hit.current").forEach((node) => node.classList.remove("current"));
+      if (!pageElement(hit.page) || Math.abs(hit.page - currentPage) > 0) {
+        await scrollToPage(hit.page, { smooth: false });
+      }
+      for (let attempt = 0; attempt < 24; attempt += 1) {
+        if (searchHits[searchHitIndex] !== hit) return;
+        if (renderSearchHits(hit.page)) break;
+        await new Promise((resolve) => window.setTimeout(resolve, 150));
+      }
+      const current = document.querySelector(`#highlightLayer-${hit.page} .pr-search-hit.current`);
+      const viewer = document.getElementById("viewer");
+      if (current && viewer) {
+        const box = current.getBoundingClientRect();
+        const viewBox = viewer.getBoundingClientRect();
+        if (box.top < viewBox.top + 40 || box.bottom > viewBox.bottom - 40) {
+          viewer.scrollTop += box.top - viewBox.top - viewer.clientHeight / 3;
         }
       }
-      for (let page = 1; page < currentPage; page += 1) {
-        const body = await pageText(page);
-        if (body.toLowerCase().includes(query)) {
-          searchResults.unshift({ page, title: `${label("page")} ${page}`, locator: `${label("page")} ${page}`, snippet: searchSnippet(body, query) });
-          activeLeftTab = "search";
-          refreshLeftRail();
-          status(`${label("search")} · ${searchResults.length}`);
-          return scrollToPage(page);
+    }
+    function searchTextNodes(textLayer) {
+      const walker = document.createTreeWalker(textLayer, NodeFilter.SHOW_TEXT);
+      const chars = [];
+      let flat = "";
+      let node = walker.nextNode();
+      while (node) {
+        const value = node.nodeValue || "";
+        for (let index = 0; index < value.length; index += 1) {
+          const ch = value[index];
+          if (/\s/.test(ch)) continue;
+          const lower = ch.toLowerCase();
+          if (lower.length !== 1) continue;
+          flat += lower;
+          chars.push({ node, offset: index });
         }
+        node = walker.nextNode();
       }
-      activeLeftTab = "search";
-      refreshLeftRail();
-      status(searchResults.length ? `${label("search")} · ${searchResults.length}` : label("no_match"));
+      return { flat, chars };
+    }
+    // Draw every occurrence of the active query on one page. Returns false
+    // while the page text layer is not ready yet, so callers can retry.
+    function renderSearchHits(pageNumber) {
+      const layer = document.getElementById(`highlightLayer-${pageNumber}`);
+      const textLayer = document.getElementById(`textLayer-${pageNumber}`);
+      const wrap = pageWrap(pageNumber);
+      if (!layer || !textLayer || !wrap) return false;
+      layer.querySelectorAll(".pr-search-hit").forEach((node) => node.remove());
+      const needle = normalizeSearchText(lastSearchQuery);
+      if (!needle || !searchHits.some((hit) => hit.page === pageNumber)) return true;
+      if (!textLayer.firstChild) return false;
+      const { flat, chars } = searchTextNodes(textLayer);
+      if (!flat) return false;
+      const wrapBox = wrap.getBoundingClientRect();
+      const current = searchHits[searchHitIndex];
+      let from = flat.indexOf(needle);
+      let ordinal = 0;
+      while (from !== -1) {
+        const start = chars[from];
+        const end = chars[from + needle.length - 1];
+        if (start && end) {
+          const range = document.createRange();
+          try {
+            range.setStart(start.node, start.offset);
+            range.setEnd(end.node, end.offset + 1);
+            const isCurrent = Boolean(current && current.page === pageNumber && current.ordinal === ordinal);
+            for (const rect of Array.from(range.getClientRects())) {
+              if (rect.width < 1 || rect.height < 1) continue;
+              const div = document.createElement("div");
+              div.className = `pr-search-hit${isCurrent ? " current" : ""}`;
+              div.style.left = `${rect.left - wrapBox.left}px`;
+              div.style.top = `${rect.top - wrapBox.top}px`;
+              div.style.width = `${rect.width}px`;
+              div.style.height = `${rect.height}px`;
+              layer.appendChild(div);
+            }
+          } catch (error) {
+            try { console.warn("Reader search highlight failed", error); } catch {}
+          }
+        }
+        ordinal += 1;
+        from = flat.indexOf(needle, from + needle.length);
+      }
+      return true;
+    }
+    // ---------- PDF links, reference preview and back navigation ----------
+    function safeExternalUrl(value) {
+      const url = text(value).trim();
+      return /^(https?:|mailto:)/i.test(url) ? url : "";
+    }
+    async function renderLinkLayer(pageNumber, page, viewport) {
+      const wrap = pageWrap(pageNumber);
+      if (!wrap || !page) return;
+      let layer = document.getElementById(`linkLayer-${pageNumber}`);
+      if (!layer) {
+        layer = document.createElement("div");
+        layer.className = "pr-link-layer";
+        layer.id = `linkLayer-${pageNumber}`;
+        wrap.appendChild(layer);
+      }
+      let annotations = pageLinkCache.get(pageNumber);
+      if (!annotations) {
+        try {
+          annotations = await page.getAnnotations({ intent: "display" });
+        } catch (error) {
+          try { console.warn("PDF.js getAnnotations failed", pageNumber, error); } catch {}
+          annotations = [];
+        }
+        pageLinkCache.set(pageNumber, annotations);
+      }
+      layer.innerHTML = "";
+      asArr(annotations).forEach((annotation) => {
+        if (annotation.subtype !== "Link") return;
+        const dest = annotation.dest;
+        const url = safeExternalUrl(annotation.url || annotation.unsafeUrl);
+        if (dest == null && !url) return;
+        const [x1, y1, x2, y2] = viewport.convertToViewportRectangle(annotation.rect);
+        const left = Math.min(x1, x2);
+        const top = Math.min(y1, y2);
+        const width = Math.abs(x2 - x1);
+        const height = Math.abs(y2 - y1);
+        if (width < 2 || height < 2) return;
+        const link = document.createElement("a");
+        link.className = `pr-link ${dest != null ? "internal" : "external"}`;
+        link.style.left = `${left}px`;
+        link.style.top = `${top}px`;
+        link.style.width = `${width}px`;
+        link.style.height = `${height}px`;
+        if (dest == null) {
+          link.href = url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.title = url;
+          link.setAttribute("aria-label", `${label("link_external")}: ${url}`);
+        } else {
+          link.href = "#";
+          link.setAttribute("aria-label", label("link_internal"));
+          link.addEventListener("click", (event) => {
+            event.preventDefault();
+            hideLinkPreview();
+            followInternalLink(dest);
+          });
+          link.addEventListener("mouseenter", () => scheduleLinkPreview(link, dest));
+          link.addEventListener("focus", () => scheduleLinkPreview(link, dest));
+          link.addEventListener("mouseleave", cancelLinkPreview);
+          link.addEventListener("blur", cancelLinkPreview);
+        }
+        layer.appendChild(link);
+      });
+    }
+    async function resolveDest(dest) {
+      if (!pdfDoc || dest == null) return null;
+      let explicit = dest;
+      try {
+        if (typeof dest === "string") explicit = await pdfDoc.getDestination(dest);
+        if (!Array.isArray(explicit) || !explicit.length) return null;
+        const ref = explicit[0];
+        let pageIndex = -1;
+        if (ref && typeof ref === "object") pageIndex = await pdfDoc.getPageIndex(ref);
+        else if (Number.isInteger(ref)) pageIndex = ref;
+        if (pageIndex < 0) return null;
+        const kind = text(explicit[1] && explicit[1].name);
+        let left = null;
+        let top = null;
+        if (kind === "XYZ") {
+          left = explicit[2];
+          top = explicit[3];
+        } else if (kind === "FitH" || kind === "FitBH") {
+          top = explicit[2];
+        } else if (kind === "FitR") {
+          left = explicit[2];
+          top = explicit[5];
+        }
+        return {
+          page: pageIndex + 1,
+          left: Number.isFinite(Number(left)) && left !== null ? Number(left) : null,
+          top: Number.isFinite(Number(top)) && top !== null ? Number(top) : null,
+          name: typeof dest === "string" ? dest : "",
+        };
+      } catch (error) {
+        try { console.warn("PDF destination could not be resolved", error); } catch {}
+        return null;
+      }
+    }
+    function pushNavHistory() {
+      const viewer = document.getElementById("viewer");
+      navHistory.push({ page: currentPage, scrollTop: Number(viewer ? viewer.scrollTop : 0) });
+      if (navHistory.length > 30) navHistory = navHistory.slice(-30);
+      refreshBackPill();
+    }
+    async function scrollToDest(resolved) {
+      await scrollToPage(resolved.page, { smooth: false });
+      if (resolved.top == null || !pdfDoc) return;
+      try {
+        const page = await pdfDoc.getPage(resolved.page);
+        const viewport = page.getViewport({ scale: scaleForPage(resolved.page) });
+        const [, y] = viewport.convertToViewportPoint(resolved.left || 0, resolved.top);
+        const viewer = document.getElementById("viewer");
+        const wrap = pageWrap(resolved.page);
+        if (!viewer || !wrap) return;
+        const offset = wrap.getBoundingClientRect().top - viewer.getBoundingClientRect().top;
+        viewer.scrollTop += offset + y - 36;
+        const marker = document.createElement("div");
+        marker.className = "pr-link-target";
+        marker.style.top = `${Math.max(0, y - 2)}px`;
+        wrap.appendChild(marker);
+        window.setTimeout(() => marker.remove(), 1600);
+      } catch (error) {
+        try { console.warn("PDF destination scroll failed", error); } catch {}
+      }
+    }
+    async function followInternalLink(dest) {
+      const resolved = await resolveDest(dest);
+      if (!resolved) return;
+      pushNavHistory();
+      await scrollToDest(resolved);
+    }
+    async function navigateBack() {
+      const entry = navHistory.pop();
+      refreshBackPill();
+      if (!entry) return;
+      await scrollToPage(entry.page, { smooth: false });
+      const viewer = document.getElementById("viewer");
+      if (viewer) viewer.scrollTop = entry.scrollTop;
+    }
+    function refreshBackPill() {
+      let pill = document.getElementById("readerBackPill");
+      const entry = navHistory[navHistory.length - 1];
+      if (!entry) {
+        if (pill) pill.hidden = true;
+        return;
+      }
+      if (!pill) {
+        pill = document.createElement("button");
+        pill.id = "readerBackPill";
+        pill.type = "button";
+        pill.className = "pr-back-pill";
+        pill.addEventListener("click", () => navigateBack());
+        shellEl()?.appendChild(pill);
+      }
+      const viewer = document.getElementById("viewer");
+      if (viewer) {
+        const box = viewer.getBoundingClientRect();
+        pill.style.left = `${box.left + 14}px`;
+        pill.style.top = `${box.bottom - 48}px`;
+      }
+      pill.textContent = `← ${label("back_to_page").replace("{page}", String(entry.page))}`;
+      pill.title = "Alt + ←";
+      pill.hidden = false;
+    }
+    function ensureLinkCard() {
+      let card = document.getElementById("linkPreviewCard");
+      if (!card) {
+        card = document.createElement("div");
+        card.id = "linkPreviewCard";
+        card.className = "pr-link-card";
+        card.setAttribute("role", "tooltip");
+        card.hidden = true;
+        card.addEventListener("mouseenter", () => { linkCardHovered = true; });
+        card.addEventListener("mouseleave", () => {
+          linkCardHovered = false;
+          cancelLinkPreview();
+        });
+        shellEl()?.appendChild(card);
+      }
+      return card;
+    }
+    function hideLinkPreview() {
+      linkPreviewToken += 1;
+      if (linkPreviewTimer) window.clearTimeout(linkPreviewTimer);
+      linkPreviewTimer = 0;
+      linkCardHovered = false;
+      const card = document.getElementById("linkPreviewCard");
+      if (card) card.hidden = true;
+    }
+    function scheduleLinkPreview(anchor, dest) {
+      if (linkPreviewTimer) window.clearTimeout(linkPreviewTimer);
+      linkPreviewTimer = window.setTimeout(() => {
+        linkPreviewTimer = 0;
+        showLinkPreview(anchor, dest);
+      }, 320);
+    }
+    function cancelLinkPreview() {
+      if (linkPreviewTimer) window.clearTimeout(linkPreviewTimer);
+      linkPreviewTimer = 0;
+      window.setTimeout(() => {
+        if (!linkCardHovered && !document.querySelector(".pr-link:hover")) {
+          const card = document.getElementById("linkPreviewCard");
+          if (card) card.hidden = true;
+          linkPreviewToken += 1;
+        }
+      }, 180);
+    }
+    function placeLinkCard(card, anchor) {
+      const box = anchor.getBoundingClientRect();
+      const width = Math.min(440, window.innerWidth - 24);
+      const left = Math.max(12, Math.min(window.innerWidth - width - 12, box.left - 20));
+      const below = box.bottom + 8;
+      const height = card.offsetHeight || 220;
+      const top = below + height > window.innerHeight - 12 ? Math.max(12, box.top - height - 8) : below;
+      card.style.left = `${left}px`;
+      card.style.top = `${top}px`;
+    }
+    function referenceRows() {
+      return asArr(asObj(asObj(args.source).metadata).structured_references).map((row) => asObj(row));
+    }
+    function matchStructuredReference(snippet) {
+      const words = new Set(text(snippet).toLowerCase().match(/[a-z]{4,}/g) || []);
+      if (words.size < 3) return null;
+      let best = null;
+      let bestScore = 0;
+      referenceRows().forEach((row) => {
+        const titleWords = text(row.title).toLowerCase().match(/[a-z]{4,}/g) || [];
+        if (titleWords.length < 2) return;
+        const hits = titleWords.filter((word) => words.has(word)).length;
+        const score = hits / titleWords.length;
+        if (score > bestScore) {
+          bestScore = score;
+          best = row;
+        }
+      });
+      return bestScore >= .6 ? best : null;
+    }
+    async function renderDestPreview(resolved) {
+      const key = `${resolved.page}:${Math.round(resolved.left || 0)}:${Math.round(resolved.top || 0)}`;
+      if (destPreviewCache.has(key)) return destPreviewCache.get(key);
+      const page = await pdfDoc.getPage(resolved.page);
+      const base = page.getViewport({ scale: 1 });
+      const pageWidth = base.width;
+      const pageHeight = base.height;
+      const content = await page.getTextContent();
+      const topPdf = resolved.top == null ? pageHeight - 36 : resolved.top;
+      const leftPdf = resolved.left == null ? 0 : resolved.left;
+      const nearby = content.items.filter((item) => {
+        const y = Number(item.transform[5]);
+        return y <= topPdf + 4 && y >= topPdf - 170;
+      });
+      const twoColumn = nearby.some((item) => Number(item.transform[4]) > pageWidth * .52)
+        && nearby.some((item) => Number(item.transform[4]) + Number(item.width || 0) < pageWidth * .48);
+      let x0 = 18;
+      let x1 = pageWidth - 18;
+      if (twoColumn) {
+        if (leftPdf < pageWidth * .5) x1 = pageWidth * .515;
+        else x0 = pageWidth * .485;
+      }
+      x0 = Math.max(0, Math.min(x0, leftPdf ? leftPdf - 8 : x0));
+      const isCitation = /^cite\./i.test(resolved.name) || /bib/i.test(resolved.name);
+      const cropHeight = isCitation ? 120 : 190;
+      const snippet = content.items
+        .filter((item) => {
+          const x = Number(item.transform[4]);
+          const y = Number(item.transform[5]);
+          return x >= x0 - 2 && x <= x1 && y <= topPdf + 4 && y >= topPdf - (isCitation ? 70 : 40);
+        })
+        .sort((a, b) => Number(b.transform[5]) - Number(a.transform[5]) || Number(a.transform[4]) - Number(b.transform[4]))
+        .map((item) => text(item.str))
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .slice(0, 320);
+      const scale = Math.min(2.2, 860 / Math.max(1, x1 - x0));
+      const viewport = page.getViewport({ scale });
+      const [vx0, vy0] = viewport.convertToViewportPoint(x0, topPdf + 6);
+      const [vx1, vy1] = viewport.convertToViewportPoint(x1, Math.max(0, topPdf - cropHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(Math.abs(vx1 - vx0)));
+      canvas.height = Math.max(1, Math.round(Math.abs(vy1 - vy0)));
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({
+        canvasContext: context,
+        viewport,
+        transform: [1, 0, 0, 1, -Math.min(vx0, vx1), -Math.min(vy0, vy1)],
+      }).promise;
+      let image = "";
+      try { image = canvas.toDataURL("image/webp", .9); } catch { image = canvas.toDataURL("image/png"); }
+      const preview = { image, snippet, reference: matchStructuredReference(snippet) };
+      destPreviewCache.set(key, preview);
+      if (destPreviewCache.size > 40) destPreviewCache.delete(destPreviewCache.keys().next().value);
+      return preview;
+    }
+    async function showLinkPreview(anchor, dest) {
+      const token = ++linkPreviewToken;
+      const resolved = await resolveDest(dest);
+      if (!resolved || token !== linkPreviewToken) return;
+      const card = ensureLinkCard();
+      const jumpLabel = label("link_jump").replace("{page}", String(resolved.page));
+      card.innerHTML = `<div class="pr-link-card-head"><span>${esc(jumpLabel)}</span></div><div class="pr-empty">${esc(label("link_preview_loading"))}</div>`;
+      card.hidden = false;
+      placeLinkCard(card, anchor);
+      let preview = null;
+      try {
+        preview = await renderDestPreview(resolved);
+      } catch (error) {
+        try { console.warn("Link preview render failed", error); } catch {}
+      }
+      if (token !== linkPreviewToken) return;
+      const ref = preview && preview.reference;
+      const refHtml = ref ? `
+        <div class="pr-link-card-ref">
+          <strong>${esc(text(ref.title))}</strong>
+          <span>${esc([asArr(ref.authors).slice(0, 4).join(", "), text(ref.year)].filter(Boolean).join(" · "))}</span>
+          <a href="https://www.semanticscholar.org/search?q=${encodeURIComponent(text(ref.title))}" target="_blank" rel="noopener noreferrer">${esc(label("link_search_reference"))}</a>
+        </div>` : "";
+      card.innerHTML = `
+        <div class="pr-link-card-head">
+          <span>${esc(label("page"))} ${resolved.page}</span>
+          <button class="pr-button" type="button" data-link-card-jump>${esc(jumpLabel)}</button>
+        </div>
+        ${preview && preview.image ? `<img alt="${attr(text(preview.snippet).slice(0, 120))}" src="${attr(preview.image)}" />` : `<div class="pr-empty">${esc(label("link_preview_failed"))}</div>`}
+        ${refHtml}
+      `;
+      card.querySelector("[data-link-card-jump]")?.addEventListener("click", () => {
+        hideLinkPreview();
+        followInternalLink(dest);
+      });
+      const image = card.querySelector("img");
+      if (image && !image.complete) image.addEventListener("load", () => placeLinkCard(card, anchor), { once: true });
+      placeLinkCard(card, anchor);
+    }
+    // ---------- Page render source + preview fallback badge ----------
+    function markPageRenderSource(pageNumber, source, reason = "") {
+      const wrap = pageWrap(pageNumber);
+      if (!wrap) return;
+      wrap.dataset.renderSource = source;
+      wrap.querySelectorAll(".pr-fallback-badge").forEach((node) => node.remove());
+      if (source !== "preview") return;
+      const badge = document.createElement("div");
+      badge.className = "pr-fallback-badge";
+      badge.title = reason ? `${label("page_preview_fallback_hint")}\n${reason}` : label("page_preview_fallback_hint");
+      badge.innerHTML = `<span>${esc(label("page_preview_fallback"))}</span>`;
+      if (pdfDoc) {
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.textContent = label("retry");
+        retry.addEventListener("click", (event) => {
+          event.stopPropagation();
+          ensurePageRendered(pageNumber, { force: true });
+        });
+        badge.appendChild(retry);
+      }
+      wrap.appendChild(badge);
+    }
+    function refreshFullscreenLabel() {
+      const button = document.querySelector('[data-action="fullscreen"]');
+      const target = button ? (button.querySelector("strong") || button) : null;
+      if (target) target.textContent = fullscreenActive ? label("exit_fullscreen") : label("fullscreen");
+    }
+    function zoomSelectOptionsHtml() {
+      const percent = Math.round(scaleForPage(currentPage || 1) * 100);
+      const options = [
+        ["fit-width", label("fit_width")],
+        ["fit-page", label("fit_page")],
+        ["actual-size", label("actual_size")],
+      ];
+      const custom = scaleMode === "custom";
+      return [
+        ...options.map(([value, title]) => `<option value="${attr(value)}" ${scaleMode === value ? "selected" : ""}>${esc(title)}${scaleMode === value ? ` · ${percent}%` : ""}</option>`),
+        `<option value="custom" ${custom ? "selected" : ""} ${custom ? "" : "hidden"}>${percent}%</option>`,
+      ].join("");
+    }
+    function refreshZoomUi() {
+      const select = document.getElementById("zoomSelect");
+      if (select) select.innerHTML = zoomSelectOptionsHtml();
+    }
+    function closeMenus(except = null) {
+      document.querySelectorAll("details.pr-menu[open]").forEach((menu) => {
+        if (menu !== except) menu.open = false;
+      });
+    }
+    function refreshMenuBusyState() {
+      document.querySelectorAll("details.pr-menu").forEach((menu) => {
+        const trigger = menu.querySelector("summary");
+        if (trigger) trigger.classList.toggle("busy", Boolean(menu.querySelector(".pr-menu-item.busy")));
+      });
+    }
+    function shortcutHelpHtml() {
+      const rows = [
+        ["← / →  ·  PgUp / PgDn", label("shortcut_pages")],
+        ["+ / −  ·  Ctrl + " + label("shortcut_wheel"), label("shortcut_zoom")],
+        ["0", label("fit_width")],
+        ["/  ·  Ctrl + F", label("shortcut_search")],
+        ["Enter / Shift + Enter", label("shortcut_search_next")],
+        ["Alt + ←", label("shortcut_back")],
+        [label("shortcut_click"), label("shortcut_click_action")],
+        [label("shortcut_dblclick"), label("shortcut_dblclick_action")],
+        [label("shortcut_drag"), label("shortcut_drag_action")],
+        ["Esc", label("shortcut_close")],
+        ["?", label("shortcuts")],
+      ];
+      return `
+        <div class="pr-shortcuts-card" role="dialog" aria-modal="false" aria-label="${attr(label("shortcuts"))}">
+          <div class="pr-shortcuts-head"><strong>${esc(label("shortcuts"))}</strong><button class="pr-icon-button" data-shortcuts-close aria-label="${attr(label("close"))}">×</button></div>
+          <dl>${rows.map(([keys, desc]) => `<dt>${esc(keys)}</dt><dd>${esc(desc)}</dd>`).join("")}</dl>
+        </div>
+      `;
+    }
+    function toggleShortcutHelp(force) {
+      let mount = document.getElementById("shortcutHelp");
+      const open = typeof force === "boolean" ? force : !(mount && mount.childElementCount);
+      if (!mount) {
+        mount = document.createElement("div");
+        mount.id = "shortcutHelp";
+        mount.className = "pr-shortcuts";
+        shellEl()?.appendChild(mount);
+      }
+      mount.innerHTML = open ? shortcutHelpHtml() : "";
+      mount.querySelector("[data-shortcuts-close]")?.addEventListener("click", () => toggleShortcutHelp(false));
     }
     function shellEl() {
       return document.getElementById("readerShell") || document.querySelector(".pr-shell");
@@ -7141,8 +8309,7 @@
         fullscreenActive = !fullscreenActive;
       }
       shell.classList.toggle("fullscreen", fullscreenActive);
-      const button = document.querySelector('[data-action="fullscreen"]');
-      if (button) button.textContent = fullscreenActive ? label("exit_fullscreen") : label("fullscreen");
+      refreshFullscreenLabel();
       window.setTimeout(() => {
         renderAround(currentPage, { force: true });
         placeSelectionDock();
@@ -7152,8 +8319,7 @@
     document.addEventListener("fullscreenchange", () => {
       fullscreenActive = Boolean(document.fullscreenElement);
       shellEl()?.classList.toggle("fullscreen", fullscreenActive);
-      const button = document.querySelector('[data-action="fullscreen"]');
-      if (button) button.textContent = fullscreenActive ? label("exit_fullscreen") : label("fullscreen");
+      refreshFullscreenLabel();
       window.setTimeout(() => {
         renderAround(currentPage, { force: true });
         placeSelectionDock();
@@ -7169,6 +8335,8 @@
     document.addEventListener("pointerdown", (event) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
+      if (!target.closest("details.pr-menu")) closeMenus();
+      if (!target.closest(".pr-shortcuts") && !target.closest('[data-action="shortcuts"]')) toggleShortcutHelp(false);
       if (target.closest("#selectionDock") || target.closest(".pr-text-layer") || target.closest(".pr-annotation-popover") || target.closest(".pr-highlight")) return;
       closeSelectionDock();
       if (!target.closest(".pr-annotation-popover")) maybeCloseAnnotationPopover();
@@ -7177,19 +8345,38 @@
       if (event.key === "Escape") {
         closeSelectionDock();
         closeAnnotationPopover();
+        hideLinkPreview();
+        closeMenus();
+        toggleShortcutHelp(false);
         return;
       }
       const target = event.target;
       const tag = target && target.tagName ? target.tagName.toLowerCase() : "";
       const isEditable = tag === "input" || tag === "textarea" || tag === "select" || (target && target.isContentEditable);
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && (event.key === "f" || event.key === "F")) {
+        event.preventDefault();
+        openSearchRail();
+        return;
+      }
+      if (event.key === "F3") {
+        event.preventDefault();
+        stepSearchHit(event.shiftKey ? -1 : 1);
+        return;
+      }
+      if (event.altKey && !event.ctrlKey && !event.metaKey && event.key === "ArrowLeft" && !isEditable) {
+        event.preventDefault();
+        navigateBack();
+        return;
+      }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "?" && !isEditable) {
+        event.preventDefault();
+        toggleShortcutHelp();
+        return;
+      }
       if (event.key === "/" && !isEditable) {
-        const searchInput = document.getElementById("searchInput");
-        if (searchInput) {
-          event.preventDefault();
-          searchInput.focus();
-          searchInput.select?.();
-        }
+        event.preventDefault();
+        openSearchRail();
         return;
       }
       if (isEditable) return;
@@ -7356,7 +8543,11 @@
     function updatePageUi() {
       const pageInput = document.getElementById("pageInput");
       if (pageInput) pageInput.value = String(currentPage);
-      status(statusText());
+      const total = document.querySelector(".pr-page-total");
+      if (total) total.textContent = `/ ${totalPages || "?"}`;
+      const main = document.querySelector(".pr-status-main");
+      if (main && main.textContent === label("pdf_loading") && pdfDoc) main.textContent = "";
+      refreshZoomUi();
     }
     async function loadPdf() {
       const seq = loadSeq + 1;
@@ -7401,7 +8592,16 @@
       pageBaseSizes = new Map();
       pageRenderStates = new Map();
       currentPage = initialPage();
+      if (pdfDoc) {
+        try { pdfDoc.destroy(); } catch (destroyError) {
+          try { console.warn("PDF.js document destroy failed", destroyError); } catch {}
+        }
+      }
       pdfDoc = null;
+      pageLinkCache.clear();
+      destPreviewCache.clear();
+      navHistory = [];
+      refreshBackPill();
       totalPages = knownPageCount(currentPage);
       pdfDocumentLoading = Boolean(pdfBase64 || pdfUrl);
       renderShell("");
@@ -7421,7 +8621,7 @@
         if (viewer) {
           const errorBox = document.createElement("div");
           errorBox.className = "pr-error";
-          errorBox.innerHTML = `${esc(label("pdf_error"))} PDF.js CDN failed to load. <button type="button" class="pr-page-error-btn">${esc(label("pdf_retry"))}</button>`;
+          errorBox.innerHTML = `${esc(label("pdf_error"))} ${esc(label("pdfjs_missing"))} <button type="button" class="pr-page-error-btn">${esc(label("pdf_retry"))}</button>`;
           errorBox.querySelector("button")?.addEventListener("click", () => loadPdf().catch(() => {}));
           viewer.replaceChildren(errorBox);
         }
@@ -7507,7 +8707,8 @@
     }
     async function fetchPagePreview(pageNumber) {
       try {
-        const response = await fetch(apiPath(`/api/${sourcePath()}/page-preview/${pageNumber}`), {
+        const previewWidth = Math.round(pageViewportSize(pageNumber).width * Math.max(1, window.devicePixelRatio || 1) * 1.5);
+        const response = await fetch(apiPath(`/api/${sourcePath()}/page-preview/${pageNumber}?max_width=${Math.max(800, Math.min(2200, previewWidth))}`), {
           credentials: "same-origin",
         });
         if (response.status === 401) {
@@ -7676,9 +8877,9 @@
           try { console.error("renderShell fallback failed", shellError); } catch {}
           const root = document.getElementById("root");
           if (root) {
-            root.innerHTML = `<div style="padding:24px;font-family:system-ui;color:#7a1f1f;line-height:1.5">
+            root.innerHTML = `<div style="padding:24px;color:var(--danger);line-height:1.5">
               <strong>${esc(label("pdf_error") || "Reader error")}</strong>
-              <div style="margin-top:8px;font-size:.85rem;color:#444">${esc(message || "render failed")}</div>
+              <div style="margin-top:8px;font-size:.85rem;color:var(--muted)">${esc(message || "render failed")}</div>
               <button style="margin-top:16px;padding:6px 12px" onclick="window.location.reload()">Reload</button>
             </div>`;
           }
@@ -7694,7 +8895,7 @@
       const target = document.getElementById(button.dataset.refToggle || "");
       if (!target) return;
       const expanded = target.classList.toggle("expanded");
-      button.textContent = expanded ? (button.dataset.lessLabel || "Show fewer references") : (button.dataset.moreLabel || "Show all references");
+      button.textContent = expanded ? (button.dataset.lessLabel || label("refs_show_less")) : (button.dataset.moreLabel || label("refs_show_all"));
     });
     window.addEventListener("resize", () => {
       if (resizeTimer) window.clearTimeout(resizeTimer);
@@ -7712,6 +8913,10 @@
       }, 180);
     });
     window.addEventListener("beforeunload", sendProgressBeacon);
+    window.addEventListener("pagehide", sendProgressBeacon);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") sendProgressBeacon();
+    });
     window.addEventListener("error", (event) => {
       try { console.error("reader window.error", event && event.error); } catch {}
     });
@@ -7729,9 +8934,9 @@
       try { renderShell(label("pdf_error")); } catch {
         const root = document.getElementById("root");
         if (root) {
-          root.innerHTML = `<div style="padding:24px;font-family:system-ui;color:#7a1f1f;line-height:1.5">
+          root.innerHTML = `<div style="padding:24px;color:var(--danger);line-height:1.5">
             <strong>${esc(label("pdf_error") || "Reader error")}</strong>
-            <div style="margin-top:8px;font-size:.85rem;color:#444">${esc(message || "load failed")}</div>
+            <div style="margin-top:8px;font-size:.85rem;color:var(--muted)">${esc(message || "load failed")}</div>
             <button style="margin-top:16px;padding:6px 12px" onclick="window.location.reload()">Reload</button>
           </div>`;
         }

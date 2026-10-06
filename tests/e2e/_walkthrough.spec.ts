@@ -86,7 +86,7 @@ test("walkthrough", async ({ page }) => {
     await page.waitForTimeout(1500);
   }
   // Open side panel if collapsed
-  const sideBtn = page.locator('[data-action="togglePanel"]').first();
+  const sideBtn = page.locator('[data-action="togglePanel"]:visible').first();
   if (await sideBtn.count() > 0) {
     await sideBtn.click();
     await page.waitForTimeout(500);

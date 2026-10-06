@@ -718,6 +718,36 @@ def _analysis_score(value: Any) -> int:
     return max(0, min(10, score))
 
 
+ANALYSIS_FALLBACK_KEPT_WARNING = (
+    "The model did not return a reliable analysis (rule fallback); "
+    "the previously saved analysis was kept."
+)
+
+
+def _analysis_has_quick_result(analysis: dict[str, Any]) -> bool:
+    """True when a saved analysis holds a real quick-analysis result."""
+
+    return bool(str(analysis.get("tldr") or "").strip() or analysis.get("key_points"))
+
+
+def _should_save_quick_analysis(
+    profile: str | Path,
+    source_id: str,
+    ai_result: Any,
+) -> bool:
+    """Decide whether a quick-analysis result may replace the saved one.
+
+    When the LLM fails, the AI gateway silently falls back to the
+    deterministic ``rule_fallback`` backend. Its placeholder card must never
+    overwrite a real analysis the user already has; it is only saved when
+    there is nothing better on disk.
+    """
+
+    if str(getattr(ai_result, "backend", "") or "") != "rule_fallback":
+        return True
+    return not _analysis_has_quick_result(load_paper_analysis(profile, source_id))
+
+
 def _normalize_paper_analysis(raw: dict[str, Any], source_id: str) -> dict[str, Any]:
     warnings = _payload_list(raw, "warnings")
     scores_raw = raw.get("scores") if isinstance(raw.get("scores"), dict) else {}
@@ -1964,11 +1994,21 @@ def _handle_reader_action_inner(
         emit_analysis_progress("normalizing", "Normalizing analysis output…", current=3, total=5)
         structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
         analysis = _normalize_paper_analysis(structured, source_id) if structured else _normalize_paper_analysis({}, source_id)
+        kept_previous = bool(structured) and not _should_save_quick_analysis(profile, source_id, ai_result)
+        if kept_previous:
+            # Surface the saved result instead of the placeholder and fail the
+            # action so the UI offers a retry rather than "Analysis saved".
+            analysis = load_paper_analysis(profile, source_id)
+            structured = {}
+            artifact_warnings.append(ANALYSIS_FALLBACK_KEPT_WARNING)
         if structured:
             emit_analysis_progress("saving", "Saving analysis…", current=4, total=5)
             save_paper_analysis(profile, source_id, analysis)
         emit_analysis_progress("done", "Analysis saved" if structured else "Analysis incomplete", current=5, total=5)
-        message = "Analysis saved" if structured else (getattr(ai_result, "error", "") or "Analysis did not return structured output.")
+        if kept_previous:
+            message = ANALYSIS_FALLBACK_KEPT_WARNING
+        else:
+            message = "Analysis saved" if structured else (getattr(ai_result, "error", "") or "Analysis did not return structured output.")
         return ReaderActionResult(
             ok=bool(getattr(ai_result, "ok", True) and structured),
             data={
@@ -2244,6 +2284,10 @@ def _handle_reader_action_inner(
         )
         structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
         analysis = _normalize_paper_analysis(structured, source_id) if structured else _normalize_paper_analysis({}, source_id)
+        if structured and not _should_save_quick_analysis(profile, source_id, ai_result):
+            analysis = load_paper_analysis(profile, source_id)
+            structured = {}
+            artifact_warnings.append(ANALYSIS_FALLBACK_KEPT_WARNING)
         if structured:
             save_paper_analysis(profile, source_id, analysis)
         return ReaderActionResult(

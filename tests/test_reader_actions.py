@@ -1025,6 +1025,59 @@ class TestReaderActions(unittest.TestCase):
         self.assertEqual(analysis["scores"]["novelty"], 6)
         self.assertEqual(analysis["cited_segment_refs"], ["seg:1"])
 
+    def test_analyze_paper_rule_fallback_keeps_existing_analysis(self) -> None:
+        good = SimpleNamespace(
+            ok=True,
+            backend="direct_llm",
+            structured={"tldr": "Real model analysis.", "key_points": [{"text": "Point", "refs": ["seg:1"]}]},
+            warnings=[],
+            error="",
+        )
+        placeholder = SimpleNamespace(
+            ok=True,
+            backend="rule_fallback",
+            structured={"tldr": "Introduction", "key_points": []},
+            warnings=["direct_llm failed (timeout); used rule_fallback."],
+            error="",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.reader_actions.generate_paper_review_card", side_effect=[good, placeholder]),
+            ):
+                first = handle_reader_action(ctx, "analyze_paper", {"page": 1})
+                second = handle_reader_action(ctx, "analyze_paper", {"page": 1})
+            analysis = load_paper_analysis(profile, ctx.source_id)
+
+        self.assertTrue(first.ok)
+        self.assertFalse(second.ok)
+        self.assertIn("previously saved analysis was kept", second.message)
+        self.assertEqual(analysis["tldr"], "Real model analysis.")
+        self.assertEqual(second.data["analysis"]["tldr"], "Real model analysis.")
+
+    def test_analyze_paper_rule_fallback_saves_when_nothing_exists(self) -> None:
+        placeholder = SimpleNamespace(
+            ok=True,
+            backend="rule_fallback",
+            structured={"tldr": "Introduction", "key_points": [{"text": "Section", "refs": []}]},
+            warnings=["direct_llm failed (timeout); used rule_fallback."],
+            error="",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.reader_actions.generate_paper_review_card", return_value=placeholder),
+            ):
+                result = handle_reader_action(ctx, "analyze_paper", {"page": 1})
+            analysis = load_paper_analysis(profile, ctx.source_id)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(analysis["tldr"], "Introduction")
+
     def test_codex_deep_read_saves_rich_schema_and_context_coverage(self) -> None:
         ai_result = SimpleNamespace(
             ok=True,
