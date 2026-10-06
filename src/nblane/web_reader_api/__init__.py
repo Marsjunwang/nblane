@@ -712,6 +712,7 @@ def _reader_ui(ui_lang: str | None = None) -> dict[str, str]:
         ),
         "translation_sync_failed": "翻译数据同步失败，正在重新拉取...",
         "task_status_retrying": "连接中断，正在重试获取任务状态...",
+        "fullscreen_unavailable": "当前浏览器不允许在这里全屏。",
         "pdf_retry": "重试 PDF",
         "refs": "引用",
         "refs_more": "还有 {count} 条引用",
@@ -784,20 +785,35 @@ def _reader_ui(ui_lang: str | None = None) -> dict[str, str]:
     }
 
 
-def _default_research_overview_url() -> str:
+def _main_app_base() -> str:
+    """Browser-facing base of the main app (the SPA; Streamlit is retired).
+
+    Empty means same-origin, which is the production layout behind Caddy.
+    ``NBLANE_STREAMLIT_BASE_URL`` is kept as a legacy alias so existing
+    deployments keep their configured origin.
+    """
+
+    return (
+        os.getenv("NBLANE_SPA_BASE_URL", "").strip()
+        or os.getenv("NBLANE_STREAMLIT_BASE_URL", "").strip()
+    ).rstrip("/")
+
+
+def _default_research_overview_url(profile: str = "") -> str:
     explicit = os.getenv("NBLANE_RESEARCH_OVERVIEW_URL", "").strip()
     if explicit:
         return explicit.rstrip("/")
-    base = os.getenv("NBLANE_STREAMLIT_BASE_URL", "").strip().rstrip("/")
-    return f"{base}/Research" if base else ""
+    clean_profile = _clean_text(profile)
+    path = f"/p/{quote(clean_profile, safe='')}/research" if clean_profile else "/research"
+    return f"{_main_app_base()}{path}"
 
 
-def _paper_library_return_url(return_to: object, return_url: object) -> str:
+def _paper_library_return_url(return_to: object, return_url: object, profile: str = "") -> str:
     clean = _clean_text(return_url)
     if clean:
         return clean
     if _clean_text(return_to) == "overview":
-        return _default_research_overview_url()
+        return _default_research_overview_url(profile)
     return ""
 
 
@@ -1211,10 +1227,7 @@ async def dashboard_view(request: Request, profile: str = "", embed: str = ""):
             "profile_json": json.dumps(clean_profile, ensure_ascii=False),
             "scripts": assets["scripts"],
             "styles": assets["styles"],
-            "streamlit_base_json": json.dumps(
-                os.getenv("NBLANE_STREAMLIT_BASE_URL", "").strip(),
-                ensure_ascii=False,
-            ),
+            "streamlit_base_json": json.dumps(_main_app_base(), ensure_ascii=False),
             "embed_json": json.dumps(str(embed or "").strip().lower() in {"1", "true", "yes"}, ensure_ascii=False),
         },
     )
@@ -1366,10 +1379,7 @@ async def blog_editor_view(request: Request, profile: str = "", slug: str = ""):
         _paper_library_profile_dir(clean_profile, request)
     if not (BLOG_EDITOR_FRONTEND_DIR / "index.html").is_file():
         raise HTTPException(status_code=404, detail="blog editor build not found")
-    streamlit_base = (
-        os.getenv("NBLANE_STREAMLIT_BASE_URL", "http://127.0.0.1:8503").strip()
-        or "http://127.0.0.1:8503"
-    )
+    streamlit_base = _main_app_base() or "/"
     config = {
         "profile": clean_profile,
         "slug": str(slug or "").strip(),
@@ -1532,7 +1542,7 @@ async def paper_library_payload(
         focus=focus,
         action=action,
         return_to=return_to,
-        return_url=_paper_library_return_url(return_to, return_url),
+        return_url=_paper_library_return_url(return_to, return_url, profile_path.name),
         user_id=user.id,
         reader_base="",
     )
@@ -1565,7 +1575,7 @@ def _paper_library_event_response(
         focus=focus,
         action=action,
         return_to=return_to,
-        return_url=_paper_library_return_url(return_to, return_url),
+        return_url=_paper_library_return_url(return_to, return_url, profile_path.name),
         user_id=user_id,
         reader_base="",
     )

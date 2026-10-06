@@ -1955,6 +1955,7 @@
       connector_scope_hint: "Connectors live in Research > Inbox & Connectors; Reader consumes imported sources.",
       translation_sync_failed: "Translation sync failed; refreshing...",
       task_status_retrying: "Connection interrupted; retrying task status...",
+      fullscreen_unavailable: "This browser does not allow fullscreen here.",
       front_matter: "Front matter",
       analysis_key_points: "Key points",
       analysis_method: "Method",
@@ -2072,6 +2073,7 @@
     let linkPreviewToken = 0;
     let linkCardHovered = false;
     let wheelZoomTimer = 0;
+    let pdfLoadError = "";
     let wheelZoomDelta = 0;
     let annotationPopover = { open: false, mode: "read", annotation: null, pending: false, dirty: false, x: 16, y: 16 };
     let readerMode = "pdf";
@@ -3586,7 +3588,7 @@
                 <summary class="pr-icon-button pr-menu-trigger" aria-haspopup="menu" aria-label="${attr(label("more_actions"))}" title="${attr(label("more_actions"))}">⋯</summary>
                 <div class="pr-menu-list align-right" role="menu">
                   <button class="pr-menu-item" role="menuitem" data-action="saveProgress" title="${attr(label("reader_workflow_hint"))}"><strong>${esc(label("save_progress"))}</strong><span>${esc(label("save_progress_help"))}</span></button>
-                  <button class="pr-menu-item" role="menuitem" data-action="fullscreen"><strong>${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</strong></button>
+                  ${fullscreenSupported() ? `<button class="pr-menu-item" role="menuitem" data-action="fullscreen"><strong>${esc(fullscreenActive ? label("exit_fullscreen") : label("fullscreen"))}</strong><span>F</span></button>` : ""}
                   <button class="pr-menu-item" role="menuitem" data-action="togglePanel"><strong>${esc(label("panel"))}</strong></button>
                   <button class="pr-menu-item" role="menuitem" data-action="shortcuts"><strong>${esc(label("shortcuts"))}</strong><span>?</span></button>
                 </div>
@@ -6983,7 +6985,7 @@
           if (preview) preview.classList.add("visible");
           canvas.classList.add("pending-fallback");
         }
-        const textLayerPromise = withTimeout(
+        const textLayerPromise = withVisibleTimeout(
           renderTextLayer(pageNumber, page, viewport),
           pdfTextLayerTimeoutMs(),
           "PDF.js text layer timed out."
@@ -7001,7 +7003,7 @@
           transform: dpr === 1 ? null : [dpr, 0, 0, dpr, 0, 0],
         });
         try {
-          await withTimeout(state.renderTask.promise, pdfPageRenderTimeoutMs(), "PDF.js render timed out; using image preview fallback.");
+          await withVisibleTimeout(state.renderTask.promise, pdfPageRenderTimeoutMs(), "PDF.js render timed out; using image preview fallback.");
           clearPagePreview(pageNumber);
           clearPageError(pageNumber);
           markPageRenderSource(pageNumber, "pdfjs");
@@ -7010,13 +7012,19 @@
           state.renderedScale = pageScale;
           state.previewScale = 0;
         } catch (error) {
-          if (!(error && error.name === "RenderingCancelledException")) {
+          const cancelled = Boolean(error && error.name === "RenderingCancelledException");
+          if (!cancelled) {
             try { console.error("PDF.js page.render failed", pageNumber, error); } catch {}
           }
-          if (hasPreview) {
+          if (cancelled || !canvas.isConnected) {
+            // Superseded by a newer render (zoom, mode switch, re-layout):
+            // not a failure, and the DOM may already belong to the new render.
+            state.status = "cancelled";
+          } else if (hasPreview) {
             state.status = "preview";
             state.previewScale = pageScale;
             markPageRenderSource(pageNumber, "preview", error && error.message ? error.message : text(error));
+            scheduleFallbackRetry(pageNumber, state);
           } else {
             state.status = "error";
             state.error = error && error.message ? error.message : text(error);
@@ -7260,6 +7268,24 @@
       clearPageError(page);
       ensurePageRendered(page, { force: true });
     }
+    // Like withTimeout, but only counts time while the tab is visible:
+    // PDF.js paints through requestAnimationFrame, which the browser pauses
+    // in background tabs, so a wall-clock timeout there is a false failure.
+    function withVisibleTimeout(promise, ms, message) {
+      let timer = null;
+      let elapsed = 0;
+      const step = 250;
+      const timeout = new Promise((_, reject) => {
+        timer = window.setInterval(() => {
+          if (document.visibilityState !== "visible") return;
+          elapsed += step;
+          if (elapsed >= ms) reject(new Error(message));
+        }, step);
+      });
+      return Promise.race([promise, timeout]).finally(() => {
+        if (timer !== null) window.clearInterval(timer);
+      });
+    }
     function withTimeout(promise, ms, message) {
       let timer = null;
       const timeout = new Promise((_, reject) => {
@@ -7347,7 +7373,7 @@
         requestedPreviews.add(pageNumber);
         fetchPagePreview(pageNumber);
       }
-      if (!pdfDocumentLoading) markPageRenderSource(pageNumber, "preview", label("pdf_error"));
+      if (!pdfDocumentLoading) markPageRenderSource(pageNumber, "preview", pdfLoadError || label("pdf_error"));
       if (state) {
         state.status = pageDomReady(pageNumber, "preview") ? "preview" : "preview_requested";
         state.previewScale = size.scale;
@@ -8201,6 +8227,27 @@
       placeLinkCard(card, anchor);
     }
     // ---------- Page render source + preview fallback badge ----------
+    // One automatic retry per page and scale for transient failures (busy
+    // main thread, slow first paint); further retries stay manual.
+    function scheduleFallbackRetry(pageNumber, state) {
+      if (!pdfDoc || state.autoRetried) return;
+      state.autoRetried = true;
+      window.setTimeout(() => {
+        if (document.visibilityState !== "visible" || !pdfDoc) return;
+        const current = pageRenderStates.get(pageNumber);
+        if (current && current.status === "preview") ensurePageRendered(pageNumber, { force: true });
+      }, 1500);
+    }
+    // Pages that fell back while the tab was hidden get a fresh PDF.js render
+    // as soon as the reader is visible again.
+    function retryFallbackPages() {
+      if (!pdfDoc || document.visibilityState !== "visible") return;
+      for (const [pageNumber, state] of pageRenderStates.entries()) {
+        if (state.status === "preview" && Math.abs(pageNumber - currentPage) <= overscanPages() + 1) {
+          ensurePageRendered(pageNumber, { force: true });
+        }
+      }
+    }
     function markPageRenderSource(pageNumber, source, reason = "") {
       const wrap = pageWrap(pageNumber);
       if (!wrap) return;
@@ -8211,16 +8258,17 @@
       badge.className = "pr-fallback-badge";
       badge.title = reason ? `${label("page_preview_fallback_hint")}\n${reason}` : label("page_preview_fallback_hint");
       badge.innerHTML = `<span>${esc(label("page_preview_fallback"))}</span>`;
-      if (pdfDoc) {
-        const retry = document.createElement("button");
-        retry.type = "button";
-        retry.textContent = label("retry");
-        retry.addEventListener("click", (event) => {
-          event.stopPropagation();
-          ensurePageRendered(pageNumber, { force: true });
-        });
-        badge.appendChild(retry);
-      }
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = label("retry");
+      retry.addEventListener("click", (event) => {
+        event.stopPropagation();
+        // Page-level failure: re-render the page. Document-level failure
+        // (no PDF.js document): reload the PDF itself.
+        if (pdfDoc) ensurePageRendered(pageNumber, { force: true });
+        else loadPdf().catch(() => {});
+      });
+      badge.appendChild(retry);
       wrap.appendChild(badge);
     }
     function refreshFullscreenLabel() {
@@ -8267,6 +8315,7 @@
         [label("shortcut_click"), label("shortcut_click_action")],
         [label("shortcut_dblclick"), label("shortcut_dblclick_action")],
         [label("shortcut_drag"), label("shortcut_drag_action")],
+        ["F", label("fullscreen")],
         ["Esc", label("shortcut_close")],
         ["?", label("shortcuts")],
       ];
@@ -8292,22 +8341,29 @@
     function shellEl() {
       return document.getElementById("readerShell") || document.querySelector(".pr-shell");
     }
+    function fullscreenSupported() {
+      return Boolean(document.fullscreenEnabled && document.documentElement.requestFullscreen);
+    }
     async function toggleFullscreen() {
       const shell = shellEl();
       if (!shell) return;
-      try {
-        if (!document.fullscreenElement && shell.requestFullscreen) {
-          await shell.requestFullscreen();
-          fullscreenActive = true;
-        } else if (document.fullscreenElement && document.exitFullscreen) {
-          await document.exitFullscreen();
-          fullscreenActive = false;
-        } else {
-          fullscreenActive = !fullscreenActive;
-        }
-      } catch {
-        fullscreenActive = !fullscreenActive;
+      // Only the real Fullscreen API. The old CSS-only fallback merely filled
+      // the embedding iframe (no visible change) and could not be left with Esc.
+      if (!fullscreenSupported()) {
+        status(label("fullscreen_unavailable"));
+        return;
       }
+      try {
+        if (!document.fullscreenElement) {
+          await shell.requestFullscreen({ navigationUI: "hide" });
+        } else {
+          await document.exitFullscreen();
+        }
+      } catch (error) {
+        try { console.warn("Reader fullscreen request failed", error); } catch {}
+        status(label("fullscreen_unavailable"));
+      }
+      fullscreenActive = Boolean(document.fullscreenElement);
       shell.classList.toggle("fullscreen", fullscreenActive);
       refreshFullscreenLabel();
       window.setTimeout(() => {
@@ -8372,6 +8428,11 @@
       if (event.key === "?" && !isEditable) {
         event.preventDefault();
         toggleShortcutHelp();
+        return;
+      }
+      if ((event.key === "f" || event.key === "F") && !isEditable && fullscreenSupported()) {
+        event.preventDefault();
+        toggleFullscreen();
         return;
       }
       if (event.key === "/" && !isEditable) {
@@ -8637,6 +8698,7 @@
           for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
           source = { data: bytes };
         }
+        pdfLoadError = "";
         loadingTask = window.pdfjsLib.getDocument(source);
         const loadedDoc = await withTimeout(loadingTask.promise, pdfLoadTimeoutMs(), "PDF.js document load timed out; using page preview fallback.");
         if (seq !== loadSeq) return;
@@ -8686,6 +8748,8 @@
         }
         pdfDocumentLoading = false;
         pdfDoc = null;
+        pdfLoadError = error && error.message ? error.message : text(error);
+        try { console.error("PDF.js document load failed", error); } catch {}
         totalPages = knownPageCount(currentPage);
         status(`${label("pdf_preview_mode")} · ${label("pdf_error")}`);
         debugState.lastLoadMs = performance.now() - startedAt;
@@ -8916,6 +8980,7 @@
     window.addEventListener("pagehide", sendProgressBeacon);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") sendProgressBeacon();
+      else window.setTimeout(retryFallbackPages, 300);
     });
     window.addEventListener("error", (event) => {
       try { console.error("reader window.error", event && event.error); } catch {}

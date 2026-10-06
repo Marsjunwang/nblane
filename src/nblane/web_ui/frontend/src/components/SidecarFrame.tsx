@@ -155,6 +155,10 @@ export function SidecarFrame({
             title={title}
             src={contentUrl}
             data-testid="sidecar-frame"
+            // The Reader's 全屏 calls requestFullscreen() inside this frame;
+            // without the permission the browser rejects it silently.
+            allow="fullscreen"
+            allowFullScreen
             onLoad={() => setLoaded(true)}
             style={{ display: 'block', width: '100%', height: '100%', border: 0, borderRadius: 8 }}
           />
