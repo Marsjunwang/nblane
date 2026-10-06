@@ -56,7 +56,20 @@ function ReadOnlyColumn({
       </Group>
       <Stack gap="xs">
         {(tasks ?? []).map((task) => (
-          <Box key={task.id} onClick={() => onSelectTask(task.id)} style={{ cursor: 'pointer' }}>
+          <Box
+            key={task.id}
+            role="button"
+            tabIndex={0}
+            aria-label={`查看任务 ${task.title}`}
+            onClick={() => onSelectTask(task.id)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onSelectTask(task.id);
+              }
+            }}
+            style={{ cursor: 'pointer' }}
+          >
             <TaskCardBody task={task} selected={selectedTaskId === task.id} />
           </Box>
         ))}

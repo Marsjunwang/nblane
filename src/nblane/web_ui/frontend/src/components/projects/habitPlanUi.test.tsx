@@ -110,6 +110,19 @@ describe('NewHabitPlanModal 按天编辑器', () => {
     expect(screen.queryByTestId('habit-plan-day-exercise-4')).not.toBeInTheDocument();
   });
 
+  it('按天超过 90 天时拒绝并提示,不渲染整墙输入框', async () => {
+    stubFetch(() => undefined);
+    renderWithProviders(
+      <NewHabitPlanModal profile="alice" habit={HABIT} today="2026-09-25" opened onClose={() => {}} />,
+    );
+    await screen.findByTestId('habit-plan-day-exercise-28');
+    fireEvent.change(screen.getByTestId('habit-plan-end-exercise'), {
+      target: { value: '2027-03-01' },
+    });
+    expect(await screen.findByText(/按天拆解最多 90 天/)).toBeInTheDocument();
+    expect(screen.queryByTestId('habit-plan-day-exercise-1')).not.toBeInTheDocument();
+  });
+
   it('默认挂载自动 case,提交组装 daily_tasks 且不传 project_id', async () => {
     let posted: Record<string, unknown> | null = null;
     stubFetch((url, init) => {

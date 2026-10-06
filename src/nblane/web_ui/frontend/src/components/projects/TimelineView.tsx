@@ -49,7 +49,8 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { IconChevronDown, IconChevronRight, IconFocus2, IconRestore } from '@tabler/icons-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useMediaQuery } from '@mantine/hooks';
 import { useSearchParams } from 'react-router-dom';
 
 import type {
@@ -119,6 +120,10 @@ import { useTimelineDrag } from './useTimelineDrag';
 import './TimelineView.css';
 
 const LABEL_WIDTH = 200;
+/** Phones: the 200px label column ate ~60% of a 390px screen. */
+const LABEL_WIDTH_NARROW = 112;
+/** Label-column width for this render (desktop vs phone). */
+const LabelWidthContext = createContext(LABEL_WIDTH);
 const HABIT_ROW_HEIGHT = 44;
 
 const STATUS_LABELS: Record<string, string> = {
@@ -172,10 +177,11 @@ function RowLabel({
   onFocus?: () => void;
   focusTestId?: string;
 }) {
+  const labelWidth = useContext(LabelWidthContext);
   return (
     <Box
-      w={LABEL_WIDTH}
-      miw={LABEL_WIDTH}
+      w={labelWidth}
+      miw={labelWidth}
       pl="sm"
       pr={4}
       className="timeline-row-label"
@@ -1272,6 +1278,10 @@ export function TimelineView({
   onSelectTask,
   onDragError,
 }: TimelineViewProps) {
+  // Narrow screens shrink the sticky label column; every axis offset below
+  // (fit width, wheel anchor, today line) reads this one value.
+  const narrow = useMediaQuery('(max-width: 48em)') ?? false;
+  const labelWidth = narrow ? LABEL_WIDTH_NARROW : LABEL_WIDTH;
   const today = board.today || '';
   // URL 视图状态: present params win on entry; absent ones fall back to
   // localStorage prefs / defaults. State is decoded once — later param
@@ -1351,7 +1361,7 @@ export function TimelineView({
         history: showHistory ? historyTasks : [],
         zoom,
         window: customWindow ?? undefined,
-        fitWidth: viewportWidth > 0 ? viewportWidth - LABEL_WIDTH : undefined,
+        fitWidth: viewportWidth > 0 ? viewportWidth - labelWidth : undefined,
       }),
     [board, historyTasks, showHistory, zoom, customWindow, viewportWidth],
   );
@@ -1408,7 +1418,7 @@ export function TimelineView({
       }
       event.preventDefault();
       const mouseX = event.clientX - viewport.getBoundingClientRect().left;
-      const axisX = mouseX - LABEL_WIDTH;
+      const axisX = mouseX - labelWidth;
       const oldSpan = daysBetween(scale.start, scale.end) + 1;
       const newSpan = Math.round(
         Math.min(Math.max(oldSpan * Math.exp(event.deltaY * 0.0022), 2), 5000),
@@ -1484,7 +1494,7 @@ export function TimelineView({
     centerOnScale.current = false;
     const inWindow = today >= scale.start && today <= scale.end;
     const target = inWindow
-      ? dateToX(today, scale) + LABEL_WIDTH - viewport.clientWidth * 0.75
+      ? dateToX(today, scale) + labelWidth - viewport.clientWidth * 0.75
       : 0;
     viewport.scrollLeft = Math.max(0, target);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1595,6 +1605,7 @@ export function TimelineView({
   }, [unassignedLive, historyByProject.loose, showHistory, today, scale]);
 
   return (
+    <LabelWidthContext.Provider value={labelWidth}>
     <Stack gap="xs" data-testid="timeline-view">
       {/* Toolbar: 历史/归档 toggles, zoom presets, 项目筛选, 重置视图. */}
       <Group gap="md" wrap="wrap" data-testid="timeline-toolbar">
@@ -1687,14 +1698,14 @@ export function TimelineView({
           onPointerDown={startPan}
           style={{
             position: 'relative',
-            minWidth: LABEL_WIDTH + width,
+            minWidth: labelWidth + width,
             cursor: panning ? 'grabbing' : undefined,
             userSelect: panning ? 'none' : undefined,
           }}
         >
           {/* Month axis */}
           <Group wrap="nowrap" gap={0}>
-            <Box w={LABEL_WIDTH} miw={LABEL_WIDTH} />
+            <Box w={labelWidth} miw={labelWidth} />
             <Box
               style={{
                 position: 'relative',
@@ -1735,8 +1746,8 @@ export function TimelineView({
             <Stack gap={0} data-testid="timeline-group-habits">
               <Group wrap="nowrap" gap={0}>
                 <Box
-                  w={LABEL_WIDTH}
-                  miw={LABEL_WIDTH}
+                  w={labelWidth}
+                  miw={labelWidth}
                   pl="sm"
                   py={4}
                   style={{ position: 'sticky', left: 0, zIndex: 2, background: boardPalette.ground }}
@@ -1784,8 +1795,8 @@ export function TimelineView({
             <Stack key={group.id} gap={0} data-testid={`timeline-group-${group.id}`}>
               <Group wrap="nowrap" gap={0}>
                 <Box
-                  w={LABEL_WIDTH}
-                  miw={LABEL_WIDTH}
+                  w={labelWidth}
+                  miw={labelWidth}
                   pl="sm"
                   py={4}
                   style={{
@@ -1828,8 +1839,8 @@ export function TimelineView({
             <Stack gap={0} data-testid="timeline-group-archived">
               <Group wrap="nowrap" gap={0}>
                 <Box
-                  w={LABEL_WIDTH}
-                  miw={LABEL_WIDTH}
+                  w={labelWidth}
+                  miw={labelWidth}
                   pl="sm"
                   py={4}
                   style={{
@@ -1932,7 +1943,7 @@ export function TimelineView({
               data-testid="timeline-today-line"
               style={{
                 position: 'absolute',
-                left: LABEL_WIDTH + dateToX(today, scale) + scale.dayWidth / 2,
+                left: labelWidth + dateToX(today, scale) + scale.dayWidth / 2,
                 top: 28,
                 bottom: 0,
                 borderLeft: `1.5px dashed ${boardPalette.todayLine}`,
@@ -1943,5 +1954,6 @@ export function TimelineView({
         </Box>
       </Box>
     </Stack>
+    </LabelWidthContext.Provider>
   );
 }

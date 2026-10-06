@@ -45,6 +45,7 @@ import {
   TextInput,
   Tooltip,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
   IconArchive,
@@ -297,7 +298,18 @@ function HabitHeatmap({
                     aria-pressed={deletable ? confirmDate === cell.date : undefined}
                     data-testid={`heatmap-cell-${habit.id}-${cell.date}`}
                     data-filled={filled ? 'true' : 'false'}
+                    tabIndex={onClick ? 0 : undefined}
                     onClick={onClick}
+                    onKeyDown={
+                      onClick
+                        ? (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              onClick();
+                            }
+                          }
+                        : undefined
+                    }
                     style={{
                       display: 'inline-block',
                       width: 11,
@@ -460,6 +472,12 @@ function DeleteHabitModal({
 }
 
 /** Pure-habit lifecycle gear: hover-revealed, opens the 新建计划/归档/删除 menu. */
+/** Touch screens have no hover: hover-revealed controls must stay visible
+ * there (they were invisible yet still tappable). */
+function useNoHover(): boolean {
+  return useMediaQuery('(hover: none)') ?? false;
+}
+
 function HabitLifecycleMenu({
   profile,
   habit,
@@ -481,6 +499,7 @@ function HabitLifecycleMenu({
   onDeleted: (habitId: string) => void;
 }) {
   const archiveHabit = useArchiveHabit(profile);
+  const noHover = useNoHover();
   const [planOpen, setPlanOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const title = habit.title || habit.id;
@@ -523,7 +542,7 @@ function HabitLifecycleMenu({
             onBlur={() => onVisibility(false)}
             style={{
               color: boardPalette.dim,
-              opacity: visible ? 1 : 0,
+              opacity: visible || noHover ? 1 : 0,
               transition: 'opacity 120ms ease',
             }}
           >
@@ -609,6 +628,7 @@ function HabitBandRow({
   const [expanded, setExpanded] = useState(false);
   // Hover (or keyboard focus on the button) reveals the 设置 affordance.
   const [settingsVisible, setSettingsVisible] = useState(false);
+  const noHover = useNoHover();
   const checkin = useAddCheckin(profile);
   // 打卡关联: when in-window active plans exist, the 打卡 button opens an
   // inline confirm instead of firing immediately; planPick '' = 不计入计划.
@@ -716,7 +736,7 @@ function HabitBandRow({
               onBlur={() => setSettingsVisible(false)}
               style={{
                 color: boardPalette.dim,
-                opacity: settingsVisible ? 1 : 0,
+                opacity: settingsVisible || noHover ? 1 : 0,
                 transition: 'opacity 120ms ease',
               }}
             >
@@ -911,7 +931,12 @@ export function HabitBand({
       ]
     : [];
   const visibleRows = [...liveRows, ...archivedRows];
-  const archivedCount = archivedIds.size + (archivedQuery.data?.length ?? 0);
+  // Union, not sum: once the refetch lands, a locally archived habit is in
+  // both archivedIds and the server's archived list.
+  const archivedCount = new Set([
+    ...archivedIds,
+    ...(archivedQuery.data ?? []).map((habit) => habit.id),
+  ]).size;
   if (rows.length === 0) {
     return null;
   }

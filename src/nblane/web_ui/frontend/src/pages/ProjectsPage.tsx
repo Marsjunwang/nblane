@@ -25,6 +25,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { IconPlus, IconRefresh } from '@tabler/icons-react';
+import { useMediaQuery } from '@mantine/hooks';
 import { useCallback, useMemo, useState } from 'react';
 import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 
@@ -110,6 +111,7 @@ export function ProjectsPage() {
   const [editProjectId, setEditProjectId] = useState<string | null>(null);
   // 显真联动 (starmap 真印): OFF = 古名「北极星」,悬浮出真名; ON = 全文直显。
   const [reveal] = useState(readRevealPref);
+  const narrow = useMediaQuery('(max-width: 48em)') ?? false;
 
   // View/group switches preserve the shared task selection; closing the
   // detail card drops only the task param. All switches replace history.
@@ -190,8 +192,11 @@ export function ProjectsPage() {
         p="sm"
         data-testid="projects-toolbar"
         style={{
-          position: 'sticky',
-          top: 0,
+          // Sticky just below the fixed 56px AppShell header (top: 0 slid the
+          // toolbar under it). Phones: the wrapped toolbar is ~200px tall, so
+          // it scrolls away with the page instead of pinning a third of the screen.
+          position: narrow ? 'static' : 'sticky',
+          top: 56,
           // Above the detail-card modal overlay (200) while a card is open —
           // the mockup keeps the topbar (and its shared-selection chip)
           // reachable so the view/group switch never loses `?task=`. At the

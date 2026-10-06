@@ -156,6 +156,9 @@ export function NewPlanModal({
                   color="gray"
                   leftSection={<IconLeaf size={12} />}
                   style={{ cursor: 'pointer' }}
+                  component="button"
+                  type="button"
+                  aria-pressed={selectedId === entry.template_id}
                   onClick={() => pick(entry.template_id, entry.title)}
                   data-testid={`plan-history-${entry.template_id}`}
                 >

@@ -699,7 +699,9 @@ function ChronicleInspector({
         right: 20,
         bottom: 20,
         width: 320,
-        zIndex: 300,
+        // Below Mantine's modal/drawer layer (200) so the detail card and the
+        // project drawer always cover it; above the board content.
+        zIndex: 150,
         background: boardPalette.ground,
         border: `1px solid ${inscription.borderColor}`,
         borderRadius: 10,

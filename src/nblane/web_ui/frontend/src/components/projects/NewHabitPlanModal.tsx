@@ -54,6 +54,9 @@ function splitTasks(raw: string): string[] {
 }
 
 /** Inclusive week count for [start, end]; 0 when the range is invalid. */
+
+/** Daily entry renders one input per day; longer ranges go weekly. */
+export const MAX_DAILY_PLAN_DAYS = 90;
 export function planWeekCount(start: string, end: string): number {
   const days = daysBetween(start, end) + 1;
   return days > 0 ? Math.ceil(days / 7) : 0;
@@ -113,9 +116,25 @@ export function NewHabitPlanModal({
   const autoCaseId = useMemo(() => autoMountCaseId(cases, habit.id), [cases, habit.id]);
   const mountValue = projectPick ?? (autoCaseId || NO_PROJECT_PICK);
 
-  const weekCount = planWeekCount(start, end);
-  const dayCount = weekCount === 0 ? 0 : daysBetween(start, end) + 1;
-  const invalidRange = weekCount === 0;
+  const rawWeekCount = planWeekCount(start, end);
+  const rawDayCount = rawWeekCount === 0 ? 0 : daysBetween(start, end) + 1;
+  // Daily mode renders one input per day: past MAX_DAILY_PLAN_DAYS the form
+  // becomes a wall of inputs, so the range is refused there (weekly is fine).
+  const tooLongForDaily = entryMode === 'daily' && rawDayCount > MAX_DAILY_PLAN_DAYS;
+  const weekCount = tooLongForDaily ? 0 : rawWeekCount;
+  const dayCount = tooLongForDaily ? 0 : rawDayCount;
+  const invalidRange = rawWeekCount === 0 || tooLongForDaily;
+  // Name the field that is actually wrong.
+  const startError = !start ? '请选择开始日期。' : undefined;
+  const endError = !start
+    ? undefined
+    : !end
+      ? '请选择结束日期。'
+      : rawWeekCount === 0
+        ? '结束日期需不早于开始日期。'
+        : tooLongForDaily
+          ? `按天拆解最多 ${MAX_DAILY_PLAN_DAYS} 天(当前 ${rawDayCount} 天),请缩短或改为按周。`
+          : undefined;
   // Resize the week/day rows as the date range moves, preserving typed text.
   useEffect(() => {
     setWeekTexts((prev) => resizeRowTexts(prev, weekCount));
@@ -127,6 +146,8 @@ export function NewHabitPlanModal({
   const weeklyTasks = weekTexts.map(splitTasks);
   const dailyTasks = assembleDailyTasks(dayTexts);
   const weeksReady = weeklyTasks.length > 0 && weeklyTasks.every((tasks) => tasks.length > 0);
+  // 1-based numbers of the weeks still empty (weekly mode needs one task each).
+  const emptyWeeks = weeklyTasks.flatMap((tasks, index) => (tasks.length === 0 ? [index + 1] : []));
   const tasksReady = entryMode === 'daily' ? dailyTasks.length > 0 : weeksReady;
   const valid = !invalidRange && title.trim().length > 0 && tasksReady;
 
@@ -189,6 +210,7 @@ export function NewHabitPlanModal({
             value={start}
             onChange={setStart}
             clearable={false}
+            error={startError}
             data-testid={`habit-plan-start-${habit.id}`}
           />
           <PlainDateInput
@@ -196,7 +218,7 @@ export function NewHabitPlanModal({
             value={end}
             onChange={setEnd}
             clearable={false}
-            error={invalidRange ? '结束日期需不早于开始日期。' : undefined}
+            error={endError}
             data-testid={`habit-plan-end-${habit.id}`}
           />
         </Group>
@@ -243,9 +265,19 @@ export function NewHabitPlanModal({
                     prev.map((value, at) => (at === index ? next : value)),
                   );
                 }}
+                error={
+                  emptyWeeks.includes(index + 1) && text.length > 0
+                    ? '这一周还没有任务'
+                    : undefined
+                }
                 data-testid={`habit-plan-week-${habit.id}-${index + 1}`}
               />
             ))}
+            {emptyWeeks.length > 0 && (
+              <Text size="xs" c="dimmed" data-testid={`habit-plan-empty-weeks-${habit.id}`}>
+                还需填写:第 {emptyWeeks.join('、')} 周
+              </Text>
+            )}
           </Stack>
         )}
         {!invalidRange && entryMode === 'daily' && (

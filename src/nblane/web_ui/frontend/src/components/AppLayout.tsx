@@ -1,4 +1,4 @@
-import { ActionIcon, AppShell, Badge, Burger, Button, Divider, Group, Indicator, NavLink, Text, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, AppShell, Badge, Box, Burger, Button, Divider, Group, Indicator, NavLink, Text, Title, Tooltip } from '@mantine/core';
 import { useDisclosure, useLocalStorage, useMediaQuery } from '@mantine/hooks';
 import {
   IconArrowLeft,
@@ -166,15 +166,19 @@ export function AppLayout() {
               </Badge>
             )}
           </Group>
-          <Group gap="sm">
+          {/* One line at every width: below sm the actions go icon-only (names
+              stay as aria-labels) so the cluster never wraps past the fixed
+              56px header and over the page content. */}
+          <Group gap="sm" wrap="nowrap">
             <Button
               component={RouterLink}
               to="/workshop"
               variant={location.pathname.startsWith('/workshop') ? 'light' : 'subtle'}
               size="compact-sm"
               leftSection={<IconTerminal2 size={14} />}
+              aria-label="车间"
             >
-              车间
+              <Box component="span" visibleFrom="sm">车间</Box>
             </Button>
             <Button
               component={RouterLink}
@@ -182,8 +186,9 @@ export function AppLayout() {
               variant={location.pathname.startsWith('/assistant') ? 'light' : 'subtle'}
               size="compact-sm"
               leftSection={<IconRobot size={14} />}
+              aria-label="助手"
             >
-              助手
+              <Box component="span" visibleFrom="sm">助手</Box>
             </Button>
             {currentProfile && hasExceptionSignal && (
               <Tooltip label="AI 异常" withArrow>
@@ -212,11 +217,12 @@ export function AppLayout() {
               variant={location.pathname.startsWith('/settings') ? 'light' : 'subtle'}
               size="compact-sm"
               leftSection={<IconSettings size={14} />}
+              aria-label="设置"
             >
-              设置
+              <Box component="span" visibleFrom="sm">设置</Box>
             </Button>
             {me.data && (
-              <Text size="sm" c="dimmed">
+              <Text size="sm" c="dimmed" visibleFrom="sm">
                 {me.data.display_name}
               </Text>
             )}
@@ -227,8 +233,9 @@ export function AppLayout() {
                 leftSection={<IconLogout size={14} />}
                 loading={logout.isPending}
                 onClick={() => logout.mutate(undefined, { onSettled: () => navigate('/login') })}
+                aria-label="退出登录"
               >
-                退出登录
+                <Box component="span" visibleFrom="sm">退出登录</Box>
               </Button>
             )}
           </Group>
