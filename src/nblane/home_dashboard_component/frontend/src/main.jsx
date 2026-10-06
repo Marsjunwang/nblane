@@ -301,7 +301,7 @@ function standaloneConfig() {
   return config && typeof config === "object" ? config : null;
 }
 
-function standaloneTargetUrl(path, streamlitBase = "") {
+function standaloneTargetUrl(path, streamlitBase = "", profile = "") {
   const clean = cleanText(path);
   if (!clean) {
     return "";
@@ -310,10 +310,15 @@ function standaloneTargetUrl(path, streamlitBase = "") {
     return clean;
   }
   // No configured base means same-origin: production sits behind a reverse
-  // proxy where "/" already resolves to the Streamlit app, and 8503 is a
-  // local-dev-only port that never exists in production.
+  // proxy where "/" serves the SPA. Legacy Streamlit page paths
+  // (pages/3_Kanban.py) are redirected by the SPA, which needs the profile.
   const base = cleanText(streamlitBase).replace(/\/+$/, "");
-  return `${base}/${clean.replace(/^\/+/, "")}`;
+  let target = `${base}/${clean.replace(/^\/+/, "")}`;
+  const cleanProfile = cleanText(profile);
+  if (cleanProfile && /(^|\/)pages\/[^/]+\.py($|[?#])/i.test(target) && !/[?&]profile=/.test(target)) {
+    target += `${target.includes("?") ? "&" : "?"}profile=${encodeURIComponent(cleanProfile)}`;
+  }
+  return target;
 }
 
 const DASHBOARD_VIEW_MODES = new Set(["focus", "canvas", "attention", "3d"]);
@@ -5232,7 +5237,7 @@ function Dashboard({ args }) {
       const action = cleanText(event?.action);
       const path = cleanText(event?.payload?.path);
       if (action === "navigate" && path) {
-        const target = standaloneTargetUrl(path, args.streamlitBase);
+        const target = standaloneTargetUrl(path, args.streamlitBase, payload?.profile);
         if (args.embed && window.top && window.top !== window) {
           window.top.location.href = target;
         } else {

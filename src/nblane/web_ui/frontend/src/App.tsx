@@ -12,6 +12,7 @@ import { HomePage } from './pages/HomePage';
 import { InboxPage } from './pages/InboxPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { LegacyStreamlitRedirect } from './pages/LegacyStreamlitRedirect';
 import { ProfilesPage } from './pages/ProfilesPage';
 import { KanbanRedirect, ProjectBoardRedirect, ProjectsPage } from './pages/ProjectsPage';
 import { PublicBuildPage } from './pages/PublicBuildPage';
@@ -86,6 +87,10 @@ export function App() {
           <Route path="/p/:name/research/papers/:sourceId" element={<PaperOverviewPage />} />
           <Route path="/p/:name/research/papers/:sourceId/read" element={<PaperReaderPage />} />
           <Route path="/p/:name/research/sources" element={<ResearchSourcesPage />} />
+          {/* Retired Streamlit URLs (/Skill_Tree, /pages/1_Skill_Tree.py) keep
+              working now that the main domain serves the SPA. */}
+          <Route path="/pages/:legacyFile" element={<LegacyStreamlitRedirect />} />
+          <Route path="/:legacyPage" element={<LegacyStreamlitRedirect />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

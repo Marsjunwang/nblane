@@ -14,6 +14,8 @@ web_api_port="${NBLANE_DEV_WEB_API_PORT:-}"
 grobid_port="${NBLANE_DEV_GROBID_PORT:-18070}"
 use_grobid="0"
 use_web_api="1"
+# Streamlit is retired (2026-10-06); start it only when explicitly asked.
+use_streamlit="0"
 runtime="${NBLANE_PAPER_LIBRARY_RUNTIME:-fastapi_iframe}"
 env_file="${NBLANE_DEV_ENV_FILE:-$repo_root/.env}"
 auth_file="${NBLANE_DEV_AUTH_FILE:-}"
@@ -24,8 +26,8 @@ usage() {
   cat <<'EOF'
 Usage: scripts/dev-web.sh [start|stop|status] [options]
 
-Starts the development Streamlit UI, FastAPI Reader sidecar, and the SPA
-backend (nblane.web_api) in tmux.
+Starts the FastAPI Reader sidecar and the SPA backend (nblane.web_api) in
+tmux. The retired Streamlit UI only starts with --streamlit.
 
 Commands:
   start              Start or restart dev tmux sessions. This is the default.
@@ -39,6 +41,7 @@ Options:
   --no-reload        Start uvicorn without reload. This is the default.
   --reader-port N    Reader sidecar port. Default: 8502, or 18502 with --isolated.
   --streamlit-port N Streamlit port. Default: 8503, or 18503 with --isolated.
+  --streamlit        Also start the retired Streamlit UI (off by default).
   --web-api-port N   SPA backend (nblane.web_api) port.
                      Default: 8504, or 18504 with --isolated.
   --no-web-api       Do not start the SPA backend service.
@@ -63,6 +66,7 @@ Examples:
   scripts/dev-web.sh --isolated --reload
   scripts/dev-web.sh --isolated --grobid
   scripts/dev-web.sh --no-web-api
+  scripts/dev-web.sh --isolated --streamlit   # also start the retired Streamlit UI
 EOF
 }
 
@@ -98,6 +102,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-web-api)
       use_web_api="0"
+      shift
+      ;;
+    --streamlit)
+      use_streamlit="1"
       shift
       ;;
     --profile)
@@ -232,7 +240,9 @@ sync_tmux_proxy_environment() {
 show_status() {
   tmux ls 2>/dev/null | grep -E "^(${reader_session}|${streamlit_session}|${web_api_session}):" || true
   echo
-  echo "Streamlit:     ${streamlit_base}"
+  if [[ "$use_streamlit" == "1" ]]; then
+    echo "Streamlit:     ${streamlit_base}  (retired; started with --streamlit)"
+  fi
   echo "Reader API:    ${reader_base}"
   echo "Paper Library: ${reader_base}/paper-library?profile=${profile}"
   if [[ "$use_web_api" == "1" ]]; then
@@ -240,7 +250,9 @@ show_status() {
   fi
   echo
   echo "Health checks:"
-  echo "  curl -i ${streamlit_base}/_stcore/health"
+  if [[ "$use_streamlit" == "1" ]]; then
+    echo "  curl -i ${streamlit_base}/_stcore/health"
+  fi
   echo "  curl -i '${reader_base}/paper-library?profile=${profile}'"
   if [[ "$use_web_api" == "1" ]]; then
     echo "  curl -i ${web_api_base}/api/v1/health"
@@ -267,7 +279,7 @@ if [[ "$command" == "status" ]]; then
 fi
 
 # --- start-only prerequisites (stop/status above must work without them) ---
-if [[ ! -x ".venv/bin/uvicorn" || ! -x ".venv/bin/streamlit" ]]; then
+if [[ ! -x ".venv/bin/uvicorn" ]] || [[ "$use_streamlit" == "1" && ! -x ".venv/bin/streamlit" ]]; then
   echo "Missing .venv tools. Run: python3 -m venv .venv && .venv/bin/pip install -e ." >&2
   exit 1
 fi
@@ -440,7 +452,10 @@ wait_for_free_port() {
 stop_sessions
 sync_tmux_proxy_environment
 
-ports_to_check=("$reader_port" "$streamlit_port")
+ports_to_check=("$reader_port")
+if [[ "$use_streamlit" == "1" ]]; then
+  ports_to_check+=("$streamlit_port")
+fi
 if [[ "$use_web_api" == "1" ]]; then
   ports_to_check+=("$web_api_port")
 fi
@@ -458,10 +473,11 @@ tmux new-session -d -s "$reader_session" -c "$repo_root" \
    NBLANE_ROOT='$dev_root' \
    NBLANE_ENV_FILE='$env_file' \
    NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
-   NBLANE_STREAMLIT_BASE_URL='$streamlit_base' \
+   NBLANE_SPA_BASE_URL='$web_api_base' \
    ${auth_env} ${grobid_env} ${lang_env} \
    PYTHONPATH=src .venv/bin/uvicorn ${uvicorn_args}"
 
+if [[ "$use_streamlit" == "1" ]]; then
 tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
   "${env_load} ${reader_token_env} \
    NBLANE_ROOT='$dev_root' \
@@ -474,6 +490,7 @@ tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
    ${auth_env} ${grobid_env} ${lang_env} \
    PYTHONPATH=src .venv/bin/streamlit run app.py \
      --server.address=127.0.0.1 --server.port=${streamlit_port} --server.headless=true"
+fi
 
 if [[ "$use_web_api" == "1" ]]; then
   # Workshop iframe URL: /terminal/ only exists behind the production Caddy
