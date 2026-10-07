@@ -3,18 +3,9 @@
 > 模板说明：把 `<profile>` 替换为你的 profile 名，把 `https://spa.<域名>`
 > 替换为你的 SPA 地址。
 
-## nblane API 调用约定
+调用 nblane（命令、成功/失败判定、哪些能直接做、哪些要先确认、撤销）一律按 nblane 技能（`skills/nblane/SKILL.md`）的规则执行，这里只写本任务要做什么。
 
-- 命令形态：`~/.openclaw/workspace/skills/bin/nblane_api --profile <profile> <子命令>`。
-  客户端自动登录并复用 cookie；服务账号密码从环境变量
-  `NBLANE_OPENCLAW_API_PASSWORD` 读取。若报密码未设置，回复主人
-  「nblane 服务账号密码未配置」，不要索要或转述密码本身。
-- 占卜（divine）属免确认级：不落盘、单次消费，卦象对（档案，日，模式）
-  确定，推送内容与主人在首页所见一致。
-- 降级：调用失败（非零退出或输出含 error 字段）时，回复「nblane 暂不可达，
-  本周卦辞缺席」即可；不要重试超过一次，不要自己编造卦辞。LLM 润色不可
-  用时服务端会自动降级为规则卦（source="rule"），照原样推送，无需特别
-  处理。
+调用失败时回复「nblane 暂不可达，本周卦辞缺席」即可，不要自己编造卦辞。LLM 润色不可用时服务端会自动降级为规则卦（source="rule"），照原样推送。
 
 ## 任务步骤
 

@@ -51,6 +51,14 @@ HTTP 的确认码存在进程内存里，服务重启后 agent 需要重新发�
   `undo_action`；用户在 SPA「助手」页的「最近操作」卡片里点撤销。
 - 编年史（chronicle.yaml）、计划模板使用记录这类只追加的叙事记录不回滚。
 
+## 规则只有一份
+
+- 服务端：`core/agent_policy.py` 的分级表，HTTP 和 MCP 都按它执行。
+- Agent 侧：`scripts/openclaw/skills/nblane/SKILL.md`，写明怎么调用、哪些直接做、哪些要确认、
+  怎么撤销。「接入 nblane」时同步到 OpenClaw 工作区。
+- 定时任务提示词（`profiles/<name>/assistant/prompts/*.md`）只写任务本身要做什么，
+  调用规则一律引用 nblane 技能，不在提示词里重复。改规则只需改上面两处。
+
 ## Agent 账号
 
 在 `users.yaml` 里给账号写 `agent: true` 即按本策略处理。历史账号 `openclaw` 即使没有这一项，

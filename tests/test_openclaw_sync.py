@@ -295,6 +295,22 @@ class TestCmdSync(unittest.TestCase):
             code, out = self._run(root, profile, skills_src=skills_src, check=True)
             self.assertEqual(code, 0)
 
+    def test_generated_runner_wrapper_is_not_pruned(self) -> None:
+        """bin/nblane_api is written by connect, not shipped; sync keeps it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            skills_src = root / "skills-src"
+            (skills_src / "bin").mkdir(parents=True)
+            (skills_src / "bin" / "nblane_api.py").write_text("# api\n", encoding="utf-8")
+            wrapper = root / ".openclaw" / "workspace" / "skills" / "bin" / "nblane_api"
+            wrapper.parent.mkdir(parents=True)
+            wrapper.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            code, out = self._run(root, profile, skills_src=skills_src)
+            self.assertEqual(code, 0)
+            self.assertTrue(wrapper.is_file())
+            self.assertNotIn("- bin/nblane_api", out)
+
     def test_write_preserves_foreign_skill_tree(self) -> None:
         """Files outside the managed top-level entries are never pruned."""
         with tempfile.TemporaryDirectory() as tmp:

@@ -222,6 +222,11 @@ def _sync_corpus(profile: str, out_dir: Path, *, check: bool) -> bool:
     return False
 
 
+# Written by ``nblane connect`` (core/openclaw_setup._ensure_skills_runner),
+# not shipped in the repo tree; pruning it would break every nblane_api call.
+_GENERATED_SKILL_FILES = frozenset({Path("bin") / "nblane_api"})
+
+
 def _stale_skill_files(src: Path, dst: Path, files: list[Path]) -> list[Path]:
     """Files under *dst* managed by this sync but absent from *src*.
 
@@ -239,6 +244,8 @@ def _stale_skill_files(src: Path, dst: Path, files: list[Path]) -> list[Path]:
             continue
         rel = path.relative_to(dst)
         if rel in src_rels or rel.parts[0] not in managed_roots:
+            continue
+        if rel in _GENERATED_SKILL_FILES:
             continue
         stale.append(rel)
     return stale
