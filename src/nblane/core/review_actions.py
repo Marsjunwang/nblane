@@ -524,6 +524,48 @@ def apply_review_public_draft_candidate(
         return ReviewApplyResult(ok=False, errors=[str(exc)], activity_item=stored)
 
 
+def activity_item_from_profile_model_candidate(
+    field: str, proposed_value: str, rationale: str = ""
+) -> dict[str, Any]:
+    """Review item proposing an agent-profile.yaml field update.
+
+    There is intentionally no auto-applier: the human reads the
+    self-describing payload and edits the profile by hand. Raises
+    ``ValueError`` when *field* or *proposed_value* is blank.
+    """
+    clean_field = _clean_text(field)
+    clean_value = _clean_text(proposed_value)
+    clean_rationale = _clean_text(rationale)
+    if not clean_field:
+        raise ValueError("field must not be empty")
+    if not clean_value:
+        raise ValueError("proposed_value must not be empty")
+    today = date.today().isoformat()
+    payload = {
+        "field": clean_field,
+        "proposed_value": clean_value,
+        "rationale": clean_rationale,
+        "target_file": "agent-profile.yaml",
+    }
+    return {
+        "kind": "candidate",
+        "candidate_type": "profile_model",
+        "source_page": "Review",
+        "source_ref": f"review:{today}:{today}",
+        "target_owner": "profile_context",
+        "status": "pending",
+        "title": f"Profile model update: {clean_field}",
+        "summary": clean_rationale,
+        "payload": payload,
+        "preview": yaml.dump(
+            payload,
+            allow_unicode=True,
+            default_flow_style=False,
+            sort_keys=False,
+        ).strip(),
+    }
+
+
 KANBAN_MOVE_ACTIONS = ("move",)
 
 

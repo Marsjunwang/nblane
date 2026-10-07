@@ -186,6 +186,9 @@ from nblane.web_api import jobs
 from nblane.web_api.auth import CurrentUser, require_user
 from nblane.web_api.schemas import (
     ActivityApplyResponse,
+    GrowthLogRequest,
+    GrowthLogResponse,
+    ProfileModelCandidateRequest,
     ActivityDismissRequest,
     ActivityDismissResponse,
     AIExceptionBulkDismissRequest,
@@ -1425,6 +1428,59 @@ def get_profile_activity_item(
     item = _find_activity_item(pdir, item_id)
     response.headers["ETag"] = _activity_etag(pdir)
     return ActivityItemModel(**item)
+
+
+@router.post(
+    "/profiles/{name}/activity/profile-model",
+    response_model=ActivityItemModel,
+    status_code=201,
+    responses=MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def submit_profile_model_candidate(
+    name: str,
+    body: ProfileModelCandidateRequest,
+) -> ActivityItemModel:
+    """Queue one proposed agent-profile.yaml field update for human review.
+
+    Nothing in the profile changes: the item lands pending in the review
+    queue and the human edits agent-profile.yaml by hand.
+    """
+    from nblane.core.review_actions import activity_item_from_profile_model_candidate
+
+    pdir = _resolve_profile(name)
+    try:
+        item = activity_item_from_profile_model_candidate(
+            body.field, body.proposed_value, body.rationale
+        )
+    except ValueError as exc:
+        raise ApiError(422, "invalid_profile_model_candidate", str(exc)) from exc
+    stored = agent_activity.append_activity_item(pdir.name, item)
+    return ActivityItemModel(**stored)
+
+
+@router.post(
+    "/profiles/{name}/growth-log",
+    response_model=GrowthLogResponse,
+    status_code=201,
+    responses=MUTATION_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def append_profile_growth_log(name: str, body: GrowthLogRequest) -> GrowthLogResponse:
+    """Append one dated row to the SKILL.md Growth Log table."""
+    from nblane.core.growth_log import append_growth_log_row
+
+    pdir = _resolve_profile(name)
+    event = body.event.strip()
+    if not event:
+        raise ApiError(422, "invalid_growth_log", "event must not be blank.")
+    try:
+        append_growth_log_row(pdir, event)
+    except FileNotFoundError as exc:
+        raise ApiError(404, "skill_md_not_found", "SKILL.md not found.") from exc
+    except ValueError as exc:
+        raise ApiError(422, "invalid_growth_log", str(exc)) from exc
+    return GrowthLogResponse(ok=True, event=event)
 
 
 @router.post(

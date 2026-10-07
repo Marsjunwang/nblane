@@ -10,6 +10,7 @@ const READY_PAYLOAD = {
   gateway: { ready: true, uptime_ms: 7_260_000 },
   mcp_nblane_registered: true,
   automations: { total: 3, enabled: 2 },
+  channels: { skill: 'synced', http_client: 'synced' },
   console_url: 'http://127.0.0.1:18789/',
   checked_at: '2026-09-19T02:30:00+00:00',
 };
@@ -87,7 +88,6 @@ describe('AssistantPage', () => {
     expect(screen.getByText('就绪')).toBeInTheDocument();
     expect(screen.getByText('运行时长:2 小时 1 分')).toBeInTheDocument();
     expect(screen.getByText('版本:openclaw 2026.9.4')).toBeInTheDocument();
-    expect(screen.getByText('已注册')).toBeInTheDocument();
     expect(screen.getByText('共 3 条,启用 2 条')).toBeInTheDocument();
   });
 
@@ -115,6 +115,31 @@ describe('AssistantPage', () => {
     renderWithProviders(<AssistantPage />, '/assistant');
 
     expect(await screen.findByText('加载失败')).toBeInTheDocument();
+  });
+});
+
+describe('AgentChannels', () => {
+  it('shows each channel with its state and no connect hint when all synced', async () => {
+    stubFetch(READY_PAYLOAD);
+    renderWithProviders(<AssistantPage />, '/assistant');
+
+    expect(await screen.findByText('接入方式')).toBeInTheDocument();
+    expect(screen.getByText('nblane 技能')).toBeInTheDocument();
+    expect(screen.getByText('HTTP 接口')).toBeInTheDocument();
+    expect(screen.queryByText('MCP')).not.toBeInTheDocument();
+    expect(screen.getAllByText('已是最新')).toHaveLength(2);
+    expect(screen.queryByRole('link', { name: '设置 → 助手与备份' })).not.toBeInTheDocument();
+  });
+
+  it('points to 接入 nblane when the skill is outdated', async () => {
+    stubFetch({ ...READY_PAYLOAD, channels: { skill: 'outdated', http_client: 'synced' } });
+    renderWithProviders(<AssistantPage />, '/assistant');
+
+    expect(await screen.findByText('需更新')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '设置 → 助手与备份' })).toHaveAttribute(
+      'href',
+      '/settings/agents',
+    );
   });
 });
 

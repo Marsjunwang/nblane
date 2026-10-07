@@ -44,6 +44,9 @@ class FakeOpenClaw:
         if rest[:2] == ["mcp", "set"]:
             data.setdefault("mcp", {}).setdefault("servers", {})[rest[2]] = json.loads(rest[3])
             self._save(data)
+        elif rest[:2] == ["mcp", "unset"]:
+            data.get("mcp", {}).get("servers", {}).pop(rest[2], None)
+            self._save(data)
         elif rest[:2] == ["config", "set"]:
             node = data
             keys = rest[2].split(".")
@@ -132,18 +135,31 @@ class TestPaths(OpenClawSetupTestBase):
 
 
 class TestConnect(OpenClawSetupTestBase):
-    def test_connect_registers_mcp_corpus_and_git(self) -> None:
+    def test_connect_sets_up_corpus_and_git_without_mcp(self) -> None:
         ws = self._existing_install()
         oc._do_connect("alice")
         config = self.fake._config()
-        entry = config["mcp"]["servers"]["nblane"]
-        self.assertEqual(entry["env"]["NBLANE_PROFILE"], "alice")
+        # The assistant uses HTTP only; connect never registers stdio MCP.
+        self.assertNotIn("nblane", (config.get("mcp") or {}).get("servers") or {})
+        self.assertFalse(any(call[:2] == ["mcp", "set"] for call in self._openclaw_calls()))
         self.assertEqual(config["memory"]["search"]["extraPaths"], [str(ws / "memory" / "nblane")])
         self.assertTrue((ws / ".git").is_dir())
         self.assertIn("memory/nblane/", (ws / ".gitignore").read_text())
         self.assertEqual(oc.connected_profile(), "alice")
         # Model routing is never touched by connect.
         self.assertFalse(any(call[:1] == ["onboard"] for call in self._openclaw_calls()))
+
+    def test_connect_removes_existing_mcp_registration(self) -> None:
+        self._existing_install()
+        data = self.fake._config()
+        data["mcp"] = {"servers": {"nblane": {"command": "nblane-mcp", "env": {"NBLANE_ROOT": str(self.root / "data")}}}}
+        self.fake._save(data)
+        with patch.object(oc.paths, "REPO_ROOT", self.root / "data"):
+            oc._do_connect("alice")
+            self.assertNotIn("nblane", self.fake._config()["mcp"]["servers"])
+            self.assertIn(["mcp", "unset", "nblane"], self._openclaw_calls())
+            # The data root guard survives the entry going away.
+            self.assertEqual(oc.foreign_root(), "")
 
     def test_skills_runner_uses_nblane_python(self) -> None:
         ws = self._existing_install()
@@ -160,7 +176,7 @@ class TestConnect(OpenClawSetupTestBase):
         before = len(self._openclaw_calls())
         oc._do_connect("alice")
         new_calls = self._openclaw_calls()[before:]
-        self.assertFalse(any(call[:2] in (["mcp", "set"], ["config", "set"]) for call in new_calls))
+        self.assertFalse(any(call[:2] in (["mcp", "set"], ["mcp", "unset"], ["config", "set"]) for call in new_calls))
 
 
 class TestInstall(OpenClawSetupTestBase):
@@ -250,6 +266,14 @@ class TestForeignRoot(OpenClawSetupTestBase):
             with self.assertRaises(oc.OpenClawSetupError):
                 oc.gateway_action("restart")
         self.assertFalse(any(call[:2] == ["gateway", "restart"] for call in self._openclaw_calls()))
+
+    def test_recorded_root_guards_without_mcp_entry(self) -> None:
+        self._existing_install()
+        with patch.object(oc.paths, "REPO_ROOT", Path("/srv/nblane-data")):
+            oc._do_connect("alice")
+        with patch.object(oc.paths, "REPO_ROOT", self.root / "dev-data"), patch.object(oc.shutil, "which", return_value="/bin/openclaw"):
+            self.assertEqual(oc.foreign_root(), "/srv/nblane-data")
+            self.assertIn("另一个 nblane 数据目录", oc.job_blocker("connect", {"profile": "alice"}))
 
     def test_gateway_restart_drains_active_work(self) -> None:
         self._existing_install()

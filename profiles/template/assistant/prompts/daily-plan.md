@@ -11,8 +11,7 @@
 
 ## 任务步骤
 
-1. 通过 nblane MCP 资源读取上下文：`profile://kanban`（当前看板）与
-   `profile://goals`（目标）；可用资源清单见 `profile://summary`。
+1. 读取上下文：`nblane_api --profile <profile> goals`（目标与北极星）与 `nblane_api --profile <profile> summary`（档案摘要）。
    不要读取任何绝对路径下的文件。
 2. 依次调用（均为只读）：
    - `nblane_api --profile <profile> starmap`：取星图计数（点亮 / 在学 /

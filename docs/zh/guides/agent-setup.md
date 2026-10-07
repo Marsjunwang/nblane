@@ -31,7 +31,7 @@ OpenClaw）装上并接入 nblane，以及给 nblane 数据和 agent 工作区�
 | 场景 | 操作 | 做了什么 |
 |------|------|----------|
 | 未安装 | 一键安装 OpenClaw | `npm install -g openclaw@<固定版本>`（用户目录，无 sudo）→ `openclaw onboard --non-interactive`（网关只绑 loopback、装 systemd user unit、工作区直接放 `/srv/agent-data/openclaw/workspace`）→ 自动执行「接入」 |
-| 已安装 | 接入 nblane | 工作区 `git init` + `.gitignore`；同步仓库技能并生成 `skills/bin/nblane_api`（复用 nblane 自己的 Python，不再建技能 venv）；`openclaw mcp set nblane`；渲染只读语料到 `memory/nblane/` 并加入 `memory.search.extraPaths`。幂等，可重复点 |
+| 已安装 | 接入 nblane | 工作区 `git init` + `.gitignore`；同步仓库技能并生成 `skills/bin/nblane_api`（复用 nblane 自己的 Python，不再建技能 venv）；移除旧的 nblane MCP 注册（助手只走 HTTP）；渲染只读语料到 `memory/nblane/` 并加入 `memory.search.extraPaths`。幂等，可重复点 |
 | 工作区不在 `/srv/agent-data` | 迁移到统一数据目录 | 先 tar 整个状态目录 → 停网关（微信断开约 10 秒）→ 移动 → 旧路径留软链接 → 改配置 → 起网关；中途失败自动回滚 |
 | 需要微信 | 安装微信渠道 | 安装腾讯维护的 `@tencent-weixin/openclaw-weixin`（`--pin`）与 weixin-task-bridge，重启网关。扫码登录在「车间」终端运行页面给出的命令，或在 OpenClaw 控制台扫码 |
 
@@ -42,7 +42,10 @@ OpenClaw）装上并接入 nblane，以及给 nblane 数据和 agent 工作区�
 - 已有安装**不改模型路由**。其它服务商（如 Kimi Code 订阅）在 OpenClaw 控制台添加——
   nblane 不接管各家 agent 的模型配置格式，这是保持可替换的边界。
 
-其它支持 MCP 的 agent（Claude Code、Cursor、nanobot 等）用卡片底部的 MCP 配置片段接入。
+OpenClaw 助手读写 nblane 一律走 HTTP（`skills/bin/nblane_api`，以 `openclaw` 账号登录，按账号权限检查）。
+本机的 MCP 只给 Claude Code、Cursor、nanobot 这类只认 MCP 的客户端用，用卡片底部的 MCP 配置片段接入。
+不给 OpenClaw 注册 MCP 的另一个原因：OpenClaw 每开一个会话就起一个 `nblane-mcp` 进程，默认不回收，
+心跳每小时开一个会话，进程会一直累积。
 
 ## 数据备份
 
@@ -75,7 +78,8 @@ OpenClaw）装上并接入 nblane，以及给 nblane 数据和 agent 工作区�
 
 - `openclaw backup create` 在旧安装残留的 `skills/.venv` 存在时失败（venv 里有绝对路径
   软链接），迁移前的安全备份因此改用 tar。新的接入不再创建该 venv。
-- 若 OpenClaw 的 nblane MCP 指向另一个 `NBLANE_ROOT`（例如开发环境误连生产网关），卡片
+- 若这个 OpenClaw 已接入另一个 `NBLANE_ROOT`（例如开发环境误连生产网关；以接入时记录的数据目录
+  为准，旧安装看 MCP 注册里的 `NBLANE_ROOT`），卡片
   只读，接入/迁移/网关操作一律拒绝。
 - 安装/迁移任务在 SPA 后端进程内的后台线程运行，服务重启会中断任务（迁移的回滚依赖
   任务本身，中断后按 `/srv/backups/agents/` 的 tar 包手工恢复）。

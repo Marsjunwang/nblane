@@ -266,3 +266,46 @@ class TestProbeHelpers(unittest.TestCase):
         )
         self.assertTrue(status.ready)
         self.assertIsNone(status.uptime_ms)
+
+
+class TestAssistantChannels(unittest.TestCase):
+    """Skill + HTTP client sync state against the shipped skills tree."""
+
+    def _status(self, workspace):
+        from nblane.web_api.assistant import collect_assistant_status
+
+        return collect_assistant_status(
+            which=lambda _name: "/usr/local/bin/openclaw",
+            runner=make_runner(),
+            http_get=lambda url, timeout: FakeResponse(200, {"ok": True}),
+            read_config=lambda: None,
+            workspace=lambda: workspace,
+        )
+
+    def test_synced_outdated_missing(self) -> None:
+        import shutil
+        import tempfile
+
+        from nblane.core import openclaw_setup
+
+        shipped = openclaw_setup.REPO_SCRIPTS / "skills"
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            self.assertEqual(self._status(ws).channels.skill, "missing")
+            (ws / "skills" / "nblane").mkdir(parents=True)
+            (ws / "skills" / "bin").mkdir(parents=True)
+            shutil.copy(shipped / "nblane" / "SKILL.md", ws / "skills" / "nblane" / "SKILL.md")
+            shutil.copy(shipped / "bin" / "nblane_api.py", ws / "skills" / "bin" / "nblane_api.py")
+            channels = self._status(ws).channels
+            self.assertEqual(channels.skill, "synced")
+            # The connect-generated wrapper is required too.
+            self.assertEqual(channels.http_client, "missing")
+            (ws / "skills" / "bin" / "nblane_api").write_text("#!/bin/sh\n", encoding="utf-8")
+            self.assertEqual(self._status(ws).channels.http_client, "synced")
+            (ws / "skills" / "nblane" / "SKILL.md").write_text("old\n", encoding="utf-8")
+            self.assertEqual(self._status(ws).channels.skill, "outdated")
+
+    def test_no_workspace_is_unknown(self) -> None:
+        channels = self._status(None).channels
+        self.assertIsNone(channels.skill)
+        self.assertIsNone(channels.http_client)

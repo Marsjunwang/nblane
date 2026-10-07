@@ -15,13 +15,12 @@ metadata:
 
 ## 调用方式
 
-- HTTP：`{baseDir}/../bin/nblane_api <子命令>`（以 `openclaw` 服务账号访问 nblane API），
-  输出 JSON。完整子命令见 `nblane_api --help`。
-- MCP：nblane MCP 的资源（`profile://kanban`、`profile://goals`、`profile://summary` 等）
-  和写工具遵守同一套规则。
+- 读写一律用 `{baseDir}/../bin/nblane_api <子命令>`（以 `openclaw` 服务账号访问 nblane
+  HTTP API），输出 JSON。完整子命令见 `nblane_api --help`。不要用 nblane 的 MCP 工具或
+  `profile://` 资源：那条通道不经过账号权限，留给 Cursor 这类本机客户端。
 - 服务账号密码从环境变量 `NBLANE_OPENCLAW_API_PASSWORD` 读取。若报密码未设置，告诉用户
   「nblane 服务账号密码未配置」，不要索要或转述密码本身。
-- 不要读取 nblane 数据目录下的文件，也不要直接改文件；一律走 `nblane_api` 或 MCP。
+- 不要读取 nblane 数据目录下的文件，也不要直接改文件；一律走 `nblane_api`。
 
 ## 成功与失败
 
@@ -48,7 +47,6 @@ metadata:
 2. 把 `summary` 原样告诉用户，问"确认吗？"。不要替用户回答，不要在同一轮里自己确认。
 3. 只有用户明确同意（"确认""好""删吧"之类）后，在**完全相同**的命令前加
    `--confirm <confirm_id>` 重新运行。确认码 10 分钟有效、只能用一次，换了参数就失效。
-   MCP 工具则是用相同参数再调一次，并带上 `confirm_id`。
 4. 用户拒绝或没回应：放弃，不要重试。
 
 ```bash
@@ -60,7 +58,7 @@ metadata:
 
 ## 撤销
 
-你做的每一次写入都能撤销（保留 30 天）。通过 MCP 工具做的写入也在同一份记录里。
+你做的每一次写入都能撤销（保留 30 天）。
 
 - `nblane_api recent` 列出最近操作（新的在前），每条有 `id`、`summary`、`status`。
 - `nblane_api undo <id>` 撤销一条。`status` 为 `conflict` 表示之后有人改过，撤销会被拒绝，
@@ -77,7 +75,9 @@ nblane_api patch "/profiles/<档案>/kanban/cards/<任务id>" '{"todos": [{"text
 nblane_api post "/profiles/<档案>/kanban/cards/<任务id>/done"
 nblane_api post "/profiles/<档案>/kanban/cards/<任务id>/move" '{"target_section": "Queue"}'
 nblane_api post "/profiles/<档案>/crystallize/draft" '{"task_ids": ["<任务id>"]}'
-nblane_api plans | plan-show <计划id> | board | starmap | chronicle [--limit N] | health
+nblane_api summary | goals | plans | plan-show <计划id> | board | starmap | chronicle [--limit N] | health
+nblane_api growth "<一句话进展>"                       # 写进成长日志（可撤销）
+nblane_api propose <字段> <建议值> --rationale <理由>   # 画像更新提交人审
 nblane_api get "/profiles/<档案>/evidence-stages"
 nblane_api divine --mode play|serious [--question …]
 ```

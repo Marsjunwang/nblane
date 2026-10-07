@@ -720,6 +720,45 @@
     "title": "AssistantAutomationsStatus",
     "type": "object"
    },
+   "AssistantChannelsStatus": {
+    "description": "How the assistant reaches nblane: the skill (rules) and the HTTP client.\n\n``synced`` = the workspace copy equals this nblane version; ``outdated``\n= present but older (re-run 「接入 nblane」); ``missing`` = not installed.",
+    "properties": {
+     "http_client": {
+      "anyOf": [
+       {
+        "enum": [
+         "synced",
+         "outdated",
+         "missing"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Http Client"
+     },
+     "skill": {
+      "anyOf": [
+       {
+        "enum": [
+         "synced",
+         "outdated",
+         "missing"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Skill"
+     }
+    },
+    "title": "AssistantChannelsStatus",
+    "type": "object"
+   },
    "AssistantGatewayStatus": {
     "description": "Gateway readiness probe (GET /readyz).",
     "properties": {
@@ -759,6 +798,16 @@
      "available": {
       "title": "Available",
       "type": "boolean"
+     },
+     "channels": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AssistantChannelsStatus"
+       },
+       {
+        "type": "null"
+       }
+      ]
      },
      "checked_at": {
       "default": "",
@@ -4196,6 +4245,39 @@
      }
     },
     "title": "GrobidUnitStateModel",
+    "type": "object"
+   },
+   "GrowthLogRequest": {
+    "description": "Body for appending one row to the SKILL.md Growth Log table.",
+    "properties": {
+     "event": {
+      "title": "Event",
+      "type": "string"
+     }
+    },
+    "required": [
+     "event"
+    ],
+    "title": "GrowthLogRequest",
+    "type": "object"
+   },
+   "GrowthLogResponse": {
+    "description": "Success body for the Growth Log append.",
+    "properties": {
+     "event": {
+      "title": "Event",
+      "type": "string"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "event"
+    ],
+    "title": "GrowthLogResponse",
     "type": "object"
    },
    "HTTPValidationError": {
@@ -7786,6 +7868,30 @@
      "profile"
     ],
     "title": "ProfileDetailSummary",
+    "type": "object"
+   },
+   "ProfileModelCandidateRequest": {
+    "description": "Body for proposing one agent-profile.yaml field update (human review).",
+    "properties": {
+     "field": {
+      "title": "Field",
+      "type": "string"
+     },
+     "proposed_value": {
+      "title": "Proposed Value",
+      "type": "string"
+     },
+     "rationale": {
+      "default": "",
+      "title": "Rationale",
+      "type": "string"
+     }
+    },
+    "required": [
+     "field",
+     "proposed_value"
+    ],
+    "title": "ProfileModelCandidateRequest",
     "type": "object"
    },
    "ProfileSettingsPatch": {
@@ -13304,6 +13410,106 @@
     "summary": "Get Profile Activity"
    }
   },
+  "/api/v1/profiles/{name}/activity/profile-model": {
+   "post": {
+    "description": "Queue one proposed agent-profile.yaml field update for human review.\n\nNothing in the profile changes: the item lands pending in the review\nqueue and the human edits agent-profile.yaml by hand.",
+    "operationId": "submit_profile_model_candidate_api_v1_profiles__name__activity_profile_model_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ProfileModelCandidateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ActivityItemModel"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ActivityItemErrorResponse"
+        }
+       }
+      },
+      "description": "Item state conflict (not pending/appliable, apply failed)."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ActivityItemErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the current activity file."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Submit Profile Model Candidate"
+   }
+  },
   "/api/v1/profiles/{name}/activity/{item_id}": {
    "get": {
     "description": "One full Agent Activity item by id (404 when missing).\n\nThe response carries the activity-file ETag (see module docstring) for\nuse as ``If-Match`` on the apply/dismiss mutations.",
@@ -18497,6 +18703,106 @@
      }
     },
     "summary": "Patch Profile Goal"
+   }
+  },
+  "/api/v1/profiles/{name}/growth-log": {
+   "post": {
+    "description": "Append one dated row to the SKILL.md Growth Log table.",
+    "operationId": "append_profile_growth_log_api_v1_profiles__name__growth_log_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/GrowthLogRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GrowthLogResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ActivityItemErrorResponse"
+        }
+       }
+      },
+      "description": "Item state conflict (not pending/appliable, apply failed)."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ActivityItemErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the current activity file."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Append Profile Growth Log"
    }
   },
   "/api/v1/profiles/{name}/habit-plans": {

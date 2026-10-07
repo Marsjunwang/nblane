@@ -322,6 +322,27 @@ class ActivityDismissRequest(BaseModel):
     note: str = ""
 
 
+class ProfileModelCandidateRequest(BaseModel):
+    """Body for proposing one agent-profile.yaml field update (human review)."""
+
+    field: str
+    proposed_value: str
+    rationale: str = ""
+
+
+class GrowthLogRequest(BaseModel):
+    """Body for appending one row to the SKILL.md Growth Log table."""
+
+    event: str
+
+
+class GrowthLogResponse(BaseModel):
+    """Success body for the Growth Log append."""
+
+    ok: bool = True
+    event: str
+
+
 class ActivityApplyResponse(BaseModel):
     """Success body for the apply mutation."""
 

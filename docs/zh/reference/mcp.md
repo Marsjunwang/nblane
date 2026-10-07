@@ -7,7 +7,11 @@ source_of_truth: true
 
 # MCP 服务器（Cursor 等客户端）
 
-nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，通过 **stdio** 与 Cursor 通信。客户端可读 **Resources**（如 `profile://context`），也可调用 **Tools** 写入部分 profile 文件。
+nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，通过 **stdio** 与 Cursor 通信。
+
+> OpenClaw 助手不用 MCP，读写都走 HTTP（`nblane_api`，有账号和权限检查；见
+> [个人 Agent 写入策略](../guides/agent-write-policy.md)）。本机 MCP 不登录，只给 Cursor、Claude Code
+> 这类信得过的本机客户端用。客户端可读 **Resources**（如 `profile://context`），也可调用 **Tools** 写入部分 profile 文件。
 
 ## 当前实现范围（给集成方 / 其他 Agent）
 

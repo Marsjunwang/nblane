@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 from nblane.commands.common import _require_profile
-from nblane.core.mcp_client_config import build_mcp_server_entry
 from nblane.core.notify import (
     NotifyConfig,
     NotifyConfigError,
@@ -367,48 +366,15 @@ def cmd_sync(
 # -- install (one-command setup, plan §5.4) -----------------------------------
 
 
-def _build_overlay_patches(
-    overlay_text: str, mcp_entry: dict
-) -> list[tuple[str, str]]:
-    """Build ``config patch`` payloads with the nblane MCP entry merged in.
+def _build_overlay_patches(overlay_text: str) -> list[tuple[str, str]]:
+    """``config patch`` payloads for the overlay, passed through verbatim.
 
-    The overlay is JSON5 and the repo has no JSON5 parser.  When the overlay
-    happens to be pure JSON (a valid JSON5 subset — the shipped template is),
-    the MCP entry is merged in memory and a single patch is emitted.
-    Otherwise the overlay is passed through verbatim as the first patch and
-    a generated JSON patch carrying only ``mcp.servers.nblane`` follows;
-    ``openclaw config patch`` merges recursively, so the two compose.
-    Returns ``(label, payload)`` pairs in application order.
+    The assistant reaches nblane over HTTP only, so no MCP entry is merged
+    in any more (a registered stdio server spawns one idle process per
+    session). Returns ``(label, payload)`` pairs in application order.
     """
 
-    try:
-        data = json.loads(overlay_text)
-    except json.JSONDecodeError:
-        data = None
-    if isinstance(data, dict):
-        mcp = data.get("mcp")
-        if not isinstance(mcp, dict):
-            mcp = {}
-            data["mcp"] = mcp
-        servers = mcp.get("servers")
-        if not isinstance(servers, dict):
-            servers = {}
-            mcp["servers"] = servers
-        servers["nblane"] = mcp_entry
-        payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
-        return [("overlay + MCP 注入（合并为单补丁）", payload)]
-    mcp_payload = (
-        json.dumps(
-            {"mcp": {"servers": {"nblane": mcp_entry}}},
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n"
-    )
-    return [
-        ("overlay 原文（非纯 JSON，原样透传）", overlay_text),
-        ("MCP 注入（生成的 JSON 补丁）", mcp_payload),
-    ]
+    return [("overlay", overlay_text)]
 
 
 def _install_plugin(plugin_src: Path, runner: Runner, *, apply: bool) -> bool:
@@ -450,10 +416,7 @@ def _install_overlay(
     """
 
     if not overlay_path.is_file():
-        print(
-            f"[跳过] 未找到 {overlay_path}，跳过配置 overlay"
-            f"（MCP 注入也随之跳过）。"
-        )
+        print(f"[跳过] 未找到 {overlay_path}，跳过配置 overlay。")
         return True
     try:
         overlay_text = substitute_env_text(
@@ -462,8 +425,7 @@ def _install_overlay(
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return False
-    mcp_entry = build_mcp_server_entry(profile)
-    patches = _build_overlay_patches(overlay_text, mcp_entry)
+    patches = _build_overlay_patches(overlay_text)
     ok = True
     for label, payload in patches:
         argv = ["openclaw", "config", "patch", "--stdin"]
@@ -540,7 +502,7 @@ def cmd_install(
     print("\n[2/3] weixin-task-bridge 插件")
     ok = _install_plugin(plugin_src, runner, apply=apply)
 
-    print("\n[3/3] 配置 overlay + nblane MCP 注入")
+    print("\n[3/3] 配置 overlay")
     overlay_path = automations_file_path(profile).parent / OVERLAY_FILENAME
     ok &= _install_overlay(profile, overlay_path, runner, apply=apply)
 

@@ -2,6 +2,7 @@ import {
   Alert,
   Anchor,
   Badge,
+  Box,
   Button,
   Card,
   Center,
@@ -16,18 +17,21 @@ import {
 import {
   IconArrowBackUp,
   IconAutomation,
+  IconBook,
   IconExternalLink,
+  IconRoute,
+  IconWorld,
   IconHistory,
-  IconPlugConnected,
   IconRefresh,
   IconRobot,
   IconRobotOff,
 } from '@tabler/icons-react';
 
 import { useState } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 
 import { useAgentJournal, useAssistantStatus, useProfiles, useUndoAgentJournal } from '../api/hooks';
-import type { AgentJournalEntry } from '../api/types';
+import type { AgentJournalEntry, AssistantStatus } from '../api/types';
 
 /** Human-readable uptime from milliseconds. */
 export function formatUptime(uptimeMs: number | null): string {
@@ -50,13 +54,77 @@ export function formatUptime(uptimeMs: number | null): string {
   return `${mins} 分`;
 }
 
-function mcpLabel(registered: boolean | null): { text: string; color: string } {
-  if (registered === null) {
-    return { text: '未知', color: 'gray' };
-  }
-  return registered
-    ? { text: '已注册', color: 'green' }
-    : { text: '未注册', color: 'red' };
+type SyncState = 'synced' | 'outdated' | 'missing' | null | undefined;
+
+function syncLabel(state: SyncState): { text: string; color: string } {
+  if (state === 'synced') return { text: '已是最新', color: 'green' };
+  if (state === 'outdated') return { text: '需更新', color: 'orange' };
+  if (state === 'missing') return { text: '未安装', color: 'red' };
+  return { text: '未知', color: 'gray' };
+}
+
+/** 接入方式: how the assistant reaches nblane — the skill and the HTTP client. */
+export function AgentChannels({ status }: { status: AssistantStatus }) {
+  const skill = syncLabel(status.channels?.skill);
+  const http = syncLabel(status.channels?.http_client);
+  const needsConnect =
+    status.channels?.skill !== 'synced' || status.channels?.http_client !== 'synced';
+  const rows = [
+    {
+      key: 'skill',
+      icon: <IconBook size={16} />,
+      name: 'nblane 技能',
+      role: '说明书：告诉助手怎么调用 nblane、哪些事先问你、怎么撤销。',
+      badge: skill,
+    },
+    {
+      key: 'http',
+      icon: <IconWorld size={16} />,
+      name: 'HTTP 接口',
+      role: '唯一通道：打卡、任务、计划、占卜等读写都走这里，以 openclaw 账号登录，按账号权限检查。',
+      badge: http,
+    },
+  ];
+  return (
+    <Card withBorder radius="md" padding="lg">
+      <Group gap="xs" mb="sm">
+        <IconRoute size={16} />
+        <Text fw={500}>接入方式</Text>
+      </Group>
+      <Stack gap="sm">
+        {rows.map((row) => (
+          <Group key={row.key} justify="space-between" wrap="nowrap" gap="sm" align="flex-start">
+            <Group gap="xs" wrap="nowrap" align="flex-start" style={{ minWidth: 0 }}>
+              <Box mt={2}>{row.icon}</Box>
+              <Stack gap={0} style={{ minWidth: 0 }}>
+                <Text size="sm" fw={500}>
+                  {row.name}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {row.role}
+                </Text>
+              </Stack>
+            </Group>
+            <Badge color={row.badge.color} variant="light" style={{ flexShrink: 0 }}>
+              {row.badge.text}
+            </Badge>
+          </Group>
+        ))}
+      </Stack>
+      <Text size="xs" c="dimmed" mt="sm">
+        助手的写入都记在下面的「最近操作」里。MCP 只留给 Cursor 这类本机客户端，助手不用。
+        {needsConnect && (
+          <>
+            {' '}有一项不是最新：到{' '}
+            <Anchor component={RouterLink} to="/settings/agents" size="xs">
+              设置 → 助手与备份
+            </Anchor>{' '}
+            点一次「接入 nblane」。
+          </>
+        )}
+      </Text>
+    </Card>
+  );
 }
 
 const JOURNAL_STATUS: Record<AgentJournalEntry['status'], { text: string; color: string }> = {
@@ -191,7 +259,6 @@ export function AssistantPage() {
     );
   }
 
-  const mcp = mcpLabel(data.mcp_nblane_registered ?? null);
   return (
     <Stack gap="md">
       <Group justify="space-between">
@@ -207,7 +274,7 @@ export function AssistantPage() {
           打开控制台
         </Button>
       </Group>
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
+      <SimpleGrid cols={{ base: 1, sm: 3 }}>
         <Card withBorder radius="md" padding="lg">
           <Group gap="xs" mb="sm">
             <IconRobot size={16} />
@@ -228,15 +295,6 @@ export function AssistantPage() {
               版本:{data.version ?? '未知'}
             </Text>
           </Stack>
-        </Card>
-        <Card withBorder radius="md" padding="lg">
-          <Group gap="xs" mb="sm">
-            <IconPlugConnected size={16} />
-            <Text fw={500}>MCP nblane 注册</Text>
-          </Group>
-          <Badge color={mcp.color} variant="light" w="fit-content">
-            {mcp.text}
-          </Badge>
         </Card>
         <Card withBorder radius="md" padding="lg">
           <Group gap="xs" mb="sm">
@@ -275,6 +333,7 @@ export function AssistantPage() {
           </Stack>
         </Card>
       </SimpleGrid>
+      <AgentChannels status={data} />
       <RecentAgentOps />
       <Text size="xs" c="dimmed">
         控制台在新标签页打开;状态每 60 秒缓存一次。控制台地址来自

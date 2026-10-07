@@ -101,6 +101,7 @@ from nblane.core.profile_context import (
 )
 from nblane.core.profile_io import load_evidence_pool
 from nblane.core.review_actions import (
+    activity_item_from_profile_model_candidate,
     activity_item_from_review_candidate,
 )
 from nblane.core.skill_evidence_inline import add_inline_evidence
@@ -1186,36 +1187,11 @@ def tool_submit_profile_model_candidate(
     name, err = _tool_profile_or_error()
     if err is not None or name is None:
         return _tool_error_payload(err or "no active profile")
-    clean_field = str(field or "").strip()
-    clean_value = str(proposed_value or "").strip()
-    clean_rationale = str(rationale or "").strip()
-    if not clean_field:
-        return _tool_error_payload("field must not be empty")
-    if not clean_value:
-        return _tool_error_payload("proposed_value must not be empty")
-    payload = {
-        "field": clean_field,
-        "proposed_value": clean_value,
-        "rationale": clean_rationale,
-        "target_file": "agent-profile.yaml",
-    }
-    item = {
-        "kind": "candidate",
-        "candidate_type": "profile_model",
-        "source_page": "Review",
-        "source_ref": f"review:{_today_iso()}:{_today_iso()}",
-        "target_owner": "profile_context",
-        "status": "pending",
-        "title": f"Profile model update: {clean_field}",
-        "summary": clean_rationale,
-        "payload": payload,
-        "preview": yaml.dump(
-            payload,
-            allow_unicode=True,
-            default_flow_style=False,
-            sort_keys=False,
-        ).strip(),
-    }
+    try:
+        item = activity_item_from_profile_model_candidate(field, proposed_value, rationale)
+    except ValueError as exc:
+        return _tool_error_payload(str(exc))
+    payload = item["payload"]
     try:
         stored, _entry = _policy_write(
             name,

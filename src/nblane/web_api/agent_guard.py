@@ -89,6 +89,9 @@ ROUTE_ACTIONS: dict[tuple[str, str], str] = {
     ("POST", f"{P}/research/sources/{{source_id}}/task"): "research_source.patch",
     ("POST", f"{P}/research/connectors/manual/import"): "research.import",
     ("POST", f"{P}/research/connectors/{{connector_id}}/import"): "research.import",
+    # growth log / review submissions
+    ("POST", f"{P}/growth-log"): "growth_log.append",
+    ("POST", f"{P}/activity/profile-model"): "review.submit",
     # read-like: casts, AI drafts, the undo endpoint itself
     ("POST", f"{P}/divination"): "divination.cast",
     ("POST", f"{P}/jobs"): "ai.draft",
@@ -156,6 +159,7 @@ ACTION_KINDS: dict[str, tuple[str, ...]] = {
     "research_source.add": ("research_source",),
     "research_source.patch": ("research_source", "kanban_card"),
     "research.import": ("research_source",),
+    "growth_log.append": (agent_journal.file_kind("SKILL.md"),),
 }
 
 ACTION_LABELS = agent_policy.ACTION_LABELS

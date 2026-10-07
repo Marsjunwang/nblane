@@ -8,11 +8,10 @@
 ## 任务步骤
 
 1. 回顾今天的会话与你的 daily memory；情景记忆照常由你自治维护。
-2. 通过 nblane MCP 资源 `profile://kanban` 读取看板原文，并调用
+2. 调用
    `nblane_api --profile <profile> board`，对照今早早报给出的重点
    与当前看板，盘点完成情况。
-3. 对可验证的进展，调用 MCP 工具 `append_growth_log` 与 `log_interaction`
-   写回 nblane 成长档案。
+3. 对可验证的进展，调用 `nblane_api --profile <profile> growth "<一句话进展>"` 写进成长日志。
 4. 一键动作（你主动提出的建议，逐条询问，主人回「好」才执行）：
    - 对今天完成的在看卡片：「把 X 移到 Done？」→ 确认后
      `nblane_api --profile <profile> post /profiles/<profile>/kanban/cards/<卡片id>/done`

@@ -12,7 +12,8 @@ nblane 页面点确认。安全感来自两点：**都能撤销**，**重要操�
 
 ## 分级
 
-一张表（`core/agent_policy.py` 的 `ACTION_TIERS`）同时约束 HTTP 和 MCP：
+一张表（`core/agent_policy.py` 的 `ACTION_TIERS`）同时约束 HTTP 和 MCP。OpenClaw 助手只走 HTTP；
+MCP 留给 Cursor 这类本机客户端：
 
 | 级别 | 处理方式 | 例子 |
 |------|----------|------|
@@ -53,7 +54,8 @@ HTTP 的确认码存在进程内存里，服务重启后 agent 需要重新发�
 
 ## 规则只有一份
 
-- 服务端：`core/agent_policy.py` 的分级表，HTTP 和 MCP 都按它执行。
+- 服务端：`core/agent_policy.py` 的分级表，HTTP 和 MCP 都按它执行。HTTP 还要求账号登录、按账号
+  授权的档案检查；本机 MCP 不登录，所以助手不用它。
 - Agent 侧：`scripts/openclaw/skills/nblane/SKILL.md`，写明怎么调用、哪些直接做、哪些要确认、
   怎么撤销。「接入 nblane」时同步到 OpenClaw 工作区。
 - 定时任务提示词（`profiles/<name>/assistant/prompts/*.md`）只写任务本身要做什么，
@@ -66,11 +68,11 @@ HTTP 的确认码存在进程内存里，服务重启后 agent 需要重新发�
 
 ## 覆盖范围（2026-10-07）
 
-HTTP：所有 `/api/v1` 写请求都经过一道应用级检查（`web_api/agent_guard.py`），按路由对照分级表。
+HTTP（OpenClaw 助手的唯一通道）：所有 `/api/v1` 写请求都经过一道应用级检查（`web_api/agent_guard.py`），按路由对照分级表。
 可撤销的实体：任务卡、打卡、习惯、阶段计划、目标、北极星、技能点、证据、项目（含里程碑）、
 收件箱、资料、学习记录。未登记的路由按 T2 处理。
 
-MCP：写工具走同一流程（`core/agent_ops.py`）。看板增/移/删、打卡、收件箱、成长日志、方法草稿
+MCP（给 Cursor 等本机客户端）：写工具走同一流程（`core/agent_ops.py`）。看板增/移/删、打卡、收件箱、成长日志、方法草稿
 可撤销；`submit_kanban_candidate` 改为直接移动（不再进审批队列）。工具清单见
 [MCP 参考](../reference/mcp.md)。
 

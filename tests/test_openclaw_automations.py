@@ -313,7 +313,9 @@ class TestLoadAutomationsFile(unittest.TestCase):
         self.assertEqual(specs[2].session, "main")
         self.assertEqual(specs[3].cron, "30 20 * * 0")
         for spec in specs:
-            self.assertIn("profile://", spec.prompt_text)
+            # The assistant reads and writes over HTTP only (nblane_api).
+            self.assertIn("nblane_api", spec.prompt_text)
+            self.assertNotIn("profile://", spec.prompt_text)
             self.assertNotIn("/srv/", spec.prompt_text)
 
 

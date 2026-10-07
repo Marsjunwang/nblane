@@ -9,6 +9,8 @@ Read-only probes only; nothing here mutates the live gateway:
   (read directly; ``openclaw mcp list`` takes >5s and is only a fallback
   for non-JSON configs)
 - ``openclaw automations list --all --json`` — automation counts
+- the OpenClaw workspace — whether the nblane skill (``skills/nblane/SKILL.md``)
+  and the HTTP client (``skills/bin/nblane_api*``) match this nblane version
 
 Every subprocess/HTTP/config call goes through injectable seams (``which`` /
 ``runner`` / ``http_get`` / ``read_config``, overridable per-app via ``app.state``) so tests
@@ -32,7 +34,8 @@ import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any, Callable, Literal
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
@@ -65,6 +68,20 @@ class AssistantAutomationsStatus(BaseModel):
     enabled: int = 0
 
 
+SyncState = Literal["synced", "outdated", "missing"]
+
+
+class AssistantChannelsStatus(BaseModel):
+    """How the assistant reaches nblane: the skill (rules) and the HTTP client.
+
+    ``synced`` = the workspace copy equals this nblane version; ``outdated``
+    = present but older (re-run 「接入 nblane」); ``missing`` = not installed.
+    """
+
+    skill: SyncState | None = None
+    http_client: SyncState | None = None
+
+
 class AssistantStatusResponse(BaseModel):
     """GET /api/v1/system/assistant payload."""
 
@@ -73,6 +90,7 @@ class AssistantStatusResponse(BaseModel):
     gateway: AssistantGatewayStatus | None = None
     mcp_nblane_registered: bool | None = None
     automations: AssistantAutomationsStatus | None = None
+    channels: AssistantChannelsStatus | None = None
     console_url: str = DEFAULT_CONSOLE_URL
     checked_at: str = ""
 
@@ -183,6 +201,47 @@ def _probe_automations(
     return AssistantAutomationsStatus(total=len(items), enabled=enabled)
 
 
+def _default_workspace(read_config: Callable[[], dict[str, Any] | None]) -> Path | None:
+    """OpenClaw workspace from the JSON config (no CLI call), else the default."""
+    try:
+        config = read_config()
+    except Exception:
+        config = None
+    found = openclaw_setup._workspace_from_config(config) if config else None
+    if found is not None:
+        return found
+    default = openclaw_setup.state_dir() / "workspace"
+    return default if default.is_dir() else None
+
+
+def _sync_state(installed: list[Path], shipped: list[Path]) -> SyncState:
+    if not all(path.is_file() for path in installed):
+        return "missing"
+    same = all(
+        dst.read_bytes() == src.read_bytes()
+        for dst, src in zip(installed, shipped)
+        if src.is_file()
+    )
+    return "synced" if same else "outdated"
+
+
+def _probe_channels(workspace: Path | None) -> AssistantChannelsStatus:
+    """Compare the workspace's nblane skill + HTTP client with this release."""
+    if workspace is None:
+        return AssistantChannelsStatus()
+    skills = workspace / "skills"
+    shipped = openclaw_setup.REPO_SCRIPTS / "skills"
+    try:
+        skill = _sync_state([skills / "nblane" / "SKILL.md"], [shipped / "nblane" / "SKILL.md"])
+        client = _sync_state(
+            [skills / "bin" / "nblane_api.py", skills / "bin" / "nblane_api"],
+            [shipped / "bin" / "nblane_api.py"],
+        )
+    except OSError:
+        return AssistantChannelsStatus()
+    return AssistantChannelsStatus(skill=skill, http_client=client)
+
+
 def collect_assistant_status(
     *,
     which: Callable[[str], str | None] = shutil.which,
@@ -191,6 +250,7 @@ def collect_assistant_status(
     read_config: Callable[[], dict[str, Any] | None] = openclaw_setup.read_config,
     gateway_base: str | None = None,
     console_url: str | None = None,
+    workspace: Callable[[], Path | None] | None = None,
 ) -> AssistantStatusResponse:
     """Run all probes (each guarded) and assemble the status payload.
 
@@ -218,6 +278,9 @@ def collect_assistant_status(
         gateway=_probe_gateway(http_get, gateway_base),
         mcp_nblane_registered=_probe_mcp_registered(runner, read_config, prefix),
         automations=_probe_automations(runner, prefix),
+        channels=_probe_channels(
+            (workspace or (lambda: _default_workspace(read_config)))()
+        ),
         console_url=console,
         checked_at=checked_at,
     )
@@ -231,6 +294,7 @@ def _seams(request: Request) -> dict[str, Any]:
         "runner": getattr(state, "assistant_runner", _default_runner),
         "http_get": getattr(state, "assistant_http_get", _default_http_get),
         "read_config": getattr(state, "assistant_read_config", openclaw_setup.read_config),
+        "workspace": getattr(state, "assistant_workspace", None),
     }
 
 

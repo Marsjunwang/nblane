@@ -433,6 +433,15 @@ def run(args: argparse.Namespace, session: Session) -> object:
         return session.mutation(profile_path(args, "/divination"), body)
     if command == "health":
         return session.get(profile_path(args, "/health"))
+    if command == "summary":
+        return session.get(profile_path(args, "/summary"))
+    if command == "goals":
+        return session.get(profile_path(args, "/goals"))
+    if command == "growth":
+        return session.mutation(profile_path(args, "/growth-log"), {"event": args.event})
+    if command == "propose":
+        body = {"field": args.field, "proposed_value": args.value, "rationale": args.rationale}
+        return session.mutation(profile_path(args, "/activity/profile-model"), body)
     if command == "activity":
         query = f"/activity?status={args.status}&limit={args.limit}"
         if args.kind:
@@ -517,6 +526,16 @@ def build_parser() -> argparse.ArgumentParser:
     divine.add_argument("--mode", choices=["play", "serious"], default="play")
     divine.add_argument("--question", default="", help="required for --mode serious")
     commands.add_parser("health", help="GET the profile health report")
+    commands.add_parser("summary", help="GET the profile summary (skills, focus, Doing)")
+    commands.add_parser("goals", help="GET goals and the North Star")
+    growth = commands.add_parser("growth", help="append one row to the SKILL.md Growth Log")
+    growth.add_argument("event")
+    propose = commands.add_parser(
+        "propose", help="queue one agent-profile.yaml field update for human review"
+    )
+    propose.add_argument("field")
+    propose.add_argument("value")
+    propose.add_argument("--rationale", default="")
     activity = commands.add_parser("activity", help="GET the agent activity queue")
     activity.add_argument("--status", default="pending")
     activity.add_argument("--kind", default="")

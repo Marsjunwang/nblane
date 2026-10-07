@@ -266,6 +266,36 @@ def test_recent_and_undo_paths(tmp_path):
     ]
 
 
+def test_summary_goals_growth_propose_paths(tmp_path):
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    session = nblane_api.Session(
+        "http://127.0.0.1:8504", password=PASSWORD,
+        jar_path=tmp_path / "jar.json", transport=httpx.MockTransport(handler),
+    )
+    for argv in (
+        ["summary"],
+        ["goals"],
+        ["growth", "Shipped the demo"],
+        ["propose", "preferences.tone", "concise", "--rationale", "asked twice"],
+    ):
+        assert nblane_api.main(["--profile", "x", *argv], session=session) == 0
+    assert [(r.method, r.url.path) for r in seen] == [
+        ("GET", "/api/v1/profiles/x/summary"),
+        ("GET", "/api/v1/profiles/x/goals"),
+        ("POST", "/api/v1/profiles/x/growth-log"),
+        ("POST", "/api/v1/profiles/x/activity/profile-model"),
+    ]
+    assert json.loads(seen[2].content) == {"event": "Shipped the demo"}
+    assert json.loads(seen[3].content) == {
+        "field": "preferences.tone", "proposed_value": "concise", "rationale": "asked twice",
+    }
+
+
 def test_password_never_logged(session, server, capsys, tmp_path):
     server.fail_logins = 2
     with pytest.raises(nblane_api.ApiFailure):

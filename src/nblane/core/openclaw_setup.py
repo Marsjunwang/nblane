@@ -432,8 +432,12 @@ def foreign_root() -> str:
     restarting the production gateway when the isolation env is missing.
     """
 
-    entry = _mcp_entry(read_config())
-    other = str(((entry or {}).get("env") or {}).get("NBLANE_ROOT") or "")
+    # Connect records its data root; older installs only had it in the MCP
+    # entry, so that stays as a fallback.
+    other = str(_load_setup_state().get("nblane_root") or "")
+    if not other:
+        entry = _mcp_entry(read_config())
+        other = str(((entry or {}).get("env") or {}).get("NBLANE_ROOT") or "")
     if not other:
         return ""
     try:
@@ -630,13 +634,16 @@ def _do_connect(profile: str) -> None:
     _phase("skills", "同步 nblane 技能")
     _sync_repo_skills(workspace)
     _ensure_skills_runner(workspace)
-    _phase("mcp", f"注册 nblane MCP（档案 {profile}）")
-    entry = build_mcp_entry(profile)
-    if _mcp_entry(read_config()) != entry:
-        _check(_openclaw("mcp", "set", "nblane", json.dumps(entry, ensure_ascii=False), timeout=60), "注册 MCP")
-        _log("已写入 mcp.servers.nblane")
-    else:
-        _log("MCP 已是最新")
+    # The assistant reaches nblane over HTTP only (skills/bin/nblane_api,
+    # authenticated, policy-checked). A registered stdio MCP server is not
+    # used, and OpenClaw keeps one process per session alive, so remove it.
+    # Record the data root first: it replaces the MCP entry as the
+    # foreign-root guard, so it must exist before that entry goes away.
+    _save_setup_state(nblane_root=str(Path(paths.REPO_ROOT).resolve()))
+    if _mcp_entry(read_config()) is not None:
+        _phase("mcp", "移除 nblane MCP 注册（助手只走 HTTP）")
+        _check(_openclaw("mcp", "unset", "nblane", timeout=60), "移除 MCP 注册")
+        _log("已移除 mcp.servers.nblane")
     _phase("corpus", "生成只读档案语料（memory/nblane/）")
     out_dir = refresh_corpus(profile, workspace)
     _ensure_extra_path(out_dir)

@@ -133,6 +133,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/activity/profile-model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Profile Model Candidate
+         * @description Queue one proposed agent-profile.yaml field update for human review.
+         *
+         *     Nothing in the profile changes: the item lands pending in the review
+         *     queue and the human edits agent-profile.yaml by hand.
+         */
+        post: operations["submit_profile_model_candidate_api_v1_profiles__name__activity_profile_model_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/activity/{item_id}": {
         parameters: {
             query?: never;
@@ -1296,6 +1319,26 @@ export interface paths {
          *     ``If-Match`` against the goals.yaml ETag (412 on mismatch).
          */
         patch: operations["patch_profile_goal_api_v1_profiles__name__goals__goal_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/growth-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Append Profile Growth Log
+         * @description Append one dated row to the SKILL.md Growth Log table.
+         */
+        post: operations["append_profile_growth_log_api_v1_profiles__name__growth_log_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/profiles/{name}/habit-plans": {
@@ -4309,6 +4352,19 @@ export interface components {
             total: number;
         };
         /**
+         * AssistantChannelsStatus
+         * @description How the assistant reaches nblane: the skill (rules) and the HTTP client.
+         *
+         *     ``synced`` = the workspace copy equals this nblane version; ``outdated``
+         *     = present but older (re-run 「接入 nblane」); ``missing`` = not installed.
+         */
+        AssistantChannelsStatus: {
+            /** Http Client */
+            http_client?: ("synced" | "outdated" | "missing") | null;
+            /** Skill */
+            skill?: ("synced" | "outdated" | "missing") | null;
+        };
+        /**
          * AssistantGatewayStatus
          * @description Gateway readiness probe (GET /readyz).
          */
@@ -4329,6 +4385,7 @@ export interface components {
             automations?: components["schemas"]["AssistantAutomationsStatus"] | null;
             /** Available */
             available: boolean;
+            channels?: components["schemas"]["AssistantChannelsStatus"] | null;
             /**
              * Checked At
              * @default
@@ -6748,6 +6805,27 @@ export interface components {
              * @default
              */
             sub_state: string;
+        };
+        /**
+         * GrowthLogRequest
+         * @description Body for appending one row to the SKILL.md Growth Log table.
+         */
+        GrowthLogRequest: {
+            /** Event */
+            event: string;
+        };
+        /**
+         * GrowthLogResponse
+         * @description Success body for the Growth Log append.
+         */
+        GrowthLogResponse: {
+            /** Event */
+            event: string;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -9257,6 +9335,21 @@ export interface components {
             /** Profile */
             profile: string;
             skill_tree?: components["schemas"]["SkillTreeSummary"];
+        };
+        /**
+         * ProfileModelCandidateRequest
+         * @description Body for proposing one agent-profile.yaml field update (human review).
+         */
+        ProfileModelCandidateRequest: {
+            /** Field */
+            field: string;
+            /** Proposed Value */
+            proposed_value: string;
+            /**
+             * Rationale
+             * @default
+             */
+            rationale: string;
         };
         /**
          * ProfileSettingsPatch
@@ -12699,6 +12792,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_profile_model_candidate_api_v1_profiles__name__activity_profile_model_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileModelCandidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityItemModel"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Item state conflict (not pending/appliable, apply failed). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityItemErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the current activity file. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityItemErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -16426,6 +16599,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    append_profile_growth_log_api_v1_profiles__name__growth_log_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrowthLogRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrowthLogResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Item state conflict (not pending/appliable, apply failed). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityItemErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the current activity file. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityItemErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

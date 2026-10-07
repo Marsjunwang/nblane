@@ -304,3 +304,45 @@ class TestGuardPolicy(JournalTestBase):
             cast = client.post(f"{BASE}/divination", json={"mode": "play"})
         self.assertNotEqual(cast.status_code, 428)
         self.assertNotEqual(cast.status_code, 403)
+
+
+class TestHttpOnlyAssistantEndpoints(JournalTestBase):
+    """Growth log + profile-model candidates are reachable over HTTP."""
+
+    def test_growth_log_append_is_journaled_and_undoable(self) -> None:
+        client = self._client(self.root, login="openclaw")
+        before = (self.profile / "SKILL.md").read_text(encoding="utf-8")
+        response = client.post(f"{BASE}/growth-log", json={"event": "Shipped the arm demo"})
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertIn("Shipped the arm demo", (self.profile / "SKILL.md").read_text(encoding="utf-8"))
+        entry = self.journal(client)[0]
+        self.assertEqual(entry["action"], "growth_log.append")
+        self.assertEqual(entry["tier"], "T1")
+        undone = client.post(f"{BASE}/agent/journal/{entry['id']}/undo")
+        self.assertEqual(undone.status_code, 200, undone.text)
+        self.assertEqual((self.profile / "SKILL.md").read_text(encoding="utf-8"), before)
+
+    def test_growth_log_rejects_blank_event(self) -> None:
+        client = self._client(self.root, login="wang")
+        response = client.post(f"{BASE}/growth-log", json={"event": "  "})
+        self.assertEqual(response.status_code, 422)
+
+    def test_profile_model_candidate_queues_pending_item(self) -> None:
+        client = self._client(self.root, login="openclaw")
+        response = client.post(
+            f"{BASE}/activity/profile-model",
+            json={"field": "preferences.tone", "proposed_value": "concise", "rationale": "asked twice"},
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        item = response.json()
+        self.assertEqual(item["status"], "pending")
+        self.assertEqual(item["candidate_type"], "profile_model")
+        self.assertEqual(item["payload"]["proposed_value"], "concise")
+        # A review submission changes no profile facts: nothing to undo.
+        self.assertEqual(self.journal(client), [])
+
+    def test_profile_model_candidate_validation(self) -> None:
+        client = self._client(self.root, login="openclaw")
+        response = client.post(f"{BASE}/activity/profile-model", json={"field": "x", "proposed_value": " "})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["code"], "invalid_profile_model_candidate")

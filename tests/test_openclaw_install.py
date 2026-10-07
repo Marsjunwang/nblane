@@ -88,13 +88,6 @@ OVERLAY_JSON = json.dumps(
     indent=2,
 )
 
-MCP_ENTRY = {
-    "command": "/venv/bin/nblane-mcp",
-    "args": [],
-    "env": {"NBLANE_ROOT": "/data", "NBLANE_PROFILE": "alice"},
-}
-
-
 def _make_profile(root: Path, *, overlay: str | None = OVERLAY_JSON) -> Path:
     profile = root / "alice"
     profile.mkdir()
@@ -167,10 +160,6 @@ class TestCmdInstall(unittest.TestCase):
                 "nblane.commands.openclaw.automations_file_path",
                 lambda _name: profile / "assistant" / "automations.yaml",
             ),
-            patch(
-                "nblane.commands.openclaw.build_mcp_server_entry",
-                lambda _name: dict(MCP_ENTRY),
-            ),
             contextlib.redirect_stdout(out),
             self.assertRaises(SystemExit) as ctx,
         ):
@@ -199,7 +188,6 @@ class TestCmdInstall(unittest.TestCase):
                     and "--dry-run" in argv
                 )
                 self.assertTrue(is_patch_dry, argv)
-            # MCP entry injected into the patch payload.
             patch_inputs = [
                 stdin
                 for argv, stdin in runner.calls
@@ -207,7 +195,8 @@ class TestCmdInstall(unittest.TestCase):
             ]
             self.assertEqual(len(patch_inputs), 1)
             payload = json.loads(patch_inputs[0])
-            self.assertEqual(payload["mcp"]["servers"]["nblane"], MCP_ENTRY)
+            # The assistant uses HTTP only: no MCP entry is injected.
+            self.assertNotIn("mcp", payload)
             self.assertEqual(
                 payload["agents"]["defaults"]["model"]["primary"],
                 "qwen/qwen3.8-flash",
@@ -241,7 +230,7 @@ class TestCmdInstall(unittest.TestCase):
                 ],
                 argvs,
             )
-            # Config patch executed without --dry-run, MCP entry injected.
+            # Config patch executed without --dry-run.
             patches = [
                 (argv, stdin)
                 for argv, stdin in runner.calls
@@ -250,7 +239,8 @@ class TestCmdInstall(unittest.TestCase):
             self.assertEqual(len(patches), 1)
             self.assertNotIn("--dry-run", patches[0][0])
             payload = json.loads(patches[0][1])
-            self.assertEqual(payload["mcp"]["servers"]["nblane"], MCP_ENTRY)
+            # The assistant uses HTTP only: no MCP entry is injected.
+            self.assertNotIn("mcp", payload)
             # Scheduled jobs belong to OpenClaw: install never touches them.
             self.assertFalse(any(argv[:2] == ["openclaw", "automations"] for argv in argvs))
 
@@ -270,7 +260,7 @@ class TestCmdInstall(unittest.TestCase):
                 self.assertNotEqual(argv[:2], ["openclaw", "config"])
             self.assertEqual(runner.argvs(), [])
 
-    def test_non_json_overlay_emits_two_sequential_patches(self) -> None:
+    def test_non_json_overlay_passes_through_verbatim(self) -> None:
         overlay_text = "// JSON5 comment, not pure JSON\n{ model: {} }\n"
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -283,14 +273,7 @@ class TestCmdInstall(unittest.TestCase):
                 for argv, stdin in runner.calls
                 if argv[:4] == ["openclaw", "config", "patch", "--stdin"]
             ]
-            self.assertEqual(len(patches), 2)
-            # First patch passes the overlay through verbatim.
-            self.assertEqual(patches[0], overlay_text)
-            # Second patch is the generated JSON carrying the MCP entry.
-            generated = json.loads(patches[1])
-            self.assertEqual(
-                generated["mcp"]["servers"]["nblane"], MCP_ENTRY
-            )
+            self.assertEqual(patches, [overlay_text])
 
     def test_config_patch_failure_exits_1(self) -> None:
         def runner_fn(argv, input=None) -> CommandResult:
@@ -324,7 +307,7 @@ class TestTemplateOverlay(unittest.TestCase):
     def test_template_overlay_is_pure_json_without_mcp_or_secrets(self) -> None:
         data = json.loads(TEMPLATE_OVERLAY.read_text(encoding="utf-8"))
         self.assertIsInstance(data, dict)
-        # mcp.servers is auto-injected by install, never declared here.
+        # The assistant uses HTTP only; no MCP server is declared here.
         self.assertNotIn("mcp", data)
         text = TEMPLATE_OVERLAY.read_text(encoding="utf-8")
         # Placeholder env ref only; no concrete owner id or token.
@@ -357,16 +340,8 @@ def test_substitute_env_text_without_refs_passes_through() -> None:
     assert substitute_env_text(text, env={}) == text
 
 
-def _patch_mcp_entry(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "nblane.commands.openclaw.build_mcp_server_entry",
-        lambda _name: dict(MCP_ENTRY),
-    )
-
-
 def test_install_overlay_substitutes_env_vars(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TEST_OVERLAY_OWNER", "owner123@im.wechat")
-    _patch_mcp_entry(monkeypatch)
     overlay = tmp_path / "openclaw.overlay.json5"
     overlay.write_text(
         '{"agents": {"defaults": {"heartbeat": {"to": "${TEST_OVERLAY_OWNER}"}}}}',
@@ -391,7 +366,6 @@ def test_install_overlay_unset_var_aborts_before_patch(
     monkeypatch, tmp_path, capsys
 ) -> None:
     monkeypatch.delenv("TEST_OVERLAY_UNSET", raising=False)
-    _patch_mcp_entry(monkeypatch)
     overlay = tmp_path / "openclaw.overlay.json5"
     overlay.write_text('{"to": "${TEST_OVERLAY_UNSET}"}', encoding="utf-8")
     runner = FakeRunner()

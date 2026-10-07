@@ -267,12 +267,12 @@ export function AgentSection() {
 
         {ready && (
           <Stack gap={6}>
-            <StatusLine ok={data.mcp_registered} label="nblane MCP" detail={data.mcp_profile && `档案 ${data.mcp_profile}`} />
+            <StatusLine ok={Boolean(data.connected_profile)} label="已接入 nblane" detail={data.connected_profile && `档案 ${data.connected_profile}`} />
             <StatusLine ok={data.corpus_present} label="档案语料（OpenClaw 记忆检索可直接命中）" />
             <StatusLine ok={data.workspace_in_agent_root} label="工作区在统一数据目录" detail={data.workspace} />
             <StatusLine ok={data.weixin_installed} label="微信渠道插件" />
             <Group gap="xs" mt="xs">
-              <Button size="xs" leftSection={<IconPlugConnected size={14} />} disabled={running} loading={job.isPending && job.variables?.kind === 'connect'} onClick={() => start('connect')}>{data.mcp_registered ? '重新接入 / 刷新语料' : '接入 nblane'}</Button>
+              <Button size="xs" leftSection={<IconPlugConnected size={14} />} disabled={running} loading={job.isPending && job.variables?.kind === 'connect'} onClick={() => start('connect')}>{data.connected_profile ? '重新接入 / 刷新语料' : '接入 nblane'}</Button>
               {!data.workspace_in_agent_root && data.workspace_exists && (
                 <Button size="xs" variant="light" leftSection={<IconFolderShare size={14} />} disabled={running} onClick={() => { if (window.confirm(`把工作区移动到 ${data.target_workspace}？\n\n会先备份整个 OpenClaw 状态目录，然后短暂停止网关（微信会断开约 10 秒），旧路径保留为软链接。`)) start('migrate'); }}>迁移到统一数据目录</Button>
               )}
