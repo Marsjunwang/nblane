@@ -3,7 +3,7 @@
 // Each section has its own URL: /settings/<section>?profile=<name>.
 
 import { Alert, Box, Center, Group, Loader, NavLink, Paper, Select, Stack, Text, Title } from '@mantine/core';
-import { IconBook2, IconCpu, IconLanguage, IconPlugConnected, IconRobot, IconRoute } from '@tabler/icons-react';
+import { IconBook2, IconCpu, IconLanguage, IconPlugConnected, IconRobot, IconRoute, IconTerminal2 } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
@@ -14,6 +14,7 @@ import { LocalServicesSection } from './settings/LocalServicesSection';
 import { ProfileAIRoutingSection, ProfileGeneralSection, ProfileResearchSection } from './settings/ProfileSections';
 import { SettingsDirtyContext, ErrorAlert } from './settings/shared';
 import { SystemAISection } from './settings/SystemAISection';
+import { WorkshopSection } from './settings/WorkshopSection';
 
 type Section = {
   key: string;
@@ -27,6 +28,7 @@ type Section = {
 const SECTIONS: Section[] = [
   { key: 'ai-service', label: 'AI 服务', description: 'AI 连接与 Codex CLI 状态', icon: <IconPlugConnected size={16} />, scope: 'system', render: () => <SystemAISection /> },
   { key: 'local-services', label: '本地服务', description: '本地翻译模型与 GROBID', icon: <IconCpu size={16} />, scope: 'system', render: () => <LocalServicesSection /> },
+  { key: 'workshop', label: '车间终端', description: '网页终端、手机快捷输入与 Happy', icon: <IconTerminal2 size={16} />, scope: 'system', render: () => <WorkshopSection /> },
   { key: 'agents', label: '助手与备份', description: '个人 Agent 安装接入与数据备份', icon: <IconRobot size={16} />, scope: 'system', render: () => <AgentsAndBackupSection /> },
   { key: 'general', label: '通用', description: '界面与 AI 回复语言', icon: <IconLanguage size={16} />, scope: 'profile', render: (profile) => <ProfileGeneralSection key={profile} profile={profile} /> },
   { key: 'research', label: '研究与阅读', description: 'Reader 默认值、翻译、研究 AI', icon: <IconBook2 size={16} />, scope: 'profile', render: (profile) => <ProfileResearchSection key={profile} profile={profile} /> },

@@ -22,3 +22,5 @@ os.environ["NBLANE_GROBID_SERVICE_DIR"] = str(_STATE_DIR / "grobid")
 # a test that calls stop()/uninstall() acts on the production GROBID.
 os.environ["XDG_CONFIG_HOME"] = str(_STATE_DIR / "config")
 os.environ["NBLANE_GROBID_UNIT"] = "nblane-grobid-pytest"
+os.environ["NBLANE_WORKSHOP_SERVICE_DIR"] = str(_STATE_DIR / "workshop")
+os.environ["NBLANE_WORKSHOP_TMUX_SOCKET"] = "nblane-workshop-pytest"

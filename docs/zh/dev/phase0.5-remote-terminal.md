@@ -1,8 +1,8 @@
 ---
 status: active
 owner: 王军 + kimi
-last_verified: 2026-09-27
-source_of_truth: 远程车间(网页终端)接入方案;Step 0/1/2 已实施并验收(见文末实施记录)
+last_verified: 2026-10-07
+source_of_truth: 远程车间(网页终端)接入方案;Step 0/1/2 已实施并验收,Step 3 代码已完成待部署(见文末实施记录)
 ---
 
 # Phase 0.5 · 远程车间(网页终端)接入方案
@@ -44,7 +44,7 @@ ttyd 一个二进制把 bash 暴露为网页终端(xterm.js 内核);配 tmux 得
 | 0 | 装 ttyd、systemd unit、tmux 会话、本机 127.0.0.1 跑通 | 半小时 | ✅ 2026-09-22 |
 | 1 | Caddy 公网入口 + basic_auth,手机实测(锁屏重进、输入体验) | 半小时 | ✅ 入口已通(手机实测待王军) |
 | 2 | SPA 加「车间」页 iframe 嵌入(路由 /p/:name/workshop 或全局页,侧栏注册) | 半天 | ✅ 2026-09-22(全局页 /workshop,见文末) |
-| 3 | SPA 上生产后,迁 8504 WS 代理 + nblane 会话认证,撤 basic_auth | 随 SPA 上生产 | 未开始 |
+| 3 | SPA 上生产后,迁 8504 WS 代理 + nblane 会话认证,撤 basic_auth | 随 SPA 上生产 | 代码完成 2026-10-07,待部署+改 Caddy |
 
 ### 安全关卡(逐条验收)
 
@@ -95,3 +95,14 @@ ttyd 一个二进制把 bash 暴露为网页终端(xterm.js 内核);配 tmux 得
   2. `-t rendererType=canvas`(弃 webgl 图集,逐字直绘,没有图集可坏)——**王军手机实测通过,显示清晰**。代价:canvas 滚动性能略低于 webgl,聊天式终端使用无感。
 - **验证手法**(下次改 `-t` 配置可直接用): ttyd 客户端选项不走 HTML 注入,而是 WebSocket 握手(子协议为 `tty`,不是 `web`;需先 GET `/token` 再带 token 连接)后由服务端 `SET_PREFERENCES`('2' 前缀帧)下发;python 裸 socket 握手 + 发送 `{"AuthToken":"","columns":N,"rows":M}` 初始化帧即可抓到该 JSON,确认配置真实到达客户端。
 - **遗留**: ttyd 1.7.7 无 viewport meta 的坑仍在;若移动端再出显示异常,可用 `-I` 挂自定义 index.html 补 meta(最后一招)。
+
+## 实施记录(2026-10-07,Step 3 + 手机快捷输入 + 设置页托管)
+
+- **认证**: `/terminal/*` 由 8504 自己反代 ttyd(`web_api/workshop_terminal.py`):HTTP 与 WebSocket(子协议 `tty`)都要求 **管理员** 会话,WS 另校验 Origin 同源。basic_auth 不再需要;Caddy 删掉 `handle /terminal/*` 块后 `/terminal/` 落到兜底 8504 即可(需 root,设置页检测到旧路由会提示步骤)。
+- **快捷输入**(车间页底部,触屏默认开):Esc / Esc×2 / ^C / ⇧Tab / Tab / 方向键 / ⏎ / ^O ^R ^T ^L ^D ^Z / 翻页,经 `POST /system/workshop/keys` 白名单 → `tmux send-keys`;输入框经 `POST /system/workshop/input` → `load-buffer` + `paste-buffer -p`(应用开了 bracketed paste 时按粘贴处理)+ 可选回车,解决 xterm.js 在手机上中文输入法不可用的问题。按钮 `preventDefault` mousedown,不抢焦点、不收起软键盘;页面高度跟随 `visualViewport`。
+- **独立 tmux**: 托管后 ttyd 跑 `tmux -L nblane-workshop -f ~/.local/share/nblane/workshop/tmux.conf`,不读写 `~/.tmux.conf`;unit `KillMode=process`,改设置/重启只重启 ttyd,tmux 里的 Agent 不中断。
+- **默认配置**(实测选定,可在「设置 → 车间终端」改): canvas 渲染 + 字形缩放、禁备用屏幕(原生滚动)+ mouse off、escape-time 10ms(原 500ms 让 Esc 发粘)、scrollback 10000 / history 50000、手机字号 16(412px 宽屏实测:24→25 列 Claude Code 排版崩,16→37 列,14→42 列)、电脑字号 15。字号经 iframe URL `?fontSize=` 下发(ttyd URL 参数优先级最高),其余 ttyd 选项写进 start.sh。
+- **一键安装/接管**: 设置页下载 ttyd 1.7.7(sha256 固定校验,本机已有同哈希二进制则直接复制)→ 写 tmux.conf/start.sh/unit → 启动;检测到手写 unit 显示「接管」(旧会话留在默认 tmux server,新车间里 `TMUX= tmux attach -t workshop` 取回)。做不了的(apt 装 tmux、enable-linger、改 Caddy、离线放 ttyd)给逐步命令。
+- **车间入口**: 顶栏「车间」改为新标签页打开(`target=nblane-workshop`,复用同一标签),页内「新标签页打开」删除。
+- **Happy Coder**: 设置页只做状态检测(CLI/配对/daemon)+ 指引;npm 包名 `happy`(旧 `happy-coder` 已停更),首次 `happy auth login` 需在电脑屏幕扫码。
+- **隔离**: dev-web.sh `--isolated` 用 unit `nblane-workshop-dev`、端口 17668、socket `nblane-workshop-dev`;测试用临时目录和 `nblane-workshop-pytest` socket。

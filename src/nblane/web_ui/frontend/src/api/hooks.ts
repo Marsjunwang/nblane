@@ -121,6 +121,9 @@ import type {
   CareerPreviewResponse,
   ResumeDoc,
   WorkshopStatus,
+  WorkshopLogs,
+  WorkshopServiceStatus,
+  WorkshopSettingsPatch,
   CodexSettings,
   CodexSettingsPatch,
   CodexStatus,
@@ -458,6 +461,71 @@ export function useWorkshopStatus() {
     queryKey: ['system', 'workshop'],
     queryFn: () => apiGet<WorkshopStatus>('/system/workshop'),
     staleTime: 60_000,
+  });
+}
+
+/** Workshop key bar: whitelisted key names (see core/workshop_service.KEYS). */
+export function useWorkshopKeys() {
+  return useMutation({
+    mutationFn: (keys: string[]) => apiPost<{ ok: boolean }>('/system/workshop/keys', { keys }),
+  });
+}
+
+/** Workshop input box: paste text into the terminal, optionally followed by Enter. */
+export function useWorkshopInput() {
+  return useMutation({
+    mutationFn: (body: { text: string; submit: boolean }) => apiPost<{ ok: boolean }>('/system/workshop/input', body),
+  });
+}
+
+const WORKSHOP_SERVICE_KEY = ['settings', 'workshop'] as const;
+
+/** Admin-only ttyd/tmux service status; polls while installing or starting. */
+export function useWorkshopService(enabled = true) {
+  return useQuery({
+    queryKey: WORKSHOP_SERVICE_KEY,
+    queryFn: () => apiGet<WorkshopServiceStatus>('/settings/workshop'),
+    enabled,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      return data.install.status === 'running' || data.state === 'starting' ? 2000 : 30000;
+    },
+  });
+}
+
+function useWorkshopServiceMutation<TVars>(request: (vars: TVars) => Promise<WorkshopServiceStatus>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: request,
+    onSuccess: (value) => {
+      queryClient.setQueryData(WORKSHOP_SERVICE_KEY, value);
+      void queryClient.invalidateQueries({ queryKey: ['system', 'workshop'] });
+    },
+  });
+}
+
+export function useWorkshopServiceAction() {
+  return useWorkshopServiceMutation((action: 'install' | 'start' | 'stop' | 'restart') =>
+    apiPost<WorkshopServiceStatus>(`/settings/workshop/${action}`, {}),
+  );
+}
+
+export function useUpdateWorkshopSettings() {
+  return useWorkshopServiceMutation((patch: WorkshopSettingsPatch) => apiPut<WorkshopServiceStatus>('/settings/workshop', patch));
+}
+
+export function useUninstallWorkshop() {
+  return useWorkshopServiceMutation((endSessions: boolean) =>
+    apiDelete<WorkshopServiceStatus>(`/settings/workshop${endSessions ? '?end_sessions=true' : ''}`),
+  );
+}
+
+export function useWorkshopLogs(enabled: boolean) {
+  return useQuery({
+    queryKey: [...WORKSHOP_SERVICE_KEY, 'logs'],
+    queryFn: () => apiGet<WorkshopLogs>('/settings/workshop/logs'),
+    enabled,
   });
 }
 

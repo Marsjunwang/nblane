@@ -4545,6 +4545,32 @@
     "title": "HabitPlanWeeklyTasksModel",
     "type": "object"
    },
+   "HappyStatus": {
+    "properties": {
+     "daemon_running": {
+      "default": false,
+      "title": "Daemon Running",
+      "type": "boolean"
+     },
+     "installed": {
+      "default": false,
+      "title": "Installed",
+      "type": "boolean"
+     },
+     "paired": {
+      "default": false,
+      "title": "Paired",
+      "type": "boolean"
+     },
+     "path": {
+      "default": "",
+      "title": "Path",
+      "type": "string"
+     }
+    },
+    "title": "HappyStatus",
+    "type": "object"
+   },
    "HealthIssueModel": {
     "description": "One actionable profile health finding.",
     "properties": {
@@ -12378,13 +12404,471 @@
     "title": "ValidationError",
     "type": "object"
    },
+   "WorkshopApplyResult": {
+    "properties": {
+     "reattach_needed": {
+      "default": false,
+      "title": "Reattach Needed",
+      "type": "boolean"
+     },
+     "tmux_reloaded": {
+      "default": false,
+      "title": "Tmux Reloaded",
+      "type": "boolean"
+     },
+     "ttyd_restarted": {
+      "default": false,
+      "title": "Ttyd Restarted",
+      "type": "boolean"
+     }
+    },
+    "title": "WorkshopApplyResult",
+    "type": "object"
+   },
+   "WorkshopInputRequest": {
+    "properties": {
+     "submit": {
+      "default": true,
+      "title": "Submit",
+      "type": "boolean"
+     },
+     "text": {
+      "default": "",
+      "maxLength": 16000,
+      "title": "Text",
+      "type": "string"
+     }
+    },
+    "title": "WorkshopInputRequest",
+    "type": "object"
+   },
+   "WorkshopInstallState": {
+    "properties": {
+     "error": {
+      "default": "",
+      "title": "Error",
+      "type": "string"
+     },
+     "phase": {
+      "default": "",
+      "title": "Phase",
+      "type": "string"
+     },
+     "started_at": {
+      "default": 0.0,
+      "title": "Started At",
+      "type": "number"
+     },
+     "status": {
+      "default": "",
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "title": "WorkshopInstallState",
+    "type": "object"
+   },
+   "WorkshopKeysRequest": {
+    "properties": {
+     "keys": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Keys",
+      "type": "array"
+     }
+    },
+    "required": [
+     "keys"
+    ],
+    "title": "WorkshopKeysRequest",
+    "type": "object"
+   },
+   "WorkshopLogsResponse": {
+    "properties": {
+     "text": {
+      "default": "",
+      "title": "Text",
+      "type": "string"
+     }
+    },
+    "title": "WorkshopLogsResponse",
+    "type": "object"
+   },
+   "WorkshopOkResponse": {
+    "properties": {
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "title": "WorkshopOkResponse",
+    "type": "object"
+   },
+   "WorkshopServiceStatus": {
+    "description": "GET /api/v1/settings/workshop payload (admin).",
+    "properties": {
+     "applied": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/WorkshopApplyResult"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "arch": {
+      "title": "Arch",
+      "type": "string"
+     },
+     "autostart": {
+      "title": "Autostart",
+      "type": "boolean"
+     },
+     "blocker": {
+      "title": "Blocker",
+      "type": "string"
+     },
+     "caddy_legacy_route": {
+      "title": "Caddy Legacy Route",
+      "type": "boolean"
+     },
+     "defaults": {
+      "$ref": "#/components/schemas/WorkshopSettings"
+     },
+     "happy": {
+      "$ref": "#/components/schemas/HappyStatus"
+     },
+     "install": {
+      "$ref": "#/components/schemas/WorkshopInstallState"
+     },
+     "managed": {
+      "title": "Managed",
+      "type": "boolean"
+     },
+     "port": {
+      "title": "Port",
+      "type": "integer"
+     },
+     "reachable": {
+      "title": "Reachable",
+      "type": "boolean"
+     },
+     "service_dir": {
+      "title": "Service Dir",
+      "type": "string"
+     },
+     "session": {
+      "title": "Session",
+      "type": "string"
+     },
+     "session_alive": {
+      "title": "Session Alive",
+      "type": "boolean"
+     },
+     "settings": {
+      "$ref": "#/components/schemas/WorkshopSettings"
+     },
+     "state": {
+      "title": "State",
+      "type": "string"
+     },
+     "tmux_path": {
+      "title": "Tmux Path",
+      "type": "string"
+     },
+     "tmux_socket": {
+      "title": "Tmux Socket",
+      "type": "string"
+     },
+     "tmux_version": {
+      "title": "Tmux Version",
+      "type": "string"
+     },
+     "ttyd_download_url": {
+      "title": "Ttyd Download Url",
+      "type": "string"
+     },
+     "ttyd_installed": {
+      "title": "Ttyd Installed",
+      "type": "boolean"
+     },
+     "ttyd_path": {
+      "title": "Ttyd Path",
+      "type": "string"
+     },
+     "ttyd_sha256": {
+      "title": "Ttyd Sha256",
+      "type": "string"
+     },
+     "ttyd_version": {
+      "title": "Ttyd Version",
+      "type": "string"
+     },
+     "unit": {
+      "title": "Unit",
+      "type": "string"
+     },
+     "unit_state": {
+      "$ref": "#/components/schemas/WorkshopUnitState"
+     },
+     "upstream": {
+      "title": "Upstream",
+      "type": "string"
+     },
+     "user_manager": {
+      "title": "User Manager",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "state",
+     "reachable",
+     "managed",
+     "unit",
+     "unit_state",
+     "port",
+     "upstream",
+     "ttyd_version",
+     "ttyd_installed",
+     "ttyd_path",
+     "ttyd_download_url",
+     "ttyd_sha256",
+     "arch",
+     "tmux_path",
+     "tmux_version",
+     "tmux_socket",
+     "session",
+     "session_alive",
+     "user_manager",
+     "autostart",
+     "service_dir",
+     "caddy_legacy_route",
+     "settings",
+     "defaults",
+     "install",
+     "blocker",
+     "happy"
+    ],
+    "title": "WorkshopServiceStatus",
+    "type": "object"
+   },
+   "WorkshopSettings": {
+    "properties": {
+     "cwd": {
+      "title": "Cwd",
+      "type": "string"
+     },
+     "escape_time_ms": {
+      "title": "Escape Time Ms",
+      "type": "integer"
+     },
+     "font_size_desktop": {
+      "title": "Font Size Desktop",
+      "type": "integer"
+     },
+     "font_size_mobile": {
+      "title": "Font Size Mobile",
+      "type": "integer"
+     },
+     "history_limit": {
+      "title": "History Limit",
+      "type": "integer"
+     },
+     "mouse": {
+      "title": "Mouse",
+      "type": "boolean"
+     },
+     "native_scroll": {
+      "title": "Native Scroll",
+      "type": "boolean"
+     },
+     "renderer": {
+      "title": "Renderer",
+      "type": "string"
+     },
+     "rescale_glyphs": {
+      "title": "Rescale Glyphs",
+      "type": "boolean"
+     },
+     "scrollback": {
+      "title": "Scrollback",
+      "type": "integer"
+     },
+     "status_bar": {
+      "title": "Status Bar",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "font_size_mobile",
+     "font_size_desktop",
+     "scrollback",
+     "renderer",
+     "rescale_glyphs",
+     "history_limit",
+     "mouse",
+     "native_scroll",
+     "escape_time_ms",
+     "status_bar",
+     "cwd"
+    ],
+    "title": "WorkshopSettings",
+    "type": "object"
+   },
+   "WorkshopSettingsPatch": {
+    "properties": {
+     "cwd": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cwd"
+     },
+     "escape_time_ms": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Escape Time Ms"
+     },
+     "font_size_desktop": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Font Size Desktop"
+     },
+     "font_size_mobile": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Font Size Mobile"
+     },
+     "history_limit": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "History Limit"
+     },
+     "mouse": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mouse"
+     },
+     "native_scroll": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Native Scroll"
+     },
+     "renderer": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Renderer"
+     },
+     "rescale_glyphs": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rescale Glyphs"
+     },
+     "scrollback": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Scrollback"
+     },
+     "status_bar": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Status Bar"
+     }
+    },
+    "title": "WorkshopSettingsPatch",
+    "type": "object"
+   },
    "WorkshopStatusResponse": {
     "description": "GET /api/v1/system/workshop payload.",
     "properties": {
+     "admin": {
+      "default": false,
+      "title": "Admin",
+      "type": "boolean"
+     },
      "checked_at": {
       "default": "",
       "title": "Checked At",
       "type": "string"
+     },
+     "font_size_desktop": {
+      "default": 15,
+      "title": "Font Size Desktop",
+      "type": "integer"
+     },
+     "font_size_mobile": {
+      "default": 16,
+      "title": "Font Size Mobile",
+      "type": "integer"
      },
      "reachable": {
       "default": false,
@@ -12398,6 +12882,37 @@
      }
     },
     "title": "WorkshopStatusResponse",
+    "type": "object"
+   },
+   "WorkshopUnitState": {
+    "properties": {
+     "active_state": {
+      "default": "",
+      "title": "Active State",
+      "type": "string"
+     },
+     "installed": {
+      "default": false,
+      "title": "Installed",
+      "type": "boolean"
+     },
+     "restarts": {
+      "default": 0,
+      "title": "Restarts",
+      "type": "integer"
+     },
+     "since": {
+      "default": "",
+      "title": "Since",
+      "type": "string"
+     },
+     "sub_state": {
+      "default": "",
+      "title": "Sub State",
+      "type": "string"
+     }
+    },
+    "title": "WorkshopUnitState",
     "type": "object"
    }
   }
@@ -26890,6 +27405,269 @@
     "summary": "Install Local Model"
    }
   },
+  "/api/v1/settings/workshop": {
+   "delete": {
+    "description": "Remove the unit; ``end_sessions`` also ends everything running in tmux.",
+    "operationId": "uninstall_workshop_api_v1_settings_workshop_delete",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "end_sessions",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "End Sessions",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WorkshopServiceStatus"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Uninstall Workshop"
+   },
+   "get": {
+    "description": "ttyd/tmux service state, terminal settings and Happy CLI presence.",
+    "operationId": "get_workshop_service_api_v1_settings_workshop_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WorkshopServiceStatus"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     }
+    },
+    "summary": "Get Workshop Service"
+   },
+   "put": {
+    "description": "Save terminal settings and apply them to the running service.",
+    "operationId": "update_workshop_settings_api_v1_settings_workshop_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/WorkshopSettingsPatch"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WorkshopServiceStatus"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Update Workshop Settings"
+   }
+  },
+  "/api/v1/settings/workshop/logs": {
+   "get": {
+    "operationId": "workshop_logs_api_v1_settings_workshop_logs_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WorkshopLogsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     }
+    },
+    "summary": "Workshop Logs"
+   }
+  },
+  "/api/v1/settings/workshop/{action}": {
+   "post": {
+    "description": "install (also takes over a hand-written unit) / start / stop / restart.",
+    "operationId": "workshop_service_action_api_v1_settings_workshop__action__post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "action",
+      "required": true,
+      "schema": {
+       "title": "Action",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WorkshopServiceStatus"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Workshop Service Action"
+   }
+  },
   "/api/v1/system/assistant": {
    "get": {
     "description": "Assistant status card payload (cached 60s in app.state).",
@@ -26926,6 +27704,124 @@
      }
     },
     "summary": "Get Workshop Status"
+   }
+  },
+  "/api/v1/system/workshop/input": {
+   "post": {
+    "description": "Mobile input box: paste text typed with the phone's own IME, optionally + Enter.",
+    "operationId": "send_workshop_input_api_v1_system_workshop_input_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/WorkshopInputRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WorkshopOkResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Send Workshop Input"
+   }
+  },
+  "/api/v1/system/workshop/keys": {
+   "post": {
+    "description": "Mobile key bar: send whitelisted keys (Esc, Ctrl-C, arrows…) to the terminal.",
+    "operationId": "send_workshop_keys_api_v1_system_workshop_keys_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/WorkshopKeysRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WorkshopOkResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Send Workshop Keys"
    }
   }
  }

@@ -301,6 +301,13 @@ export type AssistantStatus = Schemas['AssistantStatusResponse'];
 /** WorkshopStatusResponse from web_api/workshop.py. */
 export type WorkshopStatus = Schemas['WorkshopStatusResponse'];
 
+/** Settings → 车间 service status (web_api/workshop.py). */
+export type WorkshopServiceStatus = Schemas['WorkshopServiceStatus'];
+export type WorkshopSettings = Schemas['WorkshopSettings'];
+export type WorkshopSettingsPatch = Schemas['WorkshopSettingsPatch'];
+export type WorkshopLogs = Schemas['WorkshopLogsResponse'];
+
+
 /** ProjectMilestoneModel from web_api/schemas.py (with completion counts). */
 export type ProjectMilestone = Schemas['ProjectMilestoneModel'];
 

@@ -212,6 +212,9 @@ if [[ "$mode" == "isolated" ]]; then
   # gateway unit and port), agent data root, deploy keys, state and timer so
   # dev never touches the production gateway, keys or nblane-backup.timer.
   local_models_env="${local_models_env} NBLANE_OPENCLAW_PROFILE=nblane-dev NBLANE_OPENCLAW_GATEWAY_PORT=19789 NBLANE_AGENT_DATA_ROOT='$dev_root/agent-data' NBLANE_BACKUP_KEY_DIR='$dev_root/backup/keys' NBLANE_BACKUP_STATE_DIR='$dev_root/backup/state' NBLANE_BACKUP_DIR='$dev_root/backup/archives' NBLANE_BACKUP_UNIT=nblane-backup-dev"
+  # Workshop terminal managed from dev Settings: own unit, ttyd port, tmux
+  # socket and settings, so dev never restarts or reconfigures the real one.
+  local_models_env="${local_models_env} NBLANE_WORKSHOP_SERVICE_DIR='$dev_root/workshop' NBLANE_WORKSHOP_UNIT=nblane-workshop-dev NBLANE_WORKSHOP_PORT=17668 NBLANE_WORKSHOP_TMUX_SOCKET=nblane-workshop-dev NBLANE_WORKSHOP_AUTOSTART=0"
 fi
 
 reader_base="http://127.0.0.1:${reader_port}"
@@ -507,18 +510,23 @@ tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
      --server.address=127.0.0.1 --server.port=${streamlit_port} --server.headless=true"
 fi
 
+if [[ "$mode" == "isolated" ]]; then
+  workshop_url_expr="/terminal/"
+else
+  workshop_url_expr="\${NBLANE_WORKSHOP_URL:-/terminal/}"
+fi
 if [[ "$use_web_api" == "1" ]]; then
-  # Workshop iframe URL: /terminal/ only exists behind the production Caddy
-  # proxy; locally there is no proxy, so default to the ttyd port directly.
-  # Evaluated in the tmux shell AFTER the env file is sourced, so an explicit
-  # NBLANE_WORKSHOP_URL there still wins.
+  # Workshop terminal URL: the web API serves the authenticated /terminal/
+  # proxy itself, so the same-origin default works locally too. Isolated
+  # runs pin it (a production NBLANE_WORKSHOP_URL in the env file must not
+  # leak in); otherwise an explicit value from the env file still wins.
   tmux new-session -d -s "$web_api_session" -c "$repo_root" \
     "${web_api_env_load} ${reader_token_env} \
      NBLANE_ROOT='$dev_root' \
      NBLANE_ENV_FILE='$env_file' \
      NBLANE_READER_API_BASE='$reader_base' \
      NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
-     NBLANE_WORKSHOP_URL=\"\${NBLANE_WORKSHOP_URL:-http://127.0.0.1:7668/}\" \
+     NBLANE_WORKSHOP_URL=\"${workshop_url_expr}\" \
      ${web_api_auth_env} ${lang_env} ${local_models_env} \
      PYTHONPATH=src .venv/bin/uvicorn ${web_api_uvicorn_args}"
 fi

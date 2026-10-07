@@ -170,9 +170,13 @@ export function AppLayout() {
               stay as aria-labels) so the cluster never wraps past the fixed
               56px header and over the page content. */}
           <Group gap="sm" wrap="nowrap">
+            {/* The workshop opens in its own browser tab: the terminal keeps its
+                connection while the rest of the app navigates, and the tab is
+                the full-screen terminal (with the mobile key bar). */}
             <Button
-              component={RouterLink}
-              to="/workshop"
+              component="a"
+              href="/workshop"
+              target="nblane-workshop"
               variant={location.pathname.startsWith('/workshop') ? 'light' : 'subtle'}
               size="compact-sm"
               leftSection={<IconTerminal2 size={14} />}

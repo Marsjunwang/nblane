@@ -34,6 +34,7 @@ from nblane.web_api.research import router as research_router
 from nblane.web_api.research_papers import router as research_papers_router
 from nblane.web_api.spa import mount_spa
 from nblane.web_api.workshop import router as workshop_router
+from nblane.web_api.workshop_terminal import router as workshop_terminal_router
 
 
 def create_app(
@@ -58,6 +59,8 @@ def create_app(
     app.include_router(local_models_router)
     app.include_router(grobid_router)
     app.include_router(agents_setup_router)
+    # /terminal/* (authenticated ttyd proxy) must also win over the SPA fallback.
+    app.include_router(workshop_terminal_router)
     # Mounted last so API routes win over the SPA catch-all fallback.
     mount_spa(app, static_dir=spa_static_dir)
     return app

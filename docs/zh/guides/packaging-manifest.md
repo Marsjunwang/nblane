@@ -15,7 +15,7 @@ nblane 本体是 `pip install -e .`(Python 依赖见 pyproject.toml/uv.lock);本
 |---|---|---|---|
 | Node.js ≥ 18 | 组件前端构建、e2e | 系统包/nvm | package.json |
 | tmux | 远程车间会话 | apt | deploy/units/ |
-| ttyd(静态二进制) | 远程车间网页终端 | GitHub releases → ~/.local/bin | docs/zh/dev/phase0.5-remote-terminal.md |
+| ttyd(静态二进制) | 远程车间网页终端 | 设置 → 车间终端一键安装(GitHub releases,sha256 固定)→ ~/.local/share/nblane/workshop/bin | docs/zh/dev/phase0.5-remote-terminal.md |
 | GROBID(可选) | PDF 结构提取 | docker,端口 8070 | deployment-tencent-cloud.md |
 | mihomo(可选,本机网络工具) | 代理 | 见 mihomo-deployment.md | 非 nblane 配置 |
 | openclaw(可选) | 常驻 agent 运行时 | npm 全局 | scripts/openclaw/install.sh |

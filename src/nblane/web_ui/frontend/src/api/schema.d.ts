@@ -3597,6 +3597,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/workshop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workshop Service
+         * @description ttyd/tmux service state, terminal settings and Happy CLI presence.
+         */
+        get: operations["get_workshop_service_api_v1_settings_workshop_get"];
+        /**
+         * Update Workshop Settings
+         * @description Save terminal settings and apply them to the running service.
+         */
+        put: operations["update_workshop_settings_api_v1_settings_workshop_put"];
+        post?: never;
+        /**
+         * Uninstall Workshop
+         * @description Remove the unit; ``end_sessions`` also ends everything running in tmux.
+         */
+        delete: operations["uninstall_workshop_api_v1_settings_workshop_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/workshop/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workshop Logs */
+        get: operations["workshop_logs_api_v1_settings_workshop_logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/workshop/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Workshop Service Action
+         * @description install (also takes over a hand-written unit) / start / stop / restart.
+         */
+        post: operations["workshop_service_action_api_v1_settings_workshop__action__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/assistant": {
         parameters: {
             query?: never;
@@ -3631,6 +3696,46 @@ export interface paths {
         get: operations["get_workshop_status_api_v1_system_workshop_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/workshop/input": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Workshop Input
+         * @description Mobile input box: paste text typed with the phone's own IME, optionally + Enter.
+         */
+        post: operations["send_workshop_input_api_v1_system_workshop_input_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/workshop/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Workshop Keys
+         * @description Mobile key bar: send whitelisted keys (Esc, Ctrl-C, arrows…) to the terminal.
+         */
+        post: operations["send_workshop_keys_api_v1_system_workshop_keys_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6854,6 +6959,29 @@ export interface components {
             tasks?: string[];
             /** Week */
             week: number;
+        };
+        /** HappyStatus */
+        HappyStatus: {
+            /**
+             * Daemon Running
+             * @default false
+             */
+            daemon_running: boolean;
+            /**
+             * Installed
+             * @default false
+             */
+            installed: boolean;
+            /**
+             * Paired
+             * @default false
+             */
+            paired: boolean;
+            /**
+             * Path
+             * @default
+             */
+            path: string;
         };
         /**
          * HealthIssueModel
@@ -12022,16 +12150,212 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** WorkshopApplyResult */
+        WorkshopApplyResult: {
+            /**
+             * Reattach Needed
+             * @default false
+             */
+            reattach_needed: boolean;
+            /**
+             * Tmux Reloaded
+             * @default false
+             */
+            tmux_reloaded: boolean;
+            /**
+             * Ttyd Restarted
+             * @default false
+             */
+            ttyd_restarted: boolean;
+        };
+        /** WorkshopInputRequest */
+        WorkshopInputRequest: {
+            /**
+             * Submit
+             * @default true
+             */
+            submit: boolean;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+        };
+        /** WorkshopInstallState */
+        WorkshopInstallState: {
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /**
+             * Phase
+             * @default
+             */
+            phase: string;
+            /**
+             * Started At
+             * @default 0
+             */
+            started_at: number;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+        };
+        /** WorkshopKeysRequest */
+        WorkshopKeysRequest: {
+            /** Keys */
+            keys: string[];
+        };
+        /** WorkshopLogsResponse */
+        WorkshopLogsResponse: {
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+        };
+        /** WorkshopOkResponse */
+        WorkshopOkResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+        };
+        /**
+         * WorkshopServiceStatus
+         * @description GET /api/v1/settings/workshop payload (admin).
+         */
+        WorkshopServiceStatus: {
+            applied?: components["schemas"]["WorkshopApplyResult"] | null;
+            /** Arch */
+            arch: string;
+            /** Autostart */
+            autostart: boolean;
+            /** Blocker */
+            blocker: string;
+            /** Caddy Legacy Route */
+            caddy_legacy_route: boolean;
+            defaults: components["schemas"]["WorkshopSettings"];
+            happy: components["schemas"]["HappyStatus"];
+            install: components["schemas"]["WorkshopInstallState"];
+            /** Managed */
+            managed: boolean;
+            /** Port */
+            port: number;
+            /** Reachable */
+            reachable: boolean;
+            /** Service Dir */
+            service_dir: string;
+            /** Session */
+            session: string;
+            /** Session Alive */
+            session_alive: boolean;
+            settings: components["schemas"]["WorkshopSettings"];
+            /** State */
+            state: string;
+            /** Tmux Path */
+            tmux_path: string;
+            /** Tmux Socket */
+            tmux_socket: string;
+            /** Tmux Version */
+            tmux_version: string;
+            /** Ttyd Download Url */
+            ttyd_download_url: string;
+            /** Ttyd Installed */
+            ttyd_installed: boolean;
+            /** Ttyd Path */
+            ttyd_path: string;
+            /** Ttyd Sha256 */
+            ttyd_sha256: string;
+            /** Ttyd Version */
+            ttyd_version: string;
+            /** Unit */
+            unit: string;
+            unit_state: components["schemas"]["WorkshopUnitState"];
+            /** Upstream */
+            upstream: string;
+            /** User Manager */
+            user_manager: boolean;
+        };
+        /** WorkshopSettings */
+        WorkshopSettings: {
+            /** Cwd */
+            cwd: string;
+            /** Escape Time Ms */
+            escape_time_ms: number;
+            /** Font Size Desktop */
+            font_size_desktop: number;
+            /** Font Size Mobile */
+            font_size_mobile: number;
+            /** History Limit */
+            history_limit: number;
+            /** Mouse */
+            mouse: boolean;
+            /** Native Scroll */
+            native_scroll: boolean;
+            /** Renderer */
+            renderer: string;
+            /** Rescale Glyphs */
+            rescale_glyphs: boolean;
+            /** Scrollback */
+            scrollback: number;
+            /** Status Bar */
+            status_bar: boolean;
+        };
+        /** WorkshopSettingsPatch */
+        WorkshopSettingsPatch: {
+            /** Cwd */
+            cwd?: string | null;
+            /** Escape Time Ms */
+            escape_time_ms?: number | null;
+            /** Font Size Desktop */
+            font_size_desktop?: number | null;
+            /** Font Size Mobile */
+            font_size_mobile?: number | null;
+            /** History Limit */
+            history_limit?: number | null;
+            /** Mouse */
+            mouse?: boolean | null;
+            /** Native Scroll */
+            native_scroll?: boolean | null;
+            /** Renderer */
+            renderer?: string | null;
+            /** Rescale Glyphs */
+            rescale_glyphs?: boolean | null;
+            /** Scrollback */
+            scrollback?: number | null;
+            /** Status Bar */
+            status_bar?: boolean | null;
+        };
         /**
          * WorkshopStatusResponse
          * @description GET /api/v1/system/workshop payload.
          */
         WorkshopStatusResponse: {
             /**
+             * Admin
+             * @default false
+             */
+            admin: boolean;
+            /**
              * Checked At
              * @default
              */
             checked_at: string;
+            /**
+             * Font Size Desktop
+             * @default 15
+             */
+            font_size_desktop: number;
+            /**
+             * Font Size Mobile
+             * @default 16
+             */
+            font_size_mobile: number;
             /**
              * Reachable
              * @default false
@@ -12042,6 +12366,34 @@ export interface components {
              * @default /terminal/
              */
             url: string;
+        };
+        /** WorkshopUnitState */
+        WorkshopUnitState: {
+            /**
+             * Active State
+             * @default
+             */
+            active_state: string;
+            /**
+             * Installed
+             * @default false
+             */
+            installed: boolean;
+            /**
+             * Restarts
+             * @default 0
+             */
+            restarts: number;
+            /**
+             * Since
+             * @default
+             */
+            since: string;
+            /**
+             * Sub State
+             * @default
+             */
+            sub_state: string;
         };
     };
     responses: never;
@@ -22663,6 +23015,240 @@ export interface operations {
             };
         };
     };
+    get_workshop_service_api_v1_settings_workshop_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkshopServiceStatus"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_workshop_settings_api_v1_settings_workshop_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkshopSettingsPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkshopServiceStatus"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    uninstall_workshop_api_v1_settings_workshop_delete: {
+        parameters: {
+            query?: {
+                end_sessions?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkshopServiceStatus"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workshop_logs_api_v1_settings_workshop_logs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkshopLogsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    workshop_service_action_api_v1_settings_workshop__action__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                action: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkshopServiceStatus"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_assistant_status_api_v1_system_assistant_get: {
         parameters: {
             query?: never;
@@ -22699,6 +23285,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkshopStatusResponse"];
+                };
+            };
+        };
+    };
+    send_workshop_input_api_v1_system_workshop_input_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkshopInputRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkshopOkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_workshop_keys_api_v1_system_workshop_keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkshopKeysRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkshopOkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
