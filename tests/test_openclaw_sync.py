@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -327,6 +328,46 @@ class TestCmdSync(unittest.TestCase):
             self.assertIn("- myskill/extra.md", out)
             # Check mode never deletes.
             self.assertTrue((skills_dst / "myskill" / "extra.md").exists())
+
+    def test_empty_skills_source_is_drift_not_in_sync(self) -> None:
+        """A missing source must not report 全部一致 or prune the workspace."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            skills_dst = root / ".openclaw" / "workspace" / "skills"
+            (skills_dst / "nblane").mkdir(parents=True)
+            (skills_dst / "nblane" / "SKILL.md").write_text("# live\n", encoding="utf-8")
+            missing = root / "no-such-skills"
+            for check in (True, False):
+                code, out = self._run(root, profile, skills_src=missing, check=check)
+                self.assertEqual(code, 1)
+                self.assertIn("技能源目录为空或不存在", out)
+                self.assertNotIn("全部一致", out)
+            self.assertTrue((skills_dst / "nblane" / "SKILL.md").is_file())
+
+
+class TestSkillsSourceDir(unittest.TestCase):
+    def test_source_follows_code_checkout_not_data_root(self) -> None:
+        """In production NBLANE_ROOT is the data repo; skills ship with code."""
+        with tempfile.TemporaryDirectory() as data_root:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from nblane.commands import openclaw as m;"
+                    "print(m.SKILLS_SRC_DIR);print(m.PLUGIN_SRC_DIR)",
+                ],
+                capture_output=True,
+                text=True,
+                env={**os.environ, "NBLANE_ROOT": data_root},
+                check=True,
+            )
+        skills, plugin = result.stdout.splitlines()
+        self.assertEqual(Path(skills), SKILLS_SRC)
+        self.assertEqual(
+            Path(plugin),
+            REPO_ROOT / "scripts" / "openclaw" / "plugins" / "weixin-task-bridge",
+        )
 
     def test_missing_profile_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

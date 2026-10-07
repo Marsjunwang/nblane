@@ -43,16 +43,16 @@ from nblane.core.openclaw_ops import (
     doctor_exit_code,
     run_doctor,
 )
-from nblane.core.paths import REPO_ROOT
+from nblane.core.openclaw_setup import REPO_SCRIPTS
 from nblane.core.profile_io import list_profiles
 
 _MARKS = {True: "[OK]", False: "[失败]"}
 _MARK_WARNING = "[提醒]"
 
-SKILLS_SRC_DIR = REPO_ROOT / "scripts" / "openclaw" / "skills"
-PLUGIN_SRC_DIR = (
-    REPO_ROOT / "scripts" / "openclaw" / "plugins" / "weixin-task-bridge"
-)
+# Skills and the plugin ship with the code checkout, not the data root:
+# in production NBLANE_ROOT (and so paths.REPO_ROOT) is the data repo.
+SKILLS_SRC_DIR = REPO_SCRIPTS / "skills"
+PLUGIN_SRC_DIR = REPO_SCRIPTS / "plugins" / "weixin-task-bridge"
 OVERLAY_FILENAME = "openclaw.overlay.json5"
 
 
@@ -273,7 +273,10 @@ def _sync_skills(src: Path, dst: Path, *, check: bool) -> bool:
     """
     files = _iter_skill_files(src)
     if not files:
-        print(f"{_MARK_WARNING} 技能源目录为空: {src}")
+        # An empty source would otherwise "match" any workspace and hide a
+        # wrong source path; report it as drift and touch nothing.
+        print(f"{_MARKS[False]} 技能源目录为空或不存在: {src}")
+        return True
     drift = False
     wrote = 0
     removed = 0
