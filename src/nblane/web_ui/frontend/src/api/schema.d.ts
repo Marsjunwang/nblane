@@ -226,6 +226,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/agent/journal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Agent Journal
+         * @description Recent agent writes (newest first) with their undo status.
+         *
+         *     Only agent accounts are journaled; human edits never appear here. The
+         *     log keeps ``agent_journal.RETENTION_DAYS`` days.
+         */
+        get: operations["get_profile_agent_journal_api_v1_profiles__name__agent_journal_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/agent/journal/{entry_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo Profile Agent Journal Entry
+         * @description Revert one agent write (the agent itself or the user may undo).
+         *
+         *     Refused with 409 ``journal_undo_conflict`` when a touched entity changed
+         *     after the write, 409 ``journal_entry_already_undone`` on a second
+         *     attempt, 404 when the entry is unknown or past retention.
+         */
+        post: operations["undo_profile_agent_journal_entry_api_v1_profiles__name__agent_journal__entry_id__undo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/ai-exceptions": {
         parameters: {
             query?: never;
@@ -4075,6 +4122,72 @@ export interface components {
             status: string;
         };
         /**
+         * AgentJournalEntryModel
+         * @description One agent write in the undo journal (agent-journal.yaml).
+         */
+        AgentJournalEntryModel: {
+            /** Action */
+            action: string;
+            /** Actor */
+            actor: string;
+            /** At */
+            at: string;
+            /** Entities */
+            entities?: string[];
+            /** Id */
+            id: string;
+            /**
+             * Status
+             * @default undoable
+             * @enum {string}
+             */
+            status: "undoable" | "conflict" | "undone";
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /**
+             * Tier
+             * @default
+             */
+            tier: string;
+            /**
+             * Undone At
+             * @default
+             */
+            undone_at: string;
+            /**
+             * Undone By
+             * @default
+             */
+            undone_by: string;
+        };
+        /**
+         * AgentJournalResponse
+         * @description GET /profiles/{name}/agent/journal payload (newest first).
+         */
+        AgentJournalResponse: {
+            /** Entries */
+            entries?: components["schemas"]["AgentJournalEntryModel"][];
+            /** Profile */
+            profile: string;
+            /** Retention Days */
+            retention_days: number;
+        };
+        /**
+         * AgentJournalUndoResponse
+         * @description POST …/agent/journal/{entry_id}/undo payload.
+         */
+        AgentJournalUndoResponse: {
+            entry: components["schemas"]["AgentJournalEntryModel"];
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+        };
+        /**
          * AgentTaskListResponse
          * @description Agent task list, optionally filtered by status.
          */
@@ -5365,6 +5478,11 @@ export interface components {
          * @description The authenticated principal for one request.
          */
         CurrentUser: {
+            /**
+             * Agent
+             * @default false
+             */
+            agent: boolean;
             /**
              * Auth Enabled
              * @default false
@@ -12835,6 +12953,125 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentTaskListResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_profile_agent_journal_api_v1_profiles__name__agent_journal_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentJournalResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    undo_profile_agent_journal_entry_api_v1_profiles__name__agent_journal__entry_id__undo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentJournalUndoResponse"];
                 };
             };
             /** @description Invalid profile name. */

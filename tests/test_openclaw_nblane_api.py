@@ -200,11 +200,70 @@ def test_delete_discard_hard_refused_without_http(session, server):
             nblane_api.normalize_path(path)
     with pytest.raises(nblane_api.ApiFailure, match=r"\.\."):
         nblane_api.normalize_path("/profiles/x/checkins/c1/../discard")
+    # delete only reaches the server-gated routes.
+    for path in ("/profiles/x/inbox/E1", "/profiles/x/evidence/ev1", "/profiles/x/kanban/cards/a/../b"):
+        with pytest.raises(nblane_api.ApiFailure):
+            nblane_api.normalize_delete_path(path)
+    assert nblane_api.normalize_delete_path("/api/v1/profiles/x/kanban/cards/kb_1") == "/profiles/x/kanban/cards/kb_1"
     assert server.requests == []  # nothing reached the wire
-    # There is no delete subcommand at all.
-    parser = nblane_api.build_parser()
-    with pytest.raises(SystemExit):
-        parser.parse_args(["delete", "/profiles/x/checkins/c1"])
+
+
+def _confirm_transport(seen: list[httpx.Request]) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.headers.get("X-Nblane-Confirm") == "cf_1":
+            return httpx.Response(200, json={"ok": True, "deleted_ref": "kb_1"})
+        return httpx.Response(
+            428,
+            json={
+                "code": "confirmation_required",
+                "message": "needs confirmation",
+                "confirmation": {"confirm_id": "cf_1", "summary": "删除任务「A」", "expires_at": "x"},
+            },
+        )
+
+    return httpx.MockTransport(handler)
+
+
+def test_delete_confirmation_handshake(tmp_path, capsys):
+    seen: list[httpx.Request] = []
+    session = nblane_api.Session(
+        "http://127.0.0.1:8504", password=PASSWORD,
+        jar_path=tmp_path / "jar.json", transport=_confirm_transport(seen),
+    )
+    code = nblane_api.main(["--profile", "x", "delete", "/profiles/x/kanban/cards/kb_1"], session=session)
+    assert code == nblane_api.EXIT_CONFIRMATION_REQUIRED
+    out = json.loads(capsys.readouterr().out)
+    assert out["confirmation_required"] is True
+    assert out["confirm_id"] == "cf_1"
+    assert out["summary"] == "删除任务「A」"
+    assert len(seen) == 1  # never auto-confirmed
+
+    code = nblane_api.main(
+        ["--confirm", "cf_1", "delete", "/profiles/x/kanban/cards/kb_1"], session=session
+    )
+    assert code == 0
+    assert seen[-1].method == "DELETE"
+    assert seen[-1].headers["X-Nblane-Confirm"] == "cf_1"
+
+
+def test_recent_and_undo_paths(tmp_path):
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    session = nblane_api.Session(
+        "http://127.0.0.1:8504", password=PASSWORD,
+        jar_path=tmp_path / "jar.json", transport=httpx.MockTransport(handler),
+    )
+    assert nblane_api.main(["--profile", "x", "recent", "--limit", "5"], session=session) == 0
+    assert nblane_api.main(["--profile", "x", "undo", "aj_1"], session=session) == 0
+    assert [(r.method, r.url.path, r.url.query.decode()) for r in seen] == [
+        ("GET", "/api/v1/profiles/x/agent/journal", "limit=5"),
+        ("POST", "/api/v1/profiles/x/agent/journal/aj_1/undo", ""),
+    ]
 
 
 def test_password_never_logged(session, server, capsys, tmp_path):

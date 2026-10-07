@@ -47,6 +47,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from nblane.core import agent_activity, agent_tasks, file_state, gap, inbox
+from nblane.core import agent_journal, agent_policy
 from nblane.core import career_ai, career_workspace, content_ai, content_workspace, git_backup, resume_doc, visual_candidate_store
 from nblane.core import public_console
 from nblane.core.file_lock import locked_profile_write
@@ -199,6 +200,9 @@ from nblane.web_api.schemas import (
     AgentTaskModel,
     CheckinCreateRequest,
     CheckinDeleteResponse,
+    AgentJournalEntryModel,
+    AgentJournalResponse,
+    AgentJournalUndoResponse,
     CheckinModel,
     CheckinMutationResponse,
     ChronicleEntryModel,
@@ -416,11 +420,18 @@ ERROR_RESPONSES = {
 class ApiError(Exception):
     """Raised by route handlers to produce a structured error response."""
 
-    def __init__(self, status_code: int, code: str, message: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.extra = extra or {}
 
 
 def app_version() -> str:
@@ -523,7 +534,7 @@ def _record_agent_writeback(
     is best-effort: the mutation's own writes already landed, so a trace
     failure is logged, never raised into a completed mutation's response.
     """
-    if user.id != AGENT_ACCOUNT_ID:
+    if not agent_policy.is_agent(user):
         return
     try:
         record_writeback_activity(
@@ -1133,6 +1144,78 @@ def get_profile_ai_exceptions(
         total=len(items),
         items=[AIExceptionModel(**item) for item in items],
     )
+
+
+def _journal_entry_model(entry: dict[str, Any]) -> AgentJournalEntryModel:
+    return AgentJournalEntryModel(
+        id=str(entry.get("id") or ""),
+        at=str(entry.get("at") or ""),
+        actor=str(entry.get("actor") or ""),
+        action=str(entry.get("action") or ""),
+        tier=str(entry.get("tier") or ""),
+        summary=str(entry.get("summary") or ""),
+        status=entry.get("status") or ("undone" if entry.get("undone_at") else "undoable"),
+        undone_at=str(entry.get("undone_at") or ""),
+        undone_by=str(entry.get("undone_by") or ""),
+        entities=[
+            f"{change.get('entity')}:{change.get('id')}"
+            for change in entry.get("changes") or []
+        ],
+    )
+
+
+@router.get(
+    "/profiles/{name}/agent/journal",
+    response_model=AgentJournalResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_agent_journal(
+    name: str,
+    limit: int = Query(20, ge=1, le=200),
+) -> AgentJournalResponse:
+    """Recent agent writes (newest first) with their undo status.
+
+    Only agent accounts are journaled; human edits never appear here. The
+    log keeps ``agent_journal.RETENTION_DAYS`` days.
+    """
+    pdir = _resolve_profile(name)
+    return AgentJournalResponse(
+        profile=pdir.name,
+        retention_days=agent_journal.RETENTION_DAYS,
+        entries=[_journal_entry_model(item) for item in agent_journal.recent(pdir, limit)],
+    )
+
+
+@router.post(
+    "/profiles/{name}/agent/journal/{entry_id}/undo",
+    response_model=AgentJournalUndoResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def undo_profile_agent_journal_entry(
+    name: str,
+    entry_id: str,
+    user: CurrentUser = Depends(require_user),
+) -> AgentJournalUndoResponse:
+    """Revert one agent write (the agent itself or the user may undo).
+
+    Refused with 409 ``journal_undo_conflict`` when a touched entity changed
+    after the write, 409 ``journal_entry_already_undone`` on a second
+    attempt, 404 when the entry is unknown or past retention.
+    """
+    pdir = _resolve_profile(name)
+    try:
+        entry = agent_journal.undo(pdir, entry_id.strip(), actor=user.id)
+    except agent_journal.UndoError as exc:
+        status = 404 if exc.code == "journal_entry_not_found" else 409
+        raise ApiError(status, exc.code, exc.message) from exc
+    except file_state.FileConflictError as exc:
+        raise ApiError(
+            409, "journal_undo_conflict", "撤销时文件正好被修改，请稍后重试。"
+        ) from exc
+    entry["status"] = "undone"
+    return AgentJournalUndoResponse(ok=True, entry=_journal_entry_model(entry))
 
 
 @router.post(
@@ -9404,7 +9487,9 @@ def get_profile_research(
 async def api_error_handler(_request: Request, exc: ApiError) -> JSONResponse:
     """Serialize ApiError into the ErrorResponse model."""
     body = ErrorResponse(code=exc.code, message=exc.message)
-    return JSONResponse(status_code=exc.status_code, content=body.model_dump())
+    return JSONResponse(
+        status_code=exc.status_code, content={**exc.extra, **body.model_dump()}
+    )
 
 
 async def validation_error_handler(

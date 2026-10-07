@@ -3399,3 +3399,33 @@ class OpenClawGatewayRequest(BaseModel):
     """Gateway service action."""
 
     action: Literal["start", "stop", "restart"]
+
+
+class AgentJournalEntryModel(BaseModel):
+    """One agent write in the undo journal (agent-journal.yaml)."""
+
+    id: str
+    at: str
+    actor: str
+    action: str
+    tier: str = ""
+    summary: str = ""
+    status: Literal["undoable", "conflict", "undone"] = "undoable"
+    undone_at: str = ""
+    undone_by: str = ""
+    entities: list[str] = Field(default_factory=list)
+
+
+class AgentJournalResponse(BaseModel):
+    """GET /profiles/{name}/agent/journal payload (newest first)."""
+
+    profile: str
+    retention_days: int
+    entries: list[AgentJournalEntryModel] = Field(default_factory=list)
+
+
+class AgentJournalUndoResponse(BaseModel):
+    """POST …/agent/journal/{entry_id}/undo payload."""
+
+    ok: bool = True
+    entry: AgentJournalEntryModel

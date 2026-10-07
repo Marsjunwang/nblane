@@ -42,6 +42,7 @@ class CurrentUser(BaseModel):
     auth_enabled: bool = False
     profiles: list[str] = Field(default_factory=list)
     teams: list[str] = Field(default_factory=list)
+    agent: bool = False
 
     @classmethod
     def from_user(cls, user: auth_core.User, *, auth_enabled: bool) -> "CurrentUser":
@@ -53,6 +54,7 @@ class CurrentUser(BaseModel):
             auth_enabled=auth_enabled,
             profiles=list(user.profiles),
             teams=list(user.teams),
+            agent=user.agent,
         )
 
 

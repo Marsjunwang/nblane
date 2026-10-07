@@ -55,6 +55,8 @@ def make_runner(
 
     def runner(argv: list[str], timeout: float) -> subprocess.CompletedProcess:
         calls.append(list(argv))
+        if argv[1:2] == ["--profile"]:
+            argv = [argv[0], *argv[3:]]
         if fail:
             raise subprocess.TimeoutExpired(argv, timeout)
         if argv[1:] == ["--version"]:
@@ -78,9 +80,15 @@ def make_client(
     which_result: str | None = "/usr/local/bin/openclaw",
     runner=None,
     http_get=None,
+    read_config=lambda: None,
 ) -> TestClient:
-    """App with injected probe seams (auth off)."""
+    """App with injected probe seams (auth off).
+
+    ``read_config`` defaults to "no JSON config" so the MCP probe falls back
+    to the fake ``openclaw mcp list``.
+    """
     app = create_app()
+    app.state.assistant_read_config = read_config
     app.state.assistant_which = lambda _name: which_result
     app.state.assistant_runner = runner or make_runner()
     app.state.assistant_http_get = http_get or (
@@ -235,7 +243,21 @@ class TestProbeHelpers(unittest.TestCase):
 
     def test_mcp_not_registered(self) -> None:
         runner = make_runner(mcp_stdout="NAME  TRANSPORT\nother stdio\n")
-        self.assertFalse(assistant_mod._probe_mcp_registered(runner))
+        self.assertFalse(assistant_mod._probe_mcp_registered(runner, lambda: None))
+
+    def test_mcp_registered_from_config_without_cli(self) -> None:
+        runner = make_runner(fail=True)
+        config = {"mcp": {"servers": {"nblane": {"command": "nblane-mcp"}}}}
+        self.assertTrue(assistant_mod._probe_mcp_registered(runner, lambda: config))
+        self.assertFalse(assistant_mod._probe_mcp_registered(runner, lambda: {"mcp": {}}))
+        self.assertEqual(runner.calls, [])
+
+    def test_gateway_camel_case_uptime(self) -> None:
+        status = assistant_mod._probe_gateway(
+            lambda url, timeout: FakeResponse(200, {"ready": True, "uptimeMs": 40924697}),
+            "http://127.0.0.1:18789",
+        )
+        self.assertEqual(status.uptime_ms, 40924697)
 
     def test_gateway_uptime_missing_is_null(self) -> None:
         status = assistant_mod._probe_gateway(

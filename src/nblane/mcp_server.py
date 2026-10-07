@@ -1,14 +1,26 @@
-"""MCP server: expose nblane profile context and reviewed writes (stdio).
+"""MCP server: expose nblane profile context and policy-checked writes (stdio).
 
-Resources are read-only. Tools are graded: append-only captures write
-directly (``capture_inbox``), anything that changes existing facts goes
-through the Agent Activity review queue (``submit_*_candidate``), and
-``run_validate`` / ``run_sync_check`` are read-only self-checks. New
-tools return structured dicts and carry ``ToolAnnotations``; the seven
+Resources are read-only. Every write tool runs through the same agent write
+policy as the HTTP API (``core/agent_policy`` via ``core/agent_ops``):
+
+- T1 daily ops (add/move a card, check in, capture to the inbox, growth log)
+  apply directly and land in the undo journal (``recent_actions`` /
+  ``undo_action``).
+- T2 tools (``delete_kanban_card``, ``log_skill_evidence``) answer
+  ``confirmation_required`` with a ``confirm_id`` first; the agent relays the
+  summary, and only after the user agrees in the chat repeats the identical
+  call with ``confirm_id``. Confirmations are shared across MCP processes
+  (``FileConfirmStore``), so a sibling session can redeem them.
+- ``submit_*_candidate`` still queue review items; ``run_validate`` /
+  ``run_sync_check`` are read-only self-checks.
+
+New tools return structured dicts and carry ``ToolAnnotations``; the
 legacy tools keep their ``OK:``/``ERROR:`` string contract.
 
 Environment:
   NBLANE_PROFILE — default profile name (optional if exactly one profile exists).
+  NBLANE_MCP_ACTOR — journal / confirmation actor id (default ``mcp``).
+  NBLANE_AGENT_STATE_DIR — where MCP confirmations live (see agent_policy).
   NBLANE_ROOT — repo root override (see nblane.core.paths).
   NBLANE_CONTEXT_MODE — chat | review | write | plan for profile://context.
   NBLANE_GAP_USE_LLM — if ``1`` / ``true``, enable LLM routing in gap analysis.
@@ -28,6 +40,7 @@ import yaml
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+from nblane.core import agent_journal, agent_ops, agent_policy
 from nblane.core.agent_activity import (
     activity_items_for_page,
     activity_summary,
@@ -61,14 +74,26 @@ from nblane.core.inbox import (
 from nblane.core.interaction import append_interaction_record
 from nblane.core.io import (
     KANBAN_DOING,
+    KANBAN_DONE,
     list_profiles,
     load_skill_tree_raw,
     parse_kanban,
     profile_dir,
 )
-from nblane.core.kanban_io import KANBAN_SECTIONS, resolve_kanban_section
+from nblane.core.kanban_io import (
+    KANBAN_QUEUE,
+    KANBAN_SECTIONS,
+    apply_kanban_reorder,
+    ensure_kanban_task_ids,
+    find_kanban_card,
+    find_kanban_card_by_id,
+    resolve_kanban_section,
+    update_kanban,
+)
 from nblane.core.learning_log import load_learning_log, summarize_learning_log
-from nblane.core.models import EVIDENCE_TYPES
+from nblane.core import activity_log
+from nblane.core.crystallize import _slug as _method_slug
+from nblane.core.models import EVIDENCE_TYPES, KanbanTask
 from nblane.core.paths import PROFILES_DIR
 from nblane.core.profile_context import (
     north_star_context_from_identity,
@@ -76,7 +101,6 @@ from nblane.core.profile_context import (
 )
 from nblane.core.profile_io import load_evidence_pool
 from nblane.core.review_actions import (
-    activity_item_from_kanban_candidate,
     activity_item_from_review_candidate,
 )
 from nblane.core.skill_evidence_inline import add_inline_evidence
@@ -668,17 +692,110 @@ def _tool_profile_or_error() -> tuple[str | None, str | None]:
     return resolve_active_profile()
 
 
+def _mcp_actor() -> str:
+    return os.getenv("NBLANE_MCP_ACTOR", "").strip() or "mcp"
+
+
+def _confirm_store() -> agent_policy.FileConfirmStore:
+    return agent_policy.FileConfirmStore(
+        agent_policy.state_dir() / "mcp-confirmations.json"
+    )
+
+
+class _NeedsConfirmation(Exception):
+    def __init__(self, payload: dict[str, Any]) -> None:
+        super().__init__(payload.get("summary", ""))
+        self.payload = payload
+
+
+def _policy_write(
+    name: str,
+    tool: str,
+    action: str,
+    apply: Callable[[], Any],
+    *,
+    args: dict[str, Any],
+    kinds: tuple[str, ...] = (),
+    describe: Callable[[agent_journal.Snapshot], str] | None = None,
+    confirm_id: str = "",
+    count: int = 1,
+) -> tuple[Any, dict[str, Any] | None]:
+    """Run *apply* under the agent write policy.
+
+    Returns ``(value, journal_entry)``. Raises ``_NeedsConfirmation`` for an
+    unconfirmed T2 call (nothing written). *args* are the tool arguments
+    that define the request; a confirmation only redeems the identical call.
+    """
+    label = agent_policy.ACTION_LABELS.get(action, action)
+    try:
+        value, _write, entry = agent_ops.guarded(
+            profile_dir(name),
+            apply,
+            actor=_mcp_actor(),
+            action=action,
+            kinds=kinds,
+            fingerprint=agent_policy.fingerprint("MCP", f"{name}/{tool}", args),
+            describe=describe or (lambda _before: label),
+            count=count,
+            confirm_id=confirm_id,
+            store=_confirm_store(),
+        )
+    except agent_ops.ConfirmationRequired as exc:
+        pending = exc.pending.public()
+        raise _NeedsConfirmation(
+            {
+                "ok": False,
+                "confirmation_required": True,
+                "invalid_confirm_id": exc.invalid,
+                **pending,
+                "next": (
+                    f"Ask the user in the chat: {pending['summary']}? Only after "
+                    f"they agree, call {tool} again with the same arguments and "
+                    f"confirm_id={pending['confirm_id']!r} (valid 10 minutes). "
+                    "Never confirm on the user's behalf."
+                ),
+            }
+        ) from None
+    return value, entry
+
+
+def _journal_fields(entry: dict[str, Any] | None) -> dict[str, Any]:
+    if not entry:
+        return {"journal_id": ""}
+    return {"journal_id": entry.get("id", ""), "undo_hint": "undo_action(journal_id)"}
+
+
+def _legacy_suffix(entry: dict[str, Any] | None) -> str:
+    return f" Undo with undo_action({entry['id']!r})." if entry else ""
+
+
+def _legacy_confirmation(payload: dict[str, Any]) -> str:
+    return (
+        f"CONFIRM REQUIRED: {payload['summary']}. confirm_id={payload['confirm_id']} "
+        f"— {payload['next']}\n"
+    )
+
+
 @mcp.tool(name="append_growth_log")
 def tool_append_growth_log(event: str) -> str:
-    """Append one row to the Growth Log table in SKILL.md."""
+    """Append one row to the Growth Log table in SKILL.md (undoable)."""
     name, err = _tool_profile_or_error()
     if err is not None or name is None:
         return f"ERROR: {err}\n"
+    clean = event.strip()
     try:
-        append_growth_log_row(profile_dir(name), event.strip())
+        _value, entry = _policy_write(
+            name,
+            "append_growth_log",
+            "growth_log.append",
+            lambda: append_growth_log_row(profile_dir(name), clean),
+            args={"event": clean},
+            kinds=(agent_journal.file_kind("SKILL.md"),),
+            describe=lambda _before: f"记一条成长日志「{clean}」",
+        )
     except _TOOL_STORE_ERRORS as exc:
         return f"ERROR: {exc}\n"
-    return f"OK: growth log updated for profile {name!r}.\n"
+    return f"OK: growth log updated for profile {name!r}.{_legacy_suffix(entry)}\n"
 
 
 @mcp.tool(name="log_skill_evidence")
@@ -689,26 +806,53 @@ def tool_log_skill_evidence(
     date: str = "",
     url: str = "",
     summary: str = "",
+    confirm_id: str = "",
 ) -> str:
-    """Add one inline evidence item to a skill-tree node."""
+    """Add one inline evidence item to a skill-tree node.
+
+    Needs the user's confirmation in the chat: the first call answers
+    ``CONFIRM REQUIRED`` with a ``confirm_id``; repeat the identical call
+    with that ``confirm_id`` only after the user agrees.
+    """
     name, err = _tool_profile_or_error()
     if err is not None or name is None:
         return f"ERROR: {err}\n"
+    clean_skill = skill_id.strip()
+    clean_type = evidence_type.strip() or "practice"
+    args = {
+        "skill_id": clean_skill,
+        "title": title.strip(),
+        "evidence_type": clean_type,
+        "date": date.strip(),
+        "url": url.strip(),
+        "summary": summary.strip(),
+    }
     try:
-        add_inline_evidence(
+        _value, entry = _policy_write(
             name,
-            skill_id.strip(),
-            type_=evidence_type.strip() or "practice",
-            title=title,
-            date=date,
-            url=url,
-            summary=summary,
+            "log_skill_evidence",
+            "skill_evidence.add",
+            lambda: add_inline_evidence(
+                name,
+                clean_skill,
+                type_=clean_type,
+                title=title,
+                date=date,
+                url=url,
+                summary=summary,
+            ),
+            args=args,
+            kinds=("skill_node",),
+            describe=lambda _before: f"给技能点 {clean_skill} 添加证据「{title.strip()}」",
+            confirm_id=confirm_id,
         )
+    except _NeedsConfirmation as exc:
+        return _legacy_confirmation(exc.payload)
     except _TOOL_STORE_ERRORS as exc:
         return f"ERROR: {exc}\n"
     return (
         f"OK: evidence on {skill_id!r} "
-        f"({title.strip()!r}) for {name!r}.\n"
+        f"({title.strip()!r}) for {name!r}.{_legacy_suffix(entry)}\n"
     )
 
 
@@ -723,11 +867,18 @@ def tool_log_interaction(
     if err is not None or name is None:
         return f"ERROR: {err}\n"
     ids = skill_ids if skill_ids is not None else []
-    path = append_interaction_record(
+    # Append-only Q/A log: policy-checked, not journaled (nothing to undo).
+    path, _entry = _policy_write(
         name,
-        question=question,
-        answer=answer,
-        skill_ids=ids,
+        "log_interaction",
+        "interaction.log",
+        lambda: append_interaction_record(
+            name,
+            question=question,
+            answer=answer,
+            skill_ids=ids,
+        ),
+        args={"question": question, "answer": answer, "skill_ids": ids},
     )
     return f"OK: appended to {path}\n"
 
@@ -758,8 +909,20 @@ def tool_crystallize_method_draft(
     name, err = _tool_profile_or_error()
     if err is not None or name is None:
         return f"ERROR: {err}\n"
-    path = write_method_draft(name, project, body)
-    return f"OK: wrote {path}\n"
+    relative = f"methods/{_method_slug(project)}_draft.md"
+    try:
+        path, entry = _policy_write(
+            name,
+            "crystallize_method_draft",
+            "method_draft.write",
+            lambda: write_method_draft(name, project, body),
+            args={"project": project, "body": body},
+            kinds=(agent_journal.file_kind(relative),),
+            describe=lambda _before: f"写方法草稿「{project.strip()}」",
+        )
+    except _TOOL_STORE_ERRORS as exc:
+        return f"ERROR: {exc}\n"
+    return f"OK: wrote {path}{_legacy_suffix(entry)}\n"
 
 
 @mcp.tool(name="submit_agent_task_candidate")
@@ -776,13 +939,19 @@ def tool_submit_agent_task_candidate(
     if err is not None or name is None:
         return f"ERROR: {err}\n"
     try:
-        task = submit_agent_task_candidate(
+        task, _entry = _policy_write(
             name,
-            task_id,
-            summary=summary,
-            changed_paths=changed_paths or [],
-            warnings=warnings or [],
-            result_payload=result_payload or {},
+            "submit_agent_task_candidate",
+            "agent_task.report",
+            lambda: submit_agent_task_candidate(
+                name,
+                task_id,
+                summary=summary,
+                changed_paths=changed_paths or [],
+                warnings=warnings or [],
+                result_payload=result_payload or {},
+            ),
+            args={"task_id": task_id},
         )
     except _TOOL_STORE_ERRORS as exc:
         return f"ERROR: {exc}\n"
@@ -811,12 +980,18 @@ def tool_update_agent_task_status(
     if clean_status not in AGENT_TASK_STATUSES:
         return f"ERROR: unknown agent task status {status!r}\n"
     try:
-        task = update_agent_task_status(
+        task, _entry = _policy_write(
             name,
-            task_id,
-            clean_status,
-            error=error,
-            warnings=warnings or [],
+            "update_agent_task_status",
+            "agent_task.report",
+            lambda: update_agent_task_status(
+                name,
+                task_id,
+                clean_status,
+                error=error,
+                warnings=warnings or [],
+            ),
+            args={"task_id": task_id, "status": clean_status},
         )
     except _TOOL_STORE_ERRORS as exc:
         return f"ERROR: {exc}\n"
@@ -886,7 +1061,15 @@ def tool_capture_inbox(
         )
 
     try:
-        item = update_inbox(profile_dir(name), _capture)
+        item, entry = _policy_write(
+            name,
+            "capture_inbox",
+            "inbox.capture",
+            lambda: update_inbox(profile_dir(name), _capture),
+            args={"title": clean_title, "raw_text": raw_text, "tags": tags or []},
+            kinds=("inbox_item",),
+            describe=lambda _before: f"记入收件箱「{clean_title}」",
+        )
     except _TOOL_STORE_ERRORS as exc:
         return _tool_error_payload(str(exc))
     return {
@@ -895,6 +1078,7 @@ def tool_capture_inbox(
         "item_id": item.id,
         "status": item.status,
         "captured_by": item.captured_by,
+        **_journal_fields(entry),
     }
 
 
@@ -957,7 +1141,13 @@ def tool_submit_evidence_candidate(
             "evidence",
             candidate,
         )
-        stored = append_activity_item(name, item)
+        stored, _entry = _policy_write(
+            name,
+            "submit_evidence_candidate",
+            "review.submit",
+            lambda: append_activity_item(name, item),
+            args=candidate,
+        )
     except _TOOL_STORE_ERRORS as exc:
         return _tool_error_payload(str(exc))
     return {
@@ -1027,7 +1217,13 @@ def tool_submit_profile_model_candidate(
         ).strip(),
     }
     try:
-        stored = append_activity_item(name, item)
+        stored, _entry = _policy_write(
+            name,
+            "submit_profile_model_candidate",
+            "review.submit",
+            lambda: append_activity_item(name, item),
+            args=payload,
+        )
     except _TOOL_STORE_ERRORS as exc:
         return _tool_error_payload(str(exc))
     return {
@@ -1040,15 +1236,193 @@ def tool_submit_profile_model_candidate(
     }
 
 
+def _write_annotations(title: str, *, destructive: bool = False) -> ToolAnnotations:
+    return ToolAnnotations(
+        title=title,
+        readOnlyHint=False,
+        destructiveHint=destructive,
+        idempotentHint=False,
+        openWorldHint=False,
+    )
+
+
+def _resolve_card(sections: dict[str, list[KanbanTask]], card_ref: str) -> tuple[str, int, KanbanTask]:
+    """Card by id, then exact title / unique substring; ValueError otherwise."""
+    hit = find_kanban_card_by_id(sections, card_ref)
+    if hit is not None:
+        return hit
+    found, _kind, message = find_kanban_card(sections, card_ref)
+    if found is None:
+        raise ValueError(message)
+    return found
+
+
+def _card_title(before: agent_journal.Snapshot, card_ref: str) -> str:
+    states = before.get("kanban_card", {})
+    state = states.get(card_ref) or next(
+        (s for s in states.values() if agent_ops.entity_title(s) == card_ref), None
+    )
+    return agent_ops.entity_title(state) or card_ref
+
+
+def _section_or_error(raw: str) -> str:
+    resolved = resolve_kanban_section(raw)
+    if resolved is None:
+        raise ValueError(
+            f"unknown section {raw!r} (expected one of: {', '.join(KANBAN_SECTIONS)})"
+        )
+    return resolved
+
+
+def _policy_payload(name: str, fn: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    """Run one dict tool body, mapping policy/store failures to payloads."""
+    try:
+        return fn()
+    except _NeedsConfirmation as exc:
+        return {"profile": name, **exc.payload}
+    except _TOOL_STORE_ERRORS as exc:
+        return _tool_error_payload(str(exc))
+
+
+@mcp.tool(
+    name="add_kanban_card",
+    annotations=_write_annotations("Add a kanban card"),
+    structured_output=True,
+)
+def tool_add_kanban_card(
+    title: str,
+    section: str = KANBAN_QUEUE,
+    context: str = "",
+    tags: list[str] | None = None,
+    planned_start: str = "",
+    planned_end: str = "",
+) -> dict[str, Any]:
+    """Add one card to the board (applies directly; undo with ``undo_action``).
+
+    ``section`` is ``Queue`` (default), ``Doing``, ``Done`` or
+    ``Someday / Maybe``. Cards added to Doing get ``started_on`` today,
+    cards added to Done get ``completed_on`` today.
+    """
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return _tool_error_payload(err or "no active profile")
+    clean_title = str(title or "").strip()
+    if not clean_title:
+        return _tool_error_payload("title must not be empty")
+
+    def _run() -> dict[str, Any]:
+        target = _section_or_error(section or KANBAN_QUEUE)
+        today = _today_iso()
+        task = KanbanTask(
+            title=clean_title,
+            context=str(context or "").strip(),
+            tags=", ".join(t.strip() for t in tags or [] if t.strip()),
+            planned_start=str(planned_start or "").strip() or None,
+            planned_end=str(planned_end or "").strip() or None,
+        )
+        if target == KANBAN_DONE:
+            task.done, task.completed_on = True, today
+        elif target == KANBAN_DOING:
+            task.started_on = today
+
+        def _append(sections: dict[str, list[KanbanTask]]) -> str:
+            sections.setdefault(target, []).append(task)
+            ensured = ensure_kanban_task_ids(sections, name)
+            sections.clear()
+            sections.update(ensured)
+            return ensured[target][-1].id
+
+        card_id, entry = _policy_write(
+            name,
+            "add_kanban_card",
+            "kanban.card.add",
+            lambda: update_kanban(profile_dir(name), _append),
+            args={"title": clean_title, "section": target},
+            kinds=("kanban_card",),
+            describe=lambda _before: f"新建任务「{clean_title}」",
+        )
+        return {
+            "ok": True,
+            "profile": name,
+            "card_id": card_id,
+            "section": target,
+            **_journal_fields(entry),
+        }
+
+    return _policy_payload(name, _run)
+
+
+def _move_card(name: str, tool: str, card_ref: str, target_section: str) -> dict[str, Any]:
+    clean_ref = str(card_ref or "").strip()
+    if not clean_ref:
+        return _tool_error_payload("card_ref must not be empty")
+    if not str(target_section or "").strip():
+        return _tool_error_payload(
+            "target_section is required (moves apply directly; "
+            f"one of: {', '.join(KANBAN_SECTIONS)})"
+        )
+
+    def _run() -> dict[str, Any]:
+        target = _section_or_error(target_section)
+
+        def _move(sections: dict[str, list[KanbanTask]]) -> tuple[str, str, str]:
+            from_section, _index, task = _resolve_card(sections, clean_ref)
+            if from_section != target:
+                moved = apply_kanban_reorder(
+                    sections,
+                    [{"id": task.id, "to_section": target}],
+                    auto_dates=True,
+                )
+                sections.clear()
+                sections.update(moved)
+            return task.id, task.title, from_section
+
+        (card_id, title, from_section), entry = _policy_write(
+            name,
+            tool,
+            "kanban.card.move",
+            lambda: update_kanban(profile_dir(name), _move),
+            args={"card_ref": clean_ref, "target_section": target},
+            kinds=("kanban_card",),
+            describe=lambda before: f"移动任务「{_card_title(before, clean_ref)}」到 {target}",
+        )
+        out: dict[str, Any] = {
+            "ok": True,
+            "profile": name,
+            "card_id": card_id,
+            "title": title,
+            "from_section": from_section,
+            "section": target,
+            **_journal_fields(entry),
+        }
+        if from_section == target:
+            out["warnings"] = [f"card {title!r} is already in {target!r}; no move needed"]
+        return out
+
+    return _policy_payload(name, _run)
+
+
+@mcp.tool(
+    name="move_kanban_card",
+    annotations=_write_annotations("Move a kanban card"),
+    structured_output=True,
+)
+def tool_move_kanban_card(card_ref: str, target_section: str) -> dict[str, Any]:
+    """Move one card to another column (applies directly; undoable).
+
+    ``card_ref`` is the card id (``kb_…``), the exact title, or a unique
+    substring of the title. Landing in Done marks the card done with
+    ``completed_on``; leaving Done clears both.
+    """
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return _tool_error_payload(err or "no active profile")
+    return _move_card(name, "move_kanban_card", card_ref, target_section)
+
+
 @mcp.tool(
     name="submit_kanban_candidate",
-    annotations=ToolAnnotations(
-        title="Submit a kanban move candidate for human review",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
-    ),
+    annotations=_write_annotations("Move a kanban card (legacy name)"),
     structured_output=True,
 )
 def tool_submit_kanban_candidate(
@@ -1057,13 +1431,10 @@ def tool_submit_kanban_candidate(
     target_section: str = "",
     note: str = "",
 ) -> dict[str, Any]:
-    """Queue a kanban card move for human review (no direct kanban write).
+    """Legacy alias of ``move_kanban_card``: the move now applies directly.
 
-    ``card_ref`` is the card title (exact, or a unique substring).
-    ``target_section`` must be one of the board's four columns: ``Doing``,
-    ``Done``, ``Queue``, or ``Someday / Maybe`` (one column whose name
-    contains a slash). Leave it empty to let the reviewer choose. The
-    human applies the move from Agent Activity.
+    Kept so older prompts keep working; there is no review step anymore
+    (undo with ``undo_action``). ``note`` is ignored.
     """
     name, err = _tool_profile_or_error()
     if err is not None or name is None:
@@ -1073,36 +1444,182 @@ def tool_submit_kanban_candidate(
         return _tool_error_payload(
             f"unsupported action {action!r} (only 'move' is supported)"
         )
+    return _move_card(name, "move_kanban_card", card_ref, target_section)
+
+
+@mcp.tool(
+    name="delete_kanban_card",
+    annotations=_write_annotations("Delete a kanban card", destructive=True),
+    structured_output=True,
+)
+def tool_delete_kanban_card(card_ref: str, confirm_id: str = "") -> dict[str, Any]:
+    """Delete one card. Needs the user's confirmation in the chat.
+
+    The first call answers ``confirmation_required`` with a ``summary`` and
+    a ``confirm_id`` and changes nothing. Relay the summary; only after the
+    user agrees, call again with the same ``card_ref`` and ``confirm_id``.
+    The delete stays undoable via ``undo_action``.
+    """
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return _tool_error_payload(err or "no active profile")
     clean_ref = str(card_ref or "").strip()
     if not clean_ref:
         return _tool_error_payload("card_ref must not be empty")
-    clean_section = str(target_section or "").strip()
-    if clean_section:
-        resolved = resolve_kanban_section(clean_section)
-        if resolved is None:
-            return _tool_error_payload(
-                f"unknown target_section {clean_section!r} "
-                f"(expected one of: {', '.join(KANBAN_SECTIONS)})"
-            )
-        clean_section = resolved
-    candidate = {
-        "action": clean_action,
-        "card_ref": clean_ref,
-        "target_section": clean_section,
-        "note": str(note or "").strip(),
-    }
+
+    def _run() -> dict[str, Any]:
+        def _delete(sections: dict[str, list[KanbanTask]]) -> tuple[str, str]:
+            section, index, task = _resolve_card(sections, clean_ref)
+            del sections[section][index]
+            return task.id, task.title
+
+        (card_id, title), entry = _policy_write(
+            name,
+            "delete_kanban_card",
+            "kanban.card.delete",
+            lambda: update_kanban(profile_dir(name), _delete),
+            args={"card_ref": clean_ref},
+            kinds=("kanban_card",),
+            describe=lambda before: f"删除任务「{_card_title(before, clean_ref)}」",
+            confirm_id=confirm_id,
+        )
+        return {
+            "ok": True,
+            "profile": name,
+            "deleted_id": card_id,
+            "deleted_title": title,
+            **_journal_fields(entry),
+        }
+
+    return _policy_payload(name, _run)
+
+
+@mcp.tool(
+    name="add_checkin",
+    annotations=_write_annotations("Check in a habit"),
+    structured_output=True,
+)
+def tool_add_checkin(
+    habit: str,
+    date: str = "",
+    count: float = 1.0,
+    unit: str = "",
+    summary: str = "",
+    note: str = "",
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Record one habit check-in (applies directly; undoable).
+
+    ``habit`` is a habit id or title; ``date`` defaults to today (ISO).
+    """
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return _tool_error_payload(err or "no active profile")
+    clean_habit = str(habit or "").strip()
+    if not clean_habit:
+        return _tool_error_payload("habit must not be empty")
+
+    def _run() -> dict[str, Any]:
+        when = str(date or "").strip() or _today_iso()
+        entry_value, entry = _policy_write(
+            name,
+            "add_checkin",
+            "checkin.add",
+            lambda: activity_log.add_activity_checkin(
+                profile_dir(name),
+                clean_habit,
+                when=when,
+                count=count,
+                unit=str(unit or "").strip(),
+                summary=str(summary or "").strip(),
+                note=str(note or "").strip(),
+                tags=tags or [],
+            ),
+            args={"habit": clean_habit, "date": when, "summary": summary},
+            kinds=("checkin",),
+            describe=lambda _before: f"打卡「{clean_habit}」（{when}）",
+        )
+        return {
+            "ok": True,
+            "profile": name,
+            "checkin_id": entry_value.id,
+            "habit": entry_value.habit_id,
+            "date": entry_value.date,
+            **_journal_fields(entry),
+        }
+
+    return _policy_payload(name, _run)
+
+
+@mcp.tool(
+    name="recent_actions",
+    annotations=ToolAnnotations(
+        title="List recent agent writes (undo journal)",
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+    structured_output=True,
+)
+def tool_recent_actions(limit: int = 10) -> dict[str, Any]:
+    """Newest-first agent writes from the undo journal (HTTP and MCP).
+
+    ``status`` is ``undoable``, ``conflict`` (changed since, undo refused)
+    or ``undone``.
+    """
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return _tool_error_payload(err or "no active profile")
     try:
-        item = activity_item_from_kanban_candidate(name, candidate)
-        stored = append_activity_item(name, item)
+        entries = agent_journal.recent(profile_dir(name), max(1, min(int(limit), 50)))
     except _TOOL_STORE_ERRORS as exc:
         return _tool_error_payload(str(exc))
     return {
         "ok": True,
         "profile": name,
-        "item_id": stored.get("id"),
-        "status": stored.get("status"),
-        "candidate_type": stored.get("candidate_type"),
-        "target_owner": stored.get("target_owner"),
+        "retention_days": agent_journal.RETENTION_DAYS,
+        "entries": [
+            {
+                "id": e.get("id", ""),
+                "at": e.get("at", ""),
+                "actor": e.get("actor", ""),
+                "action": e.get("action", ""),
+                "tier": e.get("tier", ""),
+                "summary": e.get("summary", ""),
+                "status": e.get("status", ""),
+            }
+            for e in entries
+        ],
+    }
+
+
+@mcp.tool(
+    name="undo_action",
+    annotations=_write_annotations("Undo one agent write"),
+    structured_output=True,
+)
+def tool_undo_action(journal_id: str) -> dict[str, Any]:
+    """Revert one journaled agent write (id from ``recent_actions``).
+
+    Refused when the entity changed since (someone edited it afterwards):
+    then the user has to fix it in the nblane web UI.
+    """
+    name, err = _tool_profile_or_error()
+    if err is not None or name is None:
+        return _tool_error_payload(err or "no active profile")
+    try:
+        entry = agent_journal.undo(profile_dir(name), str(journal_id or "").strip(), actor=_mcp_actor())
+    except agent_journal.UndoError as exc:
+        return {"ok": False, "code": exc.code, "error": exc.message}
+    except _TOOL_STORE_ERRORS as exc:
+        return _tool_error_payload(str(exc))
+    return {
+        "ok": True,
+        "profile": name,
+        "journal_id": entry.get("id", ""),
+        "summary": entry.get("summary", ""),
+        "undone_at": entry.get("undone_at", ""),
     }
 
 

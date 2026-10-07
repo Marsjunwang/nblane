@@ -13,8 +13,8 @@ OpenClaw）装上并接入 nblane，以及给 nblane 数据和 agent 工作区�
 
 ## 定位
 
-- nblane 是 agent 背后的**成长档案**：agent 通过 MCP 读写，改变既有事实的操作走
-  Agent Activity 审批。agent 可替换，换掉不丢档案。
+- nblane 是 agent 背后的**成长档案**：日常写入直接生效且可撤销，删除等重要操作先在聊天里
+  确认，见 [Agent 写入策略](agent-write-policy.md)。agent 可替换，换掉不丢档案。
 - **统一备份，不统一仓库**：nblane 数据（`NBLANE_ROOT`）和每个 agent 的工作区各是一个
   私有 git 仓库，由同一个面板和同一个每日定时器负责提交推送。agent 的情景记忆仍归 agent
   自己维护。

@@ -449,6 +449,116 @@
     "title": "AgentJobModel",
     "type": "object"
    },
+   "AgentJournalEntryModel": {
+    "description": "One agent write in the undo journal (agent-journal.yaml).",
+    "properties": {
+     "action": {
+      "title": "Action",
+      "type": "string"
+     },
+     "actor": {
+      "title": "Actor",
+      "type": "string"
+     },
+     "at": {
+      "title": "At",
+      "type": "string"
+     },
+     "entities": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Entities",
+      "type": "array"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "status": {
+      "default": "undoable",
+      "enum": [
+       "undoable",
+       "conflict",
+       "undone"
+      ],
+      "title": "Status",
+      "type": "string"
+     },
+     "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+     },
+     "tier": {
+      "default": "",
+      "title": "Tier",
+      "type": "string"
+     },
+     "undone_at": {
+      "default": "",
+      "title": "Undone At",
+      "type": "string"
+     },
+     "undone_by": {
+      "default": "",
+      "title": "Undone By",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "at",
+     "actor",
+     "action"
+    ],
+    "title": "AgentJournalEntryModel",
+    "type": "object"
+   },
+   "AgentJournalResponse": {
+    "description": "GET /profiles/{name}/agent/journal payload (newest first).",
+    "properties": {
+     "entries": {
+      "items": {
+       "$ref": "#/components/schemas/AgentJournalEntryModel"
+      },
+      "title": "Entries",
+      "type": "array"
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "retention_days": {
+      "title": "Retention Days",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "profile",
+     "retention_days"
+    ],
+    "title": "AgentJournalResponse",
+    "type": "object"
+   },
+   "AgentJournalUndoResponse": {
+    "description": "POST …/agent/journal/{entry_id}/undo payload.",
+    "properties": {
+     "entry": {
+      "$ref": "#/components/schemas/AgentJournalEntryModel"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "entry"
+    ],
+    "title": "AgentJournalUndoResponse",
+    "type": "object"
+   },
    "AgentTaskListResponse": {
     "description": "Agent task list, optionally filtered by status.",
     "properties": {
@@ -2381,6 +2491,11 @@
    "CurrentUser": {
     "description": "The authenticated principal for one request.",
     "properties": {
+     "agent": {
+      "default": false,
+      "title": "Agent",
+      "type": "boolean"
+     },
      "auth_enabled": {
       "default": false,
       "title": "Auth Enabled",
@@ -13593,6 +13708,167 @@
      }
     },
     "summary": "Get Profile Agent Tasks"
+   }
+  },
+  "/api/v1/profiles/{name}/agent/journal": {
+   "get": {
+    "description": "Recent agent writes (newest first) with their undo status.\n\nOnly agent accounts are journaled; human edits never appear here. The\nlog keeps ``agent_journal.RETENTION_DAYS`` days.",
+    "operationId": "get_profile_agent_journal_api_v1_profiles__name__agent_journal_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 20,
+       "maximum": 200,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AgentJournalResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Agent Journal"
+   }
+  },
+  "/api/v1/profiles/{name}/agent/journal/{entry_id}/undo": {
+   "post": {
+    "description": "Revert one agent write (the agent itself or the user may undo).\n\nRefused with 409 ``journal_undo_conflict`` when a touched entity changed\nafter the write, 409 ``journal_entry_already_undone`` on a second\nattempt, 404 when the entry is unknown or past retention.",
+    "operationId": "undo_profile_agent_journal_entry_api_v1_profiles__name__agent_journal__entry_id__undo_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "entry_id",
+      "required": true,
+      "schema": {
+       "title": "Entry Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AgentJournalUndoResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Undo Profile Agent Journal Entry"
    }
   },
   "/api/v1/profiles/{name}/ai-exceptions": {

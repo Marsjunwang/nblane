@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-09-18
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
@@ -18,7 +18,7 @@ nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，
 | 传输 | **stdio**（由 Cursor 等客户端拉起子进程） |
 | MCP 原语 | **Resources（读）** + **Tools（写 / 建议）** |
 | 读 | `profile://summary`、`profile://kanban`、`profile://context`、`profile://gap/{task}`、`profile://goals`、`profile://evidence`、`profile://inbox`、`profile://learning`、`agent://tasks`、`agent://task/{task_id}`、`agent://activity` |
-| 写（Tools） | **直写**：`capture_inbox`；**候选审批**：`submit_evidence_candidate`、`submit_kanban_candidate`、`submit_profile_model_candidate`、`submit_agent_task_candidate`；**只读自检**：`run_validate`、`run_sync_check`；**旧版字符串工具（兼容保留）**：`append_growth_log`、`log_skill_evidence`、`log_interaction`、`suggest_skill_upgrade`（仅文本建议）、`crystallize_method_draft`、`update_agent_task_status` |
+| 写（Tools） | **直写（可撤销）**：`add_kanban_card`、`move_kanban_card`、`add_checkin`、`capture_inbox`；**聊天确认后写（可撤销）**：`delete_kanban_card`、`log_skill_evidence`；**撤销日志**：`recent_actions`、`undo_action`；**候选审批**：`submit_evidence_candidate`、`submit_profile_model_candidate`、`submit_agent_task_candidate`；**只读自检**：`run_validate`、`run_sync_check`；**旧版字符串工具（兼容保留）**：`append_growth_log`、`log_skill_evidence`、`log_interaction`、`suggest_skill_upgrade`（仅文本建议）、`crystallize_method_draft`、`update_agent_task_status` |
 
 ### 已实现的具体功能（与 CLI / Web 的对应关系）
 
@@ -34,12 +34,18 @@ nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，
 | 学习摘要 | `profile://learning` | learning-log 状态计数 + 在读（reading）资源 + 最近条目 |
 | 待审批队列 | `agent://activity` | Agent Activity 状态/kind 计数 + 前 10 条 pending（id/kind/标题/创建时间） |
 
-### 结构化工具与审批分级（2026-09 新增）
+### 写入策略（2026-10-07 起）
 
-- 新工具（`capture_inbox`、`submit_*_candidate`、`run_validate`、`run_sync_check`）返回 **dict**，FastMCP 以 `structured_output=True` 暴露为 structuredContent + outputSchema，并带 `ToolAnnotations`（`readOnlyHint` / `destructiveHint` / `idempotentHint`）供客户端分级使用；旧版 `OK:`/`ERROR:` 字符串工具保持兼容（soft-deprecated，新集成请优先用新工具）。
-- 审批分级：只有「追加型、低解释成本」的 `capture_inbox` 直写 `inbox.yaml`（走 `core/inbox.update_inbox` 文件锁）；一切改变既有事实的操作走 `submit_*_candidate` → Agent Activity 人审。
-- `submit_evidence_candidate` / `submit_kanban_candidate` 以 `source_page="Review"` 候选入队，人在 Agent Activity 页用**既有 UI 直接 Apply**（`apply_review_activity_item` 分派；`kanban_move` 由 `core/review_actions.py` 的 `apply_review_kanban_candidate` 处置：按卡片标题精确或唯一子串匹配后移动列，找不到/歧义/未知列会把该条目标为 failed 并写明原因）。
-- `submit_profile_model_candidate` 只入队（payload 自描述：`field` / `proposed_value` / `rationale` / `target_file`），**无自动处置器**，由人手动改 `agent-profile.yaml`。
+MCP 写工具和 HTTP API 共用同一套 agent 写入策略（`core/agent_policy.py` 分级表 +
+`core/agent_ops.py` 流程），详见 [个人 Agent 写入策略](../guides/agent-write-policy.md)：
+
+- **T1 直写**：`add_kanban_card`、`move_kanban_card`（旧名 `submit_kanban_candidate` 保留为别名，不再进审批队列）、`add_checkin`、`capture_inbox`、`append_growth_log`、`crystallize_method_draft`。立即生效，写入 `agent-journal.yaml`，返回 `journal_id`。
+- **T2 聊天确认**：`delete_kanban_card`、`log_skill_evidence`。第一次调用不改任何东西，返回 `confirmation_required` + `summary` + `confirm_id`；agent 把 summary 发给用户，用户同意后**用相同参数**加 `confirm_id` 再调一次。确认码 10 分钟有效、一次性、绑定参数；存放在 `~/.local/share/nblane/agent/mcp-confirmations.json`（`NBLANE_AGENT_STATE_DIR` 可改），多个 MCP 进程共享。
+- **撤销**：`recent_actions` 列出最近操作（HTTP 和 MCP 写入都在里面），`undo_action(journal_id)` 撤销；之后有人改过同一内容时拒绝撤销（`journal_undo_conflict`）。
+- 只追加、无事实可撤的写入（`log_interaction`、`submit_*_candidate`、`update_agent_task_status`）只过策略检查，不进撤销日志。
+- 日志里的操作人是 `NBLANE_MCP_ACTOR`（默认 `mcp`）。
+- 新工具返回 **dict**（`structured_output=True` + `ToolAnnotations`）；旧版字符串工具保持 `OK:`/`ERROR:` 约定，T2 时返回以 `CONFIRM REQUIRED:` 开头的一行。
+- `submit_evidence_candidate` 仍以 `source_page="Review"` 候选入队，由人在页面上处理；`submit_profile_model_candidate` 只入队，无自动处置器。
 
 ### Gap：能不能调用？与 CLI 的差异
 
@@ -53,7 +59,7 @@ nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，
 ### 未通过 MCP 暴露（请用 CLI 或 Web）
 
 - **`ingest-resume` / `ingest-kanban`**、完整 **`evidence`** 子命令、**`team`**、**`sync` 写入**、看板**正文直接编辑** — 请用 **CLI** 或 **Streamlit**（见 [Web 使用手册](../guides/web-ui.md)）。
-- 其中：`validate` 与 sync **漂移检查**已通过只读工具 `run_validate` / `run_sync_check` 暴露；看板卡片移动可走 `submit_kanban_candidate` 审批流；新增证据可走 `submit_evidence_candidate` 审批流。
+- 其中：`validate` 与 sync **漂移检查**已通过只读工具 `run_validate` / `run_sync_check` 暴露；看板卡片增/移/删走 `add_kanban_card` / `move_kanban_card` / `delete_kanban_card`；新增证据可走 `submit_evidence_candidate` 审批流。
 - `nblane context --no-kanban`：MCP 的 `profile://context` **固定带 kanban**；若不要看板请用 CLI 或本地文件。
 
 ---
@@ -85,18 +91,24 @@ nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，
 
 这些 agent tools 是 draft-first：不会直接改 evidence、resume、public site 或代码 patch，只更新 handoff / Activity 审阅元数据。
 
-**候选人审与自检工具（结构化返回，带 ToolAnnotations）**
+**结构化工具（返回 dict，带 ToolAnnotations）**
 
 | Tool | 参数 | 行为 |
 |------|------|------|
-| `capture_inbox` | `title`, `raw_text`, `source`（默认 `openclaw`）, `tags`, `note` | **直写**：向 `inbox.yaml` 追加一条 `status=inbox`、`captured_by=source` 的条目（`update_inbox` 文件锁）。返回 `{ok, item_id, status, ...}`。 |
+| `add_kanban_card` | `title`, `section`（默认 Queue）, `context`, `tags`, `planned_start`, `planned_end` | **T1 直写**：加一张卡；进 Doing 记 `started_on`，进 Done 记 `completed_on`。返回 `{ok, card_id, section, journal_id}`。 |
+| `move_kanban_card` | `card_ref`（id / 精确标题 / 唯一子串）, `target_section` | **T1 直写**：移动列，进出 Done 自动处理完成日期；已在目标列时 `warnings` 提示、不记日志。 |
+| `delete_kanban_card` | `card_ref`, `confirm_id` | **T2**：先返回 `confirmation_required`，用户同意后带 `confirm_id` 重调才删除；可撤销。 |
+| `add_checkin` | `habit`（id 或标题）, `date`（默认今天）, `count`, `unit`, `summary`, `note`, `tags` | **T1 直写**：打卡一次。返回 `{ok, checkin_id, habit, date, journal_id}`。 |
+| `recent_actions` | `limit`（默认 10，上限 50） | 只读：撤销日志最新条目（`id/at/actor/action/tier/summary/status`）。 |
+| `undo_action` | `journal_id` | 撤销一条；已撤销 / 已被改动 / 找不到时 `ok=false` + `code`。 |
+| `capture_inbox` | `title`, `raw_text`, `source`（默认 `openclaw`）, `tags`, `note` | **T1 直写**：向 `inbox.yaml` 追加一条 `status=inbox`、`captured_by=source` 的条目（`update_inbox` 文件锁），可撤销。返回 `{ok, item_id, status, journal_id, ...}`。 |
 | `submit_evidence_candidate` | `skill_id`, `title`, `evidence_type`, `date`, `url`, `summary` | 证据候选入 Agent Activity（`target_owner=evidence_pool`，pending）。人 Apply 后落入证据池，`skill_id` 记为 `skill:<id>` source ref 供后续挂接。 |
-| `submit_kanban_candidate` | `action`（目前仅 `move`）, `card_ref`, `target_section`, `note` | 看板移动候选入队（`target_owner=kanban`）。人 Apply 后按标题精确/唯一子串匹配移动卡片；`target_section` 限 Doing / Done / Queue / Someday / Maybe。 |
+| `submit_kanban_candidate` | `action`（仅 `move`）, `card_ref`, `target_section`, `note` | 旧名，等同 `move_kanban_card`（直接移动，`target_section` 必填，`note` 忽略）。 |
 | `submit_profile_model_candidate` | `field`, `proposed_value`, `rationale` | profile 模型候选入队（`target_owner=profile_context`），**无自动处置**，人手动改 `agent-profile.yaml`。 |
 | `run_validate` | 无 | 只读（`readOnlyHint`）：对当前 profile 跑 `validate_one`，返回 `{ok, errors, warnings, ...}`（列表各上限 50 条）。 |
 | `run_sync_check` | 无 | 只读（`readOnlyHint`）：返回 SKILL.md 漂移块名 `{ok, in_sync, drifted_blocks}`，不写文件。 |
 
-所有 `submit_*` 工具只入队不改事实；返回 dict 均含 `ok` 与 `item_id`（出错时 `ok=false` + `error`）。
+`submit_evidence_candidate` / `submit_profile_model_candidate` 只入队不改事实；返回 dict 均含 `ok` 与 `item_id`（出错时 `ok=false` + `error`）。
 
 **Profile 如何选定（所有资源共用）**
 
@@ -160,6 +172,8 @@ pip install -e .
 | `NBLANE_ROOT` | 指定仓库根目录（含 `profiles/`）。在任意工作区使用时建议显式设置。 |
 | `NBLANE_CONTEXT_MODE` | `chat` · `review` · `write` · `plan`，仅影响 `profile://context`。默认 `chat`。 |
 | `NBLANE_GAP_USE_LLM` | 设为 `1` / `true` 时对 gap 启用 LLM 路由（需 API key）。默认关闭。 |
+| `NBLANE_MCP_ACTOR` | 撤销日志和确认码里的操作人 id。默认 `mcp`。 |
+| `NBLANE_AGENT_STATE_DIR` | MCP 确认码存放目录。默认 `~/.local/share/nblane/agent`。 |
 
 ## 用法 A：只在「当前工程就是 nblane 仓库」时启用
 

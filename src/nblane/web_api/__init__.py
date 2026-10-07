@@ -14,9 +14,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
 
+from nblane.web_api.agent_guard import agent_write_guard
 from nblane.web_api.agents_setup import router as agents_setup_router
 from nblane.web_api.assistant import router as assistant_router
 from nblane.web_api.auth import GitActorMiddleware, LoginRateLimiter
@@ -43,7 +44,14 @@ def create_app(
     spa_static_dir: Path | None = None,
 ) -> FastAPI:
     """Build the nblane API application (API + built SPA in one process)."""
-    app = FastAPI(title="nblane API", version=app_version())
+    # Agent write policy for every route (core/agent_policy.py); a no-op for
+    # humans and reads. Function scope: the journal entry is written before
+    # the response leaves, so an immediate ``recent`` sees it.
+    try:
+        guard = Depends(agent_write_guard, scope="function")
+    except TypeError:  # FastAPI < 0.121 has no dependency scope
+        guard = Depends(agent_write_guard)
+    app = FastAPI(title="nblane API", version=app_version(), dependencies=[guard])
     app.add_middleware(GitActorMiddleware)
     app.state.login_rate_limiter = login_rate_limiter or LoginRateLimiter()
     app.add_exception_handler(ApiError, api_error_handler)

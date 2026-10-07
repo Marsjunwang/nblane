@@ -9,13 +9,18 @@ If-Match; on 412 the fresh ETag is taken from the 412 response header (the
 server always sets it) or, failing that, by re-GETting the resource, and the
 POST is retried exactly once with If-Match.
 
-Tiered-authorization contract (plan §3.3): delete-class actions are
-page-confirmation tier and are hard-refused here. There is deliberately no
-``delete`` subcommand, and the generic get/post escape hatches reject any
-path carrying a delete/discard segment (e.g. inbox discard is a POST, so
-method filtering alone is not enough). Deletions stay in the SPA where a
-human confirms them — habit-plan deletion included (DELETE habit-plans is
-never issued from this client).
+Write policy (core/agent_policy.py, docs/zh/guides/agent-write-policy.md):
+
+- Daily writes (check-in, add/edit/move a task, tick a todo, habit plans)
+  apply directly and are journaled; ``recent`` lists them and ``undo <id>``
+  reverts one.
+- Important writes answer HTTP 428. The client prints
+  ``{"confirmation_required": true, "summary": ..., "confirm_id": ...}`` and
+  exits 3. Relay the summary to the user in the chat; only after the user
+  agrees, repeat the *same* command with ``--confirm <confirm_id>``.
+- ``delete`` covers the server-gated routes only (kanban cards, check-ins,
+  habits, habit plans). The generic post/patch escape hatches still refuse
+  any path carrying a delete/discard segment (inbox discard is a POST).
 
 Habit-plan creation has no dedicated subcommand either (the body shape is
 too complex for flags); use the escape hatch instead:
@@ -27,6 +32,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import sys
 from urllib.parse import quote
 
@@ -47,10 +53,29 @@ COOKIE_JAR_ENV = "NBLANE_API_COOKIE_JAR"
 # automation never deletes; the page tier (SPA) owns deletion with human
 # confirmation.
 FORBIDDEN_SEGMENTS = {"delete", "discard", "del"}
+CONFIRM_HEADER = "X-Nblane-Confirm"
+EXIT_CONFIRMATION_REQUIRED = 3
+
+# DELETE routes the server gates with chat confirmation (428 handshake).
+# Anything else stays in the SPA.
+DELETABLE_PATHS = (
+    re.compile(r"^/profiles/[^/]+/kanban/cards/[^/]+$"),
+    re.compile(r"^/profiles/[^/]+/checkins/[^/]+$"),
+    re.compile(r"^/profiles/[^/]+/habits/[^/]+$"),
+    re.compile(r"^/profiles/[^/]+/habit-plans/[^/]+$"),
+)
 
 
 class ApiFailure(Exception):
     """Fatal client error; the message is printed to stderr, exit non-zero."""
+
+
+class ConfirmationRequired(Exception):
+    """Server answered 428: the user must confirm in the chat first."""
+
+    def __init__(self, payload: dict) -> None:
+        super().__init__(payload.get("summary", ""))
+        self.payload = payload
 
 
 def cookie_jar_path() -> Path:
@@ -126,6 +151,24 @@ def error_message(response: httpx.Response) -> str:
     return f"HTTP {response.status_code}"
 
 
+def normalize_delete_path(path: str) -> str:
+    """Validate a DELETE target: only the server-gated routes are allowed."""
+    path = path.strip()
+    if "://" in path:
+        raise ApiFailure("pass an API path, not a URL")
+    if path.startswith(API_PREFIX):
+        path = path[len(API_PREFIX):]
+    target = path.split("?", 1)[0]
+    if ".." in target.split("/"):
+        raise ApiFailure(f"API path must not contain '..': {path!r}")
+    if not any(pattern.match(target) for pattern in DELETABLE_PATHS):
+        raise ApiFailure(
+            "refused: only kanban cards, check-ins, habits and habit plans can "
+            "be deleted from chat; open the SPA for anything else"
+        )
+    return path
+
+
 def normalize_path(path: str) -> str:
     """Validate a user-supplied API path and strip an optional /api/v1 prefix."""
     path = path.strip()
@@ -159,7 +202,10 @@ class Session:
         password: str | None = None,
         jar_path: Path | None = None,
         transport: httpx.BaseTransport | None = None,
+        confirm: str = "",
     ) -> None:
+        # Confirmation token from a prior 428, sent on mutations only.
+        self.confirm = confirm.strip()
         self.base_url = (
             base_url or os.environ.get(BASE_URL_ENV, "").strip() or DEFAULT_BASE_URL
         ).rstrip("/")
@@ -244,8 +290,12 @@ class Session:
         return self.checked(self.request("GET", path))
 
     def mutation(self, path: str, body: object = None, method: str = "POST") -> httpx.Response:
-        """POST/PATCH without If-Match first; on 412 refetch the ETag and retry once."""
-        response = self.request(method, path, body)
+        """POST/PATCH/DELETE without If-Match first; on 412 refetch the ETag and retry once.
+
+        A 428 raises ``ConfirmationRequired`` (never retried automatically).
+        """
+        extra = {CONFIRM_HEADER: self.confirm} if self.confirm else None
+        response = self.request(method, path, body, extra)
         if response.status_code == 412:
             etag = response.headers.get("ETag", "").strip() or self.refresh_etag(path)
             if not etag:
@@ -253,7 +303,7 @@ class Session:
                     f"412 etag_mismatch on {path} and no fresh ETag available; "
                     "re-check the resource state before retrying"
                 )
-            response = self.request(method, path, body, {"If-Match": etag})
+            response = self.request(method, path, body, {"If-Match": etag, **(extra or {})})
             if response.status_code == 412:
                 raise ApiFailure(
                     f"412 etag_mismatch persists on {path} after one ETag retry; "
@@ -263,6 +313,27 @@ class Session:
 
     @staticmethod
     def checked(response: httpx.Response) -> httpx.Response:
+        if response.status_code == 428:
+            try:
+                body = response.json()
+            except ValueError:
+                body = {}
+            confirmation = body.get("confirmation") if isinstance(body, dict) else None
+            if isinstance(confirmation, dict):
+                raise ConfirmationRequired(
+                    {
+                        "confirmation_required": True,
+                        "summary": confirmation.get("summary", ""),
+                        "confirm_id": confirmation.get("confirm_id", ""),
+                        "expires_at": confirmation.get("expires_at", ""),
+                        "invalid_token": body.get("code") == "confirmation_invalid",
+                        "next": (
+                            "Tell the user the summary and ask for a yes/no. "
+                            "Only if they agree, re-run the same command with "
+                            f"--confirm {confirmation.get('confirm_id', '')}."
+                        ),
+                    }
+                )
         if response.status_code >= 400:
             raise ApiFailure(
                 f"HTTP {response.status_code}: {error_message(response)}"
@@ -310,6 +381,19 @@ def run(args: argparse.Namespace, session: Session) -> object:
             except ValueError as exc:
                 raise ApiFailure(f"--json body is not valid JSON: {exc}") from exc
         return session.mutation(normalize_path(args.path), body, method="PATCH")
+    if command == "delete":
+        body = None
+        if args.json is not None:
+            try:
+                body = json.loads(args.json)
+            except ValueError as exc:
+                raise ApiFailure(f"--json body is not valid JSON: {exc}") from exc
+        return session.mutation(normalize_delete_path(args.path), body, method="DELETE")
+    if command == "recent":
+        return session.get(profile_path(args, f"/agent/journal?limit={args.limit}"))
+    if command == "undo":
+        entry = quote(args.entry_id.strip(), safe="")
+        return session.mutation(profile_path(args, f"/agent/journal/{entry}/undo"))
     if command == "checkin":
         body: dict = {"habit": args.habit}
         for field in ("date", "summary", "note", "unit", "project_id", "plan_id"):
@@ -372,6 +456,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=f"API base URL (env {BASE_URL_ENV}; default: {DEFAULT_BASE_URL})",
     )
+    parser.add_argument(
+        "--confirm",
+        default="",
+        metavar="CONFIRM_ID",
+        help="confirmation id from a prior 428, after the user agreed in chat",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("login", help="force a fresh login and cache the cookie")
     get = commands.add_parser("get", help="generic GET escape hatch")
@@ -382,6 +472,16 @@ def build_parser() -> argparse.ArgumentParser:
     patch = commands.add_parser("patch", help="generic PATCH escape hatch (ETag retry)")
     patch.add_argument("path")
     patch.add_argument("json", nargs="?", help="JSON request body")
+    delete = commands.add_parser(
+        "delete",
+        help="DELETE a kanban card / check-in / habit / habit plan (chat confirmation)",
+    )
+    delete.add_argument("path")
+    delete.add_argument("json", nargs="?", help="JSON request body (e.g. confirm_title)")
+    recent = commands.add_parser("recent", help="list my recent writes (undo journal)")
+    recent.add_argument("--limit", type=int, default=10)
+    undo = commands.add_parser("undo", help="undo one of my writes by journal id")
+    undo.add_argument("entry_id")
     checkin = commands.add_parser("checkin", help="append one habit check-in")
     checkin.add_argument("habit", help="habit id or title")
     checkin.add_argument("--date", default="", help="ISO date (default: today)")
@@ -429,8 +529,13 @@ def main(argv: list[str] | None = None, session: Session | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         session = session or Session(base_url=args.base_url)
+        if args.confirm:
+            session.confirm = args.confirm.strip()
         emit(run(args, session))
         return 0
+    except ConfirmationRequired as exc:
+        emit(exc.payload)
+        return EXIT_CONFIRMATION_REQUIRED
     except ApiFailure as exc:
         print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2

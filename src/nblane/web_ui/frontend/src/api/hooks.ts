@@ -141,6 +141,8 @@ import type {
   LocalModelTestResult,
   ProfileSettings,
   ProfileSettingsPatch,
+  AgentJournal,
+  AgentJournalUndo,
 } from './types';
 
 export function useMe() {
@@ -452,6 +454,32 @@ export function useAssistantStatus() {
     queryKey: ['system', 'assistant'],
     queryFn: () => apiGet<AssistantStatus>('/system/assistant'),
     staleTime: 60_000,
+  });
+}
+
+/** Recent agent writes (undo journal) for one profile, newest first. */
+export function useAgentJournal(profile: string, limit = 20) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'agent-journal', limit],
+    queryFn: () =>
+      apiGet<AgentJournal>(
+        `/profiles/${encodeURIComponent(profile)}/agent/journal?limit=${limit}`,
+      ),
+    enabled: Boolean(profile),
+  });
+}
+
+/** Undo one agent write; refreshes every query of the profile. */
+export function useUndoAgentJournal(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (entryId: string) =>
+      apiPost<AgentJournalUndo>(
+        `/profiles/${encodeURIComponent(profile)}/agent/journal/${encodeURIComponent(entryId)}/undo`,
+      ),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile] });
+    },
   });
 }
 

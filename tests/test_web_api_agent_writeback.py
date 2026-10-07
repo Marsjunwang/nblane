@@ -143,6 +143,34 @@ def _write_users_file(path: Path) -> Path:
     return path
 
 
+class AutoConfirmClient(TestClient):
+    """Plays the user saying "yes": answers every 428 once.
+
+    For tests about tracing, not about the confirmation handshake itself
+    (that lives in test_web_api_agent_journal.py).
+    """
+
+    def request(self, method, url, **kwargs):  # type: ignore[override]
+        response = super().request(method, url, **kwargs)
+        if response.status_code != 428:
+            return response
+        confirmation = (response.json() or {}).get("confirmation") or {}
+        headers = dict(kwargs.pop("headers", None) or {})
+        headers["X-Nblane-Confirm"] = confirmation.get("confirm_id", "")
+        return super().request(method, url, headers=headers, **kwargs)
+
+
+def _confirmed(client: TestClient, method: str, url: str, **kwargs):
+    """Agent T2 handshake: 428, then repeat with the confirm header."""
+    first = client.request(method, url, **kwargs)
+    if first.status_code != 428:
+        return first  # AutoConfirmClient already confirmed
+    confirm_id = first.json()["confirmation"]["confirm_id"]
+    return client.request(
+        method, url, headers={"X-Nblane-Confirm": confirm_id}, **kwargs
+    )
+
+
 def _writeback_items(profile: Path) -> list[dict]:
     path = profile / "agent-activity.yaml"
     if not path.exists():
@@ -157,6 +185,8 @@ def _writeback_items(profile: Path) -> list[dict]:
 
 class AgentWritebackTestBase(unittest.TestCase):
     """Shared setup: tmp profile root, auth-on env, git-backup isolation."""
+
+    auto_confirm = False
 
     def _client(self, root: Path, *, login: str | None = None) -> TestClient:
         for target in (
@@ -177,7 +207,7 @@ class AgentWritebackTestBase(unittest.TestCase):
         patcher = patch("nblane.core.git_backup.record_change")
         self.addCleanup(patcher.stop)
         patcher.start()
-        client = TestClient(app)
+        client = (AutoConfirmClient if self.auto_confirm else TestClient)(app)
         if login is not None:
             response = client.post(
                 "/api/v1/auth/login",
@@ -191,6 +221,8 @@ class AgentWritebackTestBase(unittest.TestCase):
 class TestOpenclawWriteback(AgentWritebackTestBase):
     """G1: openclaw mutations land writeback entries with correct shape."""
 
+    auto_confirm = True
+
     def test_checkin_add_and_delete_traced(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "profiles"
@@ -201,8 +233,9 @@ class TestOpenclawWriteback(AgentWritebackTestBase):
                 json={"habit": "exercise", "summary": "5k run"},
             )
             self.assertEqual(added.status_code, 201, added.text)
-            deleted = client.delete(
-                "/api/v1/profiles/alice/checkins/act_20260920_exercise"
+            deleted = _confirmed(
+                client, "DELETE",
+                "/api/v1/profiles/alice/checkins/act_20260920_exercise",
             )
             self.assertEqual(deleted.status_code, 200, deleted.text)
             items = _writeback_items(profile)
@@ -261,8 +294,9 @@ class TestOpenclawWriteback(AgentWritebackTestBase):
                 "/api/v1/profiles/alice/kanban/cards/Write G1 tests/done"
             )
             self.assertEqual(done.status_code, 200, done.text)
-            deleted = client.delete(
-                "/api/v1/profiles/alice/kanban/cards/Write G1 tests"
+            deleted = _confirmed(
+                client, "DELETE",
+                "/api/v1/profiles/alice/kanban/cards/Write G1 tests",
             )
             self.assertEqual(deleted.status_code, 200, deleted.text)
             items = _writeback_items(profile)
@@ -424,8 +458,8 @@ class TestOpenclawWriteback(AgentWritebackTestBase):
             )
             self.assertEqual(deleted_case.status_code, 200,
                              deleted_case.text)
-            deleted_habit = client.request(
-                "DELETE",
+            deleted_habit = _confirmed(
+                client, "DELETE",
                 "/api/v1/profiles/alice/habits/exercise",
                 json={"confirm_title": "Exercise"},
             )
@@ -469,6 +503,8 @@ class TestOpenclawWriteback(AgentWritebackTestBase):
 
 class TestNoopDiscipline(AgentWritebackTestBase):
     """G1: mutations that change nothing leave no writeback entry."""
+
+    auto_confirm = True
 
     def test_noop_mutations_not_traced(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

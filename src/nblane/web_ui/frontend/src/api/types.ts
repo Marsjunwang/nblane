@@ -765,3 +765,12 @@ export type HabitPlanDeleteRequest = Schemas['HabitPlanDeleteRequest'];
 
 /** HabitPlanDeleteResponse — {ok, deleted_id, cards_removed}. */
 export type HabitPlanDeleteResponse = Schemas['HabitPlanDeleteResponse'];
+
+/** AgentJournalEntryModel — one undoable agent write (core/agent_journal.py). */
+export type AgentJournalEntry = Schemas['AgentJournalEntryModel'];
+
+/** AgentJournalResponse from GET /profiles/{name}/agent/journal. */
+export type AgentJournal = Schemas['AgentJournalResponse'];
+
+/** AgentJournalUndoResponse from POST …/agent/journal/{id}/undo. */
+export type AgentJournalUndo = Schemas['AgentJournalUndoResponse'];

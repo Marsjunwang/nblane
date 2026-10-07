@@ -4,12 +4,14 @@ Read-only probes only; nothing here mutates the live gateway:
 
 - ``shutil.which("openclaw")`` — binary presence
 - ``openclaw --version`` — installed version
-- ``GET http://127.0.0.1:18789/readyz`` — gateway readiness + uptime
-- ``openclaw mcp list`` — whether the nblane MCP server is registered
+- ``GET http://127.0.0.1:<port>/readyz`` — gateway readiness + uptime
+- the OpenClaw config file — whether the nblane MCP server is registered
+  (read directly; ``openclaw mcp list`` takes >5s and is only a fallback
+  for non-JSON configs)
 - ``openclaw automations list --all --json`` — automation counts
 
-Every subprocess/HTTP call goes through injectable seams (``which`` /
-``runner`` / ``http_get``, overridable per-app via ``app.state``) so tests
+Every subprocess/HTTP/config call goes through injectable seams (``which`` /
+``runner`` / ``http_get`` / ``read_config``, overridable per-app via ``app.state``) so tests
 never touch the real system. Each probe is individually guarded (5s
 timeout; failure yields a null field, never a 5xx). When the binary is
 absent the endpoint answers 200 with ``available=false`` and all probe
@@ -35,9 +37,11 @@ from typing import Any, Callable
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
+from nblane.core import openclaw_setup
 from nblane.web_api.auth import require_user
 
 PROBE_TIMEOUT_SECONDS = 5.0
+MCP_LIST_TIMEOUT_SECONDS = 15.0
 CACHE_TTL_SECONDS = 60.0
 
 DEFAULT_GATEWAY_BASE = "http://127.0.0.1:18789"
@@ -113,16 +117,34 @@ def _probe_gateway(http_get: HttpGetFn, gateway_base: str) -> AssistantGatewaySt
     except Exception:
         body = None
     if isinstance(body, dict):
-        raw = body.get("uptime_ms")
+        # OpenClaw 2026.9 answers camelCase ``uptimeMs``.
+        raw = body.get("uptimeMs", body.get("uptime_ms"))
         if isinstance(raw, (int, float)) and not isinstance(raw, bool):
             uptime_ms = int(raw)
     return AssistantGatewayStatus(ready=ready, uptime_ms=uptime_ms)
 
 
-def _probe_mcp_registered(runner: RunnerFn) -> bool | None:
-    """Whether the nblane MCP server shows up in ``openclaw mcp list``."""
+def _probe_mcp_registered(
+    runner: RunnerFn,
+    read_config: Callable[[], dict[str, Any] | None] = openclaw_setup.read_config,
+    prefix: list[str] | None = None,
+) -> bool | None:
+    """Whether the nblane MCP server is registered with OpenClaw.
+
+    Reads ``mcp.servers.nblane`` from the config file; only when the file
+    is not plain JSON does it fall back to ``openclaw mcp list``.
+    """
     try:
-        proc = runner(["openclaw", "mcp", "list"], timeout=PROBE_TIMEOUT_SECONDS)
+        config = read_config()
+    except Exception:
+        config = None
+    if config is not None:
+        return openclaw_setup._mcp_entry(config) is not None
+    try:
+        proc = runner(
+            [*(prefix or ["openclaw"]), "mcp", "list"],
+            timeout=MCP_LIST_TIMEOUT_SECONDS,
+        )
     except Exception:
         return None
     if getattr(proc, "returncode", 1) != 0:
@@ -131,11 +153,13 @@ def _probe_mcp_registered(runner: RunnerFn) -> bool | None:
     return any("nblane" in line for line in stdout.splitlines())
 
 
-def _probe_automations(runner: RunnerFn) -> AssistantAutomationsStatus | None:
+def _probe_automations(
+    runner: RunnerFn, prefix: list[str] | None = None
+) -> AssistantAutomationsStatus | None:
     """Automation counts, or None when the CLI/JSON output is unusable."""
     try:
         proc = runner(
-            ["openclaw", "automations", "list", "--all", "--json"],
+            [*(prefix or ["openclaw"]), "automations", "list", "--all", "--json"],
             timeout=PROBE_TIMEOUT_SECONDS,
         )
     except Exception:
@@ -164,10 +188,18 @@ def collect_assistant_status(
     which: Callable[[str], str | None] = shutil.which,
     runner: RunnerFn = _default_runner,
     http_get: HttpGetFn = _default_http_get,
-    gateway_base: str = DEFAULT_GATEWAY_BASE,
+    read_config: Callable[[], dict[str, Any] | None] = openclaw_setup.read_config,
+    gateway_base: str | None = None,
     console_url: str | None = None,
 ) -> AssistantStatusResponse:
-    """Run all probes (each guarded) and assemble the status payload."""
+    """Run all probes (each guarded) and assemble the status payload.
+
+    CLI calls, gateway port and config honour ``NBLANE_OPENCLAW_PROFILE``
+    so the isolated dev stack never reports the production gateway.
+    """
+    prefix = openclaw_setup.cli_prefix()
+    if gateway_base is None:
+        gateway_base = f"http://127.0.0.1:{openclaw_setup.gateway_port()}"
     checked_at = datetime.now(timezone.utc).isoformat()
     console = (
         console_url
@@ -184,8 +216,8 @@ def collect_assistant_status(
         available=True,
         version=_probe_version(runner),
         gateway=_probe_gateway(http_get, gateway_base),
-        mcp_nblane_registered=_probe_mcp_registered(runner),
-        automations=_probe_automations(runner),
+        mcp_nblane_registered=_probe_mcp_registered(runner, read_config, prefix),
+        automations=_probe_automations(runner, prefix),
         console_url=console,
         checked_at=checked_at,
     )
@@ -198,6 +230,7 @@ def _seams(request: Request) -> dict[str, Any]:
         "which": getattr(state, "assistant_which", shutil.which),
         "runner": getattr(state, "assistant_runner", _default_runner),
         "http_get": getattr(state, "assistant_http_get", _default_http_get),
+        "read_config": getattr(state, "assistant_read_config", openclaw_setup.read_config),
     }
 
 
