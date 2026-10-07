@@ -5,251 +5,102 @@ last_verified: 2026-10-07
 source_of_truth: true
 ---
 
-# MCP 服务器（Cursor 等客户端）
+# MCP 服务器
 
-nblane 提供 MCP 服务：`python -m nblane.mcp_server` 或 **`nblane-mcp`**，通过 **stdio** 与 Cursor 通信。
+> 本机 MCP 只给同一台机器上的 Cursor、Claude Code 这类可信客户端用。它不登录，也没有档案 ACL，目前暂停扩展。OpenClaw 助手不用 MCP，读写都走 HTTP，见 [助手](../guides/assistant.md)。
 
-> OpenClaw 助手不用 MCP，读写都走 HTTP（`nblane_api`，有账号和权限检查；见
-> [个人 Agent 写入策略](../guides/agent-write-policy.md)）。本机 MCP 不登录，只给 Cursor、Claude Code
-> 这类信得过的本机客户端用。客户端可读 **Resources**（如 `profile://context`），也可调用 **Tools** 写入部分 profile 文件。
+入口：`nblane-mcp`（等价 `python -m nblane.mcp_server`），走 stdio，由客户端拉起子进程。实现以 `src/nblane/mcp_server.py` 为准。
 
-## 当前实现范围（给集成方 / 其他 Agent）
+## 资源（只读）
 
-### 已提供的能力
+| URI | 返回 |
+|-----|------|
+| `profile://summary` | 技能树摘要、agent-profile 焦点与偏好、Doing 任务（Markdown） |
+| `profile://context` | 完整 system prompt，对齐 `nblane context`，固定带看板；模式由 `NBLANE_CONTEXT_MODE` 决定 |
+| `profile://kanban` | `kanban.md` 原文 |
+| `profile://goals` | 目标状态计数、主目标与活跃目标、北极星；private 目标不出现 |
+| `profile://evidence` | 证据池按审阅状态计数 + 最近 20 条 |
+| `profile://inbox` | 未处置条目（`inbox` / `captured` / `clarified`） |
+| `profile://learning` | 学习记录计数、在读资源、最近 10 条 |
+| `agent://tasks` | 外部 agent 任务列表（`agent-tasks.yaml`） |
+| `agent://task/{task_id}` | 单个任务的 handoff、输入 refs、预期产物 |
 
-| 类别 | 说明 |
-|------|------|
-| 传输 | **stdio**（由 Cursor 等客户端拉起子进程） |
-| MCP 原语 | **Resources（读）** + **Tools（写 / 建议）** |
-| 读 | `profile://summary`、`profile://kanban`、`profile://context`、`profile://gap/{task}`、`profile://goals`、`profile://evidence`、`profile://inbox`、`profile://learning`、`agent://tasks`、`agent://task/{task_id}`、`agent://activity` |
-| 写（Tools） | **直写（可撤销）**：`add_kanban_card`、`move_kanban_card`、`add_checkin`、`capture_inbox`；**聊天确认后写（可撤销）**：`delete_kanban_card`、`log_skill_evidence`；**撤销日志**：`recent_actions`、`undo_action`；**候选审批**：`submit_evidence_candidate`、`submit_profile_model_candidate`、`submit_agent_task_candidate`；**只读自检**：`run_validate`、`run_sync_check`；**旧版字符串工具（兼容保留）**：`append_growth_log`、`log_skill_evidence`、`log_interaction`、`suggest_skill_upgrade`（仅文本建议）、`crystallize_method_draft`、`update_agent_task_status` |
+## 工具
 
-### 已实现的具体功能（与 CLI / Web 的对应关系）
+写工具和 HTTP 共用同一套策略（`core/agent_policy.py` 分级 + `core/agent_ops.py` 流程），规则见 [助手 · 三类写入](../guides/assistant.md#三类写入)。
 
-| 能力 | MCP | 说明 |
-|------|-----|------|
-| 技能树摘要 + agent-profile 焦点/偏好 + Doing 看板 | `profile://summary` | 近似 `nblane status` 的摘要信息 + YAML 与看板解析，**不是** `status` 的逐行打印格式 |
-| 完整 system prompt | `profile://context` | 对齐 **`nblane context`**（含 kanban；模式由 `NBLANE_CONTEXT_MODE` 控制） |
-| 看板原文 | `profile://kanban` | 直接读 `kanban.md` |
-| **Gap 分析** | `profile://gap/{task}` | 对齐 **`nblane gap <profile> "<task>"`** 的**自然语言任务**路径：规则匹配开启；可选 LLM 路由由 `NBLANE_GAP_USE_LLM` 控制（见下） |
-| 目标摘要 | `profile://goals` | goals.yaml 状态计数 + primary/active 目标；North Star 沿用 `core/context.py` 的可见性脱敏（`private` 时正文完全不出现） |
-| 证据池摘要 | `profile://evidence` | 按 review_status 计数 + 最近 20 条（id/类型/标题/日期/状态） |
-| Inbox 未处置 | `profile://inbox` | 状态为 `inbox` / `captured` / `clarified` 的条目（id/类型/标签/创建时间） |
-| 学习摘要 | `profile://learning` | learning-log 状态计数 + 在读（reading）资源 + 最近条目 |
-| 待审批队列 | `agent://activity` | Agent Activity 状态/kind 计数 + 前 10 条 pending（id/kind/标题/创建时间） |
-
-### 写入策略（2026-10-07 起）
-
-MCP 写工具和 HTTP API 共用同一套 agent 写入策略（`core/agent_policy.py` 分级表 +
-`core/agent_ops.py` 流程），详见 [个人 Agent 写入策略](../guides/agent-write-policy.md)：
-
-- **T1 直写**：`add_kanban_card`、`move_kanban_card`（旧名 `submit_kanban_candidate` 保留为别名，不再进审批队列）、`add_checkin`、`capture_inbox`、`append_growth_log`、`crystallize_method_draft`。立即生效，写入 `agent-journal.yaml`，返回 `journal_id`。
-- **T2 聊天确认**：`delete_kanban_card`、`log_skill_evidence`。第一次调用不改任何东西，返回 `confirmation_required` + `summary` + `confirm_id`；agent 把 summary 发给用户，用户同意后**用相同参数**加 `confirm_id` 再调一次。确认码 10 分钟有效、一次性、绑定参数；存放在 `~/.local/share/nblane/agent/mcp-confirmations.json`（`NBLANE_AGENT_STATE_DIR` 可改），多个 MCP 进程共享。
-- **撤销**：`recent_actions` 列出最近操作（HTTP 和 MCP 写入都在里面），`undo_action(journal_id)` 撤销；之后有人改过同一内容时拒绝撤销（`journal_undo_conflict`）。
-- 只追加、无事实可撤的写入（`log_interaction`、`submit_*_candidate`、`update_agent_task_status`）只过策略检查，不进撤销日志。
-- 日志里的操作人是 `NBLANE_MCP_ACTOR`（默认 `mcp`）。
-- 新工具返回 **dict**（`structured_output=True` + `ToolAnnotations`）；旧版字符串工具保持 `OK:`/`ERROR:` 约定，T2 时返回以 `CONFIRM REQUIRED:` 开头的一行。
-- `submit_evidence_candidate` 仍以 `source_page="Review"` 候选入队，由人在页面上处理；`submit_profile_model_candidate` 只入队，无自动处置器。
-
-### Gap：能不能调用？与 CLI 的差异
-
-- **可以。** 通过资源 **`profile://gap/{task}`** 读取一次，即对该 **task** 跑一遍与 CLI 相同的 `gap.analyze`（输出为 `format_text` 的纯文本）。
-- **与 CLI 的差异（MCP 当前未暴露的参数）：**
-  - **没有** `nblane gap ... --node <id>`：MCP 侧 **固定为自然语言任务**，不能单独指定 schema 节点 id。需要 `--node` 时请用 **CLI**。
-  - **没有** `--no-rule`：MCP 侧 **固定** `use_rule_match=True`。
-  - Gap 的 LLM 路由在 MCP 里由环境变量 **`NBLANE_GAP_USE_LLM`** 开关；为免污染本机学习词表，MCP 调用时 **`persist_router_keywords=False`**（不向 `learned_keywords` 持久化），与 CLI 默认持久化行为不同。
-- **仍需要：** 本机已有 `skill-tree.yaml`、schema 可加载；任务非空。错误时响应正文以 `ERROR [profile://gap]: ...` 开头。
-
-### 未通过 MCP 暴露（请用 CLI 或 Web）
-
-- **`ingest-resume` / `ingest-kanban`**、完整 **`evidence`** 子命令、**`team`**、**`sync` 写入**、看板**正文直接编辑** — 请用 **CLI** 或 **Streamlit**（见 [Web 使用手册](../guides/web-ui.md)）。
-- 其中：`validate` 与 sync **漂移检查**已通过只读工具 `run_validate` / `run_sync_check` 暴露；看板卡片增/移/删走 `add_kanban_card` / `move_kanban_card` / `delete_kanban_card`；新增证据可走 `submit_evidence_candidate` 审批流。
-- `nblane context --no-kanban`：MCP 的 `profile://context` **固定带 kanban**；若不要看板请用 CLI 或本地文件。
-
----
-
-## 接口说明（给其他 Agent：如何调用每个 URI）
-
-约定：客户端使用 MCP 的 **ReadResource**，URI 如下。除 `gap` 外均为**固定 URI**，无路径参数。
-
-| URI | 参数 | 返回 | 说明 |
-|-----|------|------|------|
-| `profile://summary` | 无 | Markdown 文本 | 依赖当前解析到的 profile（见环境变量）。 |
-| `profile://kanban` | 无 | Markdown 文本 | 无文件时返回一行英文提示。 |
-| `profile://context` | 无 | 纯文本 | 长度可能较大；模式由 `NBLANE_CONTEXT_MODE` 决定。 |
-| `profile://gap/{task}` | **路径段 `task`** | 纯文本 | **必须**把自然语言任务放进 URI 的最后一级；**先做 URL 编码**（如空格→`%20`，中文通常 UTF-8 百分号编码）。服务端会对该段做 `urllib.parse.unquote` 后再分析。 |
-| `agent://tasks` | 无 | Markdown 文本 | 列出当前 profile 的 Codex/OpenCode handoff tasks。 |
-| `agent://task/{task_id}` | **路径段 `task_id`** | Markdown 文本 | 返回单个 agent task 的 handoff、输入 refs、预期产物和 review 规则。 |
-| `profile://goals` | 无 | Markdown 文本 | goals.yaml 摘要 + North Star 全文（2026-09-23 起可见性为二元，只门控公开产物，agent 始终可见；private 目标不出现）。 |
-| `profile://evidence` | 无 | Markdown 文本 | 证据池按 review_status 计数 + 最近 20 条；无文件时返回占位提示。 |
-| `profile://inbox` | 无 | Markdown 文本 | 未处置条目（`inbox`/`captured`/`clarified`）：id/类型/标签/创建时间。 |
-| `profile://learning` | 无 | Markdown 文本 | learning-log 状态计数 + 在读资源 + 最近 10 条。 |
-| `agent://activity` | 无 | Markdown 文本 | 待审批队列：状态/kind 计数 + 前 10 条 pending（id/kind/标题/创建时间）。 |
-
-**Agent task tools**
-
-| Tool | 参数 | 行为 |
+| 工具 | 级别 | 行为 |
 |------|------|------|
-| `submit_agent_task_candidate` | `task_id`, `summary`, `changed_paths`, `warnings`, `result_payload` | 把外部 agent 结果写回 `agent-tasks.yaml` 和 linked Agent Activity patch item，状态变为 `candidate_ready`。 |
-| `update_agent_task_status` | `task_id`, `status`, `error`, `warnings` | 更新 agent task 状态；`failed` 会同步到 Agent Activity 的 failed 状态。 |
+| `add_kanban_card` | 直写 | 加一张卡（`title`、`section` 默认 Queue、`context`、`tags`、`planned_start`、`planned_end`）。返回 `card_id`、`journal_id` |
+| `move_kanban_card` | 直写 | 按 id / 精确标题 / 唯一子串移动到 `target_section`，进出 Done 自动处理完成日期 |
+| `submit_kanban_candidate` | 直写 | `move_kanban_card` 的旧名，直接移动 |
+| `delete_kanban_card` | 确认 | 第一次返回 `confirmation_required` + `summary` + `confirm_id`；用户同意后用相同参数带 `confirm_id` 重调才删除 |
+| `add_checkin` | 直写 | 打卡一次（`habit` id 或标题、`date`、`count`、`unit`、`summary`、`note`、`tags`） |
+| `capture_inbox` | 直写 | 向 `inbox.yaml` 追加一条 |
+| `append_growth_log` | 直写 | 向 SKILL.md Growth Log 追加一行 |
+| `crystallize_method_draft` | 直写 | 写方法草稿到 `methods/` |
+| `log_skill_evidence` | 确认 | 给技能节点加一条内联证据；需要确认时返回以 `CONFIRM REQUIRED:` 开头的一行 |
+| `log_interaction` | 记录 | 追加交互记录到 `interactions/*.jsonl`，不进撤销日志 |
+| `suggest_skill_upgrade` | 只读 | 只返回文本建议，不写文件 |
+| `submit_evidence_candidate` | 记录 | 提交一条证据候选，只追加记录，不写证据池 |
+| `submit_profile_model_candidate` | 记录 | 提交一条 agent-profile 修改建议，只追加记录，不改 `agent-profile.yaml` |
+| `submit_agent_task_candidate` | 记录 | 外部 agent 回传任务结果（`summary`、`changed_paths`、`warnings`、`result_payload`），任务变为 `candidate_ready` |
+| `update_agent_task_status` | 记录 | 更新外部 agent 任务状态 |
+| `recent_actions` | 只读 | 撤销日志最新条目（`limit` 默认 10，上限 50），HTTP 和 MCP 的写入都在里面 |
+| `undo_action` | — | 按 `journal_id` 撤销；之后有人改过同一内容时拒绝（`journal_undo_conflict`） |
+| `run_validate` | 只读 | 对当前档案跑 validate，返回 errors / warnings |
+| `run_sync_check` | 只读 | 返回 SKILL.md 漂移的生成块名，不写文件 |
 
-这些 agent tools 是 draft-first：不会直接改 evidence、resume、public site 或代码 patch，只更新 handoff / Activity 审阅元数据。
+- 确认码 10 分钟有效、一次性、绑定参数，存在 `~/.local/share/nblane/agent/mcp-confirmations.json`（`NBLANE_AGENT_STATE_DIR` 可改），多个 MCP 进程共享。
+- 撤销日志里的操作人是 `NBLANE_MCP_ACTOR`（默认 `mcp`）。
+- 结构化工具返回 dict（带 `ToolAnnotations`）；旧版字符串工具（`append_growth_log`、`log_skill_evidence`、`log_interaction`、`suggest_skill_upgrade`、`crystallize_method_draft`、外部 agent 任务两个）返回 `OK:` / `ERROR:` 开头的文本。
 
-**结构化工具（返回 dict，带 ToolAnnotations）**
+摄入简历、完整证据编辑、`sync --write`、看板正文编辑等不经 MCP，用 CLI 或 SPA。
 
-| Tool | 参数 | 行为 |
-|------|------|------|
-| `add_kanban_card` | `title`, `section`（默认 Queue）, `context`, `tags`, `planned_start`, `planned_end` | **T1 直写**：加一张卡；进 Doing 记 `started_on`，进 Done 记 `completed_on`。返回 `{ok, card_id, section, journal_id}`。 |
-| `move_kanban_card` | `card_ref`（id / 精确标题 / 唯一子串）, `target_section` | **T1 直写**：移动列，进出 Done 自动处理完成日期；已在目标列时 `warnings` 提示、不记日志。 |
-| `delete_kanban_card` | `card_ref`, `confirm_id` | **T2**：先返回 `confirmation_required`，用户同意后带 `confirm_id` 重调才删除；可撤销。 |
-| `add_checkin` | `habit`（id 或标题）, `date`（默认今天）, `count`, `unit`, `summary`, `note`, `tags` | **T1 直写**：打卡一次。返回 `{ok, checkin_id, habit, date, journal_id}`。 |
-| `recent_actions` | `limit`（默认 10，上限 50） | 只读：撤销日志最新条目（`id/at/actor/action/tier/summary/status`）。 |
-| `undo_action` | `journal_id` | 撤销一条；已撤销 / 已被改动 / 找不到时 `ok=false` + `code`。 |
-| `capture_inbox` | `title`, `raw_text`, `source`（默认 `openclaw`）, `tags`, `note` | **T1 直写**：向 `inbox.yaml` 追加一条 `status=inbox`、`captured_by=source` 的条目（`update_inbox` 文件锁），可撤销。返回 `{ok, item_id, status, journal_id, ...}`。 |
-| `submit_evidence_candidate` | `skill_id`, `title`, `evidence_type`, `date`, `url`, `summary` | 证据候选入 Agent Activity（`target_owner=evidence_pool`，pending）。人 Apply 后落入证据池，`skill_id` 记为 `skill:<id>` source ref 供后续挂接。 |
-| `submit_kanban_candidate` | `action`（仅 `move`）, `card_ref`, `target_section`, `note` | 旧名，等同 `move_kanban_card`（直接移动，`target_section` 必填，`note` 忽略）。 |
-| `submit_profile_model_candidate` | `field`, `proposed_value`, `rationale` | profile 模型候选入队（`target_owner=profile_context`），**无自动处置**，人手动改 `agent-profile.yaml`。 |
-| `run_validate` | 无 | 只读（`readOnlyHint`）：对当前 profile 跑 `validate_one`，返回 `{ok, errors, warnings, ...}`（列表各上限 50 条）。 |
-| `run_sync_check` | 无 | 只读（`readOnlyHint`）：返回 SKILL.md 漂移块名 `{ok, in_sync, drifted_blocks}`，不写文件。 |
+## 档案选定
 
-`submit_evidence_candidate` / `submit_profile_model_candidate` 只入队不改事实；返回 dict 均含 `ok` 与 `item_id`（出错时 `ok=false` + `error`）。
-
-**Profile 如何选定（所有资源共用）**
-
-1. 若设置 `NBLANE_PROFILE` 或 `NBLANE_MCP_PROFILE`，且对应目录存在 → 使用该 profile。  
-2. 否则若 `profiles/` 下**恰好一个**非 template profile → 自动用它。  
-3. 否则 → 读资源失败，正文为 `ERROR [profile://…]: …`（提示需设置 `NBLANE_PROFILE`）。
-
-**Gap 资源示例（编码）**
-
-- 任务原文：`OpenVLA robot control`  
-- URI：`profile://gap/OpenVLA%20robot%20control`  
-- 任务原文含中文时：对每个字节做百分号编码，或由 MCP 客户端按 RFC 3986 处理路径段。
-
----
-
-## 前置条件
-
-在用于启动 MCP 的 Python 环境里安装本仓库，例如：
-
-```bash
-cd /home/narwal/workspace/nblane
-pip install -e .
-```
-
-（若你的克隆不在此路径，请改成自己的目录。）
-
-这样会安装 `mcp` 依赖并注册 `nblane` 包。
-
-若 `profiles/` 下 **不止一个** profile，请设置 **`NBLANE_PROFILE`**（见下文）。
-
-## 在 Cursor 里怎么用、能帮你什么
-
-**它是什么：** MCP 把 nblane 的 **profile 数据**暴露为 **Resources（URI）**，并提供可选 **Tools** 写入部分产物。Agent 可**按需读取**上下文（类似粘贴 `nblane context`）；**Tools** 仅在明确指令下调用，会改 `profiles/` 下文件。
-
-**你怎么做（操作顺序）：**
-
-1. 按下文「用法 A 或 B」配好 MCP，重启 Cursor 或刷新 MCP 列表。
-2. 打开 **Cursor → Settings → MCP**，确认 **nblane** 显示为已连接（无红色错误）。
-3. 打开 **MCP Inspector**（或设置里与 MCP 相关的面板），应能看到 `profile://summary`、`profile://context` 等；点一次 **Read** 做自检。
-4. 在 **Agent / Chat** 里开发时：
-   - **直接说明意图**：例如「先通过 MCP 读 `profile://context`，再帮我改这段代码」「结合 `profile://summary` 看我当前技能重点，给重构建议」。
-   - Cursor 是否**自动**把资源塞进上下文，取决于当前 Agent 与规则；**最稳妥**的方式是在任务开头显式让模型去 **fetch 对应 MCP resource**（不同版本界面文案可能略有差异，意思相同）。
-
-**对日常开发的帮助（典型场景）：**
-
-| 场景 | 可读的 URI | 作用 |
-|------|------------|------|
-| 新开对话、不想重复自我介绍 | `profile://context` | 对齐「你是谁、证据、看板」的长期 system prompt 级上下文 |
-| 快速扫一眼进度与焦点 | `profile://summary` | 技能树 lit、agent-profile 里的 focus、Doing 看板 |
-| 对齐本周事项 | `profile://kanban` | 原始 `kanban.md` |
-| 准备做一件大活（选型 / 攻坚） | `profile://gap/任务描述`（注意 URL 编码） | 与 CLI **`nblane gap <profile> "<task>"`** 的自然语言模式基本一致（见上文与 CLI 的差异） |
-| 承接 Kanban / Work handoff | `agent://tasks`、`agent://task/{task_id}` | 读取外部 agent 任务包，完成后用 `submit_agent_task_candidate` 回传候选结果 |
-
-**注意：** **Tools** 会修改 `profiles/` 内部分文件（Growth Log、技能树证据行、`interactions/*.jsonl`、方法草案等）。大量编辑（摄入、完整 evidence、团队池）请用 **CLI** 或 **Web**。
+1. 设置了 `NBLANE_PROFILE` 或 `NBLANE_MCP_PROFILE` 且目录存在，用它。
+2. 否则 `profiles/` 下恰好一个非 template 档案时自动用它。
+3. 否则读资源报 `ERROR [profile://…]`，提示设置 `NBLANE_PROFILE`。
 
 ## 环境变量
 
 | 变量 | 作用 |
 |------|------|
-| `NBLANE_PROFILE` 或 `NBLANE_MCP_PROFILE` | 默认 profile 名；存在多个 profile 时**必须**设置。 |
-| `NBLANE_ROOT` | 指定仓库根目录（含 `profiles/`）。在任意工作区使用时建议显式设置。 |
-| `NBLANE_CONTEXT_MODE` | `chat` · `review` · `write` · `plan`，仅影响 `profile://context`。默认 `chat`。 |
-| `NBLANE_GAP_USE_LLM` | 设为 `1` / `true` 时对 gap 启用 LLM 路由（需 API key）。默认关闭。 |
-| `NBLANE_MCP_ACTOR` | 撤销日志和确认码里的操作人 id。默认 `mcp`。 |
-| `NBLANE_AGENT_STATE_DIR` | MCP 确认码存放目录。默认 `~/.local/share/nblane/agent`。 |
+| `NBLANE_PROFILE` / `NBLANE_MCP_PROFILE` | 默认档案；有多个档案时必须设置 |
+| `NBLANE_ROOT` | 数据根（含 `profiles/`、`schemas/`）。工作区不是 nblane 仓库时建议显式设置 |
+| `NBLANE_CONTEXT_MODE` | `chat` / `review` / `write` / `plan`，只影响 `profile://context`，默认 `chat` |
+| `NBLANE_MCP_ACTOR` | 撤销日志和确认码里的操作人，默认 `mcp` |
+| `NBLANE_AGENT_STATE_DIR` | 确认码存放目录 |
 
-## 用法 A：只在「当前工程就是 nblane 仓库」时启用
+## 接入 Cursor / Claude Code
 
-仓库内已有 **`.cursor/mcp.json`**，使用：
+先在 nblane 仓库里 `.venv/bin/pip install -e .`。
 
-- `command`: `${workspaceFolder}/.venv/bin/python`
-- `cwd`: `${workspaceFolder}`
+当前工作区就是 nblane 仓库时，仓库自带 `.cursor/mcp.json`（`command` 为 `${workspaceFolder}/.venv/bin/python`）。需要时加 `env.NBLANE_PROFILE`。
 
-因此 **`${workspaceFolder}` 必须是 nblane 仓库根目录**（在 Cursor 里直接打开 nblane 项目时成立）。
-
-可按需增加 `env`，例如：
-
-```json
-"env": {
-  "PYTHONPATH": "src",
-  "NBLANE_PROFILE": "你的名字"
-}
-```
-
-若已 `pip install -e .`，多数情况下可去掉 `PYTHONPATH`。
-
-## 用法 B：在**另一窗口 / 别的项目**里也能连上（同一台电脑）
-
-当 Cursor 当前打开的是**别的目录**时，`${workspaceFolder}` **不是** nblane 路径，仅靠仓库里的 `.cursor/mcp.json` **不会**自动在其他工程生效，除非那个工程自己也配了 MCP。
-
-要在**任意工作区**使用同一套 nblane 数据，请用下面方式之一。
-
-### 1. 用户级 MCP 配置（推荐）
-
-在 **Cursor → Settings → MCP** 里添加服务器，或编辑本机用户级 MCP JSON（路径因系统而异，常见在 `~/.cursor/` 下）。关键是使用 **绝对路径**，指向你的 nblane 克隆与解释器。
-
-本机克隆在 `/home/narwal/workspace/nblane` 时，可直接复制（把 `NBLANE_PROFILE` 改成你的 profile 名）：
+在别的工作区也要用时，配用户级 MCP，路径全部写绝对路径：
 
 ```json
 {
   "mcpServers": {
     "nblane": {
-      "command": "/home/narwal/workspace/nblane/.venv/bin/python",
+      "command": "/path/to/nblane/.venv/bin/python",
       "args": ["-m", "nblane.mcp_server"],
       "env": {
-        "NBLANE_PROFILE": "你的名字",
-        "NBLANE_ROOT": "/home/narwal/workspace/nblane"
+        "NBLANE_PROFILE": "<profile>",
+        "NBLANE_ROOT": "/path/to/nblane"
       }
     }
   }
 }
 ```
 
-说明：
+SPA「设置 → 助手与备份」底部也给出本机的 MCP 配置片段。项目级和用户级只保留一处，或改名（如 `nblane-global`），避免重复注册。
 
-- **`command`**：装有 `nblane` 的 Python 可执行文件**完整路径**（在该环境中执行过 `pip install -e .`）。
-- **`NBLANE_ROOT`**：可选，但**建议**在「工作区不是 nblane 仓库」时写上；必须是包含 `profiles/`、`schemas/` 的**仓库根目录**。
-- 若已 `pip install -e .`，一般**不需要**再设 `PYTHONPATH`。
-- **`cwd`** 常可省略；未设置时客户端可能用当前工作区目录，数据路径仍以 `NBLANE_ROOT` / 包内解析为准。
-
-这样无论你打开的是前端项目还是别的仓库，只要 Cursor 加载了用户级 MCP，都会启动**同一套** nblane 进程配置（数据仍来自 `NBLANE_ROOT` 下的 `profiles/`）。
-
-### 2. 在其他仓库里单独放 `.cursor/mcp.json`
-
-在**每个**需要用到 nblane MCP 的项目里，复制一份配置，同样使用**绝对路径**的 `command` 和 `NBLANE_ROOT`。维护成本较高，适合少数固定项目。
-
-### 避免重名
-
-若同时启用了「nblane 仓库内的项目级 MCP」和「用户级 nblane」，可能重复注册同名服务。请只保留一处，或把其中一条改名为例如 `nblane-global`。
-
-## 自检
-
-- 在 Cursor 的 MCP / Inspector 中能看到 `profile://summary`、`profile://context` 等资源。
-- 读取 `profile://context` 应出现基于 `SKILL.md` 的 system prompt。
+自检：客户端里能看到 `profile://summary`、`profile://context`，读取 `profile://context` 应出现基于 SKILL.md 的 system prompt。
 
 ## 另见
 
-- 架构：[AI 架构](../architecture/ai-architecture.md) 与 [Agent Harness 集成](agent-harness.md)
-- 命令行对照：`nblane context`、`nblane gap`
-- Streamlit：[Web 使用手册](../guides/web-ui.md)
+- [AI 架构](../architecture/ai-architecture.md)
+- [Agent Harness](agent-harness.md)

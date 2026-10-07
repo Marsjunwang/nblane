@@ -1,224 +1,93 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-06
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
-# 腾讯云小团队部署
+# 腾讯云部署
 
-本文面向 nblane 的 Streamlit Web UI：公网入口用域名 + HTTPS，应用内账号登录，数据继续放在纯文件 + 私有 Git 仓库中。
+公网入口是域名 + HTTPS（Caddy），应用内账号登录，数据仍是纯文件 + 私有 Git 仓库。本机开发见 [本机安装](setup.md)，换机器见 [整机迁移](migration.md)。
+
+## 端口与服务
+
+本表是端口与服务的唯一登记处，其他文档链接到这里。所有服务只监听 `127.0.0.1`，公网只经 Caddy 的 80/443。
+
+| 端口 | 服务 | 托管方式 | 作用 |
+|------|------|----------|------|
+| 443 / 80 | Caddy | 系统 unit `caddy` | HTTPS 入口，按路径分流 |
+| 8504 | `nblane-web-api.service`（`uvicorn nblane.web_api:app`） | 系统 unit | SPA 页面 + `/api/v1`；同时反代车间终端 `/terminal/` |
+| 8502 | `nblane-reader.service`（`uvicorn nblane.web_reader_api:app`） | 系统 unit | 论文库、阅读器（SPA iframe 嵌入）、登录态交接 `/auth/session` |
+| 8070 | GROBID `nblane-grobid` | 用户级 Podman Quadlet | PDF 结构化抽取（可选） |
+| 8505 | `llama-server` | 8502 / 8504 按需拉起 | 本地翻译模型（可选），空闲 300 秒释放 |
+| 7668 | ttyd `nblane-workshop` | 用户级 unit | 车间网页终端（可选），只经 8504 `/terminal/` 访问，需管理员登录 |
+| 18789 | OpenClaw 网关 `openclaw-gateway` | 用户级 unit | 助手（可选），控制台经 Caddy `/openclaw` |
+| — | `nblane-backup.timer` | 用户级 timer | 每天 03:30 `nblane backup run` |
+
+端口来源：`scripts/dev-web.sh`、`core/grobid_service.py`、`core/ai/local_models.py`、`core/workshop_service.py`、`core/openclaw_setup.py`、`core/backup_targets.py`。开发隔离端口（18502 / 18504 / 18070 / 19789）见 [本机安装](setup.md)。
+
+用户级服务都要求服务用户开启 linger：`sudo loginctl enable-linger <服务用户>`。
 
 ## 目录布局
 
-推荐把代码和私有数据分开：
-
 ```text
-/srv/nblane-app       # 本仓库代码（git clone，运行 Streamlit）
-/srv/nblane-data      # 私有数据仓库，含 profiles/ schemas/ teams/ auth/
-/srv/nblane-assets    # 大文件资产，不进 Git，含 Research PDF
+/srv/nblane-app/nblane   代码（git clone，editable 安装）
+/srv/nblane-data         私有数据仓库：profiles/ schemas/ auth/users.yaml .env(0600)
+/srv/nblane-assets       大文件资产，不进 Git，如 research/ 下的论文 PDF
+/srv/agent-data          助手工作区（独立私有 git），见 OpenClaw 运维
 ```
 
-代码目录用 git 部署，不用 rsync / scp 裸拷贝：
+代码用 git 部署，不用 rsync / scp 裸拷贝：
 
 ```bash
-sudo -u nblane git clone https://github.com/<org>/nblane.git /srv/nblane-app
+sudo -u nblane git clone https://github.com/<org>/nblane.git /srv/nblane-app/nblane
+cd /srv/nblane-app/nblane
+sudo -u nblane python3 -m venv .venv
+sudo -u nblane .venv/bin/pip install -e .
 ```
 
-git 部署的好处：`git log` 能精确确认线上版本，`git status` 能发现线上手工改动
-造成的漂移，回滚是 `git checkout <旧 commit>` + 重启。仓库的 `.gitignore` 已覆盖
-`.env`、`.venv`、`profiles/*`、`dist/`、`node_modules` 等本地产物，git 工作区与
-这些文件共存无冲突。生产本地若有无须入库的目录（如 `.deploy-backups/`），写进
-`.git/info/exclude`，不要为此改仓库的 `.gitignore`。
+`git log` 能确认线上版本，`git status` 能发现线上手工改动。生产本地无须入库的目录写进 `.git/info/exclude`，不要改仓库的 `.gitignore`。
 
-`/srv/nblane-data` 中至少包含：
-
-```text
-profiles/
-schemas/
-teams/
-auth/users.yaml
-```
-
-Paper Reading Studio 的 PDF 原件不会写进 `profiles/` Git 仓库。生产部署建议额外创建资产目录：
+论文 PDF 原件不进 `profiles/`。profile 里只存 `papers/<sha>-name.pdf` 这样的相对 asset ref，迁移时整体平移 `/srv/nblane-assets` 即可。
 
 ```bash
 sudo mkdir -p /srv/nblane-assets/research
 sudo chown -R nblane:nblane /srv/nblane-assets
 ```
 
-并在服务环境中设置：
+### 账号
+
+`auth/users.yaml` 参考 `auth/users.example.yaml`，密码哈希用 `nblane auth hash-password`。
+
+- `role: admin`：管理员，可访问所有档案和系统设置。
+- `role: member` + `profile: <name>`：本人，只能访问自己的档案。
+- `agent: true`：助手服务账号（如 `openclaw`），写入按 [助手](assistant.md) 的规则处理。
+
+## 更新代码
 
 ```bash
-NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
-NBLANE_RESEARCH_PDF_BACKEND=auto
-NBLANE_GROBID_URL=http://127.0.0.1:8070
-```
-
-迁移服务器时需要同步 `/srv/nblane-data` 和 `/srv/nblane-assets`；profile 文件中只保存
-`papers/<sha>-name.pdf` 这样的相对 asset ref，不保存绝对路径。
-
-`auth/users.yaml` 可参考仓库内的 `auth/users.example.yaml`。密码哈希用：
-
-```bash
-nblane auth hash-password
-```
-
-成员配置规则：
-
-- `role: admin`：可访问所有 profile 和 team，可创建新 profile。
-- `role: member`：只能访问自己的 `profile`，以及 `teams` 列表中允许的团队。
-- `teams: ["*"]`：允许访问所有团队。
-
-## 更新代码与依赖
-
-生产更新以 git 为准（首次部署见上文"目录布局"的 git clone）：
-
-```bash
-cd /srv/nblane-app
+cd /srv/nblane-app/nblane
 sudo -u nblane git fetch origin
-sudo -u nblane git status -sb          # 应显示与 origin/main 同步；有本地改动先排查漂移
-sudo -u nblane git pull --ff-only      # 只快进；失败说明线上有脏改动，不要强拉
-.venv/bin/python -m pip install -e .   # 重装 nblane 包本身，只 git pull 不重装时
-.venv/bin/python -m pip install -r requirements.txt   # 非 editable 安装下改动不生效
-.venv/bin/python - <<'PY'
-import socksio
-print("socksio ok")
-PY
-sudo systemctl restart nblane-reader nblane
+sudo -u nblane git status -sb          # 应与 origin/main 同步；有本地改动先排查
+sudo -u nblane git pull --ff-only      # 只快进
+sudo systemctl restart nblane-reader nblane-web-api
 ```
 
-尤其是使用 `ALL_PROXY=socks5://...`、`HTTPS_PROXY=socks5://...` 或 mihomo/clash
-SOCKS 出口时，必须安装 `httpx[socks]`（本仓库已写入 `pyproject.toml` 和
-`requirements.txt`），否则 LLM / Reader / Research 的外部请求会报：
+- editable 安装下只改代码不用重装；依赖变了再跑 `.venv/bin/pip install -e .`。用 `uv sync` 时同样要在重启前完成。
+- 走 SOCKS 代理时必须有 `httpx[socks]`（已在依赖里），否则外部请求报 `Using SOCKS proxy, but the 'socksio' package is not installed.`。
+- 回滚：`git checkout <旧 commit>` 后重启两个服务。
 
-```text
-Using SOCKS proxy, but the 'socksio' package is not installed.
-```
+### 前端产物
 
-回滚：`sudo -u nblane git checkout <旧 commit>` 后重跑上面的 pip + restart；
-回到最新用 `git checkout main && git pull --ff-only`。
+前端是预构建的，生产不跑 `npm run build`。SPA（`src/nblane/web_ui/static/`）和论文库组件（`src/nblane/paper_library_component/frontend/static/`）的产物都随仓库提交。只改源码不重新构建，生产看不到变化。
 
-如果使用 `uv sync` 管理虚拟环境，也要在重启前完成 sync；不要只拉代码而跳过依赖同步。
-
-## 更新前端组件（Dashboard / Reader / Paper Library / Blog 编辑器）
-
-`src/nblane/**/frontend/` 下的 React/Vite 组件是**预构建**的：编译产物提交在
-`frontend/static/assets/home-dashboard.<hash>.js|css`，生产运行时直接 serve 这些静态文件，
-**不在生产机上跑构建**。因此只改前端源码（`frontend/src/*.jsx`、`*.js`、`*.css`）而不重新构建，
-生产**看不到任何变化**——运行的仍是旧 bundle。
-
-改动任一前端组件后，必须在能联网的机器（本地或生产均可）重新构建，并把新产物一起提交：
-
-```bash
-cd src/nblane/home_dashboard_component/frontend
-# 生产机通常没有 node_modules（被 .gitignore 忽略）。首次构建先装依赖，
-# 走代理时显式带上，否则拉包失败：
-HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 npm ci
-npm test          # 组件单测，应全绿
-npm run build     # 产出内容哈希文件名 home-dashboard.<hash>.js/css
-```
-
-构建要点：
-
-- Vite 用**内容哈希**命名产物。每次源码变化，`.js`/`.css` 文件名的 hash 都会变，旧哈希文件被删、
-  新哈希文件新增、`static/index.html` 自动更新引用。sidecar 用 `HOME_DASHBOARD_ASSET_DIR.glob("*.js")`
-  运行时扫目录拾取新哈希，无需改代码。
-- **新旧产物都要纳入提交**：`git add` 时把被删的旧 `home-dashboard.*.js|css`、新增的新哈希文件、
-  以及改动的 `index.html` 一起提交。漏提交任何一个都会导致生产资产 404 / 加载旧版。
-- `node_modules/` 已在 `.gitignore`，不要提交。
-
-**重启哪个服务（这一步最容易漏）：** dashboard 全屏页 `/dashboard` 由 **8502（reader）** serve，
-主应用首页 3D hero 由 **8501（streamlit）** serve，两者共用同一份 `home_dashboard_component` bundle。
-改了这个组件后，**两个服务都要重启**，只重启 8501 会让 8502 继续用旧 bundle（页面卡死、按钮点不动等）：
-
-```bash
-sudo systemctl restart nblane-reader nblane
-```
-
-**浏览器缓存：** 前端发版后，浏览器可能仍缓存旧 bundle。验证时先 `Ctrl+Shift+R` 硬刷新；
-若 `target="_blank"` 打开的 8502 全屏页仍是旧版，用 DevTools → Network 勾 Disable cache 再刷，
-或开无痕窗口。用 DevTools Network 里实际加载的 `home-dashboard.<hash>.js` 文件名对比生产产物，
-可确认浏览器是否拿到新版。
-
-**同源模式与 Dashboard Canvas 入口：** 生产用 `NBLANE_READER_API_BASE=0`（同源哨兵值，
-sidecar 走 Caddy 反代而非绝对 URL）。主应用首页「打开全屏星系」入口的 `canvas_base` 会把 `=0`
-解析成同源域名；健康检查命中 auth-gated sidecar 返回 401/403 时应视为“可达但需登录”，不是不可达。
-若入口不显示，先确认这两点。
-
-Reader 全文翻译依赖长时间 LLM 调用。生产环境如通过 SOCKS 代理访问模型，建议保留默认的
-`NBLANE_STREAM_PAPER_TRANSLATION=1`，让 `research.paper_translate` 用流式响应收完整 JSON，
-避免长非流式响应在代理层一直无结果。大论文还应给 Reader 后台任务更长预算，例如在
-`nblane-reader.service` 的 drop-in 中设置：
-
-```ini
-[Service]
-Environment=NBLANE_READER_TASK_TIMEOUT_SECONDS=3600
-Environment=NBLANE_PAPER_TRANSLATION_MODEL_TIMEOUT_SECONDS=300
-```
-
-修改 systemd drop-in 后执行：
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart nblane-reader
-```
-
-端口职责保持固定：
-
-- `8501`：Streamlit 主应用，负责 Dashboard、Evidence Review、Research、Output Studio、Blog 编辑等可写页面。
-- `8502`：FastAPI sidecar，负责 Reader、Paper Library standalone、Dashboard Canvas/Paper Library iframe 等长任务和只读/半只读前端。
-- `8504`：SPA 后端（`nblane.web_api`），`/api/v1/*` + SPA 静态产物；部署方式见下文「SPA 后端（8504，nblane.web_api）」。
-
-因此 Blog 侧边栏、Dashboard 添加目标、Evidence Review 保存等写入操作仍应发生在 `8501`
-主应用中；`8502` 只提供 sidecar 能力，不应作为这些页面的独立写入口。
+- Vite 用内容哈希命名产物。提交时把删掉的旧哈希文件、新文件和 `index.html` 一起提交，漏一个就会 404 或加载旧版。
+- 改了 SPA 重启 `nblane-web-api`；改了论文库组件重启 `nblane-reader`。
+- 验证时先硬刷新，或用 DevTools Network 对比实际加载的哈希文件名。
 
 ## systemd
 
-示例服务文件 `/etc/systemd/system/nblane.service`：
-
-```ini
-[Unit]
-Description=nblane Streamlit Web UI
-After=network.target
-
-[Service]
-Type=simple
-User=nblane
-WorkingDirectory=/srv/nblane-app
-Environment=NBLANE_ROOT=/srv/nblane-data
-Environment=NBLANE_AUTH_FILE=/srv/nblane-data/auth/users.yaml
-Environment=UI_LANG=zh
-Environment=LLM_REPLY_LANG=zh
-Environment=NBLANE_DATA_GIT_AUTOCOMMIT=1
-Environment=NBLANE_DATA_GIT_AUTOPUSH=1
-Environment=NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
-Environment=NBLANE_RESEARCH_PDF_BACKEND=auto
-Environment=NBLANE_GROBID_URL=http://127.0.0.1:8070
-Environment=NBLANE_READER_API_BASE=0
-EnvironmentFile=-/srv/nblane-data/.env
-ExecStart=/srv/nblane-app/.venv/bin/streamlit run app.py --server.address=127.0.0.1 --server.port=8501 --server.headless=true
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`UI_LANG` 控制 Streamlit 界面文案；`LLM_REPLY_LANG` 控制模型输出和 AI
-prompt 语言。需要时二者可以分别设置。
-
-启动：
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now nblane
-sudo systemctl status nblane
-```
-
-Research PDF Reader 由独立 FastAPI sidecar 提供，避免 PDF 滚动触发 Streamlit
-整页 rerun。先生成共享 token secret，并写入两个 service 都会读取的
-`/srv/nblane-data/.env`：
+两个系统 unit 共用 `/srv/nblane-data/.env`（0600）。先生成 Reader token secret：
 
 ```bash
 printf 'NBLANE_READER_TOKEN_SECRET=%s\n' "$(openssl rand -hex 32)" | sudo tee -a /srv/nblane-data/.env
@@ -226,7 +95,11 @@ sudo chown nblane:nblane /srv/nblane-data/.env
 sudo chmod 600 /srv/nblane-data/.env
 ```
 
-示例服务文件 `/etc/systemd/system/nblane-reader.service`：
+HTTPS 生产环境在同一文件里加 `NBLANE_AUTH_COOKIE_SECURE=1`。
+
+### Reader API（8502）
+
+`/etc/systemd/system/nblane-reader.service`：
 
 ```ini
 [Unit]
@@ -236,20 +109,19 @@ After=network.target
 [Service]
 Type=simple
 User=nblane
-WorkingDirectory=/srv/nblane-app
+WorkingDirectory=/srv/nblane-app/nblane
 Environment=NBLANE_ROOT=/srv/nblane-data
 Environment=NBLANE_AUTH_FILE=/srv/nblane-data/auth/users.yaml
 Environment=UI_LANG=zh
 Environment=LLM_REPLY_LANG=zh
 Environment=NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
+Environment=NBLANE_GROBID_URL=http://127.0.0.1:8070
 Environment=NBLANE_CODEX_BIN=/home/nblane/.local/bin/codex
 Environment=NBLANE_CODEX_HOME=/home/nblane/.codex
-Environment=NBLANE_RESEARCH_PDF_BACKEND=auto
-Environment=NBLANE_GROBID_URL=http://127.0.0.1:8070
 Environment=NBLANE_READER_API_BASE=0
 EnvironmentFile=-/srv/nblane-data/.env
-# 任务状态（搜索 / 翻译 / AI 流）保存在单进程内存中，禁止多 worker。
-ExecStart=/srv/nblane-app/.venv/bin/uvicorn nblane.web_reader_api:app --host 127.0.0.1 --port 8502 --workers 1
+# 任务状态（搜索 / 翻译 / AI 流）在单进程内存中，禁止多 worker。
+ExecStart=/srv/nblane-app/nblane/.venv/bin/uvicorn nblane.web_reader_api:app --host 127.0.0.1 --port 8502 --workers 1
 Restart=always
 RestartSec=5
 
@@ -257,50 +129,25 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Reader sidecar 不会继承 Streamlit service 的语言变量；`UI_LANG` 必须同时配置在
-`nblane.service` 和 `nblane-reader.service`，否则 Reader payload 里的按钮和提示会回到
-英文默认值。
+- `--workers 1`：多 worker 下 start 与 poll / SSE / cancel 会落到不同进程，约半数请求 404（如 `search job not found`）。
+- `NBLANE_READER_API_BASE=0`：同源哨兵。SPA 拿到的 iframe 地址不含 host，浏览器走同源相对路径，由 Caddy 分流到 8502。漏配会回退 `http://127.0.0.1:8502`，公网浏览器访问不到，论文库和阅读器整片空白。
+- Reader 不继承 8504 的语言变量，`UI_LANG` / `LLM_REPLY_LANG` 两个 unit 都要写。
+- 论文库的 Codex 搜索需要能找到 Codex CLI。systemd 默认 `PATH` 通常不含 `~/.local/bin`，用 `NBLANE_CODEX_BIN` / `NBLANE_CODEX_HOME` 写绝对路径；否则 trace 里出现 `codex_not_found`。
+- 大论文全文翻译可放宽预算（drop-in）：`NBLANE_READER_TASK_TIMEOUT_SECONDS=3600`、`NBLANE_PAPER_TRANSLATION_MODEL_TIMEOUT_SECONDS=300`。走 SOCKS 代理时保留默认的 `NBLANE_STREAM_PAPER_TRANSLATION=1`。
 
-`--workers` 必须保持 `1`：论文搜索、全文翻译、blog AI 流等任务状态全部保存在
-sidecar 的单进程内存中；多 worker 下 start 与 poll / SSE / cancel 请求会被分发到不同
-进程，约半数请求报 404（如 "search job not found"）。需要扩容时先把任务表换成
-文件 / Redis 等外部存储后端，再考虑多 worker。
+### SPA 后端（8504）
 
-两个 service 都设了 `NBLANE_READER_API_BASE=0`（同源哨兵）：Streamlit 页面生成的
-iframe / 链接 URL 不含 host，浏览器走同源相对路径，由 Caddy 按路径分流到 8502。
-漏配时会回退硬编码的 `http://127.0.0.1:8502`，公网浏览器无法访问该地址，
-Paper Library / Reader iframe 会整片空白。
-
-启动：
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now nblane-reader
-sudo systemctl status nblane-reader
-```
-
-Reader sidecar 是生产 PDF Reader 的唯一主路径；不要依赖旧的 Streamlit 静态组件路径。
-普通部署也不要开启 overlay 调试开关，只有排查 legacy PDF 贴图渲染时才临时设置
-`NBLANE_READER_DEBUG_OVERLAY=1`。
-
-## SPA 后端（8504，nblane.web_api）
-
-新版 SPA（`web_ui`）由独立 FastAPI 进程承载：同一进程服务 `/api/v1/*` JSON
-接口和 `src/nblane/web_ui/static/` 构建产物（客户端路由回退 `index.html`）。
-它是完整写路径——看板、Inbox、证据评审、Studio 的全部 mutation 都走
-这里，生产必须和 8501 一样配置认证与 Git 备份变量。
-
-示例服务文件 `/etc/systemd/system/nblane-web-api.service`（沿用前两个 unit 的写法）：
+`/etc/systemd/system/nblane-web-api.service`：
 
 ```ini
 [Unit]
 Description=nblane Web API (SPA backend)
-After=network.target
+After=network.target nblane-reader.service
 
 [Service]
 Type=simple
 User=nblane
-WorkingDirectory=/srv/nblane-app
+WorkingDirectory=/srv/nblane-app/nblane
 Environment=NBLANE_ROOT=/srv/nblane-data
 Environment=NBLANE_AUTH_FILE=/srv/nblane-data/auth/users.yaml
 Environment=UI_LANG=zh
@@ -308,11 +155,11 @@ Environment=LLM_REPLY_LANG=zh
 Environment=NBLANE_DATA_GIT_AUTOCOMMIT=1
 Environment=NBLANE_DATA_GIT_AUTOPUSH=1
 Environment=NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
+Environment=NBLANE_GROBID_URL=http://127.0.0.1:8070
 Environment=NBLANE_READER_API_BASE=0
-Environment=NBLANE_TRUST_PROXY_HEADERS=1
 EnvironmentFile=-/srv/nblane-data/.env
 # 登录限流是单进程内存实现，禁止多 worker。
-ExecStart=/srv/nblane-app/.venv/bin/uvicorn nblane.web_api:app --host 127.0.0.1 --port 8504 --workers 1
+ExecStart=/srv/nblane-app/nblane/.venv/bin/uvicorn nblane.web_api:app --host 127.0.0.1 --port 8504 --workers 1
 Restart=always
 RestartSec=5
 
@@ -320,90 +167,54 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-三点不能漏：
+- 8504 是完整写路径，必须配 `NBLANE_DATA_GIT_AUTOCOMMIT=1` / `NBLANE_DATA_GIT_AUTOPUSH=1`，否则保存不产生备份提交。
+- `--workers 1`：多 worker 会把登录失败计数分散到不同进程，限流失效。
 
-- **Git 备份变量**：`NBLANE_DATA_GIT_AUTOCOMMIT=1` / `NBLANE_DATA_GIT_AUTOPUSH=1`
-  必须和 `nblane.service` 一样配置——SPA 的写操作直接改 `profiles/` 下的文件，
-  漏配后 SPA 保存不会产生备份提交。CW-2 变更窗口的备份检查需覆盖这第三个 unit。
-- **`--workers 1`**：登录限流（`LoginRateLimiter`）是单进程内存实现；多 worker
-  会把失败计数分散到不同进程，限流形同虚设。
-- **`NBLANE_TRUST_PROXY_HEADERS=1`**：见下文「HTTPS 反向代理」的限流说明；
-  不要改用 uvicorn `--proxy-headers`（应用自己读取 X-Forwarded-For）。
-
-生产机上这三个运行期修正建议做成 drop-in（`/etc/systemd/system/nblane-web-api.service.d/`），
-不要直接改 unit 主体：
+运行期修正建议放 drop-in（`/etc/systemd/system/nblane-web-api.service.d/`），不改 unit 主体：
 
 ```bash
 sudo install -d /etc/systemd/system/nblane-web-api.service.d
 
-# 1. 出站代理（如需）：写法与 nblane.service 的 10-proxy.conf 相同，
-#    见 mihomo-deployment.md「让生产 systemd 服务走代理」，含成对的 no_proxy/NO_PROXY。
+# 出站代理（如需）：见 mihomo-deployment.md「让生产 systemd 服务走代理」，含成对的 no_proxy/NO_PROXY。
 
-# 2. PATH：SPA 助手页要在服务端探测/调用 openclaw，而 openclaw 通常装在
-#    用户级 npm-global，systemd 默认 PATH 看不到（症状是助手页显示「本机未安装」）。
-#    systemd Environment= 不做 shell 展开，必须写绝对路径：
+# PATH：助手页要在服务端调用 openclaw，它通常装在用户级 npm-global。
+# systemd Environment= 不做 shell 展开，写绝对路径。漏配时助手页显示「本机未安装」。
 sudo tee /etc/systemd/system/nblane-web-api.service.d/20-path.conf >/dev/null <<'EOF'
 [Service]
-Environment=PATH=/home/nblane/.local/npm-global/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/home/nblane/.local/npm-global/bin:/home/nblane/.local/bin:/usr/local/bin:/usr/bin:/bin
 EOF
 
-# 3. TRUST_PROXY_HEADERS：上面 unit 模板里已带 =1。若部署时 Caddy 反代尚未就位，
-#    先不要在主体里开启——直连可达时开启等于允许客户端伪造限流身份。
-#    条件满足（Caddy 就位且安全组只放 80/443）后再用 drop-in 打开：
+# 信任反代头：只在 Caddy 就位、安全组只放 80/443 之后开启。
 sudo tee /etc/systemd/system/nblane-web-api.service.d/30-trust-proxy.conf >/dev/null <<'EOF'
 [Service]
 Environment=NBLANE_TRUST_PROXY_HEADERS=1
 EOF
-
-sudo systemctl daemon-reload
-sudo systemctl restart nblane-web-api
 ```
+
+`NBLANE_TRUST_PROXY_HEADERS=1` 让应用取 `X-Forwarded-For` 首跳作为登录限流的客户端 IP（同一 IP + 用户名 60 秒内失败 5 次即 429）。8504 直接可达时开启等于允许伪造限流身份。不要改用 uvicorn `--proxy-headers`。
 
 启动：
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now nblane-web-api
-sudo systemctl status nblane-web-api
-```
-
-如果 Paper Library 的 Codex 搜索需要走 `local_codex_readonly`，生产 systemd service
-必须能找到 Codex CLI。很多机器把 Codex 安装到 `~/.local/bin/codex`，但 systemd 默认
-`PATH` 通常不包含 `~/.local/bin`，会导致页面 trace 出现
-`codex_not_found: install Codex CLI first`。建议在 `nblane.service` 和
-`nblane-reader.service` 都显式配置：
-
-```ini
-Environment=NBLANE_CODEX_BIN=/home/nblane/.local/bin/codex
-Environment=NBLANE_CODEX_HOME=/home/nblane/.codex
-```
-
-实际路径按运行 service 的 Linux 用户调整。配置后可用同一用户检查：
-
-```bash
-sudo -u nblane /home/nblane/.local/bin/codex --version
-sudo -u nblane CODEX_HOME=/home/nblane/.codex /home/nblane/.local/bin/codex login status
+sudo systemctl enable --now nblane-reader nblane-web-api
+systemctl is-active nblane-reader nblane-web-api
+curl -fsS http://127.0.0.1:8504/api/v1/health
 ```
 
 ## HTTPS 反向代理
 
-推荐 Caddy。示例 `/etc/caddy/Caddyfile`：
+Caddy。8502 只承接 SPA 实际用到的三组路径，其余全部（SPA 页面、`/api/v1/*`、`/terminal/*`）走 8504：
 
 ```caddyfile
-your-domain.com {
+(nblane_routes) {
+    # 阅读器页面与其 API（/reader/view、/reader/assets、/reader/api/...）
     handle /reader/* {
         reverse_proxy 127.0.0.1:8502
     }
 
+    # 论文库页面、静态资源与 API
     handle /paper-library* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    handle /dashboard* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    handle /api/dashboard/* {
         reverse_proxy 127.0.0.1:8502
     }
 
@@ -411,25 +222,13 @@ your-domain.com {
         reverse_proxy 127.0.0.1:8502
     }
 
-    handle /auth/* {
+    # 登录态交接：SPA 用隐藏表单 POST /auth/session，再跳 /auth/session-ok
+    handle /auth/session* {
         reverse_proxy 127.0.0.1:8502
     }
 
-    handle /blog-editor* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    handle /api/blog/* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    handle /api/site/* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    # OpenClaw Control UI 子路径反代（gateway 监听 127.0.0.1:18789）。
-    # 精确匹配与通配两条都必须写：只写 /openclaw/* 时，无尾斜杠的
-    # /openclaw 会落到下面的 8501 catch-all，WebSocket 握手失败。
+    # OpenClaw 控制台（可选）。精确匹配与通配两条都要写，
+    # 只写通配时无尾斜杠的 /openclaw 会落到 8504，WebSocket 握手失败。
     handle /openclaw {
         reverse_proxy 127.0.0.1:18789
     }
@@ -438,283 +237,82 @@ your-domain.com {
         reverse_proxy 127.0.0.1:18789
     }
 
-    reverse_proxy 127.0.0.1:8501
-}
-```
-
-这里必须使用 `handle /reader/*`，不要使用 `handle_path /reader/*`；后者会剥掉
-FastAPI 需要的 `/reader` 路由前缀。同理 `/dashboard*`、`/api/dashboard/*`、
-`/paper-library*`、`/auth/*`、`/blog-editor*`、`/api/blog/*`、`/api/site/*`
-都必须用 `handle`（不是 `handle_path`），否则
-FastAPI 侧的路由前缀会被剥掉，`/dashboard?profile=...` 会 404 或路由到错误的
-处理函数。`/auth/*` 承载 8501/8503 → 8502 的登录态 handoff，缺失这条会导致
-生产环境下打开 `/dashboard` 返回 401。`/blog-editor*`、`/api/blog/*`、`/api/site/*`
-承载 Output Studio 的完整 Blog 编辑器、AI 流接口与公开站点构建接口，缺失时编辑器
-404、发布不可达。
-
-`/openclaw` 两条反代把 OpenClaw Control UI 挂到主站子路径（gateway 只监听
-`127.0.0.1:18789`，不对公网开放）。Caddy 侧之外，Gateway 侧还必须配四件套，
-缺一不可（`publicOrigin` 是裸 origin、不带路径；缺 `trustedProxies` 会 403
-`proxy_attribution_required`；缺 `allowedOrigins` 会在 WS 握手后拒绝来源）：
-
-```bash
-openclaw config patch --stdin --dry-run <<'JSON5'
-{ "gateway": {
-    "controlUi": { "basePath": "/openclaw",
-                   "allowedOrigins": ["https://your-domain.com", "https://spa.your-domain.com"] },
-    "publicOrigin": "https://your-domain.com",
-    "trustedProxies": ["127.0.0.1", "::1"]
-} }
-JSON5
-# dry-run 通过后去掉 --dry-run 再执行同一补丁，然后 openclaw gateway restart
-```
-
-完整变更窗口（前置检查、验证、回滚）见
-[OpenClaw 接入指南 CW-4](openclaw-integration.md)。
-
-Streamlit 只监听 `127.0.0.1:8501`，Reader API 只监听 `127.0.0.1:8502`，
-SPA 后端只监听 `127.0.0.1:8504`，不要在腾讯云安全组开放 `8501`、`8502` 或 `8504`。
-
-SPA 后端建议挂独立子域名（根路径与 Streamlit 主站点冲突，不宜同域按路径分流）。
-SPA 内嵌的 sidecar iframe（Paper Library / 3D dashboard）和 handoff 换票都走同源
-相对路径，所以子域名站点要复制主站点的全部 8502 `handle` 块，catch-all 指向 8504：
-
-```caddyfile
-spa.your-domain.com {
-    # 与主站点一致的 sidecar 分流（handle，不是 handle_path）。
-    handle /reader/* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    handle /paper-library* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    handle /dashboard* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    handle /api/dashboard/* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    handle /api/research/* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    handle /auth/* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    handle /blog-editor* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    handle /api/blog/* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    handle /api/site/* {
-        reverse_proxy 127.0.0.1:8502
-    }
-
-    # 其余全部（/api/v1/* + SPA 静态产物）走 8504。
+    # SPA + /api/v1 + /terminal/
     reverse_proxy 127.0.0.1:8504
 }
-```
 
-SPA 的 `handoff_token` 由此与 sidecar 同源，设 cookie 无跨域问题；漏配
-`/auth/*` 分流时 iframe 引导返回 404/401，Paper Library 整片空白。
-
-HTTPS 生产环境把 `NBLANE_AUTH_COOKIE_SECURE=1` 写入 `/srv/nblane-data/.env`，
-登录 cookie 会带 `Secure` 标记、只经 HTTPS 传输；默认关闭，仅用于无 HTTPS 的
-本地调试。该文件被三个 service 共享（`EnvironmentFile`），8504 同样生效。
-
-8504 应用层已实现登录限流：同一「客户端 IP + 用户名」60 秒内失败 5 次即 429。
-反代拓扑下所有请求的对端地址都是 Caddy 的 `127.0.0.1`，必须给
-`nblane-web-api.service` 配置 `NBLANE_TRUST_PROXY_HEADERS=1`，应用才会取
-`X-Forwarded-For` 首跳（Caddy `reverse_proxy` 默认重写该头）作为客户端 IP。
-**仅当 8504 不直接可达（安全组只放 80/443）且反代会覆盖该头部时才能开启**；
-直连可达时开启等于允许客户端伪造限流身份、绕过限流。不开启时所有代理客户端
-共享一个 IP 桶，但用户名维度仍能防止单个账号失败把其他账号一起锁死。
-8501/8502 的登录面（Streamlit 登录、sidecar handoff）应用层没有限流，
-仍建议在反代层兜底，例如给 Caddy 装 `rate_limit` 插件限制 `/auth/*` 的尝试
-频率，或用 fail2ban 盯访问日志中的登录 401。
-
-注意：SPA 与 Streamlit 现在都通过隐藏表单 **POST** 向 sidecar 换取登录 cookie
-（handoff token 有效期 60 秒），但 sidecar 仍兼容 URL query 形式的 handoff，
-且 reader token 仍以 URL query 传递（iframe 场景的现实约束）——这些会进入
-Caddy 访问日志和浏览器历史。确保访问日志权限受控、定期轮转，不要送进公网可达的
-日志聚合服务。handoff 改为一次性 POST 换票是 sidecar 侧的后续项。
-
-## Paper Reading PDF 后端
-
-Paper Reading Studio 默认使用 PyMuPDF 做本地 PDF 读取、页数统计、文本抽取和坐标 fallback。
-PyMuPDF 采用 AGPL / commercial dual licensing；闭源或商业生产部署需要确认 AGPL 义务，
-或使用其 commercial license。这个依赖不应被当作“无许可成本”的普通库处理。
-
-结构化学术 PDF 抽取推荐部署 GROBID。GROBID 服务不可用时，上传和 metadata 导入仍会成功，
-页面会显示结构化抽取降级 warning，并退回 PyMuPDF / lightweight fallback。
-
-GROBID 是自托管 REST 服务，不是默认云服务；nblane 只需要能访问
-`/api/isalive` 和 `/api/processFulltextDocument`。生产部署建议把 GROBID 只绑定到
-本机回环地址，避免把未公开论文 PDF 发送到不可信服务。
-
-### 推荐：在设置页一键安装（无 root Podman）
-
-管理员在 SPA「设置 → 系统 → 本地服务」的 GROBID 卡片点「安装并启动」（`/settings/local-services`）：nblane 用服务用户自己的
-Podman 拉取固定版本镜像 `docker.io/grobid/grobid:0.9.0-crf`，写入
-`~/.config/containers/systemd/nblane-grobid.container`（Quadlet），交给 `systemd --user` 运行，
-只监听 `127.0.0.1:8070`。之后可以在同一张卡片里启动、停止、重启、看日志、看内存，
-并切换「PDF 结构后端」（自动 / GROBID / 仅 PyMuPDF）。
-
-整个过程不需要 root，网站进程也不接触 Docker socket。一次性准备（需要 sudo）：
-
-```bash
-sudo apt-get install -y podman                 # Ubuntu 24.04 官方源 4.9.x
-sudo loginctl enable-linger <服务用户>          # 无人登录时 systemd --user 也常驻
-grep <服务用户> /etc/subuid /etc/subgid          # 无 root 容器需要的 ID 映射（adduser 默认已分配）
-```
-
-- 镜像约 1.7 GB，走服务的 `https_proxy` 从 Docker Hub 拉取。已有 Docker 镜像时可直接导入，免下载：
-  `sudo docker save grobid/grobid:0.9.0-crf | podman load`（以服务用户执行 `podman load`）。
-- 设置页的「PDF 结构后端」写在 `~/.local/share/nblane/grobid/settings.json`，**优先于** unit 里的
-  `NBLANE_RESEARCH_PDF_BACKEND`，所以 Reader（8502）和 SPA 后端（8504）总是一致。
-- 已经有 root Docker 跑着 GROBID 时，卡片显示「运行中（外部服务）」，只能查看。迁移：
-  `sudo docker stop nblane-grobid && sudo docker update --restart=no nblane-grobid`，再在设置页点
-  「安装并启动」；确认正常后可 `sudo docker rm nblane-grobid`。回滚：设置页「移除服务」，
-  再 `sudo docker start nblane-grobid && sudo docker update --restart=unless-stopped nblane-grobid`。
-- GROBID 运行约占 1.3–2.7 GB 内存，首次启动约 30–60 秒。2 核 4 GB 机器上它和本地翻译模型同时满载会很挤，
-  不导入论文时可以在设置页停掉。
-- 维护：`systemctl --user status nblane-grobid`、`journalctl --user -u nblane-grobid -f`、`podman ps`。
-
-### 备选：root Docker
-
-
-```bash
-sudo apt-get update
-sudo apt-get install -y docker.io
-sudo systemctl enable --now docker
-```
-
-国内环境如 Docker Hub 连接不稳定，可配置 registry mirror 后重启 Docker：
-
-```bash
-sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json >/dev/null <<'JSON'
-{
-  "registry-mirrors": [
-    "https://docker.1ms.run",
-    "https://docker.m.daocloud.io",
-    "https://dockerproxy.com",
-    "https://docker.nju.edu.cn"
-  ]
+your-domain.com {
+    import nblane_routes
 }
-JSON
-sudo systemctl restart docker
+
+spa.your-domain.com {
+    import nblane_routes
+}
 ```
 
-本机启动 GROBID 示例：
+- 一律用 `handle`，不要用 `handle_path`：后者会剥掉 FastAPI 需要的 `/reader`、`/paper-library` 等前缀。
+- 漏了 `/auth/session*`，iframe 引导返回 404/401，论文库整片空白。
+- `/openclaw` 还需要网关侧四项配置，见 [OpenClaw 运维](openclaw-ops.md#网关与-systemd)。
+- 车间终端 `/terminal/*` 由 8504 鉴权后反代到 ttyd，Caddy 不需要单独配置，也不要再加 basic_auth。
+- 第二个站点只在你用两个域名时需要；单域名删掉即可。
 
 ```bash
-sudo docker run -d --name nblane-grobid --restart unless-stopped \
-  -p 127.0.0.1:8070:8070 \
-  grobid/grobid:0.9.0-crf
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
 ```
 
-验证：
+日志注意：Reader token 和兼容形式的 handoff 仍可能出现在 URL query 里，会进入 Caddy 访问日志和浏览器历史。访问日志权限要受控、定期轮转，不要送进公网可达的日志服务。Reader 的登录面应用层没有限流，可在 Caddy 给 `/auth/*` 加 `rate_limit` 插件或用 fail2ban 兜底。
+
+## GROBID（可选）
+
+管理员在「设置 → 系统 → 本地服务」的 GROBID 卡片点「安装并启动」。nblane 用服务用户自己的 Podman 拉取固定镜像 `docker.io/grobid/grobid:0.9.0-crf`，写 Quadlet `~/.config/containers/systemd/nblane-grobid.container`，交给 `systemd --user` 运行，只监听 `127.0.0.1:8070`。同一张卡片可启停、看日志和内存，并切换「PDF 结构后端」（自动 / GROBID / 仅 PyMuPDF）。
+
+一次性准备（需要 sudo）：
 
 ```bash
-curl http://127.0.0.1:8070/api/isalive
+sudo apt-get install -y podman
+sudo loginctl enable-linger <服务用户>
+grep <服务用户> /etc/subuid /etc/subgid      # 无 root 容器需要的 ID 映射
 ```
 
-返回 `true` 后，设置服务环境：
+- 镜像约 1.7 GB，走服务的 `https_proxy` 拉取。
+- 「PDF 结构后端」写在 `~/.local/share/nblane/grobid/settings.json`，优先于 unit 里的 `NBLANE_RESEARCH_PDF_BACKEND`，所以 8502 和 8504 总是一致。
+- 运行约占 1.3–2.7 GB 内存，首次启动 30–60 秒。不导入论文时可以停掉。
+- 维护：`systemctl --user status nblane-grobid`、`journalctl --user -u nblane-grobid -f`、`podman ps`。
+- 不部署 GROBID 时设 `NBLANE_RESEARCH_PDF_BACKEND=pymupdf`（或 `NBLANE_GROBID_URL=off`）。只留空 `NBLANE_GROBID_URL` 不会禁用，会回退默认地址继续探测。
 
-```bash
-NBLANE_GROBID_URL=http://127.0.0.1:8070
-NBLANE_RESEARCH_PDF_BACKEND=grobid
-```
+PyMuPDF 是默认本地 PDF 后端，采用 AGPL / 商业双许可。闭源或商业部署要确认 AGPL 义务。
 
-`NBLANE_RESEARCH_PDF_BACKEND` 取值 `pymupdf|grobid|auto`（默认 `auto`）：`auto`
-会按 `NBLANE_GROBID_URL` 探测 GROBID、不可达时回退 PyMuPDF；部署了 GROBID 时显式
-设为 `grobid` 只是更明确。
+## 本地翻译模型（可选）
 
-维护命令：
+管理员在「设置 → 系统 → 本地服务」安装和启用，不用改 systemd 或 `.env`。用户侧说明见 [研究台](research.md)。
 
-```bash
-sudo docker ps --filter name=nblane-grobid
-sudo docker logs -f nblane-grobid
-sudo docker restart nblane-grobid
-sudo docker stop nblane-grobid
-```
+- 下载固定版本的 llama.cpp 运行时（GitHub）和 GGUF（Hugging Face），校验 SHA-256，支持续传。走服务的 `https_proxy`；没有代理时可设 `NBLANE_HF_ENDPOINT=https://hf-mirror.com`。安装进度只在 8504 内存里，重启丢进度条，重新点「安装」会续传。
+- 文件默认在 `~/.local/share/nblane/local-models/`，`NBLANE_LOCAL_MODELS_DIR` 可改；8502 和 8504 必须看到同一目录。
+- 运行：首次翻译时拉起 `llama-server`，监听 `127.0.0.1:8505`（`NBLANE_LOCAL_MT_PORT`），空闲 300 秒（`NBLANE_LOCAL_MT_IDLE_SECONDS`）后释放。1.8B 约占 2.1 GB 内存。
 
-如果不部署 GROBID，设置 `NBLANE_RESEARCH_PDF_BACKEND=pymupdf`（或把 `NBLANE_GROBID_URL`
-显式设为 `off`）关闭探测；仅删除或留空 `NBLANE_GROBID_URL` 不会禁用——空值会回退默认
-地址 `http://127.0.0.1:8070` 继续探测。Reader 仍能使用已抽取的 page text、
-手工 annotations、chunks、claims、citations 和导出功能。
+## 车间终端与助手（可选）
 
-## 本地翻译模型
-
-可选。部署代码后由管理员在 SPA「设置 → 系统 → 本地服务」安装和启用，不需要改 systemd 或 `.env`。
-用户侧说明见 [Research 使用说明 · 本地翻译模型](research.md#本地翻译模型)。
-
-- **下载**：后端进程直接下载固定版本的 llama.cpp CPU 运行时（GitHub）和固定 revision 的 GGUF（Hugging Face），
-  校验 SHA-256，支持断点续传。下载走服务的 `https_proxy`（见 [mihomo 部署](mihomo-deployment.md)「让生产 systemd 服务走代理」）；
-  没有代理时可设 `NBLANE_HF_ENDPOINT=https://hf-mirror.com`。安装进度只在 8504 进程内存里，下载中重启服务会丢进度条，
-  已下载部分保留，重新点「安装」会续传。
-- **文件**：默认放在服务用户的 `~/.local/share/nblane/local-models/`（`models/`、`runtime/`、`run/`、`active.json`），
-  可用 `NBLANE_LOCAL_MODELS_DIR` 改到数据盘；两个服务（8502、8504）必须看到同一个目录。不进入 Git。
-- **运行**：第一次翻译时由 8502 或 8504 拉起 `llama-server`，只监听 `127.0.0.1:8505`（`NBLANE_LOCAL_MT_PORT`），
-  每次启动生成随机 API key；空闲 300 秒（`NBLANE_LOCAL_MT_IDLE_SECONDS`）后释放模型内存。和 GROBID 一样，
-  **不要在安全组或 Caddy 中暴露 8505**。
-- **资源**：1.8B 运行约 2.1 GB 内存。2 核 4 GB 机器上 GROBID（约 3 GB，多在 swap）和模型同时满载会变慢；
-  内存紧张时可以把全文翻译保持为 AI（默认）。
-
-维护：
-
-```bash
-ls -lh ~/.local/share/nblane/local-models/models/      # 已安装模型
-tail -f ~/.local/share/nblane/local-models/run/llama-8505.log
-pgrep -af llama-server                                  # 是否在运行（休眠时 RSS 约 50 MB）
-```
-
-停用或删除在设置页操作即可；手动删除 `local-models/` 目录等同于卸载。
+- 车间终端：「设置 → 系统 → 车间终端」一键安装 ttyd，用独立 tmux socket，unit `nblane-workshop`。说明见 [车间](workshop.md)。
+- 助手：OpenClaw 网关、微信通道、服务账号密码见 [OpenClaw 运维](openclaw-ops.md)。
 
 ## 腾讯云安全组与备案
 
-安全组只开放必要端口：
-
-- `TCP:80,443`：公网 Web。
-- `TCP:22`：仅允许管理员固定 IP。
-- 不开放 `8501`、`8505`（本地翻译模型）、`8070`（GROBID）、数据库端口或全端口。
-
-腾讯云官方文档：
-
-- [安全组概述](https://cloud.tencent.com/document/product/213/112610)
-- [添加安全组规则](https://cloud.tencent.com/document/product/213/112614)
-
-如果使用中国大陆地域 CVM + 域名访问，需要按腾讯云要求完成备案或接入备案：
-
-- [接入备案](https://cloud.tencent.com/document/product/243/97669)
-- [备案域名要求](https://cloud.tencent.com/document/product/243/18905)
+- 只开放 `TCP:80,443`；`TCP:22` 仅允许管理员固定 IP。
+- 不开放上表中的任何本机端口（8502、8504、8505、8070、7668、18789）。
+- 中国大陆地域 + 域名访问需要备案：[接入备案](https://cloud.tencent.com/document/product/243/97669)、[备案域名要求](https://cloud.tencent.com/document/product/243/18905)。安全组规则见 [安全组概述](https://cloud.tencent.com/document/product/213/112610)。
 
 ## 私有 Git 备份
 
-在 `/srv/nblane-data` 初始化私有 Git 远端并配置 deploy key。Web 保存成功后，若启用：
+`/srv/nblane-data` 配私有远端和 deploy key。8504 配了 `NBLANE_DATA_GIT_AUTOCOMMIT=1` / `NBLANE_DATA_GIT_AUTOPUSH=1` 后，每次保存都会 commit 并尝试 push。push 失败时页面提示 warning，不回滚已保存的文件。
 
-```bash
-NBLANE_DATA_GIT_AUTOCOMMIT=1
-NBLANE_DATA_GIT_AUTOPUSH=1
-```
-
-nblane 会自动 `git add`、`git commit`，并尝试 `git push`。如果 push 失败，页面会提示 warning，但不会回滚用户已经保存的文件。
+数据仓库和助手工作区的远端向导、每日定时备份见 [助手 · 数据备份](assistant.md#数据备份)。
 
 ## 验收
 
-- `https://your-domain.com` 显示登录页。
-- 未登录访问 Home 或任意 `pages/*.py` 都会被登录页拦住。
-- member 账号只能看到自己的 profile；admin 可看到全部 profile。
-- 修改 `kanban.md` 或 `skill-tree.yaml` 后，`/srv/nblane-data` 产生 Git commit。
-- 上传论文 PDF 后，`/srv/nblane-assets/research/profiles/<profile>/papers/` 出现 PDF，
-  而 `/srv/nblane-data/profiles/<profile>/research/sources.yaml` 只记录 asset ref / hash / 页数。
-- 两个浏览器同时编辑同一文件时，后保存的一方会收到刷新提示，不会静默覆盖。
+- `https://your-domain.com` 显示登录页；未登录访问任何页面都会跳到登录。
+- member 账号只能看到自己的档案；admin 能看到全部和系统设置。
+- 在页面上改一张任务卡后，`git -C /srv/nblane-data log --oneline -1` 出现新提交且已推送。
+- 研究台的论文库和阅读器 iframe 正常显示，不空白。
+- 上传论文 PDF 后，`/srv/nblane-assets/research/profiles/<profile>/papers/` 出现 PDF，而 `research/sources.yaml` 只记录 asset ref、hash、页数。
+- 两个浏览器同时编辑同一文件时，后保存的一方收到刷新提示，不会静默覆盖。

@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: active
 owner: product/engineering
-last_verified: 2026-10-05
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
@@ -19,7 +19,7 @@ source_of_truth: true
 
 ## 1. 当前实现与本阶段范围
 
-本文同时记录现状和目标，必须区分“已有能力”“本阶段新增/调整”和“后续延期”。当前 React SPA 仍使用 `/p/:name/studio` 与 `/p/:name/public-build`；Output Studio 已支持博客草稿 CRUD、Markdown 正文、发布前检查、发布、从证据/断言生成候选以及 JD 匹配任务；Public Build 已支持校验、草稿预览、博客草稿选择性发布并构建、构建产物清单。文档后续提出的 `/content`、`/career`、构建历史和 manifest 都是目标能力，不应被理解为现状。
+本文是三个工作台的设计依据。`/content`、`/career`、`/public-build` 三个工作台已在 SPA 落地，Output Studio 页已移除；用户手册见 [内容工作台](../guides/content.md)、[求职工作台](../guides/career.md)、[公开站点](../guides/public-site.md)。下文的「现状」描述保留为设计时的背景。
 
 | 领域 | 当前实现 | 本阶段确定范围 | 后续/暂缓 |
 | --- | --- | --- | --- |
@@ -35,7 +35,6 @@ source_of_truth: true
 
 - 用户必须理解 Evidence、Claim、候选和公开输出之间的内部链路，才能完成普通创作。
 - 博客编辑、简历编辑和静态站构建被放在同一个复杂页面中。
-- Streamlit 与 React SPA 存在两套交互，能力和体验不一致。
 - JD 匹配主要停留在输入简历文本和 JD，结果上下文和保存方式仍较简单。
 - Public Build 既承担发布控制台，也承载预览和产物检查，信息边界需要更清晰。
 

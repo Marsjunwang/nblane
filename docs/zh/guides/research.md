@@ -1,82 +1,105 @@
 ---
 status: active
 owner: product
-last_verified: 2026-10-06
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
-# Research 使用说明
+# 研究台使用说明
 
-Research 是外部资料的收件箱、论文库和阅读室。日常入口全部在 SPA；Streamlit 的 `Research`
-页面正在下线，不再新增功能。论文阅读材料（笔记、翻译、分析）不会自动变成 Claim 或 Evidence，
-SPA 暂不提供这两类入口。
+研究台是外部资料的收件箱、论文库和阅读室。阅读材料（笔记、翻译、分析）只服务阅读，
+不会自动变成证据。
 
-## 入口与端口
+## 入口
 
-| 页面 | SPA 路由 | 说明 |
+| 页面 | 路由 | 能做什么 |
 | --- | --- | --- |
-| 研究台 | `/p/<name>/research` | 继续阅读、阅读队列、最近读过、论文索引（翻译与快速分析状态）。 |
-| 论文库 | `/p/<name>/research/library` | 内嵌 sidecar 论文库（`embed=1&ui_lang=zh`）：导入、目录树、批量操作、导出。 |
-| 论文概览 | `/p/<name>/research/papers/<id>` | 单篇论文起始页：摘要与译文、阅读/翻译进度、最近笔记、快速分析与深度研读结果。 |
-| 阅读器 | `/p/<name>/research/papers/<id>/read` | 内嵌 sidecar Reader；`?mode=compare|translation&page=N` 可直达。 |
-| 研究来源 | `/p/<name>/research/sources` | 来源收件箱、手动添加来源、连接器（`?tab=connectors`）。研究 AI 配置已移到「设置 → 档案 → 研究与阅读」。 |
+| 研究台 | `/p/<name>/research` | 继续阅读、阅读队列、最近读过、论文索引（按状态筛选，显示翻译与快速分析状态）。 |
+| 论文库 | `/p/<name>/research/library` | 内嵌论文库：导入、目录树、批量操作、导出。 |
+| 论文概览 | `/p/<name>/research/papers/<id>` | 单篇起始页：摘要与译文、PDF 与抽取状态、阅读/翻译进度、最近笔记、快速分析、深度研读。 |
+| 阅读器 | `/p/<name>/research/papers/<id>/read` | 内嵌 Reader；`?mode=compare|translation&page=N` 可直达。 |
+| 研究来源 | `/p/<name>/research/sources` | 来源收件箱、手动收录、连接器批量导入（`?tab=connectors`）。 |
 
-- SPA 后端：`8504`（隔离开发 `18504`）。Reader / Paper Library sidecar：`8502`（隔离 `18502`），
-  只通过 SPA 内嵌访问；生产不要把 sidecar 端口直接暴露。
-- 论文库里点「打开阅读器」会通过 `postMessage({type: "nblane.library.open_reader"})` 通知 SPA，
-  跳到论文概览页，不再打开裸 sidecar 标签页。
+论文库和阅读器由 Reader 服务（`8502`，隔离开发 `18502`）提供，SPA 用 iframe 嵌入，登录态经
+`/auth/session` 交接。生产不要把 `8502` 直接暴露。在论文库里打开一篇论文，会先跳到 SPA 的论文概览页。
+从论文概览和研究台打开阅读器时，同一篇论文共用一个新标签页。
 
 ## 推荐流程
 
-1. 在「研究来源」添加来源或配置连接器（arXiv / Semantic Scholar / GitHub 等，配置不保存 token、cookie 或 API key），
-   预览后选择导入。
-2. 在「论文库」整理目录、补 PDF。导入框接受论文链接、裸 DOI（`10.xxxx/...`、`doi:...`）和
-   arXiv ID（`2407.08693`、`arXiv:2407.08693v2`、`hep-th/9901001`）。
-3. 打开「论文概览」先跑「快速分析」，判断是否值得细读；需要时再启动「深度研读」（耗时数分钟，需 Codex CLI）。
-   模型失败时不会覆盖已有分析结果，页面会提示重试。
-4. 进入「阅读器」逐段阅读：单击段落看段落译文，双击单词查词，拖选文字出现选区工具条；
-   `Ctrl/Cmd+F` 全文搜索，参考文献 / 图表链接可悬停预览、点击跳转，`Alt+←` 返回；`?` 查看全部快捷键。
-5. 在论文库勾选论文「导出所选」，或在详情抽屉「导出引用」，得到 BibTeX / RIS / CSL-JSON / Markdown。
-   引用键（如 `vaswani2017attention`）首次导出时写入来源元数据，之后保持不变。
+1. **收录来源**：在「研究来源」手动收录（粘贴链接、CSV 或 JSON 列表，相同链接自动去重），
+   或配置连接器（arXiv / Semantic Scholar / GitHub）先预览候选再挑选导入，重复项自动跳过。
+   连接器配置不保存 token、cookie 或 API key。来源可以一键「建看板任务」。
+2. **整理论文**：在「论文库」整理目录、补 PDF。导入框接受论文链接、裸 DOI（`10.xxxx/...`、`doi:...`）
+   和 arXiv ID（`2407.08693`、`arXiv:2407.08693v2`、`hep-th/9901001`）。
+3. **快速分析**：在论文概览点「快速分析」，得到一句话结论、要点、评分和阅读建议，判断是否值得细读。
+   引用的段落可以跳回阅读器。需要时再启动「深度研读」（由 Codex CLI 通读全文，耗时数分钟）。
+   模型失败时不覆盖已有结果，页面提示重试；结果缺少可靠依据的评分显示为「未评估」，不显示为零分。
+4. **阅读**：在阅读器逐段读。单击段落看译文，双击单词查词，拖选文字出现选区工具条（高亮、笔记、解释、翻译）。
+   `Ctrl/Cmd+F` 全文搜索；参考文献和图表链接可悬停预览、点击跳转，`Alt+←` 返回；`?` 查看全部快捷键。
+   阅读位置自动保存。
+5. **导出引用**：论文库勾选后「导出所选」，或在详情抽屉「导出引用」，格式有 BibTeX / RIS / CSL-JSON / Markdown。
+   引用键（如 `vaswani2017attention`）首次导出时写入来源元数据，之后不变。
 
-## Research AI 配置
+快速分析整篇论文一次调用，输出上限在「设置 → 系统 → AI 服务」调（`LLM_MAX_TOKENS`、
+`LLM_ANALYSIS_MAX_TOKENS`）。输出被截断时页面会提示上限和调整位置。
 
-「设置 → 档案 → 研究与阅读 → 研究 AI」（`/settings/research`）只影响 Research 里的论文与 Reader 动作（论文搜索、翻译、快速分析、导读、问答、
-深度研读、论文对比），存放在 `web-preferences.yaml` 的 `ai.actions.research.*`。看板和证据的 AI 配置不在这里。
+## 设置：研究与阅读
 
-## 本地翻译模型
+「设置 → 档案 → 研究与阅读」（`/settings/research`），每个档案单独保存在 `web-preferences.yaml`。
 
-管理员可以在服务器上装一个开源翻译模型，让选区和当前页翻译不再消耗 LLM 额度。没装时一切照旧走 AI 连接。
+- **Reader 默认值**：新打开论文时的初始状态，包括默认模式（PDF / 翻译 / 对照）、缩放、左侧导航栏与页签、
+  右侧面板与页签、面板宽度、对照分栏比例。论文已保存的阅读位置和模式优先。
+- **翻译**：目标语言、译文布局（流式 / 叠加）、是否默认显示原文；按范围选「本地模型 / AI」：
+  选区翻译、当前页翻译默认本地模型，全文翻译默认 AI。单词始终先查本地词典。本地模型没启用或失败时自动走 AI，
+  阅读器里本地模型的译文标「本地模型翻译」。
+- **研究 AI**：论文翻译、选区解释、论文问答、快速分析、阅读回顾卡、深度研读、论文搜索、论文比较、观点提取
+  各自用什么执行、用哪个模型，留空跟随默认（存于 `ai.actions.research.*`）。看板、项目和证据的 AI 在「AI 路由」里配。
 
-**安装（只需管理员，无需命令行）**：SPA「设置 → 系统 → 本地服务」（`/settings/local-services`），选一档点「安装」，完成后点「启用」，再用页面下方的「试译」确认效果。
+## 设置：本地服务（管理员）
+
+「设置 → 系统 → 本地服务」（`/settings/local-services`）。两项服务都只监听 `127.0.0.1`；
+停用或删除不影响已保存的译文和已抽取的论文结构。
+
+### 本地翻译模型
+
+在服务器上用 llama.cpp 跑开源翻译模型，选区和当前页翻译不再消耗 LLM 额度。没装时一切照旧走 AI。
+
+选一档点「安装」（下载运行时和模型），完成后点「启用」，再用页面下方的「试译」确认效果。
 
 | 档位 | 模型 | 文件 | 运行内存 | 适用 |
 | --- | --- | --- | --- | --- |
 | 适配当前服务器 | Hy-MT2 1.8B Q4_K_M | 1.13 GB | 约 2.1 GB | 2 核 4 GB；段落 5–9 秒 |
 | 高质量 | Hy-MT2 7B Q4_K_M | 4.62 GB | 约 5.6 GB | 8 GB 以上内存 |
 
-两档都是腾讯混元 Hy-MT2（Apache-2.0）。内存不够的档位会显示原因并禁止安装；服务器升级后同一页面即可安装 7B 并切换。
+两档都是腾讯混元 Hy-MT2（Apache-2.0）。内存不够的档位会显示原因并禁止安装。模型服务不常驻：
+第一次翻译时自动启动，空闲 5 分钟后释放内存，再次使用约 3 秒唤醒。部署细节见
+[腾讯云部署 · 本地翻译模型](deployment-tencent-cloud.md#本地翻译模型)。
 
-**谁用本地模型**：每个档案在「设置 → 档案 → 研究与阅读 → 翻译」按范围选择「本地模型 / AI」。默认选区和当前页用本地模型，全文用 AI（1.8B 翻整篇太慢）。本地模型失败时自动改用 AI；单词始终先查本地词典。Reader 里本地模型的译文标「本地模型翻译」。
+### GROBID 与 PDF 结构后端
 
-**内存**：模型服务不常驻，第一次翻译时自动启动，空闲 5 分钟后释放内存，再次使用约 3 秒唤醒。部署细节见 [腾讯云部署 · 本地翻译模型](deployment-tencent-cloud.md#本地翻译模型)。
+GROBID 把论文 PDF 解析成章节、段落和参考文献；阅读器的段落定位、结构化翻译和参考文献卡片都依赖它。
+在同一页可以安装（拉取镜像约 1.7 GB）、启动、停止、重启、查看日志和移除，启动需要约 1 分钟加载模型。
+GROBID 由 nblane 以无 root 的 Podman 托管；如果检测到不是 nblane 管理的外部服务，只能查看状态。
 
-## GROBID 与坐标
+「PDF 结构后端」三选一，点选立即生效，Reader 和 SPA 后端共用：
 
-GROBID 的安装、启停和状态在 SPA「设置 → 系统 → 本地服务」（管理员），同一处还能切换 PDF 结构后端：
-「自动」在 GROBID 不可用时退回 PyMuPDF 页面文本，「仅 PyMuPDF」完全不调用 GROBID。部署细节见
+- **自动**：GROBID 可用就用，不可用时退回 PyMuPDF 页面文本。
+- **GROBID**：总是先用 GROBID 抽取章节、段落和参考文献。
+- **仅 PyMuPDF**：不调用 GROBID，只做页面文本抽取。
+
+已抽取的论文不受影响，重新抽取时才用新后端。论文概览会标出当前结构是「GROBID 结构化」还是
+「PyMuPDF 降级结构」。部署细节见
 [腾讯云部署 · Paper Reading PDF 后端](deployment-tencent-cloud.md#paper-reading-pdf-后端)。
 
-GROBID 负责结构化学术 PDF。某些 PDF 会返回结构化文本但不返回 segment 级坐标。此时 Reader 会优先使用 layout-grounded structure anchors；如果也没有可用结构锚点，才退回页级定位。这个 warning 通常不是部署失败，而是该 PDF/GROBID 组合缺少细粒度坐标。
+有些 PDF 经 GROBID 返回结构化文本但没有段落级坐标。此时阅读器优先用版面结构锚点定位，
+没有可用锚点才退回页级定位。这通常不是部署失败。
 
 ## 全文翻译
 
-Reader 的「全文翻译」默认走结构单元，适合论文长文。生产环境如果使用 SOCKS 代理，必须安装 `httpx[socks]`，否则会出现 `socksio` 缺失错误。部署更新后运行：
+阅读器的「全文翻译」按结构单元翻译，适合长论文。生产环境如果走 SOCKS 代理，必须装 `httpx[socks]`，
+否则会报 `socksio` 缺失。部署更新后运行：
 
 ```bash
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python - <<'PY'
-import socksio
-print("socksio ok")
-PY
+.venv/bin/python -c "import socksio; print('socksio ok')"
 ```

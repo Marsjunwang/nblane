@@ -1,198 +1,129 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-09-19
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
 # CLI 参考
 
-安装后 CLI 入口为：
+安装后入口为 `nblane <command> ...`。子命令以 `src/nblane/cli.py` 为准，`nblane <command> --help` 看完整参数。
 
-```bash
-nblane <command> ...
-```
-
-## Profile
+## 档案
 
 ```bash
 nblane init <profile>
-nblane context <profile>
-nblane context <profile> --review
-nblane context <profile> --write
-nblane context <profile> --plan
-nblane context <profile> --no-kanban
-nblane status
-nblane status <profile>
+nblane context <profile> [--chat|--review|--write|--plan] [--no-kanban]
+nblane status [profile]
 nblane log <profile> "finished first manipulation demo"
+nblane health [profile]                 # 档案体检（SPA 证据页「待补强」的同一份报告）
+nblane sync-cursor <profile>            # 写 .cursor/rules/nblane-context.mdc
 ```
 
-## Skill Tree / Evidence
+`context` 输出 Agent system prompt，格式见 [SKILL.md 格式](skill-md-format.md)。
+
+## 技能树与证据
 
 ```bash
-nblane validate
-nblane validate <profile>
-nblane sync <profile> --check
+nblane validate [profile]
+nblane sync <profile> --check           # 有漂移退出码 1
 nblane sync <profile> --write
 
 nblane evidence <profile> <node_id> add --type project --title "Demo"
 nblane evidence <profile> pool add --type project --title "Shared milestone"
 nblane evidence <profile> link <node_id> <evidence_id>
 nblane evidence <profile> unlink <node_id> <evidence_id>
-nblane evidence <profile> pool remove <evidence_id>
-nblane evidence <profile> pool deprecate <evidence_id>
+nblane evidence <profile> pool remove <evidence_id> [--prune-refs]
+nblane evidence <profile> pool deprecate <evidence_id> [--replaced-by ID]
+
+nblane crystallize <profile> <project> [--file PATH|--stdin]   # 写方法草稿到 methods/
 ```
 
-字段说明见 [Evidence 参考](evidence.md) 和 [Skill Tree Schema](skill-tree-schema.md)。
+写入顺序是证据池 → 技能树 → validate → sync。字段见 [证据参考](evidence.md) 和 [技能树 Schema](skill-tree-schema.md)。
 
-## Gap / Ingest / Health
+## 导入（LLM）
 
 ```bash
-nblane gap <profile> "OpenVLA robot control"
-nblane gap <profile> --node ros2_basics
-
-nblane ingest-resume <profile> --file resume.txt
+nblane ingest-resume <profile> --file resume.txt [--dry-run] [--allow-status-change] [--no-bump-locked]
 nblane ingest-resume <profile> --stdin --dry-run
-nblane ingest-resume <profile> --file resume.txt --allow-status-change
-
-nblane ingest-kanban <profile>
-nblane ingest-kanban <profile> --dry-run
-nblane ingest-kanban <profile> --allow-status-change
-
-nblane health <profile>
+nblane ingest-kanban <profile> [--dry-run] [--allow-status-change]
 ```
 
-## Team
+流程是解析 → 合并 → 预览 → 应用。需要配置 `LLM_API_KEY`，见 [本机安装](../guides/setup.md#ai-配置)。
 
-```bash
-nblane team <team_id>
-```
-
-团队文件位于 `teams/<team_id>/team.yaml` 和 `teams/<team_id>/product-pool.yaml`。
-
-## Public Surface
+## 公开站
 
 ```bash
 nblane public init <profile>
-nblane public validate <profile>
-nblane public blog new <profile> --title "My post"
-nblane public build <profile> --out dist/public/<profile> --base-url https://www.example.com
+nblane public validate <profile> [--include-drafts]
+nblane public build <profile> [--out dist/public/<profile>] [--base-url https://www.example.com] [--include-drafts]
+nblane public resume <profile> [--out DIR] [--target ROLE]
+nblane public blog list|new|media|publish <profile> ...
+nblane public library tree|reconcile|trash|restore|purge <profile> ...
+nblane public draft-blog <profile> (--from-evidence ID | --from-kanban-done)
+nblane public draft-resume <profile> --target ROLE
+nblane public draft-project-update <profile> --project ID
+nblane public suggest-groups <profile> --dry-run
+nblane public group <profile> --id ID --title T --evidence ID [--evidence ID ...]
+nblane public hydrate <profile> --dry-run|--write-drafts
 ```
 
-详细说明见 [公开站点指南](../guides/public-site.md)。
+说明见 [公开站点](../guides/public-site.md)。
 
-## MCP / Agent
+## 研究台
 
 ```bash
-nblane-mcp
-nblane sync-cursor <profile>
+nblane research connector sync <profile> --all [--provider arxiv|semantic_scholar|github|...] [--dry-run]
+nblane research connector sync <profile> --id <connector_id>
 ```
 
-Harness / Codex 命令：
+## Codex 与外部 Agent
 
 ```bash
-nblane sync-agent-harness --target codex
-nblane sync-agent-harness --target opencode
-nblane agent handoff <agent_task_id> --target codex --profile <profile>
-nblane agent handoff <agent_task_id> --target opencode --profile <profile>
-
-nblane codex status
-nblane codex status --profile <profile>
-nblane codex install --print-command
-nblane codex install
-nblane codex install --upgrade
+nblane codex status [--profile <profile>]
+nblane codex install [--print-command] [--upgrade]
 nblane codex local run <agent_task_id> --profile <profile>
 nblane codex cloud submit <agent_task_id> --profile <profile>
-nblane codex cloud refresh <agent_task_id> --profile <profile>
-nblane codex cloud refresh <agent_task_id> --profile <profile> --diff
+nblane codex cloud refresh <agent_task_id> --profile <profile> [--diff]
+
+nblane agent handoff <agent_task_id> --target codex|opencode [--profile <profile>]
+nblane sync-agent-harness --target codex|opencode [--out PATH]
 ```
 
-`nblane codex local run` 是显式 CLI patch runner，不由 Kanban 页面触发；Kanban
-内的 Codex 只作为可选只读 AI backend，替代原有看板 LLM 动作。
+见 [Agent Harness](agent-harness.md)。`sync-agent-harness --target openclaw` 仍能打印 MCP 片段，但助手不走 MCP，不要用它接 OpenClaw。
 
-当前 MCP 说明见 [MCP 参考](mcp.md)，规划见 [Agent Harness](agent-harness.md)。
+## MCP
+
+```bash
+nblane-mcp            # stdio，给本机 Cursor / Claude Code
+```
+
+见 [MCP 参考](mcp.md)。
 
 ## OpenClaw
 
 ```bash
-nblane openclaw doctor
-nblane openclaw doctor --profile <profile>
-
-nblane openclaw sync [--profile <profile>]
-nblane openclaw sync [--profile <profile>] --check
-
+nblane openclaw doctor [--profile <profile>]
+nblane openclaw sync [--profile <profile>] [--check]
 nblane openclaw install [--profile <profile>] [--dry-run|--apply]
-
 nblane openclaw automations sync <profile> [--apply] [--prune]   # 可选的手动工具
-
 nblane notify <text> [--dry-run]
 ```
 
-- `doctor` 把接入指南的体检项脚本化（只读）：OpenClaw CLI 版本、Node 版本
-  （>=24.16 且 <25，或 >=26.1）、systemd linger、`127.0.0.1:18789` 监听、
-  `mcp.servers` 含 nblane、openclaw-weixin 插件已启用、
-  备份调度存在（标识含 `backup` 段且带 cron/every 调度的任务，纯文本提及
-  不算）。任一 error 级检查失败时退出码为 1，warning 不影响退出码。
-  **不会**调用 `openclaw doctor`（它会重启 Gateway）。
-- `sync` 是日常漂移对账（§5.4）：渲染记忆语料到
-  `~/.openclaw/workspace/memory/nblane/`、把 `scripts/openclaw/skills/`
-  复制到 `~/.openclaw/workspace/skills/`（排除 `__pycache__`）。定时任务归 OpenClaw
-  管，`sync` 不读也不改。缺省 `--profile` 时使用唯一存在的 profile。
-  同步**不再只增不减**：语料侧删除带生成头标记但本次无渲染产物的旧 md
-  （如源文件被删后的 `goals.md`；无标记的用户文件不动），技能侧删除
-  `src` 已纳管顶层目录（如 `codex-dev/`、`kimi-dev/`、`bin/`）下
-  `src` 中已不存在的文件并清理空目录（其他顶层目录视为外来技能树，
-  永不触碰）。
-  `--check` 不写任何文件，仅对账语料/技能漂移，任一漂移退出码为 1（对齐
-  `nblane sync --check`，可进 cron 周报）；多余文件在 `--check` 下也计为漂移
-  （分别以 `~` / `-` 标出）。`skills/bin/nblane_api` 是「接入 nblane」生成的包装
-  脚本，不算多余文件。未安装 OpenClaw（无 `~/.openclaw`）时报错退出。
-- `install` 是一键幂等安装（§5.4），默认 `--dry-run`（打印完整行动计划、
-  不改任何东西），`--apply` 才执行。三步：① 技能 + 记忆语料（复用
-  `sync` 的写入逻辑；dry-run 只报差异）；② 插件安装（仓库内
-  `scripts/openclaw/plugins/weixin-task-bridge/` 存在时执行
-  `openclaw plugins install <abs path> --force --accept-capabilities`，
-  目录缺失则跳过并提示；dry-run 只打印命令）；③ 配置 overlay（profile
-  有 `assistant/openclaw.overlay.json5` 时经 `openclaw config patch
-  --stdin` 应用，dry-run 带官方 `--dry-run` 校验；打补丁前把
-  `mcp.servers.nblane`（`build_mcp_server_entry` 生成的绝对路径
-  nblane-mcp + `NBLANE_ROOT`/`NBLANE_PROFILE` env）合并进 payload——overlay
-  是纯 JSON 时单补丁内存合并，非纯 JSON（JSON5 注释等）时先原样透传
-  overlay、再发一个只含 MCP 注入的生成 JSON 补丁，靠 config patch 的递归
-  合并组合；overlay 缺失则整步跳过）。定时任务不在安装范围内。任一步失败退出码为 1，结束提示
-  运行 `nblane openclaw doctor` 体检。
-- 定时任务归 OpenClaw 管，直接在 OpenClaw 里建和改。提示词只写任务本身，调用 nblane 的规则在
-  nblane 技能里（见 [个人 Agent 写入策略](../guides/agent-write-policy.md)），所以 nblane 改规则
-  不需要改定时任务。`automations sync` 只是可选的手动工具：想把
-  `profiles/<profile>/assistant/automations.yaml` 当成定时任务的声明来维护时才用。它对账声明
-  与 Gateway 实际任务（模板见 `profiles/template/assistant/`）：默认
-  dry-run，只打印对账计划与将执行的命令，退出码在存在新增/更新漂移时为 1；
-  `--apply` 执行 add/edit；声明中已移除的 `nblane:` 任务默认只提示，
-  `--apply --prune` 才删除（`--prune` 不带 `--apply` 时 stderr 明确提醒
-  其不生效，不会静默）；非 `nblane:` 前缀的任务（如
-  `personal-assistant:*`）永不触碰。声明中的 `${VAR}` 从本机 `.env` /
-  环境注入，未设置即报错。**纳管既有任务（adopt）**：外来 key 的条目设置
-  `adopt: true` 才被 loader 接受（否则报错），被 adopt 的 key 在声明期间
-  与 `nblane:` key 完全同权（add/update/keep）；声明移除后默认回到
-  `skip_foreign`，调用方显式传入 `adopted_keys` 时按 `prune_candidate`
-  处理（同样需 `--prune` 才删除）。
-- `notify` 是 §3.4 的反向推送 MVP：经 OpenClaw 入站 webhook
-  （`NBLANE_OPENCLAW_HOOK_URL`，默认 `http://127.0.0.1:18789/hooks/agent`）
-  把消息推往微信通道；token 仅从 `.env` / 环境的
-  `NBLANE_OPENCLAW_HOOK_TOKEN` 读取（与 `cron.webhookToken` 一致），
-  未设置时报错退出码 1，成功 0；`--dry-run` 只打印 URL 与 payload 不发送。
+- `doctor`：只读体检。OpenClaw 版本、Node 版本（>=24.16 且 <25，或 >=26.1）、systemd linger、`127.0.0.1:18789` 监听、openclaw-weixin 插件已启用、存在备份调度。任一 error 级失败退出码 1。不调用 `openclaw doctor`（它会重启网关）。
+- `sync`：渲染只读档案语料到 `~/.openclaw/workspace/memory/nblane/`，把 `scripts/openclaw/skills/` 同步到工作区 `skills/`。会删除纳管目录里仓库已不存在的文件，其他技能树不碰；`skills/bin/nblane_api` 是生成物，不算多余。`--check` 不写文件，有漂移退出码 1。缺省 `--profile` 时用唯一存在的档案。
+- `install`：一键幂等安装，默认 dry-run。三步：技能与语料；安装 `weixin-task-bridge` 插件；profile 有 `assistant/openclaw.overlay.json5` 时经 `openclaw config patch --stdin` 应用（`${VAR}` 从环境替换，未设置即报错）。不注册 MCP，不碰定时任务。
+- `automations sync`：可选手动工具。定时任务归 OpenClaw 管，平时直接在 OpenClaw 里建和改。只有想把 `profiles/<profile>/assistant/automations.yaml` 当声明维护时才用：默认 dry-run 打印计划和命令，有新增或更新时退出码 1；`--apply` 执行 add / edit；`--apply --prune` 才删除声明里已移除的任务。只处理 `nblane:` 前缀的任务（或声明里标了 `adopt: true` 的），其他任务不碰。
+- `notify`：经 OpenClaw 入站 webhook 推消息到微信。地址 `NBLANE_OPENCLAW_HOOK_URL`（默认 `http://127.0.0.1:18789/hooks/agent`），token 只读 `NBLANE_OPENCLAW_HOOK_TOKEN`。`--dry-run` 只打印 URL 和 payload。
 
-设计细节见
-[OpenClaw × nblane 深度融合总体方案](../architecture/openclaw-deep-integration.md)
-§5。
+运维背景见 [OpenClaw 运维](../guides/openclaw-ops.md)。
 
-`profiles/template/assistant/openclaw.overlay.json5` 是 overlay 模板
-（纯 JSON，即合法 JSON5，保证 install 的单补丁合并路径可用，因此字段说明
-放在这里而非文件注释）：`agents.defaults.model.primary/fallbacks`、
-`agents.defaults.utilityModel`、`agents.defaults.imageModel`
-（模型路由：主对话/工具调用/视觉三路，均带 fallbacks）、
-`agents.defaults.heartbeat`（心跳骨架，`to` 为 `${WEIXIN_OWNER_ID}` 占位符）、
-`memory.search.extraPaths`（含语料目录
-`~/.openclaw/workspace/memory/nblane`）、
-`channels.openclaw-weixin.replyProgressMessages`。模板**不含**
-`mcp.servers`（install 自动注入）与任何密钥。
+## 备份与账号
+
+```bash
+nblane backup status
+nblane backup run [--target <id>]        # 任一目标失败退出码 1
+nblane auth hash-password [password]     # 省略时交互输入
+```
+
+备份目标在「设置 → 助手与备份」配置，见 [助手 · 数据备份](../guides/assistant.md#数据备份)。

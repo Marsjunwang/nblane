@@ -1,66 +1,55 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-09-18
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
 # 当前状态
 
-## 总体判断
+nblane 是单人加自己的 Agent 的成长系统。唯一界面是 React SPA（8504，同进程提供 `/api/v1`），论文库和阅读器由 Reader API（8502）提供并嵌入 SPA。数据仍是 `profiles/<name>/` 下的文件。
 
-nblane 当前功能可用，但产品结构还没有完全收束。主要问题不是缺少单点能力，而是：
+## 各区现状
 
-- 文档和项目管理状态过于分散。
-- 看板、博客、证据、学习、公开输出之间缺少统一索引。
-- AI 调用层仍是薄 `llm.chat()` wrapper。
-- 博客 AI 缺少 source/claim/citation provenance。
-- Team product pool 结构偏弱。
-- Codex/OpenCode 等高级 harness 还没有作为外部执行器接入。
+| 区 | 现状 |
+|----|------|
+| 首页 | 全屏星图（图态 / 境态），铭文卡重刻北极星与目标，星表管理目标，日课印打卡与销印，占卜（戏占 / 正占，正占可「化为任务」） |
+| 项目 | 看板 / 时间轴 / 编年史三视图，按目标或活动分组；看板与项目板合并；习惯与阶段计划住日课栏；Someday 可直接列入 Queue；手机与键盘可用 |
+| 技能树 | 按类目星官分组，节点铭文卡显示关联证据和进阶进度，三态写入（locked / learning / lit） |
+| 证据 | 五阶段单页：待结晶、待评审（审阅队列）、已入座、待补强（原档案体检）、已废弃；Done 任务结晶为证据，突破标记 |
+| 研究台 | 论文库（嵌入 8502）、论文概览、阅读器（嵌入 8502）、研究来源；本地翻译模型与 GROBID 可在设置页安装和启停；Claim / Evidence 暂不进 SPA |
+| 内容工作台 | 文章库 + 全屏 BlockNote 编辑器，AI 封面、改写、元信息建议 |
+| 求职工作台 | 结构化简历、目标岗位、导入简历、按 JD 定制 |
+| 公开站点 | 自我介绍开关、作品、写作、构建与上线 |
+| 车间 | 网页终端（xterm + ttyd，设置页托管），手机快捷键栏；生产待部署 |
+| 助手 | OpenClaw 状态、「接入方式」卡（nblane 技能 / HTTP 接口是否最新）、撤销日志 |
+| 设置 | 系统级：AI 服务、本地服务、车间终端、助手与备份；档案级：通用、研究与阅读、AI 路由 |
+| AI 异常 | 顶栏抽屉，可逐条或批量忽略 |
+| Agent 写入 | 直写可撤销，重要操作聊天确认，页面专属操作 403；助手只走 HTTP |
 
-## 已实现能力
+## 已移除
 
-| 模块 | 状态 | 说明 |
-|------|------|------|
-| Profile 数据层 | 已实现 | `profiles/<name>/` 下的核心 YAML/Markdown 文件 |
-| Skill Tree / Schema | 已实现 | schema 校验、状态统计、sync 生成块 |
-| Evidence Pool | 已实现 | pool row、refs、物化解析、CLI/Web 编辑 |
-| Kanban | 已实现 | Markdown parser/render、拖拽、子任务、归档、Done -> evidence |
-| Profile Ingest | 已实现 | resume/kanban Done -> LLM JSON patch -> validate/sync |
-| Web UI | 已实现（SPA） | React SPA（8504）为唯一入口；Streamlit 多页应用 2026-10-06 下线，旧页面 URL 由 SPA 重定向 |
-| Research Workspace | 已实现（SPA） | 研究台、论文库（内嵌）、论文概览、Reader、研究来源/连接器均在 SPA；本地翻译模型（llama.cpp + Hy-MT2 1.8B/7B）可在设置页安装，按选区/当前页/全文分工路由；GROBID 可在设置页一键安装（无 root Podman）、启停、监控并切换 PDF 结构后端；Claim/Evidence 暂不进 SPA |
-| Output Studio / Public Build | 已实现 | profile/blog/resume/project output 生产与静态构建拆分 |
-| Public Site 旧页面 | 已删除 | 兼容跳转页已移除，由 Output Studio / Public Build 承接 |
-| Blog Editor | 已实现 | BlockNote、sidecar、AI patch、visual、Reviewer |
-| MCP Server | 已实现 | profile/goals/evidence/inbox/learning resources + growth/evidence/interaction/inbox/candidate write tools（带 ToolAnnotations + 结构化返回） |
-| OpenClaw 融合 | 仓库侧已实现 | 计划见 [openclaw-deep-integration](../architecture/openclaw-deep-integration.md)；插件入库、写入加固（file_lock）、MCP 补全、automations-as-code、`nblane openclaw doctor|sync|install|automations sync` CLI + 顶层 `nblane notify` 已落地；生产侧接通待人工窗口 |
-| Cursor Skill | 初版已实现 | `sync-cursor` 生成规则文件 |
-| Team View | 初版已实现 | team.yaml / product-pool.yaml 编辑 |
-| Activity / Learning / Inbox helpers | 部分实现 | core helper 和测试存在，UI 未完全统一 |
-
-## 主要缺口
-
-| 缺口 | 影响 | 对应里程碑 |
-|------|------|------------|
-| 文档事实源混乱 | 新开发和产品判断容易重复/过期 | M0 |
-| AI 调用不可任务化 | 模型路由、结构化输出、审计困难 | M1 |
-| 缺少统一索引 | 无法像 Obsidian Bases 一样跨文件查询/视图 | M2 |
-| 项目不是一等实体 | task/evidence/public project/team project 难关联 | M3 |
-| 缺少研究 source/claim 层 | 博客和论文分析缺乏出处链 | M4/M5 |
-| MCP 覆盖面不足 | OpenCode/Codex 不能自然读写 nblane | M6 |
-| Harness 集成缺失 | 复杂多步任务仍只能靠人工复制 prompt | M7 |
+- Streamlit 多页应用（2026-10-06 退出主界面，旧 URL 重定向到 SPA；代码待删）。
+- Team View 与团队产品池。
+- Gap Analysis 页与 `nblane gap` 命令（缺口计算 `core/gap.py` 保留，供首页占卜使用）。
+- Agent Activity 审批页。
+- Inbox 页。
+- Output Studio 页（由内容工作台、求职工作台、公开站点承接）。
+- 独立的目标页、档案体检页（分别并入首页星表、证据页「待补强」）。
 
 ## 当前技术边界
 
-- 主存储仍是文件，不是数据库。
-- LLM 通过 OpenAI-compatible API key 调用。
-- Streamlit 是主要 UI shell。
-- 前端组件已内置静态 bundle，只有改组件时才需要 Node 构建。
-- 公开站构建不会读取 private profile 文件。
+- 主存储是文件，不是数据库；Git 做备份。
+- 生产：systemd（`nblane-web-api.service`、`nblane-reader.service`）+ Caddy，端口只绑 127.0.0.1。
+- LLM 走 OpenAI-compatible API，经 `core/ai/` 路由；本地翻译用 llama.cpp。
+- `nblane-mcp` 只给本机 Cursor / Claude Code，无登录无权限控制。
+- 公开站构建不读取 private 文件。
 
-## 近期优先级
+## 缺口与优先级
 
-1. 完成文档 IA 重构，清掉旧过程文档。
-2. 设计并落地 AI Gateway 兼容层。
-3. 做只读 Workspace Index，先不要改存储格式。
-4. 扩展 MCP resources/tools，为 OpenCode/Codex 接入做基础。
+1. 删除 Streamlit 遗留代码（`app.py`、`pages/`、`*_component/`、`web_*.py`），先确认 SPA 与 Reader 无引用。
+2. 车间上生产：8504 WS 代理 + nblane 会话认证已完成，待部署并改 Caddy、撤 basic_auth。
+3. 文档按 SPA 现状收束（本轮进行中）。
+4. 首页星图尚未显示技能「可进阶」脉冲（`/starmap` 不含 progress）。
+5. MCP 暂停扩展；Agent 写入策略阶段 5 暂停。
+6. 新用户初始化只适配工程类技能树，非工程领域待做。

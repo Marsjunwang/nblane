@@ -1,13 +1,13 @@
 ---
 status: active
 owner: product
-last_verified: 2026-05-13
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
 # 成长关系图谱
 
-本文定义 nblane 中长期应遵守的成长对象模型。它不是 UI 页面列表，也不是文件说明书，而是一张可被 Web、CLI、MCP、Agent、Public Surface 共同投影的 typed graph。
+本文定义 nblane 中长期应遵守的成长对象模型。它不是 UI 页面列表，也不是文件说明书，而是一张可被 SPA、CLI、Agent（HTTP / 本机 MCP）、Public Surface 共同投影的 typed graph。
 
 核心判断：
 
@@ -37,7 +37,7 @@ North Star
 
 - 从上游看：一条简历 bullet、博客结论或 skill status 必须能追溯到哪些 evidence、source、project 和时间范围。
 - 从下游看：一条 evidence 必须能知道它支撑了哪些 skill、project case、resume bullet、blog、public claim 或 next action。
-- 从治理看：AI 可以生成候选、补丁和摘要，但不能静默把 source、resume import 或 output 提升成强 evidence。
+- 从治理看：AI 可以生成候选、补丁和摘要，但不能静默把 source、resume import 或 output 提升成强 evidence。Agent 的写入都进撤销日志，重要操作先确认。
 
 ## 公开架构借鉴
 
@@ -100,7 +100,7 @@ flowchart LR
   ST --> CAP[North Star Capacity\n能力地基]
   CAP --> NS
 
-  H[Health / Review / Agent Activity\n治理与审查] -. watches .-> S
+  H[待补强 / 审阅队列 / 撤销日志\n治理与审查] -. watches .-> S
   H -. watches .-> EC
   H -. watches .-> AE
   H -. watches .-> CE
@@ -123,7 +123,7 @@ nblane 的数据应被理解为一张分层图谱。文件只是 owner，不是�
 | Claim | 这些证据支撑我对外说什么？ | achievement claim、skill claim、impact claim、role claim、learning claim、project claim | `claims.yaml`；legacy `evidence-pool.yaml.claims` 仅迁移兼容 |
 | Capability | 我具备哪些能力？ | skill node、status、evidence refs、claim refs、gap | `skill-tree.yaml`、`schemas/*.yaml` |
 | Output | 哪些证据和 claim 可以对外表达？ | blog、resume bullet、public project、output item、media | `blog/`、`resume-source.yaml`、`projects.yaml`、`outputs.yaml` |
-| Governance | 哪些内容需要审查？ | health issue、unsupported claim、privacy risk、drift、agent patch | derived / future review files |
+| Governance | 哪些内容需要审查？ | 待补强证据、unsupported claim、privacy risk、drift、agent 写入 | 派生视图；`agent-journal.yaml`（撤销日志） |
 
 最重要的抽象边界：
 
@@ -139,7 +139,16 @@ Output 是表达和投影
 
 ## 机器可读元素契约
 
-以下区块供 Dashboard、Schema、8502 Canvas 和测试读取。人类说明仍以本文正文为准；修改图谱元素时应同步更新该区块。
+以下区块由 `core/growth_graph_contract.py` 读取（解析失败时回退到模块内默认值），是图谱元素的唯一定义；`core/workspace_graph.py` 和测试都从这里取。人类说明仍以本文正文为准；修改图谱元素时同步更新该区块并升 `schema_version`。
+
+契约要点：
+
+- `type` 与 `role` 双轨：`type` 是记录种类，驱动功能判断（选中、编辑入口），不能删；`role` 是视觉原型（trunk / direction / branch / leaf / fruit / star / constellation / sand），只驱动渲染。两者映射只在本区块维护。
+- `role: ""` 表示不入星树视图（gap、next_action、feedback、agent_run、capacity、health），它们有自己的页面。
+- 技能节点按 schema 全集发出，未追踪的技能以 `locked` 出现，亮度随 `locked / learning / solid / expert` 分档。
+- 布局确定性：同一数据多次渲染形状不变，动感来自呼吸、闪烁、漂移，不来自力导向漂移。
+
+首页星图（`/starmap` 聚合，`core/starmap_snapshot.py`）是这张图谱当前的主要投影，视觉规则见 [设计语言](design-language.md)。
 
 ```yaml growth_graph_contract
 schema_version: "1.1"
@@ -689,7 +698,7 @@ Claim 类型：
 | 类型 | 例子 | 下游 |
 |------|------|------|
 | Achievement Claim | 完成了某个项目、交付、实验或发布 | Resume、Public Project、Blog |
-| Skill Claim | 能稳定完成某类任务或使用某项技术 | Skill Tree、Gap Analysis |
+| Skill Claim | 能稳定完成某类任务或使用某项技术 | Skill Tree、首页占卜 |
 | Impact Claim | 产生了量化影响、质量改进、效率提升 | Resume、Public Profile |
 | Role Claim | 在项目中承担 owner / lead / contributor / reviewer | Resume、Project Page |
 | Learning Claim | 完成某方向学习并能复现或应用 | Skill Tree、Research View |
@@ -827,23 +836,25 @@ Resume Import -> Evidence Candidate -> Review -> Evidence / Claim -> Resume Sour
 - 如果旧简历来自外部历史文件，且没有 lineage，可以作为 source，但必须标记 `origin: resume_import`。
 - 只有新出现的外部反馈，例如面试通过、招聘方认可、公开引用、真实使用，才能作为新的 evidence source 反哺原项目。
 
-### Health / Review / Agent Activity
+### 治理层：待补强 / 审阅队列 / 撤销日志
 
-Health、Review 和 Agent Activity 是治理层，负责发现风险和生成候选。
+治理层负责发现风险、生成候选，并让 Agent 的写入可追溯。
 
 关系：
 
 ```text
-Health -> drift / missing evidence / unsupported claim / privacy risk
-Review -> Evidence Candidate / Claim Candidate / Next Action Candidate / Public Candidate
-Agent Activity -> Patch Candidate / Source / Evidence Candidate
+待补强（证据页 stage=strengthen） -> drift / missing evidence / unsupported claim / privacy risk
+审阅队列（证据页） -> Evidence Candidate / Next Action Candidate / Public Candidate
+撤销日志（助手页） -> Agent 写入前后快照 -> undo
 ```
 
 不变量：
 
-- Governance 层不直接替代 owner 文件。
-- AI / Agent 产物默认 draft-first。
-- 写入 evidence、claim、skill、goal、public output 必须经过预览、校验或人工确认。
+- 治理层不替代 owner 文件。
+- Agent 日常写入直接落到 owner 文件并记入撤销日志，可撤销。
+- 重要操作（删除、超过 3 条的批量、改目标 / 北极星 / 技能点、证据编辑与评审、结晶 apply）先在聊天里确认再执行。
+- 发布、权限、系统设置只能由人在页面上完成。
+- 写入 evidence、skill、goal 仍复用 validate / sync，规则见 [Agent Harness](../reference/agent-harness.md)。
 
 ## 事实沉淀规则
 
@@ -885,10 +896,10 @@ Evidence 不应该直接变成面向外部的表达。中间需要 Claim 层把�
 Claim
   -> skill-tree.yaml:evidence_refs / claim_refs
   -> skill status review
-  -> Gap Analysis
+  -> 技能缺口（首页占卜）
 ```
 
-能力状态不应只来自自我感觉。至少在 `solid` 和 `expert` 层级，缺 evidence 或缺 claim 应被 Profile Health / Dashboard 标出。
+能力状态不应只来自自我感觉。至少在 `solid` 和 `expert` 层级，缺 evidence 或缺 claim 应在证据页「待补强」中标出。
 
 ### Project 聚合强证据
 
@@ -1106,7 +1117,7 @@ Source -> Chunk -> Claim -> Citation -> Evidence Candidate / Blog Draft
 
 ### Resume View
 
-用于 Output Studio / Resume。
+用于求职工作台的简历。
 
 ```text
 Evidence / Claim
@@ -1129,7 +1140,7 @@ Evidence / Claim -> Blog / Resume / Public Project / Output
 
 ### Health View
 
-用于 Profile Health / Review。
+用于证据页「待补强」与审阅队列。
 
 ```text
 Files / Generated Blocks / Evidence Risk / Unsupported Claims / Resume Loops -> Review Candidates
@@ -1139,14 +1150,14 @@ Files / Generated Blocks / Evidence Risk / Unsupported Claims / Resume Loops -> 
 
 ## Workspace Graph 契约建议
 
-后续 Dashboard、2D Canvas、3D Graph、Review 和 MCP 可以共享一个 read model：
+首页星图、证据页和 Agent 接口可以共享一个 read model：
 
 ```python
 workspace_graph_payload(profile, view="context")
 ```
 
-Web 侧栏导航只是这张图谱的任务投影：用户按 Home / Work / Growth / Output / Team
-进入工作流，不等于图谱层级本身被拆成页面层级。页面应帮助用户沿着
+SPA 左栏导航（首页 / 项目 / 技能树 / 证据 / 研究台 / 内容 / 求职 / 公开站点）只是这张图谱的任务投影，
+不等于图谱层级本身被拆成页面层级。页面应帮助用户沿着
 `Source -> Evidence -> Claim -> Skill / Output` 前进，而不是要求用户理解所有底层 owner 文件。
 
 建议节点字段：
@@ -1241,7 +1252,7 @@ needs_review
 
 - 隐私脱敏在 read model 阶段完成。
 - Dashboard 只读聚合，不成为事实源。
-- AI 只能生成 candidate，不能静默改 owner 文件。
+- AI 生成的内容先作为 candidate；Agent 直写 owner 文件时必须进撤销日志，重要操作先确认。
 - Graph 展示的是事实源的投影，不是新的事实源。
 - 反向边可以由 index 生成，避免在多个 owner 文件中手写重复关系。
 
@@ -1258,4 +1269,4 @@ needs_review
 9. Output 是 evidence 的表达；发布后的 blog、公开 artifact 和真实反馈也可以反哺为新的 evidence。
 10. Goal 组织阶段行动，但不拥有 skill status 和 evidence 本体。
 11. Public Surface 只读取人工确认可公开的对象。
-12. Health / Review / Agent Activity 只生成风险、候选和补丁，不绕过人工确认。
+12. 治理层只生成风险和候选；Agent 写入直写可撤销，重要操作经聊天确认，发布 / 权限 / 系统设置只能由人在页面上做。

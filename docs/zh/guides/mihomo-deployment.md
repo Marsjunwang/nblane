@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-06-04
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 

@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-05-08
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
@@ -9,75 +9,91 @@ source_of_truth: true
 
 ## 为何重要
 
-加载你 `SKILL.md` 的 Agent 会把它当作系统提示。输出质量与你在文中写的
-诚实度、具体度成正比。笼统描述 → 笼统回答；具体描述 → 有用回答。
+`SKILL.md` 既是档案，也是 Agent 的系统提示。`nblane context`、MCP `profile://context` 和助手的只读语料都从它生成。写得越诚实、越具体，Agent 的帮助越有用。
+
+模板见 `profiles/template/SKILL.md`。
 
 ## 章节
 
 ### Identity（身份）
 
-你是谁、领域、去向。北极星用一句话写清，具体到你**能判断是否达成**。
+你是谁、领域、去向：
 
 ```markdown
+- **Name**: alice
 - **Domain**: Robotics (Manipulation, Embodied AI)
 - **Journey**: Year 1 of 5
+- **Current Role**: PhD student
 - **North Star**: First-author paper at ICRA 2028, open-source project with 500+ stars
+- **North Star Brief**: 一句能放在首页的短版本
+- **North Star Visibility**: private
 ```
+
+- 北极星具体到你能判断是否达成。
+- `North Star Visibility` 只有 `public` / `private` 两档，只控制公开站等公开产物；Agent 始终能看到全文。
+- 首页星表编辑北极星时，只改写这三行（`core/north_star.py`），其余内容不动。
 
 ### Core Competencies（核心能力）
 
-技能域与诚实状态表。用于校准 Agent：已会的不会过度讲解，未宣称的熟练度
-不会默认你已掌握。
-
-状态取值：`locked` | `learning` | `solid` | `expert`
+技能域与诚实状态表，用来校准 Agent：已会的不过度讲解，没宣称的熟练度不默认你已掌握。状态取值 `locked` | `learning` | `solid` | `expert`。
 
 ### Skill Tree（技能树）
 
-从 `skill-tree.yaml` 摘一部分内联展示。只列**正在推进**的节点，完整内容在
-YAML。
+生成块，不要手改：
+
+```markdown
+<!-- BEGIN GENERATED:skill_tree -->
+- [x] ROS2 Basics (`ros2_basics`): completed 2025-09
+- [ ] MoveIt2 (`moveit2`)
+<!-- END GENERATED:skill_tree -->
+```
+
+由 `skill-tree.yaml` 渲染：`solid` / `expert` 为 `[x]`，`learning` 为 `[ ]`，`locked` 为 `[~]`。完整内容在 YAML，见 [技能树 Schema](skill-tree-schema.md)。
 
 ### Research Fingerprint（研究指纹）
 
-**共进化里最重要的一节**，你的品味在这里。读过好的 Research Fingerprint
-的 Agent 可以：
-
-- 像你一样找论文薄弱点
-- 用你认得出的风格写作
-- 优先排你真正关心的问题
+共进化里最重要的一节，你的品味在这里。读过它的 Agent 可以像你一样找论文薄弱点、用你认得出的风格写作、优先排你真正关心的问题。
 
 要具体。「我在意干净消融」可以；「我不信不展示真机失败案例的操作论文」更好。
 
 ### Current Focus（当前焦点）
 
-周粒度在做什么。与 `kanban.md` 同步。Agent 据此避免重复建议你已在做的事。
+生成块，从 `kanban.md` 渲染：Doing 列为 Active，Queue 列为 Queued，带 `blocked_by` 的任务进 Blocked。不要手改。
 
 ### Thinking & Communication Style（思维与表达）
 
-你怎么讲、怎么写、用什么语言。在 `--mode write` 时用于贴近你的声音。
+你怎么讲、怎么写、用什么语言。`--mode write` 时用来贴近你的声音。
 
 ### Growth Log（成长日志）
 
-按时间追加的表。只增不删，作为证据。
+按时间追加的表，只增不删。追加方式：`nblane log <name> "事件"`，或助手的 `nblane_api growth "<一句话进展>"`（可撤销）。
 
-命令行追加：`python nblane.py log <name> "事件"`
+### Influence & Output（影响与产出）
+
+论文、项目等对外产出的简表。公开站的结构化产出在 `outputs.yaml` / `projects.yaml`。
+
+## 生成块与同步
+
+只有 `skill_tree` 和 `current_focus` 两个生成块（`core/sync.py`）。改了 `skill-tree.yaml` 或 `kanban.md` 后：
+
+```bash
+nblane sync <name> --check    # 有漂移退出码 1
+nblane sync <name> --write
+```
+
+SPA 里改技能点和证据关联时会自动重写生成块；只改看板时 Current Focus 不会自动更新，需要跑 `sync --write`。`nblane validate` 会把生成块漂移报为 warning。
 
 ## agent-profile.yaml（可选）
 
-与 `SKILL.md` 并列，用于**结构化**表达 Agent 侧对你强项、弱项与协作风格
-的建模（产品手册中的 Agent profile）。存在时，`python nblane.py context
-<name>` 会在输出中追加 **Agent profile (structured)** 区块。
-
-模板见 `profiles/template/agent-profile.yaml`。不需要可删除该文件，行为与
-旧版一致。
+与 `SKILL.md` 并列，结构化描述 Agent 对你强项、弱项与协作风格的建模。存在时，`nblane context` 会追加 **Agent profile (structured)** 区块（只渲染白名单字段）。助手可以用 `nblane_api propose` 提交修改建议，但不会直接改这个文件。模板见 `profiles/template/agent-profile.yaml`，不需要可删除。
 
 ## 更新节奏
 
-- **每周**：Current Focus、Kanban
-- **每月**：Skill Tree、Core Competencies
-- **里程碑**：Growth Log、Influence & Output
-- **每季**：Research Fingerprint、Identity（北极星会演变）
+- 每周：`nblane sync --write` 刷新 Current Focus。
+- 每月：Skill Tree、Core Competencies。
+- 里程碑：Growth Log、Influence & Output。
+- 每季：Research Fingerprint、Identity。
 
 ## 诚实原则
 
-只有 `SKILL.md` 反映真实，系统才有效。它不是简历，是**先验**。夸大则 Agent
-假设错误，帮助变差。该锁就标 `locked`。日志用来证明你何时点亮了节点。
+`SKILL.md` 不是简历，是先验。夸大会让 Agent 假设错误，帮助变差。该锁就标 `locked`，日志用来证明你何时点亮了节点。

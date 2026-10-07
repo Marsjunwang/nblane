@@ -1,13 +1,13 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-08
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
 # 技能证据（Skill evidence）
 
-在 **skill-tree** 节点上挂载结构化证明，用于差距分析、校验与 agent
+在 **skill-tree** 节点上挂载结构化证明，用于校验与 agent
 system prompt 展示「能力是否有据可查」。
 
 支持两种方式：
@@ -58,8 +58,24 @@ system prompt 展示「能力是否有据可查」。
 | `source_refs` | 字符串列表 | 关联的 commit、test、kanban、source、artifact 等来源引用 |
 
 v1 强度规则：`learning` 可由 weak / unrated evidence 支撑；`solid` 至少需要
-`medium`；`expert` 至少需要 `strong`。低于门槛会进入 Evidence Review /
-Profile Health 警告，但不会阻止保存，因为 skill status 仍由用户人工确认。
+`medium`；`expert` 至少需要 `strong`。低于门槛会出现在证据页「待补强」，但不会阻止保存，因为 skill status 仍由用户人工确认。
+
+### 关联与 v2 字段
+
+池文件 `schema_version: "2.0"` 起，条目还可带以下字段（均可选）：
+
+| 字段 | 说明 |
+|------|------|
+| `project_refs` / `kanban_refs` / `experience_refs` | 关联的项目、看板任务（`kanban:<id>`）、经历 |
+| `source_excerpt` | 来源摘录 |
+| `origin` | 来源类型：`kanban_task` \| `resume_parse` \| `output` \| `manual_daily` \| `paper` \| `research_source`（与证明类别 `type` 不同） |
+| `origin_ref` / `origin_detail` | 来源对象的 id 与补充说明 |
+| `original_content` | 原文全文 |
+| `formatted_content` | 整理后的正文 |
+| `language` / `original_language` | 规范化字段的语言与原文语言：`en` \| `zh` \| `mixed` \| `unknown` |
+| `original_content_hash` / `source_content_hash` | 原文与来源内容哈希，用于幂等去重 |
+| `deprecated` / `replaced_by` | 软下线与替代条目 |
+| `breakthrough` | 突破标记：在技能进阶评分中权重高于普通证据 |
 
 ## 命令行
 
@@ -100,7 +116,7 @@ nblane evidence <profile> pool remove <evidence_id>
 nblane evidence <profile> pool remove <evidence_id> --prune-refs
 ```
 
-**软下线池条目**（id 仍存在以满足 validate；context / gap 物化时**跳过**
+**软下线池条目**（id 仍存在以满足 validate；context 物化时**跳过**
 `deprecated: true` 的行）：
 
 ```bash
@@ -110,15 +126,11 @@ nblane evidence <profile> pool deprecate <evidence_id> --replaced-by NEW_ID
 
 ## Web
 
-在 **Skill Tree**：展开 **证据池** 可新增池条目、查看已登记条目并**删除行**
-（可勾选先从所有技能移除该 id 再删）；需点击**保存**写入 YAML。技能卡片上
-**来自证据池（引用）**多选 + 内联证据行；保存时若已有池文件或池非空，会一并写入
-`evidence-pool.yaml`。
+证据的录入、审阅、补强、结晶和技能关联都在 SPA 证据页完成，见 [证据使用手册](../guides/evidence.md)。
 
 ## 与其它功能的关系
 
 - **`nblane context`** — 物化后的证据用于 **Skill evidence (solid / expert)**。
-- **`nblane gap`** — 显示如 `solid (4 evidence)`（内联 + 引用合计）。
 - **`nblane validate`** — 内联非法 type / 空 title → **WARN**；未知
   `evidence_refs` id 或缺池文件却写了引用 → **ERROR**。池行 `deprecated: true`
   仍算有效引用，但不出现在物化证据列表中。

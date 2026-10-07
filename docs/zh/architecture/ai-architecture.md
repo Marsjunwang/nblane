@@ -1,125 +1,97 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-15
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
 # AI 架构
 
-当前 nblane 直接用 API key 调 OpenAI-compatible chat API。这个方式保留，但要从薄 `llm.chat()` 升级为任务化 AI Gateway；Codex/OpenCode 用于复杂多步 agent 工作，不替代 UI 内短模型调用。
-
-## 分层
+nblane 内的 AI 分两类：页面里的短任务走 AI Gateway 直接调模型；复杂多步工作交给外部 Agent（个人助手 OpenClaw、Codex 等），它们通过 HTTP 读写 nblane，不嵌进 nblane。
 
 ```text
-Streamlit / CLI short AI task
-    -> nblane AI Gateway
-    -> Direct Model API
+SPA / CLI / Reader 短任务
+  → core/ai/ AI Gateway（action → backend → 结构化输出 → run 日志）
+  → OpenAI-compatible API / 本地翻译模型 / 本地 Codex 只读 / 规则兜底
 
-Codex / OpenCode / Cursor / Claude
-    -> nblane MCP Server
-    -> nblane resources/tools
-    -> YAML/Markdown facts
+个人助手 OpenClaw（微信等渠道）
+  → nblane_api.py（HTTP，服务账号）
+  → /api/v1 + agent_write_guard（分级、确认、撤销日志）
+  → core/ → profile 文件
+
+本机 Cursor / Claude Code
+  → nblane-mcp（stdio，无登录无 ACL，暂停扩展）
 ```
-
-## Direct API 适合什么
-
-继续直接调模型的任务：
-
-- Gap AI 解释和追问。
-- Resume / Kanban Done -> evidence patch。
-- Blog inline polish / expand / translate。
-- Blog reviewer。
-- Kanban task alignment / subtask generation。
-- Visual caption prompt。
-- Profile health summary。
-
-这些任务短、局部、需要低延迟和结构化输出，不适合启动完整 harness。
 
 ## AI Gateway
 
-已新增 MVP 模块边界：
+模块：`src/nblane/core/ai/`
 
-```text
-src/nblane/core/ai/
-  gateway.py
-  actions.py
-  backends.py
-  prompts.py
-  structured.py
-  runs.py
-  router.py
-```
+| 文件 | 职责 |
+|------|------|
+| `gateway.py` | `run_ai_action` 统一入口：选 backend、调用、修复一次、记录 run |
+| `router.py` | `ACTION_SPECS` 动作注册表：owner、默认 / 兜底 backend、输出模式、schema |
+| `actions.py` | 请求 / 结果 / 规格数据结构 |
+| `backends.py` | `direct_llm`、`local_translation`、`rule_fallback`、`workflow_agent`、`external_agent`、`local_codex_readonly` |
+| `structured.py` | JSON 提取与轻量 schema 校验 |
+| `prompts.py` | prompt 注册 |
+| `runs.py` | `ai-runs/YYYY-MM-DD.jsonl` 运行记录 |
+| `exceptions.py` | AI 异常汇总（顶栏「AI 异常」抽屉），支持忽略 |
+| `skill_suggest.py` | 技能关联建议：embedding → LLM → 规则三级 |
+| `local_models.py` / `local_translation.py` | 可安装的本地翻译模型（llama.cpp，懒启动） |
 
-职责：
+已注册的动作覆盖：论文翻译 / 解释 / 问答 / 深读 / 速读卡 / 断言提取、来源推荐、简历要点与 JD 定制、博客候选与行内改写、看板任务对齐与子任务、证据结晶、项目引用建议、简历 / 看板摄入、视觉配图说明、每日简报、占卜。完整列表以 `router.py` 为准。
 
-- 任务化调用：`blog.inline_patch`、`profile.ingest_resume`、`kanban.subtasks`。
-- 模型路由：fast、json、writing、reasoning、review。
-- 结构化输出：JSON extraction + schema validation + typed error。
-- Prompt registry：集中管理 prompt 版本。
-- 重试和一次修复。
-- Streaming。
-- AI run 日志。
-- Activity bridge：需要审阅的 action 自动进入 Agent Activity。
-- ExternalAgentBackend：只创建 Codex/OpenCode handoff 任务，不执行外部 runtime。
+约定：
 
-兼容：
+- 新 AI 流程必须注册为 action 走 Gateway，路由和页面不直接调 provider SDK。
+- 路由按 profile 的 AI 路由设置（`web-preferences.yaml`）选 backend；未配置时回退 `LLM_MODEL`。
+- 失败要显式：降级到规则兜底时结果带标记，页面显示；失败进 AI 异常抽屉。
+- 长任务走 web_api jobs + SSE，不做前端轮询。
+- run 日志默认不保存完整私密 prompt。
+- `llm.py` 保留旧薄封装供兼容。
 
-- `llm.py` 保留旧接口。
-- 未配置新路由时回退到 `LLM_MODEL`。
+## 外部 Agent 与 harness
 
-第一批注册的 action：
+- 外部 harness（OpenClaw、Codex、OpenCode）负责多步任务、长对话、渠道和定时任务；nblane 不把它们嵌为库或子进程。harness 可替换，换掉不丢档案。
+- Codex：页面可用本地 Codex 作为只读 AI backend；改代码类 handoff 由 `external_agent` 创建 `agent-tasks.yaml` 任务，结果由人处理。集成细节见 [Agent Harness](../reference/agent-harness.md)。
 
-- `research.reading_draft`
-- `research.recommend_sources`
-- `resume.bullets_from_claims`
-- `resume.target_for_job`
-- `output.blog_candidate`
-- `output.inline_patch`
-- `kanban.task_alignment`
-- `kanban.subtasks`
-- `work.remote_dev_task`
+## 个人助手接入
 
-Kanban 的任务理解和子任务生成已经通过 `core/ai/` 调用；页面可以选择
-`record_activity=True` 将候选写入 Agent Activity，也可以保持纯函数式预览。
+助手只走 HTTP：`scripts/openclaw/skills/bin/nblane_api.py` 用 `agent: true` 的服务账号调用 `/api/v1`，受 profile ACL 约束。调用规则只有一份：`scripts/openclaw/skills/nblane/SKILL.md`（技能）+ 服务端策略。
 
-Agent 闭环 v1 已打通：
+服务端策略：
 
-- Kanban 页面可以从任务创建 `work.remote_dev_task` handoff。
-- `ExternalAgentBackend` 创建 `agent-tasks.yaml` 记录和 Agent Activity patch item。
-- 外部 harness 通过 MCP 读取 `agent://task/{task_id}`，完成后用
-  `submit_agent_task_candidate` 写回候选结果。
-- 写回只更新 `agent-tasks.yaml` 与 `agent-activity.yaml`，不直接修改事实源或发布内容。
+| 组件 | 作用 |
+|------|------|
+| `core/agent_policy.py` | 动作分级表 T0–T3、批量阈值 3、确认码（10 分钟、一次性、请求指纹） |
+| `web_api/agent_guard.py` | 路由 → 动作映射，应用级依赖统一拦截 |
+| `core/agent_ops.py` | begin / finish / abort 共享流程（HTTP 与 MCP 共用） |
+| `core/agent_journal.py` | 实体级 before / after 撤销日志 `agent-journal.yaml` |
 
-## OpenCode / Codex 适合什么
+- T1 日常操作（打卡、加任务、勾子任务、习惯计划等）直写、记日志、可撤销。
+- T2 重要操作（删除、超过 3 条的批量、改目标 / 北极星 / 技能点、证据编辑与评审、结晶 apply 等）先 428，助手在聊天里请用户确认后带 `X-Nblane-Confirm` 重发。
+- T3 页面专属（发布、权限、系统设置）对 Agent 返回 403 `agent_forbidden`。
+- 定时任务归 OpenClaw 管（`openclaw automations`），nblane 不同步；`nblane openclaw automations sync` 只是可选的手动工具。
 
-外部 harness 负责复杂多步任务：
+用户侧说明（接入、确认、撤销、助手页）见 [个人助手](../guides/assistant.md)，运维见 [OpenClaw 运维](../guides/openclaw-ops.md)。
 
-- 分析整个代码库。
-- 实现 milestone。
-- 跑测试并修 bug。
-- 处理一批研究资料。
-- 生成 source-aware synthesis。
-- 多 agent review / researcher / writer 协作。
+## 双记忆模型
 
-它们通过 MCP 访问 nblane，不作为 nblane 内部业务库。
+nblane 与助手各管一种记忆，不互相投影替换：
 
-## MCP-first
+| 记忆 | 归属 | 内容 | 特点 |
+|------|------|------|------|
+| 成长档案 | nblane（权威） | 目标、技能树、证据、项目、Growth Log | 低频、准确、可审查 |
+| 情景记忆 | 助手自治 | 会话、daily notes、USER.md | 高频、杂乱，助手自己维护 |
 
-MCP 是当前阶段的一级集成接口：
+- 巩固：助手把可验证的沉淀经 HTTP 写回 nblane（T1 直写或 T2 确认）。
+- 灌注：nblane 的上下文（`core/context.py`、`SKILL.md`）和档案摘要供助手读取。
+- 冲突裁决：结构化事实（技能状态、目标、证据）以 nblane 为准；情境与偏好（当日状态、对话风格）以助手为准；运行时事实（模型路由、渠道状态）不进 nblane。
 
-- resources：给外部 agent 读 profile、workspace、research、project、blog draft。
-- tools：让外部 agent draft-first 写回 task、claim、synthesis、evidence draft。
-- agent handoff：`agent://tasks`、`agent://task/{task_id}` 以及
-  `submit_agent_task_candidate` / `update_agent_task_status`，用于
-  Codex/OpenCode 结果回到候选态审阅。
+## 安全
 
-ACP 暂不进入核心架构。只有未来 nblane 自建 agent client、agent runtime 或 agent-agent 编排时再评估。
-
-## 写回安全
-
-- AI/Agent 默认写草稿。
-- evidence/skill-tree 变更必须 validate/sync。
-- Public publish 必须人工确认。
-- MCP tools 复用路径安全、文件冲突检查、atomic write、Git backup。
-- AI run 默认不保存完整私密 prompt。
+- 密钥不进仓库、不进 `profiles/`。OpenClaw 自身的 token / key 用其 SecretRef 机制管理，不写明文配置。
+- Agent 写入复用路径安全、文件锁、原子写、Git 备份；撤销遇到后续人工修改时拒绝，不覆盖新内容。
+- 服务端无法证明确认是人敲的，这是助手技能的契约；公开发布始终只能在 Web 端由人触发。
+- 对生产 Gateway 的变更先 dry-run、先备份、低峰操作。

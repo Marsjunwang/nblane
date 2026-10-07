@@ -1,7 +1,7 @@
 ---
 status: draft
 owner: product
-last_verified: 2026-10-06
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
@@ -259,7 +259,7 @@ Figure 1、Model Architecture、Encoder and Decoder Stacks、Attention 已恢复
 
 ## 2. 产品形态
 
-Research 顶层仍是一个页面，不新增顶层导航。内部改成类似 Output Studio 的
+Research 顶层仍是一个页面，不新增顶层导航。内部改成类似内容工作台的
 小页面结构：
 
 ```text
@@ -1076,7 +1076,7 @@ research/exports/<timestamp>.bib
 research/exports/<timestamp>.md
 ```
 
-多篇论文 literature memo、Claim Studio、Evidence Review 和 Output Studio 上游连接后置，
+多篇论文 literature memo、Claim、证据审阅和内容工作台的上游连接后置，
 不阻塞单篇论文阅读闭环。
 
 ### 2.7 Inbox & Connectors
@@ -1287,8 +1287,7 @@ citation_refs: []
 SPA 的 `/research` 和 `/research/papers/:source_id/reader` 是用户可见的主入口。
 `PaperReaderPage` 负责标题、返回、阅读状态、URL 深链、错误反馈和 sidecar 生命周期；
 当前 PDF 阅读画布由 FastAPI sidecar 的 `/reader/view/{source_id}` 通过 iframe 承载。
-`research_paper_reader_component` 的静态 Streamlit runtime 已停用，仅保留 `events.py`
-作为事件常量契约。前端 PDF 渲染由 sidecar 模板加载 bundled PDF.js 资产完成。
+`research_paper_reader_component/events.py` 只作为事件常量契约。前端 PDF 渲染由 sidecar 模板加载 bundled PDF.js 资产完成。
 
 近期不重写 PDF.js，也不让 SPA 和 sidecar 分别实现翻译、批注或进度保存。先把 SPA 作为
 唯一产品外壳，再以同一套 API 和 URL 契约逐步替换 iframe 内的 UI。
@@ -1657,9 +1656,8 @@ def pymupdf_document_to_fallback_segments(source_id: str, doc: PyMuPDFDocument) 
 
 ## 7. Reader Sidecar 事件协议
 
-Reader 由 FastAPI sidecar 提供 `/reader/view/{source_id}` 主入口。旧
-`research_paper_reader_component` runtime 不再作为 PDF Reader fallback；仅保留事件常量
-模块作为前后端契约来源：
+Reader 由 FastAPI sidecar 提供 `/reader/view/{source_id}` 主入口。`research_paper_reader_component/events.py`
+是前后端事件常量的契约来源：
 
 ```text
 src/nblane/research_paper_reader_component/events.py

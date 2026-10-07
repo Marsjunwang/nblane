@@ -1,165 +1,102 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-08
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
 # 里程碑
 
-## M0 · 文档与项目管理事实源重构
+本页是阶段账本。总纲（2026-09-22）：融合 OpenClaw、优化前端交互、统合后端功能，不改数据存储。验收标准：第一条数据闭环（北极星 → 目标 → 项目 → 看板 → 证据结晶）全程在前端完成，不手改 YAML。往后方向见 [路线图](../product/roadmap.md)。
 
-目标：把产品定义、项目状态、架构边界、路线图和指南拆清楚。
+## Phase 0 · 基线：文件层、AI Gateway、SPA 骨架
 
-交付：
+状态：完成（2026-09-20）。
 
-- 新 `docs/zh` 信息架构。
-- `project/status.md`、`project/milestones.md`、`project/issues.md`、`project/decisions.md`。
-- `architecture/ai-architecture.md`、`architecture/module-map.md`、`architecture/data-contracts.md`。
-- `reference/agent-harness.md`。
-- 删除被吸收的旧过程文档。
+目标：在文件事实源上建好后续阶段要用的底座。
 
-验收：
+- 文档事实源收束到 `docs/zh/`，项目管理集中到 `project/`。
+- AI Gateway：`core/ai/`（gateway / router / backends / 结构化输出），`llm.py` 兼容旧调用。
+- 项目一等实体：`project-board.yaml`，kanban 任务带 `project_id`。
+- 研究层：`research/` 下来源、分块、阅读笔记，研究默认私有。
+- 博客 front matter 支持 `related_sources` / `related_claims`。
+- `nblane sync-agent-harness --target codex|opencode|openclaw` 生成外部执行器配置。
+- React SPA 骨架（8504）与 OpenClaw 初步接入。
 
-- `docs/zh/README.md` 可按读者路径导航。
-- 旧 `design.md` / `initial-loop.md` / `public-site-workplan.md` 不再作为主入口。
-- README、代码注释、文档链接不再引用已删除旧路径。
+关键提交：`0e7431b`（OpenClaw 接入 + SPA M0–M4）。
 
-## M1 · AI Gateway
+旧计划中的独立 Workspace Index 与 Obsidian 式多视图不再单列：只读聚合改由各页的聚合端点承担（`/starmap`、`/projects-board`），多视图落在项目页三视图。
 
-目标：把 API key 直连模型升级为任务化 AI 调用层。
+## Phase 0.5 · 远程车间
 
-交付：
+状态：代码完成，生产待部署。
 
-- `src/nblane/core/ai/` 模块。
-- task-based `run_text` / `run_json`。
-- 任务类型、prompt registry、结构化输出校验、模型路由。
-- AI run 日志。
-- `llm.py` 兼容旧调用。
+目标：手机也能进入 nblane 的运行环境，调用任意已装工具。
 
-验收：
+- ttyd + tmux 网页终端，设置页托管，手机快捷键栏，nblane 会话认证。
+- 生产剩余：8504 WS 代理上线、改 Caddy、撤 basic_auth。
 
-- 旧功能继续工作。
-- 新 AI 功能不直接调用 `llm.chat()`。
-- JSON 任务有 schema 校验和 typed error。
-- 未配置新模型路由时回退到现有 `LLM_MODEL`。
+关键提交：`57a82b8`。方案见 [远程车间](../dev/phase0.5-remote-terminal.md)。
 
-## M2 · Workspace Index
+## Phase 1 · 证据域单页化
 
-目标：在 YAML/Markdown 文件上建立只读 typed graph。
+状态：完成。
 
-交付：
+目标：证据的采集、评审、结晶、入座、补强在一页内完成。
 
-- `workspace_index.py`。
-- 节点、边、warning 数据结构。
-- 覆盖 profile、kanban、evidence、skill、blog、team、activity、learning、inbox。
-- 总览 UI 初版。
+- 证据页五阶段：待结晶、待评审、已入座、待补强、已废弃。
+- 结晶状态机收口在 `core/crystallize.py`；Done 任务按任务结晶，一任务一证据。
+- 档案体检页解散：证据风险进「待补强」。
+- 通用件：mutation API 样板（ETag / If-Match + flock）、铭文卡共享组件与设计 token。
 
-验收：
+关键提交：`0ec6f2c`（证据单页 + 结晶管线）、`46fb878`（结晶上线）、`28f5768`。
 
-- 不改变现有存储格式。
-- 缺文件/坏 YAML 不崩。
-- dangling refs 生成 warning。
-- 输出 deterministic。
+## Phase 2 · 项目与看板一体化
 
-## M3 · Internal Project Board
+状态：完成。
 
-目标：让内部项目成为一等实体。
+目标：项目、任务、习惯在一个页面里规划和执行。
 
-交付：
+- `/projects` 一页三视图：看板（目标分组泳道）、时间轴（排期拖拽、里程碑、历史层）、编年史（只读回放）。
+- 日课栏：一个习惯全站一行，阶段计划、90 天热力图补卡与销印，习惯归档与删除。
+- 行内快添、任务编辑与删除、TODO 清单、Someday 直接列入 Queue。
+- 删除三件套，计划模板。
+- 打磨：不静默丢数据、真实数据规模下保持紧凑、手机与键盘可用。
 
-- `project-board.yaml`。
-- Project/Milestone loader/saver/validator。
-- Kanban task 支持 `project_id` / `milestone_id`。
-- Workspace Index 展示 project -> task -> evidence。
+关键提交：`7adfa7e`（后端聚合）、`775b2c8`（统一 /projects）、`3c119e8`（交互宪法）、`88f7717`、`8516112`、`ad86485`（阶段计划）、`0e5bb15`、`d77597f`、`29c8f46`、`1521f65`。
 
-验收：
+## Phase 3 · 目标 / 北极星编辑 + 首页星图
 
-- 旧 `kanban.md` 兼容。
-- 归档和拖拽保留 project metadata。
-- Public `projects.yaml` 不受内部 project 影响。
+状态：完成。
 
-## M4 · Research Workspace
+目标：首页成为全站导航枢纽，目标和北极星在星图上直接改。
 
-目标：建立论文/资料/source/claim/synthesis 的私有研究层。
+- `/starmap` 聚合端点，Three.js 星图（图态 / 境态）。
+- 铭文卡重刻北极星和目标，虚位空星，刻痕星，星表管理目标，目标页删除。
+- 命名层与显真，印章家族，日课印，占卜（替代差距分析页）。
+- 技能树页：类目星官化、节点铭文卡、三态写端点、进阶进度。
+- Streamlit 退出主界面（`ad87958`），设置页分区（`32ff066`）。
 
-交付：
+关键提交：`794d55f`（星图原型）、`775b2c8`、`b377c6b`（北极星 / 目标 CRUD、大事记）、`3c119e8`、`8383c59`、`ad87958`。
 
-- `research/sources.yaml`。
-- `research/chunks/*.jsonl`。
-- `research/claims.yaml`。
-- `research/drafts.yaml`。
-- metadata ingest 和 claim extraction 初版。
+未完成：星图上的技能「可进阶」脉冲（`/starmap` 尚不含 progress）。
 
-验收：
+## Phase 4 · 助手（OpenClaw）主动推进
 
-- source id/hash 稳定。
-- claim 可回指 source/chunk，或显式标记 human note。
-- Research 默认 private。
+状态：完成。
 
-## M5 · Source-aware Blog AI
+目标：助手每天用 nblane 的数据做计划、提醒和记录，且写入安全可撤销。
 
-目标：让博客草稿、AI patch、Reviewer 具备出处意识。
+- `nblane_api` HTTP 客户端，助手服务账号（`agent: true`）+ profile 权限。
+- 写入策略 T0–T3：日常直写进撤销日志，重要操作 428 + 聊天确认，页面专属 403。
+- 调用规则只在 nblane 技能一处；助手只走 HTTP，MCP 仅本机。
+- 定时任务由 OpenClaw 自己管理，nblane 不同步；每日复盘默认关闭。
+- 助手页：状态、接入方式卡、撤销日志。
 
-交付：
+关键提交：`3a96ffe`（nblane_api）、`5fd4ad1`（自动化声明，后被 `65754db` 收回）、`915323f`、`2946ac5`、`65754db`、`83f0ca8`。
 
-- Blog front matter 支持 `related_sources` / `related_claims`。
-- AI patch 支持 source/chunk/claim refs。
-- Reviewer 支持 unsupported claim 检查。
-- Synthesis draft 可导出 blog draft。
+## 工具层（Phase 5 起，按需）
 
-验收：
+已落地：研究台与阅读器（`ad64e16`、`f07a975`、`957ae24`、`f64ceff`、`0fbf9fe`）、本地翻译模型（`ca61dbf`）、内容工作台（`667a28c`、`bf56f14`、`09b97dd`）、求职工作台（`a897cbc`）、公开站点控制台（`b19a0d2`）、AI 异常（`0a34fa0`、`4ef0ee0`、`32a1d8c`）。
 
-- 发布前能提示缺出处和 private source。
-- 现有 Blog Editor、BlockNote sidecar、static build 不回退。
-
-## M6 · MCP 扩展
-
-目标：让外部 Agent 能读取 workspace/research/project/blog，并安全写回草稿。
-
-交付：
-
-- `workspace://graph`、`research://sources`、`project://status`、`blog://drafts` 等 resources。
-- `capture_research_source`、`create_claim`、`create_synthesis_draft`、`export_synthesis_to_blog_draft` 等 tools。
-
-验收：
-
-- tools draft-first。
-- 写入复用路径安全、冲突检查、atomic write、git backup。
-- missing profile 有明确错误。
-
-## M7 · Codex/OpenCode Harness Adapter
-
-目标：把 Codex/OpenCode 作为外部高级执行器接入。
-
-交付：
-
-- `nblane sync-agent-harness --target codex|opencode`。
-- agent role prompts。
-- MCP config snippets。
-- `agent-tasks.yaml` 与 handoff CLI。
-
-验收：
-
-- nblane 不依赖 harness 内部 API。
-- harness 通过 MCP 读取/写回 nblane。
-- 写回默认草稿，人确认后进入事实源或公开发布。
-
-## M8 · Obsidian-like Views
-
-目标：基于 Workspace Index 提供属性过滤、多视图和 typed graph。
-
-交付：
-
-- Table view。
-- Board view。
-- Graph view。
-- Project view。
-- Research matrix。
-- Evidence/publication readiness view。
-
-验收：
-
-- 同一对象可在不同视图里出现。
-- 视图不成为新的事实源。
-- 断链、缺 source、unsupported claim 可见。
+团队功能不做。

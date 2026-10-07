@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-10-06
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
@@ -10,9 +10,9 @@ source_of_truth: true
 本文说明已经落地的公开层：个人网站、博客和简历由 profile 下显式公开的
 YAML / Markdown 文件生成，不直接渲染内部 profile 文件。
 
-**当前状态：** Public Surface v1 已落地。仓库现在包含 profile 级公开数据文件、
-`nblane public ...` CLI、静态站构建器，以及 SPA **公开站点** 控制台
-（`/p/<name>/public-build`）。
+入口是 SPA「公开站点」（`/p/<name>/public-build`），命令行是 `nblane public ...`。
+文章在[内容工作台](content.md)写作并发布进公开层，在这里决定是否上线。
+发布、回滚等操作只能由本人在页面上做，助手不能代为执行。
 
 **定位（2026-10-05 定）：** 公开站 = 自我介绍 + 写作 + 作品。首页是照片和简介
 （来自求职工作台的主简历），主体是博客和「作品」（重点项目视频、论文、代码、
@@ -20,7 +20,8 @@ YAML / Markdown 文件生成，不直接渲染内部 profile 文件。
 
 ## 公开站点控制台
 
-SPA 的「公开站点」页左边决定网站显示什么，右边是实时预览，顶部发布到线上：
+左边决定网站显示什么，右边是实时预览，顶部发布到线上。第一次打开时点「初始化」创建公开资料文件，
+不会改动已有内容。
 
 - **网站公开**：`public-profile.yaml` 的 `visibility`。私有时不能发布。
 - **显示开关**：写在 `public-profile.yaml` 的 `site:` 下，全部可单独开关：
@@ -200,7 +201,7 @@ nblane public library purge <profile> <node-id>
 nblane public library purge <profile> <node-id> --delete-files
 ```
 
-`public-library.yaml` 是 Public Site 编辑器使用的自由文件树。它可以同时管理
+`public-library.yaml` 是公开内容的后台文件树。它可以同时管理
 folder、post、media 节点，post 节点下面也可以继续挂 folder、post、media。
 folder 只是后台组织元数据：新建或移动 folder 不会在磁盘上创建或移动目录。
 
@@ -261,7 +262,7 @@ nodes:
 
 `blog-taxonomy.yaml` 继续兼容旧 profile 和“URL 分类目录”需求。当
 `public-library.yaml` 中已经有真实节点时，文件树成为后台组织源；taxonomy 不再
-限制编辑器里 folder、post、media 的自由挂载。只有在你希望 URL 本身带分类路径时，
+限制 folder、post、media 的自由挂载。只有在你希望 URL 本身带分类路径时，
 才需要继续使用 taxonomy。
 
 如果需要让博客 URL 带分类目录，在 profile 根目录新增 `blog-taxonomy.yaml`。
@@ -323,9 +324,7 @@ route，例如 `robotics/software/vla/my-post`。
 文章详情 header、`og:image` 和 `twitter:image` 都会使用该封面；草稿预览遇到
 缺失或不合法封面时会降级为纯文本布局，发布校验会继续报告该 cover 错误。
 
-Blog 编辑器的 Public Preview 使用当前会话中的 meta/body 做 in-memory 渲染，
-不需要先保存到磁盘。发布则走 `publish_blog_text()`：先校验未保存的 meta/body，
-通过后才写回 `blog/<slug-or-route>.md` 并记录 `publish ...` Git backup action。
+在 SPA 里写作、预览和发布文章见 [内容工作台](content.md)。
 
 视觉生成配置使用 `VISUAL_*` 命名，并兼容旧式 `IMAGE_*` alias。默认 provider 是
 DashScope / 通义万相：
@@ -364,82 +363,25 @@ nblane public hydrate <profile> --write-drafts
 `status: draft` 项目，不修改 evidence 或 skill 文件。`hydrate` 只把明显的
 paper / patent evidence 一对一补成 `outputs.yaml` 成果草稿。
 
-## Streamlit
-
-旧 Streamlit 页面仍可用（新功能只在 SPA 控制台）。Web UI 曾拆为 **Output Studio** 与 **Public Build**：
-
-- **Output Studio / Profile** 提供结构化表单编辑公开姓名、headline、简介、联系方式与头像；
-  保存时会把头像写入 `media/` 并同步 `public-profile.yaml` 的 `avatar` 路径。
-  右侧提供实时整站预览，未保存的文字和新上传头像也会进入预览；原始 YAML 仍
-  在折叠区内可直接编辑。
-- **Output Studio / Blog** 通过 React / BlockNote 编辑器 shell 创建、编辑、检查并发布博客。
-  shell 包含文章筛选、新建草稿、从 evidence / Done 生成、正文编辑区、
-  Meta / Media / AI / Visual / Check 右侧抽屉、Public Preview、移动端
-  Editor / Articles / Tools / Preview tab、专注模式和 browser `localStorage`
-  布局记忆。Streamlit 继续负责文件 I/O、session state、上传落盘、AI / 视觉调用、
-  发布校验、静态预览与 Git backup。
-  Blog front matter 支持 `related_claims` 以及 research provenance refs
-  `related_sources`、`related_research_claims`、`related_citations`；可以从
-  accepted claims 或 Research Workspace synthesis 生成候选或草稿。
-- **Output Studio / Resume** 编辑 `resume-source.yaml`，预览生成简历，并生成定制简历草稿。
-  Resume 也可以从 accepted claims 生成 bullet 候选预览；候选不会自动写回
-  `resume-source.yaml`。
-- **Output Studio / Known Info** 展示 evidence 上下文、推荐分组，并支持勾选多条 evidence
-  生成 draft 项目。
-- **Public Build** 只负责校验、预览并构建静态站，默认输出到
-  `dist/public/<profile>`（即线上目录）；勾选「包含草稿」时默认改为
-  `dist/public-preview/<profile>`，草稿构建写入线上目录会被拒绝。
-
-这些页面复用现有 profile 选择器、文件 snapshot 冲突保护、缓存清理与可选 Git
-备份。
-
-## 当前 v1 与下一步优化
-
-已落地的 v1 覆盖完整公开闭环：
-
-- **数据层：** `public-profile.yaml`、`resume-source.yaml`、`projects.yaml`、
-  `outputs.yaml`、`blog/**/*.md` 与 profile 媒体目录。
-- **CLI：** 初始化、校验、静态构建、简历生成、博客创建/媒体/发布、草稿生成、
-  evidence 到公开项目的人工整理。
-- **Web UI：** **Output Studio** 页面含 Generate、Profile、Blog、Resume、
-  Known Info；**Public Build** 页面含 Validate、Preview、Build。旧 **Public Site**
-  兼容跳转页已删除，统一从这两个页面进入。
-- **静态输出：** 首页（照片 + 简介 + 最近写作 + 作品）、Blog、作品页、可选
-  Projects、可选简历 PDF、复制后的媒体、
-  Blog cover 展示、Open Graph / Twitter 图片、`robots.txt`、`sitemap.xml` 与页面
-  meta description。
-
-下一轮优化方向：
-
-- **React Blog Shell 打磨：** Markdown / front matter 仍是事实源，继续补齐
-  更细的块级光标插入、更多 visual provider adapter 和前端 smoke 测试。
-- **SEO 质量：** 继续优化 canonical、Open Graph、社交分享 metadata、按 profile
-  优化 title，并在部署时校验 `base-url` / base path。
-- **部署质量：** 补静态托管、缓存刷新、草稿预览 vs 公开构建、小团队受保护
-  Streamlit 工作台的生产说明。
-- **展示质量：** 改进生成主题、响应式布局、媒体展示、项目/成果详情页与简历可读性。
-
 ## 部署
 
 推荐分离私有工作台和公开站：
 
 ```text
-app.nblane.cloud  -> 受登录保护的 Streamlit 工作台
-www.nblane.cloud  -> dist/public/<profile> 静态目录
+spa.example.com  -> 受登录保护的 SPA（127.0.0.1:8504，Reader 路由转 8502）
+www.example.com  -> dist/public/<profile> 静态目录
 ```
 
-Caddy 示例：
+公开站只需要 Caddy `file_server`：
 
 ```caddyfile
 www.example.com {
-    root * /srv/nblane-app/dist/public/alice
+    root * /srv/nblane-public/alice
     file_server
 }
-
-app.example.com {
-    reverse_proxy 127.0.0.1:8501
-}
 ```
+
+SPA 与 Reader 的完整反代配置见 [腾讯云部署](deployment-tencent-cloud.md)。
 
 构建器会先校验，再写入临时目录，最后替换目标目录。校验或渲染失败时，不会
 覆盖已有线上目录。

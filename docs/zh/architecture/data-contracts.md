@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-09-25
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
@@ -14,7 +14,7 @@ source_of_truth: true
 - YAML/Markdown 是事实源。
 - Workspace Index 是派生 read model，不手动编辑。
 - `SKILL.md` 人写区由用户维护，生成块由 `sync` 写入。
-- AI/Agent 产物默认是草稿或候选。
+- 页面内 AI 产物是候选，人确认后才落盘；Agent 账号的写入直写、记撤销日志，重要操作先聊天确认（见下文 agent-journal）。
 - Public Surface 只读取显式公开层文件。
 
 ## Profile 文件职责
@@ -50,7 +50,7 @@ source_of_truth: true
   `profile_context.normalize_north_star_visibility` 把旧四档映射进来:
   `visible` → `public`,`discreet` / `hidden` / 空 / 未知 → `private`。
 - 语义:**只门控公开产物**(公开构建/拓片/分享)。本地 UI 与 agent
-  上下文(openclaw、MCP、系统提示)永远看到全文——agent 看不到真实
+  上下文(助手、MCP、系统提示)永远看到全文——agent 看不到真实
   北极星就不可能给出真实计划。
 - 写入只写 canonical 新值(`public`/`private`);`brief`
   保留为展示简称,不是隐私机制。
@@ -134,7 +134,7 @@ reviewed evidence graph
   -> claim candidates
   -> human selection
   -> claims.yaml
-  -> Output Studio related_claims / provenance
+  -> 内容 / 求职工作台、公开输出的 related_claims / provenance
 ```
 
 Web 中的通用 Evidence Claim 使用 profile 级 `claims.yaml` 作为事实源。
@@ -177,7 +177,7 @@ claims:
 不变量：
 
 - Claim `type` 只能是 `achievement`、`skill`、`impact`、`role`、`learning`、`project`。
-- Claim `status` 使用 `draft`、`accepted`、`deprecated`、`dismissed`；Output Studio 默认只消费 `accepted`。
+- Claim `status` 使用 `draft`、`accepted`、`deprecated`、`dismissed`；输出生成默认只消费 `accepted`。
 - Claim `refresh_status` 使用 `current`、`needs_refresh`；`accepted + needs_refresh` 可追溯，但生成输出时必须提示复核。
 - Claim 去重键是 `normalized(text) + evidence_refs + skill_refs`；重复应用时更新已有 claim metadata，不追加重复行。
 - Claim 可以引用多条 evidence；因此它放在 `claims.yaml` 顶层，不嵌入单条 evidence row。
@@ -191,7 +191,7 @@ claims:
 
 ```text
 kanban Done task
-  -> AI JSON patch (LLM or read-only Codex from Kanban)
+  -> AI JSON patch (LLM or read-only Codex)
   -> human selection
   -> evidence-pool.yaml
   -> skill-tree.yaml
@@ -262,65 +262,56 @@ private profile facts
 - Project update 草稿和 resume bullet 候选也可从 accepted claims 生成，并保留 `related_claims` / `evidence_refs` provenance；resume bullet 第一版只返回候选预览，不自动写入 `resume-source.yaml`。
 - 公开输出不直接渲染 claim/source/citation id；这些 refs 只用于 provenance、候选生成和发布前检查。
 
-### Agent Activity / Writeback Review
+### Agent Journal 撤销日志
 
 ```text
-Review / owner page candidate
-  -> agent-activity.yaml items[]
-  -> pending / applied / failed / dismissed / superseded
-  -> owner page or Activity apply
+Agent 账号写请求
+  -> agent_write_guard：动作分级（T1 直写 / T2 先确认 / T3 拒绝）
+  -> 执行前快照相关实体
+  -> handler 写入
+  -> 执行后快照，diff
+  -> agent-journal.yaml entries[]
+  -> 助手页「撤销日志」或 nblane_api undo
 ```
 
-`agent-activity.yaml` 是内部候选、patch 和写回审阅队列，不参与 public build。
-旧 profile 没有该文件时按空队列读取，首次写入时创建。
+`profiles/<name>/agent-journal.yaml` 是 Agent 写入的短期操作日志，用于撤销，不是业务事实源，不参与 public build。实现在 `core/agent_journal.py`。
 
-最小形态：
+条目形态：
 
 ```yaml
-schema_version: "1.0"
-profile: 王军
-updated: "2026-05-14"
-items:
-  - id: act:review:evidence:abc123
-    kind: candidate
-    candidate_type: evidence
-    source_page: Review
-    source_ref: review:2026-05-11:2026-05-14
-    target_owner: evidence_pool
-    status: pending
-    title: Ship demo
-    summary: demo shipped
-    refs:
-      task_refs: [done-demo]
-      evidence_refs: []
-      claim_refs: []
-      files: [profiles/王军/evidence-pool.yaml]
-    payload: {}
-    preview: ""
-    warnings: []
-    error: ""
-    changed_paths: []
-    created: "2026-05-14T00:00:00+00:00"
-    updated: "2026-05-14T00:00:00+00:00"
-    applied_at: ""
+entries:
+  - id: aj_20261007093012_a1b2c3
+    at: "2026-10-07T09:30:12+00:00"
+    actor: openclaw
+    action: kanban.card.add
+    tier: T1
+    summary: 添加任务「整理周报」
+    confirm_id: ""          # T2 时为所用确认码
+    changes:
+      - entity: kanban_card
+        id: kb_xxx
+        before: null        # 新建
+        after: {section: Doing, index: 0, task: {...}}
+    undone_at: ""
+    undone_by: ""
 ```
+
+实体类型（`ENTITY_KINDS`）：`kanban_card`；`activity-log.yaml` 中的 `checkin` / `habit_plan` / `habit`；列表文档行 `goal` / `project_case` / `evidence` / `skill_node` / `inbox_item` / `research_source` / `learning_resource`；`north_star`（SKILL.md Identity 三行）；`file:<相对路径>`（整文件文本，用于 Growth Log 等无行结构的写入）。
 
 不变量：
 
-- `status` 只能是 `pending`、`applied`、`failed`、`dismissed`、`superseded`。
-- `payload` 保存结构化候选或 patch，`preview` 保存短 YAML / diff / Markdown 摘要；不保存完整私密文件快照。
-- `applied` 必须记录 `changed_paths` 和 `applied_at`；`failed` 必须记录 `error`。
-- 第一版只有 Review 来源且 owner 为 evidence / kanban / public site 的 pending item 可在 Activity 页直接应用；其他 patch 只审查和跳转 owner 页面。
-- 看板内 Codex 只读 AI backend 失败时，`source_page` 为 `Kanban`、`source_ref`
-  为 `kanban:<task_id>`，并返回 `activity_item_id` 给看板错误卡片用于跳转。
-- **agent 直写留痕(G1,2026-09-24)**:web_api 第一环 mutation 端点在
-  `CurrentUser.id == "openclaw"` 且实际发生变更时追加
-  `kind=writeback`、`source_page="openclaw"`、`status="applied"` 条目
-  (复用 `record_writeback_activity`;`source_ref` 带唯一后缀,同一动作
-  一天多次各成条目);no-op mutation 不留痕,其他用户不留痕。配套地,
-  web_api 每个请求以当前用户 id 启动 `git_backup.start_operation`
-  (`GitActorMiddleware`,G2),git 提交 actor 与留痕簿互证;auth 关闭时
-  actor 为合成账号 `local`。
+- 只记 Agent 账号的写入；人类账号不记。请求没有实际改变（412、422、no-op）时不写条目。
+- 保留 30 天、最多 500 条（`RETENTION_DAYS` / `MAX_ENTRIES`），写入时修剪。
+- 撤销把每个实体的 `before` 经所属领域写入器写回，并整体回滚相关文件；只有当前状态仍等于 `after` 时才允许，否则拒绝（`journal_undo_conflict`），不覆盖后来的修改。
+- 每条只能撤销一次；撤销后记录 `undone_at` / `undone_by`。`recent` 给每条附 `status`：`undoable`、`conflict`、`undone`。
+- chronicle.yaml、计划模板使用历史等追加型叙事副作用不回滚。
+- 日志与撤销都经 Git 备份；git 提交 actor 为当前用户（`GitActorMiddleware`），与日志 `actor` 互证。
+
+API：`GET /api/v1/profiles/{name}/agent/journal`、`POST /api/v1/profiles/{name}/agent/journal/{entry_id}/undo`。分级与确认流程见 [AI 架构](ai-architecture.md#个人助手接入)。
+
+### agent-activity.yaml 与 AI 异常
+
+`agent-activity.yaml` 现在只承载 AI Gateway 的 run 候选与失败记录（`core/ai/runs.py`、`core/agent_activity.py`），供顶栏「AI 异常」抽屉读取失败项并忽略（`core/ai/exceptions.py`，非 activity 来源的忽略记录在 `ai-exception-dismissals.yaml`）。它不是审批队列，也不记 Agent 写入。旧 profile 没有该文件时按空读取。
 
 ### Web Preferences and Profile Codex Home
 

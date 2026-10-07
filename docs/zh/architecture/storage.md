@@ -1,30 +1,29 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-05-08
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
 # 文件存储演进
 
-本文评估 nblane 当前「文件 + YAML/Markdown + Git 备份」的数据方案，是否能支撑后续个人网站、公开作品集、简历生成、博客、媒体与多用户。它是产品 / 架构决策文档，不代表这些 public surface 功能已经实现。
+本文说明 nblane「文件 + YAML/Markdown + Git 备份」数据方案的边界：公开层、媒体、规模演进，以及什么时候才需要数据库。公开层文件、静态站构建和 Git 备份已落地；对象存储与数据库仍是演进选项。
 
 | 项 | 值 |
 |----|----|
-| 文档版本 | `v0.1.0` |
-| 状态 | Proposed |
-| 范围 | `profiles/`、`teams/`、公开个人网站、文件到数据库演进 |
+| 状态 | 文件优先已落地；数据库未采用 |
+| 范围 | `profiles/`、公开层、媒体、文件到数据库演进 |
 
 ---
 
 ## 1. 背景与结论
 
-nblane 当前的核心优势是 **plain text first**：个人成长、技能树、证据、看板和团队池都落在仓库里的 Markdown / YAML 文件中，并由 Git 记录历史。这种模型适合个人和小团队，因为它透明、可 diff、可被 agent 直接读取，也容易备份。
+nblane 的核心优势是 **plain text first**：目标、技能树、证据、项目、看板、研究和公开层都落在 Markdown / YAML 文件中，由 Git 记录历史。服务进程（8504 SPA + API、8502 Reader）不持有自己的状态。这种模型透明、可 diff、可被 Agent 直接读取，也容易备份。
 
 结论：
 
-- **个人网站 v0/v1 可以继续文件优先**，但必须新增一层 **public data layer**，不能直接把内部 `SKILL.md`、`kanban.md`、`skill-tree.yaml` 原样公开。
-- **小规模多用户可以继续用 `profiles/<name>/` 目录隔离**，配合现有登录、profile/team 权限、file snapshot 和 Git backup。
+- **个人网站继续文件优先**，通过独立的 **public data layer** 发布，不把内部 `SKILL.md`、`kanban.md`、`skill-tree.yaml` 原样公开。
+- **少量账号继续用 `profiles/<name>/` 目录隔离**，配合登录、profile 权限、文件快照比对（ETag / 412）、文件锁和 Git backup。
 - **媒体和高并发是文件方案的边界**：图片可先放本地 `media/`，视频优先外链或对象存储；大量用户、高频写入、搜索和公开站点托管最终需要数据库与对象存储。
 - **真正 SaaS 多租户阶段应迁移到数据库**，文件系统退化为 export / backup，而不是主存储。
 
@@ -32,7 +31,7 @@ nblane 当前的核心优势是 **plain text first**：个人成长、技能树�
 
 ## 2. 当前文件模型
 
-当前 profile 数据位于：
+profile 主要数据（完整清单见 [数据契约](data-contracts.md)）：
 
 ```text
 profiles/<name>/
@@ -42,18 +41,22 @@ profiles/<name>/
   evidence-pool.yaml
   kanban.md
   kanban-archive.md
+  goals.yaml
+  project-board.yaml
+  activity-log.yaml
+  chronicle.yaml
+  agent-journal.yaml
+  research/
 ```
 
-相关全局与团队数据：
+全局数据：
 
 ```text
 schemas/*.yaml
-teams/<team>/team.yaml
-teams/<team>/product-pool.yaml
 auth/users.yaml
 ```
 
-部署时可通过 `NBLANE_ROOT` 把数据目录独立到 `/srv/nblane-data`。写入后可通过 `NBLANE_DATA_GIT_AUTOCOMMIT` 和 `NBLANE_DATA_GIT_AUTOPUSH` 自动提交 / 推送。Web 编辑器使用 file snapshot 做轻量并发保护。
+生产通过 `NBLANE_ROOT` 把数据目录独立到 `/srv/nblane-data`。每次写入可由 `NBLANE_DATA_GIT_AUTOCOMMIT` / `NBLANE_DATA_GIT_AUTOPUSH` 自动提交 / 推送；设置 → 助手与备份另有每日推送到私有远端。Web API 用文件指纹 ETag + `If-Match`（412）做并发保护，写入持有 flock 边车锁。
 
 ### 2.1 文件职责
 
@@ -65,16 +68,16 @@ auth/users.yaml
 | `kanban.md` | 当前工作计划、Doing / Queue / Done | 否。计划不应原样公开 |
 | `kanban-archive.md` | 已归档 Done 历史 | 否。可作为内部回顾源 |
 | `agent-profile.yaml` | Agent 侧结构化先验 | 否 |
-| `teams/*` | 团队共享池和协作规则 | 部分。需团队级 public layer |
-| `auth/users.yaml` | 小团队账号、profile/team 权限 | 否 |
+| `agent-journal.yaml` | Agent 写入撤销日志 | 否 |
+| `auth/users.yaml` | 账号、角色、profile 权限、Agent 标志 | 否 |
 
 ### 2.2 当前方案擅长什么
 
 - 人和 agent 都能直接读写。
 - Git diff 能显示成长轨迹与数据变更。
 - 小规模数据容易备份、恢复、迁移。
-- 与 CLI、MCP、Streamlit 工作台共享同一事实来源。
-- 适合「先草案、再人工确认、再写入」的 LLM 工作流。
+- CLI、SPA、Agent（HTTP）、本机 MCP 共享同一事实来源。
+- 适合「AI 出候选、人确认后写入」和「Agent 直写、可撤销」两种写入方式。
 
 ### 2.3 当前方案不擅长什么
 
@@ -101,8 +104,8 @@ auth/users.yaml
 | 博客视频 | 部分支持 | 优先外链；小型 `mp4` / `webm` 可本地 | 视频上传、转码、播放统计 |
 | 项目链接 | 部分在 evidence | `projects.yaml` 引用 evidence | 项目多、复杂筛选 |
 | 论文 / 专利 | 部分在 evidence | `outputs.yaml`，扩展 `patent` 等类型 | 引用统计、同步外部平台 |
-| 工作计划结合 | 部分：Done -> evidence | Publish pipeline | 多人协作、任务状态复杂 |
-| 小规模多用户 | 部分已有 auth | profile 目录隔离可继续 | 高并发、多实例部署 |
+| 工作计划结合 | Done -> evidence（结晶） | 公开发布管线 | 任务状态复杂 |
+| 少量账号 | 已有登录与 profile 权限 | profile 目录隔离可继续 | 高并发、多实例部署 |
 
 ---
 
@@ -279,11 +282,10 @@ Kanban Done
 适合继续文件优先：
 
 ```text
-1-20 个用户
+本人 + 自己的 Agent，少量账号
 每人一个 profile
-少量团队
 低并发编辑
-内部 Streamlit 工作台
+SPA 工作台（单进程 API）
 Git backup 审计
 ```
 
@@ -330,9 +332,9 @@ Git -> export / backup / audit snapshot
 
 | 阶段 | 存储策略 | 目标 |
 |------|----------|------|
-| v0 | 当前 `profiles/` 文件模型 | Private OS、Agent OS、小团队工作台 |
-| v1 | 新增 public layer 文件 | 个人网站 MVP、公开简历、博客、项目、成果 |
-| v2 | 新增 `public-site.yaml` manifest | 控制导航、精选内容、发布简历、主题与域名 |
+| v0 | `profiles/` 文件模型（已落地） | Private、Agent 层 |
+| v1 | public layer 文件（已落地） | 公开站、简历、博客、项目、成果 |
+| v2 | 公开站控制台与构建清单 | 导航、精选内容、上线开关 |
 | v3 | 媒体外置 | 图片 / 视频规模增长，减少 Git 大文件 |
 | v4 | 数据库主存储 | SaaS 多租户、高并发、搜索、审计、任务队列 |
 
@@ -353,21 +355,15 @@ Git -> export / backup / audit snapshot
 
 ---
 
-## 9. 后续实施建议
+## 9. 后续演进信号
 
-1. 先定义 `public-profile.yaml`、`resume-source.yaml`、`projects.yaml`、`outputs.yaml` 和 `blog/*.md` 的最小字段。
-2. 做静态公开网站生成器，让 `www.nblane.cloud` 展示 public layer。
-3. 将私有 Streamlit 工作台放到 `app.nblane.cloud` 或受保护路径。
-4. 在 Streamlit 中新增 public profile、blog、resume source 编辑器。
-5. 增加 Kanban Done -> evidence / blog draft / resume bullet / project update 的发布管线。
-6. 当媒体或用户规模上来后，再迁移对象存储和数据库。
-
----
+1. 媒体或 Git 仓库体积明显增长时，先把视频和大图迁到对象存储。
+2. 出现多实例部署或高频并发写时，再评估数据库主存储；在此之前保持单进程 + 文件锁。
 
 ## 10. 相关文档
 
 - [数据契约](data-contracts.md)
 - [产品总览](../product/overview.md)
 - [架构总览](overview.md)
-- [Web 体验设计](../product/web-experience.md)
+- [公开站点](../guides/public-site.md)
 - [技能证据 Skill evidence](../reference/evidence.md)

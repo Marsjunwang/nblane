@@ -7,19 +7,28 @@ pointers/summaries.
 
 ## Project overview
 
-nblane is a **Human + Agent + Team co-evolution system**: each user maintains
-a profile directory with a `SKILL.md` (a living document that doubles as an
-agent system prompt), a `skill-tree.yaml`, an `evidence-pool.yaml`, a
-`kanban.md`, and more. Teams share a product pool under `teams/`.
+nblane is a **Human + Agent co-evolution system** for one person and their
+own agent. Each user maintains a profile directory with a `SKILL.md` (a
+living document that doubles as an agent system prompt; `core/sync.py`
+rewrites its generated block, `core/context.py` builds the prompt), a
+`skill-tree.yaml`, an `evidence-pool.yaml`, a `kanban.md`, goals, projects,
+research and public-layer files.
 
 Design principles that shape all changes:
 
-- **File-first, no database, no server required**: YAML / Markdown files are
-  the source of truth; Git is the backup mechanism (optional `git_backup.py`).
-- Data lives in `profiles/<name>/`, `teams/<id>/`, `schemas/` — the Python
-  package in `src/nblane/` is pure logic over those files.
+- **File-first, no database**: YAML / Markdown files are the source of truth;
+  Git is the backup mechanism (`core/git_backup.py`). There are services
+  (SPA + API on 8504, Reader API on 8502), but they hold no state of their
+  own beyond the files.
+- Data lives in `profiles/<name>/` and `schemas/`; the Python package in
+  `src/nblane/` is logic over those files.
 - Mutation order matters: **pool → tree → validate → sync**
   (see `docs/zh/architecture/data-contracts.md`).
+- Agents reach nblane over HTTP with a service account; their writes are
+  direct and undoable, important ones need a chat confirmation
+  (`core/agent_policy.py`, see `docs/zh/guides/assistant.md`).
+- Public output is private by default and published only after human
+  confirmation.
 - `profiles/<name>/` is gitignored except `profiles/template/`, which is the
   reference layout. Real profiles (`alice/`, `王军/`) are user data — do not
   commit them or treat them as fixtures.
@@ -28,63 +37,81 @@ Design principles that shape all changes:
 
 - **Python ≥ 3.11**, packaged with setuptools (`pyproject.toml`), src layout.
   Install with `pip install -e .`. A `.venv/` at the repo root is the
-  convention (`scripts/dev-web.sh` requires `.venv/bin/uvicorn` and
-  `.venv/bin/streamlit`).
-- **CLI**: `nblane` entry point (`nblane.cli:main`), plus `nblane-mcp` (MCP
-  stdio server for Cursor integration).
-- **Web UI**: Streamlit multi-page app — `app.py` + `pages/*.py`, theme in
-  `.streamlit/config.toml`.
-- **Reader API sidecar**: FastAPI + uvicorn (`nblane.web_reader_api:app`)
-  serving the Research PDF reader / Paper Library. Local dev runs **both**
-  Streamlit (8503) and Reader API (8502).
-- **Streamlit custom components** with bundled frontends (Vite + React for
-  newer ones, static HTML for older ones) under
-  `src/nblane/*_component/frontend/`; built assets are declared in
-  `pyproject.toml` `[tool.setuptools.package-data]`.
-- **Node.js**: only for e2e tests (Playwright) and component frontend builds;
-  root `package.json` has `@playwright/test` only.
-- **LLM features**: OpenAI-compatible API via `src/nblane/core/llm.py`,
-  configured in `.env` (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`; see
-  `.env.example`). Optional: visual generation (DashScope/Wan), Codex
-  CLI/Cloud integration, self-hosted GROBID for PDF structure extraction.
-- Key deps: pyyaml, pydantic v2, streamlit, fastapi, openai, httpx, pandas,
-  PyMuPDF, pypdf, mcp. Lockfile: `uv.lock` (uv) — `requirements.txt` mirrors
-  `pyproject.toml` for pip users.
+  convention (`scripts/dev-web.sh` requires `.venv/bin/uvicorn`).
+- **CLI**: `nblane` entry point (`nblane.cli:main`).
+- **Web UI = SPA**: `src/nblane/web_ui/frontend` — Vite + React 18 +
+  TypeScript + Mantine 8 + TanStack Query + React Router; BlockNote for the
+  content editor, three.js for the home star map. Theme tokens live in
+  `src/theme.ts` (dark only). Build output `src/nblane/web_ui/static/` is
+  **committed** and shipped via `pyproject.toml` package-data, so installs
+  serve the SPA without Node.
+- **SPA backend** `nblane.web_api:app` (FastAPI, port **8504**): one process
+  serves both the built SPA and `/api/v1/*` (cookie session auth, ETag /
+  `If-Match` → 412 conflicts, jobs + SSE for long AI tasks, agent write
+  guard).
+- **Reader API** `nblane.web_reader_api:app` (FastAPI, port **8502**): paper
+  library and PDF reader pages that the SPA embeds via iframe, plus the
+  `/auth/session` login handoff.
+- **API contract**: FastAPI OpenAPI → `src/nblane/web_ui/frontend/openapi.json`
+  (committed snapshot) → `openapi-typescript` → `src/api/schema.d.ts`.
+- **MCP**: `nblane-mcp` (stdio) is for local Cursor / Claude Code only; no
+  login, no profile ACL. Not the assistant channel; expansion is paused.
+- **Node.js**: SPA and component frontend builds, vitest, Playwright e2e
+  (root `package.json` has `@playwright/test` only).
+- **LLM features**: OpenAI-compatible API via `src/nblane/core/llm.py` and
+  the AI Gateway in `src/nblane/core/ai/`, configured in `.env`
+  (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`; see `.env.example`).
+  Optional: local translation models (llama.cpp), self-hosted GROBID,
+  Codex CLI, visual generation.
+- Key deps: pyyaml, pydantic v2, fastapi, uvicorn, openai, httpx, PyMuPDF,
+  pypdf, mcp. Lockfile: `uv.lock` (uv) — `requirements.txt` mirrors
+  `pyproject.toml` for pip users. `streamlit` is still a dependency only
+  because legacy code has not been deleted yet.
 
 ## Repository layout
 
 - `src/nblane/` — the Python package:
-  - `cli.py` + `commands/` — CLI entry and subcommand implementations
-    (`profile`, `evidence`, `ingest`, `public`, `team`, `agent`, `codex`,
-    `research`, `auth`, `openclaw`, …).
+  - `cli.py` + `commands/` — CLI entry and subcommands (`profile`,
+    `evidence`, `ingest`, `public`, `agent`, `codex`, `research`, `health`,
+    `backup`, `openclaw`, …).
   - `core/` — all business logic, one module per domain concern:
-    `profile_io.py` / `schema_io.py` / `kanban_io.py` / `team_io.py` (domain
-    file I/O; `io.py` is a compatibility facade), `models.py` (dataclasses +
-    enums), `evidence_resolve.py`, `context.py` (system-prompt generation),
-    `validate.py`, `sync.py` (rewrites the generated block in `SKILL.md`),
-    `gap.py`, `profile_ingest*.py` + `ingest_*.py` (LLM resume/kanban
-    ingest: parse → merge → preview → apply), `llm.py`, `public_site.py`,
-    `research_workspace.py` + `research_papers/`, `ai/` (gateway, router,
-    backends, structured output), `auth.py`, `file_state.py` (write-conflict
-    detection), `file_lock.py` (advisory flock write locks), `git_backup.py`.
-  - `mcp_server.py` — MCP resources/tools over stdio.
-  - `web_*.py` — Streamlit helpers (shell, i18n, auth, cache, shared).
-  - `*_component/` — Streamlit custom components with `frontend/` subprojects.
-  - `i18n/{en,zh}/*.yaml` — UI copy, loaded lazily via `importlib.resources`.
-- `app.py`, `pages/` — Streamlit app entry and pages (Skill Tree, Gap
-  Analysis, Kanban, Team View, Profile Health, Output Studio, Research,
-  Review, Agent Activity, Public Build, Project Board, Settings, …).
-- `profiles/template/` — the only committed profile; copy template for
-  `nblane init`.
-- `schemas/` — domain skill-tree definitions (e.g. `robotics-engineer.yaml`)
-  plus Python schema helpers; `schemas/.learned/` is local-only, gitignored.
-- `teams/` — team data (`team.yaml`, `product-pool.yaml`); `_template/` +
-  `example-team/`.
-- `tests/` — pytest suite (~80 files, one per module) + `tests/e2e/`
-  (Playwright, TypeScript).
-- `scripts/dev-web.sh` — tmux dev launcher (see below).
-- `docs/zh/` — canonical docs (product / project / architecture / guides /
-  reference). Keep them in sync when you change documented behavior.
+    `profile_io.py` / `schema_io.py` / `kanban_io.py` (domain file I/O;
+    `io.py` is a compatibility facade), `models.py`, `evidence_*.py`,
+    `crystallize.py`, `goals.py`, `north_star.py`, `projects_board.py` /
+    `project_board*.py`, `activity_log.py`, `context.py`, `validate.py`,
+    `sync.py`, `ingest_*.py`, `content_workspace.py`, `career_workspace.py`,
+    `public_site.py`, `research_workspace.py` + `research_papers/`, `ai/`
+    (gateway, router, backends, structured output, runs), agent write policy
+    (`agent_policy.py`, `agent_ops.py`, `agent_journal.py`), `openclaw_*.py`,
+    `auth.py`, `file_state.py`, `file_lock.py`, `file_write.py`,
+    `git_backup.py`, `backup_targets.py`, `grobid_service.py`,
+    `workshop_service.py`.
+  - `web_api/` — SPA backend: `routes_v1.py` (most `/api/v1` routes),
+    `auth.py`, `agent_guard.py`, `assistant.py`, `agents_setup.py`,
+    `research*.py`, `workshop*.py`, `local_models.py`, `grobid.py`,
+    `jobs.py`, `schemas.py` (pydantic models), `spa.py` (static mount).
+  - `web_reader_api/` — Reader API (paper library, reader, auth handoff).
+  - `web_ui/frontend/` — SPA source (`src/pages`, `src/components`,
+    `src/starmap`, `src/api`); `web_ui/static/` — committed build output.
+  - `mcp_server.py` — local MCP stdio server.
+  - `i18n/{en,zh}/*.yaml` — Python-side UI copy.
+  - **Streamlit legacy, pending deletion, do not modify**: `app.py`,
+    `pages/`, `src/nblane/*_component/` (the Reader API still serves the
+    `paper_library_component` frontend and imports
+    `research_paper_reader_component.events`), `web_*.py` helpers
+    (`web_shared`, `web_cache`, `web_auth`, `web_page_shell`,
+    `web_output_studio`, `web_public_build`, …), `kanban_ui/`,
+    `research_ui/`, `evidence_editor_host.py`, `.streamlit/`; also
+    `core/team*.py` and `teams/`.
+- `profiles/template/` — the only committed profile; copied by `nblane init`.
+- `schemas/` — domain skill-tree definitions; `schemas/.learned/` is
+  local-only, gitignored.
+- `scripts/` — `dev-web.sh` (tmux dev launcher), `dump-openapi.sh`,
+  `openclaw/` (assistant skill `skills/nblane/SKILL.md`, HTTP client
+  `skills/bin/nblane_api.py`, installer).
+- `tests/` — pytest suite + `tests/e2e/` (Playwright, TypeScript).
+- `docs/zh/` — canonical docs. Keep them in sync when you change documented
+  behavior.
 
 ## Build and run commands
 
@@ -98,25 +125,38 @@ nblane init yourname
 nblane validate               # validate all profiles against schemas/
 nblane status                 # skill tree summary
 
-# Web dev (starts Reader API 8502 + Streamlit 8503 + SPA backend 8504 in tmux)
-scripts/dev-web.sh            # start (default)
-scripts/dev-web.sh --isolated # ports 18502/18503/18504, data in .dev-data/, no prod writes
+# Web dev: Reader API 8502 + SPA backend 8504 in tmux (Streamlit is off)
+scripts/dev-web.sh            # start (default command)
+scripts/dev-web.sh --reload   # uvicorn --reload --reload-dir src
+scripts/dev-web.sh --isolated # ports 18502/18504, data in .dev-data/ + .dev-assets/,
+                              # auth from .dev-data/auth/users.yaml if present
 scripts/dev-web.sh status|stop
+# Other options: --reader-port N, --web-api-port N, --no-web-api,
+# --profile NAME, --root PATH, --asset-root PATH, --grobid [--grobid-port N],
+# --env-file PATH, --auth-file PATH. Run with --help for the full list.
 
-# Component frontend rebuild (only for *_component/frontend changes)
+# SPA frontend (only for web_ui/frontend changes)
+cd src/nblane/web_ui/frontend
+npm install
+npm run dev                   # Vite on 5173, proxies /api to 8511
+                              # (VITE_API_PROXY_TARGET to override)
+npm run build                 # tsc + vite build into ../static — commit it
+npm run test                  # vitest
+
+# API contract changed? Regenerate types, then test + build
+scripts/dump-openapi.sh       # from repo root: updates openapi.json
+cd src/nblane/web_ui/frontend && npm run gen:api
+
+# Legacy component frontends (still built by CI)
 cd src/nblane/<name>_component/frontend && npm install && npm run build
-
-# SPA frontend rebuild (only for web_ui/frontend changes; output src/nblane/web_ui/static/
-# is committed + shipped via package-data, same convention as the components)
-cd src/nblane/web_ui/frontend && npm install && npm run build
 ```
 
 Environment variables that matter: `NBLANE_ROOT` (data root; defaults to repo
-root), `NBLANE_READER_API_BASE` (Streamlit → sidecar URL; if unreachable from
-the browser, Reader/Paper Library iframes render blank),
-`NBLANE_AUTH_FILE` (enables app-level login; empty disables),
-`UI_LANG` (`en`/`zh` Streamlit copy), `LLM_REPLY_LANG` (model prompt/reply
-language), `NBLANE_DISABLE_NETWORK_LOOKUPS` (set by tests).
+root), `NBLANE_AUTH_FILE` (enables login; empty = synthetic local admin),
+`NBLANE_READER_API_BASE` (SPA → Reader API origin; `0` means same origin
+behind Caddy; if unreachable from the browser the library/reader iframes are
+blank), `LLM_REPLY_LANG` (model reply language),
+`NBLANE_DISABLE_NETWORK_LOOKUPS` (set by tests).
 
 ## Testing instructions
 
@@ -126,44 +166,34 @@ language), `NBLANE_DISABLE_NETWORK_LOOKUPS` (set by tests).
 .venv/bin/pytest -q                    # full suite
 .venv/bin/pytest tests/test_gap.py -q  # one file
 
-# Browser e2e (requires a running dev server; baseURL from NBLANE_E2E_BASE_URL,
-# default http://127.0.0.1:8510)
+# SPA unit tests
+cd src/nblane/web_ui/frontend && npm run test
+
+# Browser e2e (requires a running dev stack; SPA specs default to
+# http://127.0.0.1:18504 via NBLANE_E2E_SPA_BASE_URL)
 npm install
 npm run test:e2e:install               # or npm run test:e2e:install:cn (China mirror)
-npm run test:e2e
+npm run test:e2e                       # all specs
+npm run test:e2e:spa                   # SPA smoke only
 ```
 
 - `tests/conftest.py` puts the repo root on `sys.path` and sets
   `NBLANE_DISABLE_NETWORK_LOOKUPS=1` — tests must not hit the network or
   require LLM keys.
 - Unit tests are plain pytest (some class-based), one `test_<module>.py` per
-  core module; use `tmp_path`-style isolation and never write to real
+  module; use `tmp_path`-style isolation and never write to real
   `profiles/`.
-- CI (`.github/workflows/ci.yml`) runs: `pip install -e .`, `pytest -q`,
-  `python -m nblane.cli validate`, `status`, and an import smoke of
-  `nblane.kanban_ui` + `nblane.core.profile_ingest`. Keep all four green.
+- `tests/test_web_api_openapi_snapshot.py` fails when `openapi.json` drifts
+  from the live app.
+- CI (`.github/workflows/ci.yml`) runs `pip install -e .`, `pytest -q`,
+  `python -m nblane.cli validate`, `status`, an import smoke, and the
+  `frontend-artifacts` job (rebuilds the SPA and component frontends and
+  fails if committed build output is stale). Keep them green.
 
-## Design workflow (binding for all agents, 2026-09-23)
+## Design workflow
 
-- **New directions need approval first**: pitch with a one-paragraph
-  description + reference position/links before any prototype; prototype only
-  after the owner approves the direction.
-- **Motion is judged in motion**: anything animated (transitions, particles,
-  living scenes) must be prototyped as an interactive/live demo (precedent:
-  the starmap playground) — never evaluated from static screenshots.
-- **Increments go straight to the real thing**: changes to existing,
-  already-live designs (labels, naming layers, removals) skip mockups — align
-  on position/effect in words first, then implement on the isolated stack
-  (18504) for hands-on review.
-- New designs build on the production texture/quality as baseline; mockups
-  validate composition and concepts, they do not redefine strokes.
-- **Every change names the pain it kills**: no "this might look nicer"
-  proposals — a change must declare which felt pain it removes. Pure aesthetic
-  experiments go to a prototype first. Identity-bearing grammar (polar
-  top-down view, stone-engraving texture, seal language, inscription cards)
-  is frozen by default unless a prototype proves a clear win (example: the
-  camera-tilt idea was discussed and shelved 2026-09-24 — revisit only if the
-  flat vocabulary provably falls short after the current tuning lands).
+See [`docs/zh/product/design-language.md`](docs/zh/product/design-language.md)
+(binding for all agents).
 
 ## Code style guidelines
 
@@ -175,10 +205,17 @@ npm run test:e2e
   of profile data around the codebase. Use `yaml.safe_load` semantics.
 - Compatibility facades exist (`core/io.py`, `core/profile_ingest.py`) —
   prefer the split modules (`ingest_parse/merge/preview/apply`) in new code.
-- New UI strings go into `src/nblane/i18n/{en,zh}/<section>.yaml`, not inline;
-  respect `UI_LANG` and the `NBLANE_UI_EMOJI=0` opt-out.
+- SPA copy lives in the frontend source (Chinese). Python-rendered UI copy
+  (Reader API pages) goes into `src/nblane/i18n/{en,zh}/<section>.yaml`, not
+  inline; respect `UI_LANG`.
 - New AI flows go through `core/ai/` (gateway/router/backends) and
-  `core/llm.py`; do not call provider SDKs directly from pages.
+  `core/llm.py`; do not call provider SDKs directly from routes or pages.
+- New mutating `/api/v1` routes must get an entry in
+  `web_api/agent_guard.py` `ROUTE_ACTIONS` (unmapped routes default to T2
+  for agent accounts) and, if journaled, an entity kind in
+  `core/agent_journal.py`.
+- Backend contract changes: run `scripts/dump-openapi.sh`, then
+  `npm run gen:api` in the SPA frontend; never hand-edit `schema.d.ts`.
 - Docs discipline (from `docs/zh/README.md`): active docs keep front matter
   (`status`, `owner`, `last_verified`, `source_of_truth`); product status
   lives only in `docs/zh/project/status.md` and `milestones.md`; do not add
@@ -190,21 +227,28 @@ npm run test:e2e
   `.env.example` documents all keys. Do not read or echo the real `.env`.
 - Personal data stays local: `profiles/*` (except `template/`) and
   `schemas/.learned/` are gitignored on purpose.
-- Path safety: profile/team IDs are user input — go through `profile_io.py`
+- Path safety: profile IDs are user input — go through `profile_io.py`
   path helpers rather than string-joining paths.
-- Web auth is optional and off by default for single-user local runs; enabling
-  `NBLANE_AUTH_FILE` turns on login, permissions, and file-conflict checks
-  (see `docs/zh/guides/deployment-tencent-cloud.md`).
-- Production deployment: systemd + Caddy, ports bound to `127.0.0.1`, never
-  expose `8501`/`8502`/GROBID `8070` directly.
+- Web auth is optional and off by default for single-user local runs; setting
+  `NBLANE_AUTH_FILE` turns on login. Roles are `admin` and `member` (member
+  sees only its own profiles); an account with `agent: true` is an agent
+  service account whose writes go through `web_api/agent_guard.py`
+  (journal + undo, 428 chat confirmation, 403 for web-only actions).
+- MCP stdio has no login and no ACL; keep it local.
+- Production: systemd + Caddy, ports bound to `127.0.0.1`; never expose
+  `8502`/`8504`/GROBID `8070` directly.
 - `config.yaml` at repo root is a **mihomo proxy config** (local network
   tooling), not app configuration — do not confuse it with nblane settings.
 
 ## Deployment
 
-- Local dev: `scripts/dev-web.sh` (tmux). SSH/IDE port forwarding must forward
-  **both** the Streamlit port and the Reader API sidecar port.
-- Production (small team / cloud): systemd + Caddy; see
-  `docs/zh/guides/deployment-tencent-cloud.md` and
+- Local dev: `scripts/dev-web.sh` (tmux). With SSH/IDE port forwarding,
+  forward **both** the SPA backend port (8504 / 18504) and the Reader API
+  port (8502 / 18502).
+- Production: systemd units `nblane-web-api.service` (8504) and
+  `nblane-reader.service` (8502) behind Caddy; code in
+  `/srv/nblane-app/nblane`, data in `/srv/nblane-data` (`NBLANE_ROOT`).
+  See `docs/zh/guides/deployment-tencent-cloud.md` and
   `docs/zh/guides/mihomo-deployment.md`.
-- Public static sites: `nblane public build <name> --out dist/public/<name>`.
+- Public static sites: `nblane public build <name> --out dist/public/<name>`
+  or the 公开站点 page.

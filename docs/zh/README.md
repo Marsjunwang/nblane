@@ -1,95 +1,101 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-09-20
+last_verified: 2026-10-07
 source_of_truth: true
 ---
 
 # nblane 中文文档
 
-中文文档是 nblane 的主事实源。英文文档只保留入口与关键摘要；产品定义、项目状态、架构边界、开发里程碑以本目录为准。
+中文文档是 nblane 的事实源。英文文档只保留入口。产品定义、项目状态、架构边界以本目录为准。
 
-## 推荐阅读路径
+## 阅读路径
 
 | 读者 | 阅读顺序 |
 |------|----------|
-| 新用户 | [产品总览](product/overview.md) -> [安装与 LLM 配置](guides/setup.md) -> [Web 使用手册](guides/web-ui.md) -> [看板使用手册](guides/kanban.md) |
-| 产品 / 项目管理 | [全局 Phase 计划](dev/phase-plan.md) -> [SPA 迁移总账](architecture/frontend-spa-migration.md) -> [路线图](product/roadmap.md) -> [当前状态](project/status.md) -> [问题与风险](project/issues.md) |
-| 开发者 | [架构总览](architecture/overview.md) -> [数据契约](architecture/data-contracts.md) -> [模块总览图](architecture/module-map.md) -> [CLI 参考](reference/cli.md) -> [MCP 参考](reference/mcp.md) |
-| Agent / 集成方 | [AI 架构](architecture/ai-architecture.md) -> [Agent Harness 集成](reference/agent-harness.md) -> [MCP 参考](reference/mcp.md) -> [OpenClaw 深度融合](architecture/openclaw-deep-integration.md) |
-| 运维 / 发布 | [腾讯云部署](guides/deployment-tencent-cloud.md) -> [Mihomo 代理部署](guides/mihomo-deployment.md) -> [存储演进](architecture/storage.md) -> [公开站点](guides/public-site.md) |
+| 新用户 | [产品总览](product/overview.md) → [安装与配置](guides/setup.md) → [Web 总览](guides/web-ui.md) → [首页](guides/home.md) → [项目](guides/projects.md) → [证据](guides/evidence.md) |
+| 开发者 | [架构总览](architecture/overview.md) → [数据契约](architecture/data-contracts.md) → [模块地图](architecture/module-map.md) → [SPA 现状总账](architecture/frontend-spa-migration.md) → [设计语言](product/design-language.md) → [CLI 参考](reference/cli.md) |
+| Agent 接入 | [AI 架构](architecture/ai-architecture.md) → [个人助手](guides/assistant.md) → [OpenClaw 运维](guides/openclaw-ops.md) → [Agent Harness](reference/agent-harness.md) → [MCP 参考](reference/mcp.md)（仅本机 Cursor / Claude Code） |
+| 部署 / 运维 | [腾讯云部署](guides/deployment-tencent-cloud.md) → [整机迁移](guides/migration.md) → [Mihomo 代理](guides/mihomo-deployment.md) → [OpenClaw 运维](guides/openclaw-ops.md) → [存储边界](architecture/storage.md) |
+| 产品 / 项目管理 | [路线图](product/roadmap.md) → [当前状态](project/status.md) → [里程碑](project/milestones.md) → [决策记录](project/decisions.md) → [问题与风险](project/issues.md) |
 
 ## 文档地图
 
-### Product
+### product/
 
 | 文档 | 作用 |
 |------|------|
-| [overview.md](product/overview.md) | nblane 是什么、用户是谁、核心对象和非目标 |
-| [phase-plan.md](dev/phase-plan.md) | 当前首个数据闭环验收口径与全局阶段计划 |
-| [growth-graph.md](product/growth-graph.md) | 成长关系图谱：事实沉淀为 evidence，evidence 支撑 skill，skill 构成 North Star 的能力地基 |
-| [roadmap.md](product/roadmap.md) | 当前统一路线图，替代旧 `product.md` / `design.md` 中分散的 Demo Phase |
-| [web-experience.md](product/web-experience.md) | Streamlit Web 体验设计和 backlog |
-| [paper_reading.md](product/paper_reading.md) | Research 论文阅读工作台开发文档：搜索、导入、PDF 高亮、翻译、AI 深读、GROBID 增强与引用导出 |
+| [overview.md](product/overview.md) | 定位、用户、核心对象、三层结构、非目标 |
+| [roadmap.md](product/roadmap.md) | 往后方向、暂不做、升级判断标准 |
+| [design-language.md](product/design-language.md) | 主题 token、身份语法、交互约定、设计流程 |
+| [growth-graph.md](product/growth-graph.md) | 成长图谱：evidence 支撑 skill，skill 构成北极星的地基 |
+| [paper_reading.md](product/paper_reading.md) | 论文阅读工作台：检索、导入、阅读、翻译、深读、GROBID |
 
-### Project
-
-| 文档 | 作用 |
-|------|------|
-| [status.md](project/status.md) | 当前实现状态、已落地能力和缺口 |
-| [milestones.md](project/milestones.md) | 开发里程碑总账 |
-| [issues.md](project/issues.md) | 当前问题、风险与待处理项 |
-| [decisions.md](project/decisions.md) | 关键产品/架构决策 |
-
-### Development
+### project/
 
 | 文档 | 作用 |
 |------|------|
-| [public-output-workspaces-design.md](dev/public-output-workspaces-design.md) | 内容工作台、求职工作台与公开站点的产品边界、数据契约和开发计划 |
+| [status.md](project/status.md) | 各功能区现状、已移除项、缺口与优先级 |
+| [milestones.md](project/milestones.md) | Phase 0–4 里程碑账本 |
+| [decisions.md](project/decisions.md) | 关键产品 / 架构决策 |
+| [issues.md](project/issues.md) | 当前问题与风险 |
 
-### Architecture
-
-| 文档 | 作用 |
-|------|------|
-| [overview.md](architecture/overview.md) | 当前代码、模块和运行时架构 |
-| [data-contracts.md](architecture/data-contracts.md) | Profile、看板、证据、公开层、研究层的数据真源与不变量 |
-| [module-map.md](architecture/module-map.md) | 模块化对象关系和总览图 |
-| [ai-architecture.md](architecture/ai-architecture.md) | Direct API、AI Gateway、MCP、Codex/OpenCode、ACP 的分层 |
-| [storage.md](architecture/storage.md) | 文件优先、Git、媒体、数据库演进边界 |
-| [openclaw-deep-integration.md](architecture/openclaw-deep-integration.md) | OpenClaw × nblane 深度融合分层方案：优先级、双记忆模型、MCP 补全、入口统一、生产布局 |
-| [frontend-spa-migration.md](architecture/frontend-spa-migration.md) | 前端从 Streamlit 到 React SPA + FastAPI 的迁移蓝图（融合方案 L5 展开） |
-| [integration-audit-2026-09-20.md](architecture/integration-audit-2026-09-20.md) | 融合开发全面审查报告：分域问题清单（blocker/major/minor）、完成度评分、修复优先级 |
-
-### Guides
+### architecture/
 
 | 文档 | 作用 |
 |------|------|
-| [setup.md](guides/setup.md) | 安装、依赖、LLM/Visual provider 配置 |
-| [web-ui.md](guides/web-ui.md) | Streamlit 页面使用手册 |
-| [kanban.md](guides/kanban.md) | 看板、Done 摄入、归档规则 |
-| [public-site.md](guides/public-site.md) | 公开资料、博客、简历、项目、静态构建 |
-| [blog-editor.md](guides/blog-editor.md) | Blog 编辑器、AI patch、视觉候选、发布检查 |
-| [deployment-tencent-cloud.md](guides/deployment-tencent-cloud.md) | 腾讯云小团队部署 |
-| [mihomo-deployment.md](guides/mihomo-deployment.md) | Mihomo 代理完整部署与运维 |
-| [migration.md](guides/migration.md) | 整机迁移 runbook：三树 + OpenClaw 侧 + 系统层的搬迁顺序与验收 |
-| [agent-setup.md](guides/agent-setup.md) | 设置页：个人 Agent（OpenClaw）一键安装/接入/迁移，数据备份私有远端向导与每日备份 |
-| [agent-write-policy.md](guides/agent-write-policy.md) | 个人 Agent 写入策略：日常直写可撤销、重要操作聊天二次确认（T0–T3、428 确认、撤销日志） |
-| [spa-experience-checklist.md](guides/spa-experience-checklist.md) | 体验官手册：融合 + SPA 全功能走查清单与问题记录表 |
+| [overview.md](architecture/overview.md) | 进程与端口、请求链路、鉴权、Agent 写入守卫、生产布局 |
+| [ai-architecture.md](architecture/ai-architecture.md) | AI Gateway、外部 harness、Agent 接入与写入策略 |
+| [data-contracts.md](architecture/data-contracts.md) | profile 文件真源、写入顺序、不变量 |
+| [module-map.md](architecture/module-map.md) | `src/nblane` 模块地图 |
+| [storage.md](architecture/storage.md) | 文件优先、Git 备份、公开层、数据库演进边界 |
+| [frontend-spa-migration.md](architecture/frontend-spa-migration.md) | SPA 技术栈、打包、契约与现状总账 |
 
-### Reference
+### guides/
+
+| 文档 | 作用 |
+|------|------|
+| [web-ui.md](guides/web-ui.md) | SPA 总览、导航、通用设置 |
+| [home.md](guides/home.md) | 首页星图、星表与目标、占卜、习惯印 |
+| [projects.md](guides/projects.md) | 项目：看板 / 时间轴 / 编年史、习惯阶段计划 |
+| [skill-tree.md](guides/skill-tree.md) | 技能树 |
+| [evidence.md](guides/evidence.md) | 证据五阶段、审阅、待补强、结晶 |
+| [research.md](guides/research.md) | 研究台：论文库、概览、阅读器、来源 |
+| [content.md](guides/content.md) | 内容工作台 |
+| [career.md](guides/career.md) | 求职工作台：简历、目标岗位、JD 定制 |
+| [public-site.md](guides/public-site.md) | 公开站点：公开层、构建、发布 |
+| [assistant.md](guides/assistant.md) | 个人助手：接入、写入策略、确认与撤销 |
+| [workshop.md](guides/workshop.md) | 车间网页终端 |
+| [openclaw-ops.md](guides/openclaw-ops.md) | OpenClaw 安装、接入、定时任务、备份 |
+| [setup.md](guides/setup.md) | 安装、依赖、LLM 配置 |
+| [deployment-tencent-cloud.md](guides/deployment-tencent-cloud.md) | 生产部署：systemd + Caddy |
+| [migration.md](guides/migration.md) | 整机迁移 runbook |
+| [mihomo-deployment.md](guides/mihomo-deployment.md) | Mihomo 代理部署与运维 |
+
+### reference/
 
 | 文档 | 作用 |
 |------|------|
 | [cli.md](reference/cli.md) | CLI 命令总览 |
-| [mcp.md](reference/mcp.md) | MCP resources/tools 与 Cursor/外部工程接入 |
-| [evidence.md](reference/evidence.md) | Evidence 字段、CLI、Web、上下文解析 |
+| [mcp.md](reference/mcp.md) | 本机 MCP resources / tools |
+| [evidence.md](reference/evidence.md) | Evidence 字段与解析 |
+| [skill-md-format.md](reference/skill-md-format.md) | `SKILL.md` 人写区与生成区 |
 | [skill-tree-schema.md](reference/skill-tree-schema.md) | `schemas/` 与 `skill-tree.yaml` |
-| [skill-md-format.md](reference/skill-md-format.md) | `SKILL.md` 人写区和生成区 |
-| [agent-harness.md](reference/agent-harness.md) | Codex/OpenCode 集成策略与生成配置 |
+| [agent-harness.md](reference/agent-harness.md) | Codex / OpenCode 等外部 harness 集成 |
 
-## 维护规则
+### dev/
 
-- Active 文档必须保留 front matter：`status`、`owner`、`last_verified`、`source_of_truth`。
-- 产品状态只写在 `project/status.md` 和 `project/milestones.md`，不要在使用手册里重复维护路线图。
-- 过程性工作计划合并后删除；不要再新增长期未维护的 `*-workplan.md`。
-- 涉及公开发布、Agent 写回、研究资料引用的行为，以 [数据契约](architecture/data-contracts.md) 和 [AI 架构](architecture/ai-architecture.md) 为准。
+| 文档 | 作用 |
+|------|------|
+| [phase0.5-remote-terminal.md](dev/phase0.5-remote-terminal.md) | 远程终端（车间）设计与待部署项 |
+| [public-output-workspaces-design.md](dev/public-output-workspaces-design.md) | 内容 / 求职工作台与公开站点的边界和契约 |
+
+英文入口：[../README.md](../README.md)；英文项目板指南：[../en/guides/project-board.md](../en/guides/project-board.md)。
+
+## 文档纪律
+
+- Active 文档必须保留 front matter 四项：`status`、`owner`、`last_verified`、`source_of_truth`。
+- 产品状态只写在 [status.md](project/status.md) 和 [milestones.md](project/milestones.md)，使用手册不重复维护路线图。
+- 过程性计划合并进正式文档后删除，不新增长期 `*-workplan.md`。
+- 规则只写一处，其他地方链接。Agent 写入规则以 [个人助手](guides/assistant.md) 和服务端 `core/agent_policy.py` 为准；公开发布与研究引用以 [数据契约](architecture/data-contracts.md) 为准。
+- 事实以代码为准；改了文档描述的行为，同步改文档。
