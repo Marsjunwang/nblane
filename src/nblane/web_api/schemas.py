@@ -28,6 +28,8 @@ class LlmConnectionResponse(BaseModel):
     model: str = ""
     api_key_set: bool = False
     configured: bool = False
+    max_tokens: int = 8192
+    analysis_max_tokens: int = 16384
 
 
 class LlmConnectionUpdateRequest(BaseModel):
@@ -41,6 +43,9 @@ class LlmConnectionUpdateRequest(BaseModel):
     model: str | None = None
     api_key: str = ""
     clear_api_key: bool = False
+    # Output token ceilings; None keeps the current value.
+    max_tokens: int | None = Field(default=None, ge=256, le=131072)
+    analysis_max_tokens: int | None = Field(default=None, ge=256, le=131072)
 
 
 class LlmConnectionVerifyResponse(BaseModel):

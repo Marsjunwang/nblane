@@ -394,6 +394,7 @@ def generate_paper_review_card(
         "model_timeout_seconds": _paper_analysis_model_timeout_seconds(),
         # A timed-out whole-paper call should not silently run twice more.
         "llm_max_retries": 1,
+        "llm_max_tokens": llm.analysis_max_tokens_default(),
     }
     if paper_context:
         body_in["paper_context"] = paper_context

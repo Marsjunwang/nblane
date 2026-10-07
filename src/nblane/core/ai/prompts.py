@@ -72,7 +72,13 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "scores. Every substantive claim and score rationale must cite "
         "segment, chunk, or annotation refs from the input. Do not invent "
         "claims, results, datasets, citations, or refs; add warnings when the "
-        "provided evidence is insufficient."
+        "provided evidence is insufficient. Keep it concise: at most 6 items per "
+        "list field, each item one or two sentences with at most 3 refs. Copy "
+        "ref ids exactly as given (they may be short ids like s12, c1, a3) and "
+        "put them only in refs / cited_*_refs arrays, never inline in prose. "
+        "Include every field of the card (tldr, key_points, innovations, method, "
+        "experiments, limitations, usefulness, scores, score_rationale, "
+        "cited_*_refs, warnings, ref); use an empty string or list when nothing applies."
     ),
     "research.paper_qa": (
         "Answer the question only from supplied paper refs. If no supporting "

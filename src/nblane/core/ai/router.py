@@ -170,23 +170,11 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
         fallback_backend="rule_fallback",
         output_mode="json",
         activity_policy="candidate",
+        # Only the fields the card cannot do without are required: a long
+        # generation that skips e.g. "usefulness" is still a usable card, and
+        # the normalizer fills missing lists. Failing it wasted a 2-min call.
         schema=schema_for_keys(
-            [
-                "tldr",
-                "key_points",
-                "innovations",
-                "method",
-                "experiments",
-                "limitations",
-                "usefulness",
-                "scores",
-                "score_rationale",
-                "cited_segment_refs",
-                "cited_chunk_refs",
-                "cited_annotation_refs",
-                "warnings",
-                "ref",
-            ],
+            ["tldr", "key_points", "scores"],
             properties={
                 "key_points": {
                     "type": "array",

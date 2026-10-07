@@ -552,6 +552,18 @@ def get_health() -> HealthResponse:
     return HealthResponse(ok=True, version=app_version())
 
 
+def _connection_response() -> LlmConnectionResponse:
+    config = llm_client.current_config(mask_key=True)
+    return LlmConnectionResponse(
+        base_url=str(config.get("base_url") or ""),
+        model=str(config.get("model") or ""),
+        api_key_set=bool(config.get("configured")),
+        configured=bool(config.get("configured")),
+        max_tokens=llm_client.max_tokens_default(),
+        analysis_max_tokens=llm_client.analysis_max_tokens_default(),
+    )
+
+
 @router.get(
     "/settings/connection",
     response_model=LlmConnectionResponse,
@@ -561,13 +573,7 @@ def get_settings_connection(
     _user: CurrentUser = Depends(require_admin),
 ) -> LlmConnectionResponse:
     """Return deployment LLM settings without exposing the API key."""
-    config = llm_client.current_config(mask_key=True)
-    return LlmConnectionResponse(
-        base_url=str(config.get("base_url") or ""),
-        model=str(config.get("model") or ""),
-        api_key_set=bool(config.get("configured")),
-        configured=bool(config.get("configured")),
-    )
+    return _connection_response()
 
 
 @router.put(
@@ -591,13 +597,11 @@ def update_settings_connection(
         api_key,
         body.model if body.model is not None else str(current.get("model") or ""),
     )
-    config = llm_client.current_config(mask_key=True)
-    return LlmConnectionResponse(
-        base_url=str(config.get("base_url") or ""),
-        model=str(config.get("model") or ""),
-        api_key_set=bool(config.get("configured")),
-        configured=bool(config.get("configured")),
+    llm_client.set_env_output_limits(
+        max_tokens=body.max_tokens,
+        analysis_max_tokens=body.analysis_max_tokens,
     )
+    return _connection_response()
 
 
 @router.post(

@@ -57,11 +57,15 @@ class DirectLLMBackend:
             )
         prompt = prompt_for_action(request, spec)
         use_stream = _stream_llm_action(request)
+        max_tokens = _nonnegative_int_override(request.payload, "llm_max_tokens") or None
+        meta: dict[str, Any] = {}
         raw = llm.chat(
             prompt.system,
             prompt.user,
             temperature=spec.temperature,
             stream=use_stream,
+            max_tokens=max_tokens,
+            meta_out=meta,
             model=_model_override(request.payload),
             timeout=_positive_float_override(
                 request.payload,
@@ -88,6 +92,19 @@ class DirectLLMBackend:
             )
         if spec.output_mode == "json":
             validation = validate_json_response(raw, spec.schema)
+            if not validation.ok and meta.get("finish_reason") == "length":
+                limit = max_tokens or llm.max_tokens_default()
+                return AIActionResult(
+                    ok=False,
+                    action=request.action,
+                    backend=self.name,
+                    run_id=run_id,
+                    content=raw,
+                    error=(
+                        f"output_truncated: 模型输出达到 {limit} token 上限被截断，"
+                        "JSON 不完整；可在「设置 → AI 服务」调高输出上限"
+                    ),
+                )
             if not validation.ok:
                 return AIActionResult(
                     ok=False,

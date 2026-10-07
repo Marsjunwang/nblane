@@ -426,32 +426,44 @@ def _compact_paper_for_analysis(
 
     picked = _section_aware_paper_segments(segment_rows, limit=segment_limit)
     segments = _compact_picked_segments(picked, limit=segment_limit, char_limit=char_limit)
-    for row in segments:
+    # Full ids like "seg:source-research-20261004-001:00003" are ~35 chars and
+    # a review card cites hundreds of them, which alone ate a third of the
+    # output budget. The model sees short aliases; expand_analysis_refs maps
+    # them back so saved refs (and Reader jump links) are unchanged.
+    aliases: dict[str, str] = {}
+    for index, row in enumerate(segments, start=1):
+        aliases[f"s{index}"] = str(row["segment_id"])
+        row["segment_id"] = f"s{index}"
         row.pop("source_id", None)
         row.pop("text_hash", None)
-    chunks = [
-        {
-            "id": row.id,
-            "title": row.title,
-            "kind": row.kind,
-            "locator": row.locator,
-            "text": str(row.text or "").strip()[:800],
-        }
-        for row in list(chunk_rows)[:20]
-    ]
-    annotations = [
-        {
-            "id": row.id,
-            "kind": row.kind,
-            "page": row.page,
-            "selected_text": str(row.selected_text or "").strip()[:600],
-            "note": str(row.note or "").strip()[:600],
-        }
-        for row in list(annotation_rows)[:30]
-        if str(row.status or "active") == "active"
-    ]
+        row.pop("locator", None)
+    chunks = []
+    for index, row in enumerate(list(chunk_rows)[:20], start=1):
+        aliases[f"c{index}"] = str(row.id)
+        chunks.append(
+            {
+                "id": f"c{index}",
+                "title": row.title,
+                "kind": row.kind,
+                "text": str(row.text or "").strip()[:800],
+            }
+        )
+    annotations = []
+    active = [row for row in annotation_rows if str(row.status or "active") == "active"]
+    for index, row in enumerate(active[:30], start=1):
+        aliases[f"a{index}"] = str(row.id)
+        annotations.append(
+            {
+                "id": f"a{index}",
+                "kind": row.kind,
+                "page": row.page,
+                "selected_text": str(row.selected_text or "").strip()[:600],
+                "note": str(row.note or "").strip()[:600],
+            }
+        )
     pages = sorted({int(row.get("page") or 0) for row in segments if int(row.get("page") or 0) > 0})
     return {
+        "aliases": aliases,
         "segments": segments,
         "chunks": chunks,
         "annotations": annotations,
@@ -462,6 +474,20 @@ def _compact_paper_for_analysis(
             "sections_covered": _deep_read_sections_covered(segments),
         },
     }
+
+
+def expand_analysis_refs(value: Any, aliases: dict[str, str]) -> Any:
+    """Replace short ref aliases (s3, c1, a2) with the real ids, recursively."""
+
+    if not aliases:
+        return value
+    if isinstance(value, dict):
+        return {key: expand_analysis_refs(item, aliases) for key, item in value.items()}
+    if isinstance(value, list):
+        return [expand_analysis_refs(item, aliases) for item in value]
+    if isinstance(value, str):
+        return aliases.get(value.strip(), value)
+    return value
 
 
 def _compact_segments_for_deep_read(
@@ -2050,6 +2076,8 @@ def _handle_reader_action_inner(
             paper_context=analysis_context["paper_context"],
             require_review=False,
         )
+        if isinstance(ai_result.structured, dict):
+            ai_result.structured = expand_analysis_refs(ai_result.structured, analysis_context["aliases"])
         emit_analysis_progress("normalizing", "Normalizing analysis output…", current=3, total=5)
         structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
         analysis = _normalize_paper_analysis(structured, source_id) if structured else _normalize_paper_analysis({}, source_id)
@@ -2343,6 +2371,8 @@ def _handle_reader_action_inner(
             paper_context=analysis_context["paper_context"],
             require_review=False,
         )
+        if isinstance(ai_result.structured, dict):
+            ai_result.structured = expand_analysis_refs(ai_result.structured, analysis_context["aliases"])
         structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
         analysis = _normalize_paper_analysis(structured, source_id) if structured else _normalize_paper_analysis({}, source_id)
         if structured and not _should_save_quick_analysis(profile, source_id, ai_result):

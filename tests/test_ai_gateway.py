@@ -283,6 +283,32 @@ class TestAIGateway(unittest.TestCase):
         payload = run.call_args.args[1]
         self.assertEqual(payload["model_timeout_seconds"], 300.0)
         self.assertEqual(payload["llm_max_retries"], 1)
+        self.assertEqual(payload["llm_max_tokens"], 16384)
+
+    def test_direct_backend_reports_truncated_json_output(self) -> None:
+        """finish_reason=length with broken JSON names the token ceiling."""
+
+        spec = get_action_spec("research.paper_review_card")
+        request = AIActionRequest(
+            action="research.paper_review_card",
+            profile="",
+            payload={"source_id": "source:paper:1", "llm_max_tokens": 4096},
+        )
+
+        def fake_chat(*args, **kwargs):
+            kwargs["meta_out"]["finish_reason"] = "length"
+            return '{"tldr": "cut off'
+
+        with (
+            patch("nblane.core.llm.is_configured", return_value=True),
+            patch("nblane.core.llm.chat", side_effect=fake_chat) as chat,
+        ):
+            result = DirectLLMBackend().run(request, spec)  # type: ignore[arg-type]
+
+        self.assertFalse(result.ok)
+        self.assertEqual(chat.call_args.kwargs["max_tokens"], 4096)
+        self.assertTrue(result.error.startswith("output_truncated:"))
+        self.assertIn("4096", result.error)
 
     def test_translate_paper_segments_sets_long_translation_timeout(self) -> None:
         """Full-paper translation batches should not inherit short UI polling limits."""

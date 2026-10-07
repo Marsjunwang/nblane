@@ -142,6 +142,7 @@ describe('PaperOverviewPage', () => {
       'href',
       '/p/alice/research/papers/source%3Apaper%3Ademo/read?mode=compare',
     );
+    expect(screen.getByRole('link', { name: /继续阅读 · 第 5 页/ })).toHaveAttribute('target', 'nblane-reader-source_paper_demo');
     const card = screen.getByTestId('paper-quick-analysis');
     expect(within(card).getByText('Transformer replaces recurrence with attention.')).toBeInTheDocument();
     // seg:5 + seg:6 both resolve to page 2 → one deduplicated chip.
@@ -151,6 +152,7 @@ describe('PaperOverviewPage', () => {
       '/p/alice/research/papers/source%3Apaper%3Ademo/read?page=4',
       '/p/alice/research/papers/source%3Apaper%3Ademo/read?page=3',
     ]);
+    expect(new Set(chips.map((chip) => chip.getAttribute('target')))).toEqual(new Set(['nblane-reader-source_paper_demo']));
     expect(within(card).getByText(/引用 3 \/ 15 页/)).toBeInTheDocument();
     expect(within(screen.getByTestId('paper-scores')).getByText('新颖性')).toBeInTheDocument();
     // Empty sections say so instead of disappearing.

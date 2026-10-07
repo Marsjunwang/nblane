@@ -54,6 +54,12 @@ _DEFAULT_TIMEOUT_SECONDS = 90.0
 # truncates long generations such as a whole-document reorganize. Send an
 # explicit, generous ceiling instead. Override via ``LLM_MAX_TOKENS``.
 _DEFAULT_MAX_TOKENS = 8192
+# Whole-paper analysis writes a long structured card; give it its own,
+# higher ceiling so it is not truncated mid-JSON. Override via
+# ``LLM_ANALYSIS_MAX_TOKENS`` (Settings → AI 服务).
+_DEFAULT_ANALYSIS_MAX_TOKENS = 16384
+MAX_TOKENS_FLOOR = 256
+MAX_TOKENS_CEILING = 131072
 
 _BASE_URL: str = os.getenv("LLM_BASE_URL", _DEFAULT_BASE_URL)
 _API_KEY: str = os.getenv("LLM_API_KEY", "")
@@ -263,11 +269,60 @@ def max_tokens_default() -> int:
     low-default truncation some gateways apply when ``max_tokens`` is omitted.
     """
 
+    return _env_token_limit("LLM_MAX_TOKENS", _DEFAULT_MAX_TOKENS)
+
+
+def analysis_max_tokens_default() -> int:
+    """Return the output token ceiling for whole-paper analysis actions."""
+
+    return _env_token_limit("LLM_ANALYSIS_MAX_TOKENS", _DEFAULT_ANALYSIS_MAX_TOKENS)
+
+
+def _env_token_limit(name: str, default: int) -> int:
     try:
-        value = int(os.getenv("LLM_MAX_TOKENS", str(_DEFAULT_MAX_TOKENS)))
+        value = int(os.getenv(name, str(default)) or default)
     except ValueError:
-        value = _DEFAULT_MAX_TOKENS
-    return max(256, value)
+        value = default
+    return max(MAX_TOKENS_FLOOR, min(MAX_TOKENS_CEILING, value))
+
+
+def set_env_output_limits(
+    *,
+    max_tokens: int | None = None,
+    analysis_max_tokens: int | None = None,
+) -> None:
+    """Persist output token ceilings to ``.env`` and apply them live.
+
+    ``None`` leaves a value unchanged. Values are read from the environment
+    on every call, and other processes pick them up through
+    :func:`reload_env_if_changed`.
+    """
+    try:
+        from dotenv import set_key
+    except ImportError as exc:
+        raise RuntimeError(
+            "python-dotenv is required to save LLM output limits"
+        ) from exc
+
+    global _ENV_FILE_MTIME
+
+    updates = {
+        "LLM_MAX_TOKENS": max_tokens,
+        "LLM_ANALYSIS_MAX_TOKENS": analysis_max_tokens,
+    }
+    if all(value is None for value in updates.values()):
+        return
+    if not _ENV_FILE.exists():
+        _ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _ENV_FILE.touch(mode=0o600)
+        os.chmod(_ENV_FILE, 0o600)
+    for name, value in updates.items():
+        if value is None:
+            continue
+        clean = str(max(MAX_TOKENS_FLOOR, min(MAX_TOKENS_CEILING, int(value))))
+        set_key(str(_ENV_FILE), name, clean)
+        os.environ[name] = clean
+    _ENV_FILE_MTIME = _env_file_mtime()
 
 
 def reply_language(text: str | None = None) -> str:

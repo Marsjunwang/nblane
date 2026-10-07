@@ -45,6 +45,7 @@ import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 
 import {
   paperReaderPath,
+  readerTabTarget,
   usePaperJob,
   usePaperOverview,
 } from '../api/paperHooks';
@@ -124,6 +125,7 @@ function RefChips({ refs, profile, sourceId }: { refs: PaperRef[]; profile: stri
           key={page}
           component={Link}
           to={paperReaderPath(profile, sourceId, { page })}
+          target={readerTabTarget(sourceId)}
           aria-label={`在阅读器中打开第 ${page} 页`}
           style={{
             fontFamily: 'inherit',
@@ -603,7 +605,7 @@ function SidePanels({ data, profile, sourceId }: { data: PaperOverview; profile:
                 )}
                 {note.note && <Text size="xs" c={chrome.text} mt={4} lineClamp={2}>{note.note}</Text>}
                 {note.page > 0 && (
-                  <Anchor component={Link} to={paperReaderPath(profile, sourceId, { page: note.page })} size="xs" c={chrome.goldText}>
+                  <Anchor component={Link} to={paperReaderPath(profile, sourceId, { page: note.page })} target={readerTabTarget(sourceId)} size="xs" c={chrome.goldText}>
                     第 {note.page} 页
                   </Anchor>
                 )}
@@ -734,6 +736,7 @@ export function PaperOverviewPage() {
               <Button
                 component={Link}
                 to={paperReaderPath(name, sourceId)}
+                target={readerTabTarget(sourceId)}
                 color="brand"
                 leftSection={progress.last_page > 0 ? <IconPlayerPlay size={15} /> : <IconBook2 size={15} />}
                 disabled={readerDisabled}
@@ -745,6 +748,7 @@ export function PaperOverviewPage() {
             <Button
               component={Link}
               to={paperReaderPath(name, sourceId, { mode: 'compare' })}
+              target={readerTabTarget(sourceId)}
               variant="default"
               leftSection={<IconLayoutColumns size={15} />}
               disabled={readerDisabled}

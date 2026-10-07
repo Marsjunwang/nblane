@@ -33,7 +33,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { useResearch } from '../api/hooks';
-import { paperLibraryPath, paperOverviewPath, paperReaderPath, researchSourcesPath } from '../api/paperHooks';
+import { paperLibraryPath, paperOverviewPath, paperReaderPath, readerTabTarget, researchSourcesPath } from '../api/paperHooks';
 import type { ResearchPaperItem } from '../api/types';
 import { chrome } from '../theme';
 
@@ -210,7 +210,7 @@ export function ResearchPage() {
           {nextPaper?.pdf_available ? (
             <Group gap="xs" wrap="nowrap">
               <Button component={Link} to={paperOverviewPath(name, nextPaper.id)} variant="default">论文概览</Button>
-              <Button component={Link} to={paperReaderPath(name, nextPaper.id)} color="brand" leftSection={<IconPlayerPlay size={15} />}>继续阅读</Button>
+              <Button component={Link} to={paperReaderPath(name, nextPaper.id)} target={readerTabTarget(nextPaper.id)} color="brand" leftSection={<IconPlayerPlay size={15} />}>继续阅读</Button>
             </Group>
           ) : data.sidecar?.paper_library_url ? (
             <Button component={Link} to={paperLibraryPath(name)} variant="default" leftSection={<IconLibrary size={15} />}>选择论文</Button>

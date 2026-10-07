@@ -7922,6 +7922,11 @@ export interface components {
          */
         LlmConnectionResponse: {
             /**
+             * Analysis Max Tokens
+             * @default 16384
+             */
+            analysis_max_tokens: number;
+            /**
              * Api Key Set
              * @default false
              */
@@ -7937,6 +7942,11 @@ export interface components {
              */
             configured: boolean;
             /**
+             * Max Tokens
+             * @default 8192
+             */
+            max_tokens: number;
+            /**
              * Model
              * @default
              */
@@ -7950,6 +7960,8 @@ export interface components {
          *     the explicit operation for removing it.
          */
         LlmConnectionUpdateRequest: {
+            /** Analysis Max Tokens */
+            analysis_max_tokens?: number | null;
             /**
              * Api Key
              * @default
@@ -7962,6 +7974,8 @@ export interface components {
              * @default false
              */
             clear_api_key: boolean;
+            /** Max Tokens */
+            max_tokens?: number | null;
             /** Model */
             model?: string | null;
         };

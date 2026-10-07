@@ -46,6 +46,15 @@ export function paperOverviewPath(profile: string, sourceId: string): string {
 }
 
 /** SPA route of the Reader for one paper, with optional page / mode. */
+/**
+ * Reader links open beside the overview. Every link for one paper targets the
+ * same named tab, so clicking several citations jumps that tab instead of
+ * piling up new ones.
+ */
+export function readerTabTarget(sourceId: string): string {
+  return `nblane-reader-${sourceId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+}
+
 export function paperReaderPath(
   profile: string,
   sourceId: string,

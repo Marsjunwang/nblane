@@ -5,7 +5,7 @@ import { Route, Routes, useLocation } from 'react-router-dom';
 import { jsonResponse, renderWithProviders } from '../test/render';
 import { SettingsPage } from './SettingsPage';
 
-const CONNECTION = { base_url: 'https://api.example.test/v1', model: 'gpt-test', api_key_set: true, configured: true };
+const CONNECTION = { base_url: 'https://api.example.test/v1', model: 'gpt-test', api_key_set: true, configured: true, max_tokens: 8192, analysis_max_tokens: 16384 };
 
 const PROFILE_SETTINGS = {
   profile: 'alice',
@@ -116,7 +116,7 @@ describe('SettingsPage', () => {
     fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'new-secret' } });
     fireEvent.click(screen.getByRole('button', { name: '保存连接' }));
     await waitFor(() => expect(calls.some((call) => call.method === 'PUT' && call.url === '/settings/connection')).toBe(true));
-    expect(calls.find((call) => call.method === 'PUT')?.body).toEqual({ base_url: CONNECTION.base_url, model: CONNECTION.model, api_key: 'new-secret', clear_api_key: false });
+    expect(calls.find((call) => call.method === 'PUT')?.body).toEqual({ base_url: CONNECTION.base_url, model: CONNECTION.model, api_key: 'new-secret', clear_api_key: false, max_tokens: 8192, analysis_max_tokens: 16384 });
   });
 
   it('hides 系统 from members and never requests deployment settings', async () => {

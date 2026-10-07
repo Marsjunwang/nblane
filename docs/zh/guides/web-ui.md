@@ -288,6 +288,10 @@ Direct LLM 的 `research.paper_translate` 默认启用流式请求（`NBLANE_STR
 最多 60 段、约 3.6 万字正文，同样默认流式（`NBLANE_STREAM_PAPER_ANALYSIS=1`），单次调用预算
 `NBLANE_PAPER_ANALYSIS_MODEL_TIMEOUT_SECONDS=300` 秒、最多重试 1 次。模型失败而退回规则占位时，
 这次调用会以「AI 降级」出现在右上角「AI 异常」里，附带原始错误（例如 `Request timed out`）。
+发给模型的段落用 `s3` 这类短编号，返回后换回完整 segment id，保存的引用和 Reader 跳转不变。
+快速分析的输出上限单独设置（「设置 → AI 服务」的「论文分析输出上限」，即 `LLM_ANALYSIS_MAX_TOKENS`，
+默认 16384；其他动作用 `LLM_MAX_TOKENS`，默认 8192）。模型写满上限时报 `output_truncated`，提示调高。
+概览页的「开始/继续阅读」「对照阅读」和引用页码都在新标签页打开，同一篇论文共用一个阅读器标签页。
 详情页 `Retry translation` 旁可选择翻译模式：
 
 - `Fast body`：默认值。使用带 PDF 定位的 structure 单元，只翻正文、标题和图表 caption，跳过参考文献。

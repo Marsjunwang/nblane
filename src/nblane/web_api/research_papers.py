@@ -953,8 +953,10 @@ _register(
         validate=_validate_paper_job_input,
         run=_make_runner(KIND_PAPER_QUICK_ANALYSIS),
         queued_message="已排队：快速分析。",
-        timeout_seconds=600,
-        timeout_message="快速分析超时（10 分钟），请重试。",
+        # A 16k-token card at ~30 tok/s takes ~9 minutes; stay below the
+        # 20-minute job prune like deep read.
+        timeout_seconds=1140,
+        timeout_message="快速分析超时（19 分钟），请重试；可在「设置 → AI 服务」调低分析输出上限。",
     )
 )
 _register(

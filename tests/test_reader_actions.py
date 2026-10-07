@@ -1056,10 +1056,40 @@ class TestReaderActions(unittest.TestCase):
         rows = kwargs["segments"]
         self.assertLessEqual(len(rows), 60)
         self.assertLessEqual(sum(len(row["text"]) for row in rows), 36_000)
-        self.assertIn("seg:218", [row["segment_id"] for row in rows])
+        self.assertTrue(any(row["text"].startswith("Passage 218 ") for row in rows))
         self.assertNotIn("rects", rows[0])
         self.assertNotIn("text_hash", rows[0])
         self.assertEqual(kwargs["paper_context"]["source_segments"], 218)
+        # The model sees short aliases instead of 35-char segment ids.
+        self.assertEqual(rows[0]["segment_id"], "s1")
+        self.assertTrue(all(len(row["segment_id"]) <= 4 for row in rows))
+
+    def test_analyze_paper_expands_short_refs_before_saving(self) -> None:
+        ai_result = SimpleNamespace(
+            ok=True,
+            backend="direct_llm",
+            structured={
+                "tldr": "Useful.",
+                "key_points": [{"text": "Point", "refs": ["s1"]}],
+                "cited_segment_refs": ["s1"],
+            },
+            warnings=[],
+            error="",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.reader_actions.generate_paper_review_card", return_value=ai_result) as card,
+            ):
+                handle_reader_action(ctx, "analyze_paper", {"page": 1})
+            analysis = load_paper_analysis(profile, ctx.source_id)
+
+        real_id = card.call_args.kwargs["segments"][0]
+        self.assertEqual(real_id["segment_id"], "s1")
+        self.assertNotIn("s1", analysis["cited_segment_refs"])
+        self.assertTrue(analysis["cited_segment_refs"][0].startswith("seg:"))
 
     def test_analyze_paper_rule_fallback_keeps_existing_analysis(self) -> None:
         good = SimpleNamespace(

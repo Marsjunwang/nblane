@@ -1,6 +1,6 @@
 // 系统 · AI 服务: deployment LLM connection and Codex CLI readiness (admin).
 
-import { Badge, Button, Center, Checkbox, Code, Group, Loader, PasswordInput, SimpleGrid, Stack, Text, TextInput } from '@mantine/core';
+import { Badge, Button, Center, Checkbox, Code, Group, Loader, NumberInput, PasswordInput, SimpleGrid, Stack, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconDeviceFloppy, IconKey, IconPlugConnected, IconTerminal2 } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
@@ -22,11 +22,15 @@ function ConnectionCard() {
   const [model, setModel] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [clearApiKey, setClearApiKey] = useState(false);
+  const [maxTokens, setMaxTokens] = useState<number | string>(8192);
+  const [analysisMaxTokens, setAnalysisMaxTokens] = useState<number | string>(16384);
 
   useEffect(() => {
     if (connection.data) {
       setBaseUrl(connection.data.base_url);
       setModel(connection.data.model);
+      setMaxTokens(connection.data.max_tokens);
+      setAnalysisMaxTokens(connection.data.analysis_max_tokens);
       // The API key is deliberately never populated from the response.
       setApiKey('');
       setClearApiKey(false);
@@ -37,7 +41,15 @@ function ConnectionCard() {
   if (connection.isError) return <ErrorAlert error={connection.error} />;
 
   const submit = () => {
-    const body: LlmConnectionUpdate = { base_url: baseUrl, model, api_key: apiKey, clear_api_key: clearApiKey };
+    const tokens = (value: number | string) => (typeof value === 'number' ? value : null);
+    const body: LlmConnectionUpdate = {
+      base_url: baseUrl,
+      model,
+      api_key: apiKey,
+      clear_api_key: clearApiKey,
+      max_tokens: tokens(maxTokens),
+      analysis_max_tokens: tokens(analysisMaxTokens),
+    };
     save.mutate(body, {
       onSuccess: () => {
         setApiKey('');
@@ -54,6 +66,11 @@ function ConnectionCard() {
         <TextInput label="默认模型" placeholder="gpt-4o-mini" value={model} onChange={(event) => setModel(event.currentTarget.value)} />
       </SimpleGrid>
       <PasswordInput label="API Key" description={connection.data.api_key_set ? '服务端已保存 Key；留空表示保留现有值。' : '尚未配置 API Key。'} placeholder="只在新增或更换时填写" value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} leftSection={<IconKey size={16} />} />
+      <SimpleGrid cols={{ base: 1, sm: 2 }}>
+        <NumberInput label="输出上限（token）" description="大多数 AI 动作每次回复的最大长度，默认 8192。" min={256} max={131072} step={1024} thousandSeparator="," value={maxTokens} onChange={setMaxTokens} />
+        <NumberInput label="论文分析输出上限（token）" description="快速分析 / 阅读回顾卡专用，默认 16384。越大越完整也越慢。" min={256} max={131072} step={1024} thousandSeparator="," value={analysisMaxTokens} onChange={setAnalysisMaxTokens} />
+      </SimpleGrid>
+      <Text size="xs" c="dimmed">上限不能超过模型本身的最大输出（例如 qwen3.8-flash 为 131072）；超过时服务商会报错。输出被截断时，「AI 异常」里会提示调高。</Text>
       <Checkbox label="清除服务端 API Key" checked={clearApiKey} onChange={(event) => { setClearApiKey(event.currentTarget.checked); if (event.currentTarget.checked) setApiKey(''); }} />
       <Group>
         <Button leftSection={<IconDeviceFloppy size={16} />} loading={save.isPending} onClick={submit}>保存连接</Button>

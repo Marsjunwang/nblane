@@ -110,6 +110,28 @@ class TestWebApiSettings(unittest.TestCase):
         self.assertEqual(cleared.status_code, 200)
         self.assertFalse(cleared.json()["api_key_set"])
 
+    def test_connection_saves_output_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _profile(root)
+            client = self._client(root)
+            with (
+                patch("nblane.core.llm._ENV_FILE", root / ".env"),
+                patch.dict(os.environ, {"LLM_MAX_TOKENS": "", "LLM_ANALYSIS_MAX_TOKENS": ""}),
+            ):
+                before = client.get("/api/v1/settings/connection").json()
+                saved = client.put(
+                    "/api/v1/settings/connection",
+                    json={"max_tokens": 4096, "analysis_max_tokens": 32768},
+                )
+                too_big = client.put("/api/v1/settings/connection", json={"analysis_max_tokens": 200000})
+                env_text = (root / ".env").read_text()
+        self.assertEqual((before["max_tokens"], before["analysis_max_tokens"]), (8192, 16384))
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual((saved.json()["max_tokens"], saved.json()["analysis_max_tokens"]), (4096, 32768))
+        self.assertIn("LLM_ANALYSIS_MAX_TOKENS='32768'", env_text)
+        self.assertEqual(too_big.status_code, 422)
+
     def test_empty_key_keeps_existing_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
