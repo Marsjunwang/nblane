@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
@@ -49,10 +49,15 @@ describe('AppLayout', () => {
   });
 
   it('shows the AI exception bell only when the profile has failures', async () => {
+    const posts: Array<{ url: string; body: unknown }> = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        if (url.includes('/ai-exceptions/dismiss')) {
+          posts.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+          return jsonResponse(200, { ok: true, dismissed: 1, skipped: [] });
+        }
         if (url.includes('/ai-exceptions')) {
           return jsonResponse(200, {
             profile: 'alice',
@@ -97,5 +102,10 @@ describe('AppLayout', () => {
       'href',
       '/p/alice/research',
     );
+    // AI-run failures are dismissible too, one at a time or in bulk.
+    expect(screen.getByRole('checkbox', { name: '选择 研究分析失败' })).toBeInTheDocument();
+    screen.getByRole('button', { name: '忽略' }).click();
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0].body).toEqual({ ids: ['run:failed'] });
   });
 });

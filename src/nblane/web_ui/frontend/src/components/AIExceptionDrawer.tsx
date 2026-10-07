@@ -28,7 +28,7 @@ export function AIExceptionDrawer({ profile, opened, onClose }: AIExceptionDrawe
   const items = exceptions.data?.items ?? [];
   const [selected, setSelected] = useState<string[]>([]);
   const dismiss = useDismissAIExceptions(profile);
-  const selectableIds = items.filter((item) => item.id.startsWith('activity:')).map((item) => item.id);
+  const selectableIds = items.map((item) => item.id);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.includes(id));
 
   useEffect(() => {
@@ -100,9 +100,14 @@ export function AIExceptionDrawer({ profile, opened, onClose }: AIExceptionDrawe
               </Button>
             </Group>
           </Group>
+          {dismiss.isError && (
+            <Alert color="red" title="忽略失败">
+              {dismiss.error.message}
+            </Alert>
+          )}
           {selectableIds.length > 0 && (
             <Checkbox
-              label="全选可忽略的异常"
+              label="全选"
               checked={allSelected}
               indeterminate={selected.length > 0 && !allSelected}
               onChange={(event) => setSelected(event.currentTarget.checked ? selectableIds : [])}
@@ -112,13 +117,11 @@ export function AIExceptionDrawer({ profile, opened, onClose }: AIExceptionDrawe
             <Paper key={item.id} withBorder p="sm" radius="sm">
               <Stack gap="xs">
                 <Group justify="space-between" align="flex-start" wrap="nowrap">
-                  {item.id.startsWith('activity:') && (
-                    <Checkbox
-                      aria-label={`选择 ${item.title}`}
-                      checked={selected.includes(item.id)}
-                      onChange={(event) => toggle(item.id, event.currentTarget.checked)}
-                    />
-                  )}
+                  <Checkbox
+                    aria-label={`选择 ${item.title}`}
+                    checked={selected.includes(item.id)}
+                    onChange={(event) => toggle(item.id, event.currentTarget.checked)}
+                  />
                   <div>
                     <Text fw={600}>{item.title}</Text>
                     <Group gap="xs" mt={4}>
@@ -139,8 +142,17 @@ export function AIExceptionDrawer({ profile, opened, onClose }: AIExceptionDrawe
                 <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
                   {item.message}
                 </Text>
-                {item.href && (
-                  <Group justify="flex-end" mt={2}>
+                <Group justify="flex-end" mt={2} gap="xs">
+                  <Button
+                    variant="subtle"
+                    color="gray"
+                    size="compact-sm"
+                    loading={dismiss.isPending && dismiss.variables?.includes(item.id)}
+                    onClick={() => dismiss.mutate([item.id])}
+                  >
+                    忽略
+                  </Button>
+                  {item.href && (
                     <Button
                       component={RouterLink}
                       to={item.href}
@@ -151,8 +163,8 @@ export function AIExceptionDrawer({ profile, opened, onClose }: AIExceptionDrawe
                     >
                       打开来源
                     </Button>
-                  </Group>
-                )}
+                  )}
+                </Group>
               </Stack>
             </Paper>
           ))}

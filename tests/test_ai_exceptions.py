@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from nblane.core.ai.exceptions import collect_profile_exceptions
+from nblane.core.ai.exceptions import collect_profile_exceptions, dismiss_exception_ids, load_dismissed_ids
 
 
 def _dump(path: Path, value: dict) -> None:
@@ -130,3 +130,35 @@ def test_fallback_runs_surface_primary_failure_as_warning(tmp_path: Path) -> Non
     assert items[0]["severity"] == "warning"
     assert items[0]["source"] == "AI 降级"
     assert "Request timed out" in items[0]["message"]
+
+
+def test_dismissed_runs_jobs_and_tasks_are_hidden(tmp_path: Path) -> None:
+    profile = tmp_path / "alice"
+    profile.mkdir()
+    _dump(
+        profile / "ai-runs.yaml",
+        {
+            "runs": [
+                {"id": "run-a", "action": "research.paper_qa", "ok": False, "error": "x", "created": "2026-10-07T01:00:00+00:00"},
+                {
+                    "id": "run-b",
+                    "action": "research.paper_review_card",
+                    "ok": True,
+                    "warnings": ["direct_llm failed (timeout); used rule_fallback."],
+                    "created": "2026-10-07T02:00:00+00:00",
+                },
+            ]
+        },
+    )
+    jobs = [{"job_id": "j1", "kind": "paper-analysis", "status": "failed", "error": {"message": "boom"}}]
+
+    before = {item["id"] for item in collect_profile_exceptions(profile, jobs=jobs)}
+    added = dismiss_exception_ids(profile, ["run:run-a", "run:run-b", "job:j1", "activity:x", ""])
+    again = dismiss_exception_ids(profile, ["run:run-a"])
+    after = collect_profile_exceptions(profile, jobs=jobs)
+
+    assert before == {"run:run-a", "run:run-b", "job:j1"}
+    assert added == ["job:j1", "run:run-a", "run:run-b"]
+    assert again == []
+    assert after == []
+    assert load_dismissed_ids(profile) == {"run:run-a", "run:run-b", "job:j1"}

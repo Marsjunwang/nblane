@@ -2,7 +2,7 @@
  "components": {
   "schemas": {
    "AIExceptionBulkDismissRequest": {
-    "description": "Activity-backed exception ids to dismiss in one write.",
+    "description": "Exception ids (``activity:``, ``run:``, ``agent-task:``, ``job:``) to dismiss.",
     "properties": {
      "ids": {
       "items": {
@@ -13679,7 +13679,7 @@
   },
   "/api/v1/profiles/{name}/ai-exceptions/dismiss": {
    "post": {
-    "description": "Dismiss selected Activity-backed AI failures in one locked write.\n\nThe exception feed also contains historical AI runs and jobs, which do\nnot have a dismiss state. Those ids are reported as skipped rather than\nbeing silently altered.",
+    "description": "Dismiss selected AI failures.\n\nActivity-backed items flip to ``dismissed`` in one locked write. AI runs,\nexternal-agent tasks and web jobs have no status of their own; their ids\nare recorded in the profile's dismissal list so the feed hides them.\nUnknown id kinds are reported as skipped.",
     "operationId": "dismiss_profile_ai_exceptions_api_v1_profiles__name__ai_exceptions_dismiss_post",
     "parameters": [
      {

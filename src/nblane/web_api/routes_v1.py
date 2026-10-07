@@ -50,7 +50,11 @@ from nblane.core import agent_activity, agent_tasks, file_state, gap, inbox
 from nblane.core import career_ai, career_workspace, content_ai, content_workspace, git_backup, resume_doc, visual_candidate_store
 from nblane.core import public_console
 from nblane.core.file_lock import locked_profile_write
-from nblane.core.ai.exceptions import collect_profile_exceptions
+from nblane.core.ai.exceptions import (
+    DISMISSABLE_PREFIXES,
+    collect_profile_exceptions,
+    dismiss_exception_ids,
+)
 from nblane.core import chronicle as chronicle_core
 from nblane.core import north_star as north_star_core
 from nblane.core import evidence_review as evidence_review_core
@@ -1141,11 +1145,12 @@ def dismiss_profile_ai_exceptions(
     name: str,
     body: AIExceptionBulkDismissRequest,
 ) -> AIExceptionBulkDismissResponse:
-    """Dismiss selected Activity-backed AI failures in one locked write.
+    """Dismiss selected AI failures.
 
-    The exception feed also contains historical AI runs and jobs, which do
-    not have a dismiss state. Those ids are reported as skipped rather than
-    being silently altered.
+    Activity-backed items flip to ``dismissed`` in one locked write. AI runs,
+    external-agent tasks and web jobs have no status of their own; their ids
+    are recorded in the profile's dismissal list so the feed hides them.
+    Unknown id kinds are reported as skipped.
     """
     pdir = _resolve_profile(name)
     requested = {str(item or "").strip() for item in body.ids}
@@ -1155,14 +1160,21 @@ def dismiss_profile_ai_exceptions(
         for item_id in requested
         if item_id.startswith("activity:")
     }
+    other_ids = {
+        item_id for item_id in requested if item_id.startswith(DISMISSABLE_PREFIXES)
+    }
     skipped = sorted(
-        requested - {f"activity:{item_id}" for item_id in activity_ids}
+        requested
+        - {f"activity:{item_id}" for item_id in activity_ids}
+        - other_ids
     )
-    if not activity_ids:
-        return AIExceptionBulkDismissResponse(dismissed=0, skipped=skipped)
-
     note = body.note.strip()
-    dismissed = 0
+    # Already-dismissed ids are idempotent: they count, nothing is rewritten.
+    dismiss_exception_ids(pdir, other_ids, note=note)
+    dismissed = len(other_ids)
+    if not activity_ids:
+        return AIExceptionBulkDismissResponse(dismissed=dismissed, skipped=skipped)
+
 
     def _dismiss(activity: dict[str, Any]) -> None:
         nonlocal dismissed

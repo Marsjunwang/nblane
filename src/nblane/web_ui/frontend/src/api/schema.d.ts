@@ -257,11 +257,12 @@ export interface paths {
         put?: never;
         /**
          * Dismiss Profile Ai Exceptions
-         * @description Dismiss selected Activity-backed AI failures in one locked write.
+         * @description Dismiss selected AI failures.
          *
-         *     The exception feed also contains historical AI runs and jobs, which do
-         *     not have a dismiss state. Those ids are reported as skipped rather than
-         *     being silently altered.
+         *     Activity-backed items flip to ``dismissed`` in one locked write. AI runs,
+         *     external-agent tasks and web jobs have no status of their own; their ids
+         *     are recorded in the profile's dismissal list so the feed hides them.
+         *     Unknown id kinds are reported as skipped.
          */
         post: operations["dismiss_profile_ai_exceptions_api_v1_profiles__name__ai_exceptions_dismiss_post"];
         delete?: never;
@@ -3748,7 +3749,7 @@ export interface components {
     schemas: {
         /**
          * AIExceptionBulkDismissRequest
-         * @description Activity-backed exception ids to dismiss in one write.
+         * @description Exception ids (``activity:``, ``run:``, ``agent-task:``, ``job:``) to dismiss.
          */
         AIExceptionBulkDismissRequest: {
             /** Ids */

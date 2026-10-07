@@ -339,7 +339,7 @@ class ActivityDismissResponse(BaseModel):
 
 
 class AIExceptionBulkDismissRequest(BaseModel):
-    """Activity-backed exception ids to dismiss in one write."""
+    """Exception ids (``activity:``, ``run:``, ``agent-task:``, ``job:``) to dismiss."""
 
     ids: list[str] = Field(default_factory=list, min_length=1, max_length=200)
     note: str = ""

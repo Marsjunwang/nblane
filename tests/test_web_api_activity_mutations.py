@@ -18,6 +18,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from nblane.core import agent_activity
+from nblane.core.ai.exceptions import load_dismissed_ids
 from nblane.core import auth as auth_core
 from nblane.core.paths import REPO_ROOT
 from nblane.core.review_actions import activity_item_from_review_candidate
@@ -168,13 +169,16 @@ class TestActivityMutations(unittest.TestCase):
 
             response = client.post(
                 "/api/v1/profiles/alice/ai-exceptions/dismiss",
-                json={"ids": [f"activity:{first_id}", f"activity:{second_id}", "run:old"]},
+                json={"ids": [f"activity:{first_id}", f"activity:{second_id}", "run:old", "bogus:1"]},
             )
 
             stored = agent_activity.load_agent_activity(profile)
+            dismissed_ids = load_dismissed_ids(profile)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["dismissed"], 2)
-        self.assertEqual(response.json()["skipped"], ["run:old"])
+        # Two activity items plus the run id; unknown kinds stay skipped.
+        self.assertEqual(response.json()["dismissed"], 3)
+        self.assertEqual(response.json()["skipped"], ["bogus:1"])
+        self.assertEqual(dismissed_ids, {"run:old"})
         statuses = {item["id"]: item["status"] for item in stored["items"]}
         self.assertEqual(statuses[first_id], "dismissed")
         self.assertEqual(statuses[second_id], "dismissed")

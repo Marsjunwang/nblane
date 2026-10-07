@@ -1,4 +1,9 @@
-"""Read-only aggregation of AI failures that need owner attention."""
+"""Aggregation of AI failures that need owner attention.
+
+Activity-backed failures are dismissed in ``agent-activity.yaml``. AI runs,
+external-agent tasks and web jobs have no status of their own, so their
+dismissals live in ``ai-exception-dismissals.yaml`` next to them.
+"""
 
 from __future__ import annotations
 
@@ -8,9 +13,83 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+import yaml
+
+from nblane.core import git_backup
 from nblane.core.agent_activity import load_agent_activity
 from nblane.core.agent_tasks import load_agent_tasks
 from nblane.core.ai.runs import load_ai_runs
+from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_write import atomic_write_text
+from nblane.core.profile_io import profile_dir
+from nblane.core.yaml_io import _load_yaml_dict
+
+DISMISSALS_FILENAME = "ai-exception-dismissals.yaml"
+DISMISSABLE_PREFIXES = ("run:", "agent-task:", "job:")
+_MAX_DISMISSALS = 5000
+
+
+def _dismissals_path(profile: str | Path) -> Path:
+    base = profile if isinstance(profile, Path) else profile_dir(profile)
+    return base / DISMISSALS_FILENAME
+
+
+def load_dismissed_ids(profile: str | Path) -> set[str]:
+    """Return exception ids (``run:…``, ``job:…``) the owner has dismissed."""
+
+    raw = _load_yaml_dict(_dismissals_path(profile)) or {}
+    items = raw.get("dismissed") if isinstance(raw.get("dismissed"), list) else []
+    return {
+        _text(item.get("id"))
+        for item in items
+        if isinstance(item, dict) and _text(item.get("id"))
+    }
+
+
+def dismiss_exception_ids(
+    profile: str | Path,
+    ids: Iterable[str],
+    *,
+    note: str = "",
+) -> list[str]:
+    """Record dismissals for non-activity exception ids; return the new ones."""
+
+    wanted = sorted(
+        {
+            _text(item)
+            for item in ids
+            if _text(item).startswith(DISMISSABLE_PREFIXES)
+        }
+    )
+    if not wanted:
+        return []
+    path = _dismissals_path(profile)
+    with locked_profile_write(path.parent, DISMISSALS_FILENAME):
+        raw = _load_yaml_dict(path) or {}
+        items = [
+            item
+            for item in (raw.get("dismissed") if isinstance(raw.get("dismissed"), list) else [])
+            if isinstance(item, dict) and _text(item.get("id"))
+        ]
+        known = {_text(item.get("id")) for item in items}
+        added = [item_id for item_id in wanted if item_id not in known]
+        if not added:
+            return []
+        now = datetime.now(timezone.utc).isoformat()
+        for item_id in added:
+            row: dict[str, Any] = {"id": item_id, "dismissed_at": now}
+            if note.strip():
+                row["note"] = note.strip()[:500]
+            items.append(row)
+        body = yaml.dump(
+            {"dismissed": items[-_MAX_DISMISSALS:]},
+            allow_unicode=True,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+        atomic_write_text(path, "# Dismissed AI exception ids (runs, tasks, jobs).\n" + body)
+    git_backup.record_change([path], action=f"update {path.parent.name}/{DISMISSALS_FILENAME}")
+    return added
 
 
 def _text(value: object) -> str:
@@ -217,8 +296,16 @@ def collect_profile_exceptions(
             )
         )
 
+    dismissed = load_dismissed_ids(profile)
+    if dismissed:
+        output = [item for item in output if item["id"] not in dismissed]
     output.sort(key=lambda item: _text(item.get("created")), reverse=True)
     return output[: max(1, min(int(limit), 200))]
 
 
-__all__ = ["collect_profile_exceptions"]
+__all__ = [
+    "DISMISSABLE_PREFIXES",
+    "collect_profile_exceptions",
+    "dismiss_exception_ids",
+    "load_dismissed_ids",
+]
