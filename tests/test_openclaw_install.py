@@ -184,7 +184,7 @@ class TestCmdInstall(unittest.TestCase):
             runner = FakeRunner()
             code, out = self._run(root, profile, runner)
             self.assertEqual(code, 0)
-            for step in ("[1/4]", "[2/4]", "[3/4]", "[4/4]"):
+            for step in ("[1/3]", "[2/3]", "[3/3]"):
                 self.assertIn(step, out)
             self.assertIn("dry-run", out)
             self.assertIn("openclaw doctor", out)
@@ -194,12 +194,11 @@ class TestCmdInstall(unittest.TestCase):
             self.assertFalse((root / ".openclaw" / "workspace").exists())
             # Runner log: only read-only / self-dry-run gateway calls.
             for argv in runner.argvs():
-                is_list = argv[:3] == ["openclaw", "automations", "list"]
                 is_patch_dry = (
                     argv[:4] == ["openclaw", "config", "patch", "--stdin"]
                     and "--dry-run" in argv
                 )
-                self.assertTrue(is_list or is_patch_dry, argv)
+                self.assertTrue(is_patch_dry, argv)
             # MCP entry injected into the patch payload.
             patch_inputs = [
                 stdin
@@ -252,14 +251,8 @@ class TestCmdInstall(unittest.TestCase):
             self.assertNotIn("--dry-run", patches[0][0])
             payload = json.loads(patches[0][1])
             self.assertEqual(payload["mcp"]["servers"]["nblane"], MCP_ENTRY)
-            # Automations applied (declared job missing live → add).
-            adds = [
-                argv
-                for argv in argvs
-                if argv[:3] == ["openclaw", "automations", "add"]
-            ]
-            self.assertEqual(len(adds), 1)
-            self.assertIn("nblane:daily-plan", adds[0])
+            # Scheduled jobs belong to OpenClaw: install never touches them.
+            self.assertFalse(any(argv[:2] == ["openclaw", "automations"] for argv in argvs))
 
     def test_missing_overlay_and_plugin_dir_are_skipped_with_note(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -275,25 +268,7 @@ class TestCmdInstall(unittest.TestCase):
             for argv in runner.argvs():
                 self.assertNotEqual(argv[:2], ["openclaw", "plugins"])
                 self.assertNotEqual(argv[:2], ["openclaw", "config"])
-            # Automations reconcile still ran (read-only list call).
-            self.assertEqual(
-                runner.argvs(),
-                [["openclaw", "automations", "list", "--all", "--json"]],
-            )
-
-    def test_missing_automations_file_is_skipped_with_note(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _make_profile(root)
-            (profile / "assistant" / "automations.yaml").unlink()
-            runner = FakeRunner()
-            code, out = self._run(root, profile, runner)
-            self.assertEqual(code, 0)
-            self.assertIn("跳过自动化对账", out)
-            self.assertNotIn(
-                ["openclaw", "automations", "list", "--all", "--json"],
-                runner.argvs(),
-            )
+            self.assertEqual(runner.argvs(), [])
 
     def test_non_json_overlay_emits_two_sequential_patches(self) -> None:
         overlay_text = "// JSON5 comment, not pure JSON\n{ model: {} }\n"
@@ -331,57 +306,6 @@ class TestCmdInstall(unittest.TestCase):
             profile = _make_profile(root)
             code, out = self._run(root, profile, runner_fn)
             self.assertEqual(code, 1)
-
-    def test_invalid_automations_file_fails_step_not_process(self) -> None:
-        """A bad automations.yaml fails step 4 like any other step (exit 1),
-        after the closing hints printed — no mid-step ``sys.exit``."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _make_profile(root)
-            (profile / "assistant" / "automations.yaml").write_text(
-                "version: 99\nautomations: []\n", encoding="utf-8"
-            )
-            runner = FakeRunner()
-            code, out = self._run(root, profile, runner)
-            self.assertEqual(code, 1)
-            self.assertIn("[4/4]", out)
-            self.assertIn("nblane openclaw doctor", out)
-
-    def test_automations_list_failure_fails_step_not_process(self) -> None:
-        def runner_fn(argv, input=None) -> CommandResult:
-            argv = list(argv)
-            if argv[:3] == ["openclaw", "automations", "list"]:
-                return CommandResult(ok=False, returncode=1, stderr="gateway down")
-            return CommandResult(ok=True, returncode=0)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _make_profile(root)
-            code, out = self._run(root, profile, runner_fn)
-            self.assertEqual(code, 1)
-            self.assertIn("nblane openclaw doctor", out)
-
-    def test_install_automations_returns_false_on_load_error(self) -> None:
-        """Direct contract: step 4 reports failure via its return value."""
-        from nblane.commands.openclaw import _install_automations
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _make_profile(root)
-            (profile / "assistant" / "automations.yaml").write_text(
-                "version: 99\nautomations: []\n", encoding="utf-8"
-            )
-            err = io.StringIO()
-            with (
-                patch(
-                    "nblane.commands.openclaw.automations_file_path",
-                    lambda _name: profile / "assistant" / "automations.yaml",
-                ),
-                contextlib.redirect_stderr(err),
-            ):
-                ok = _install_automations("alice", FakeRunner(), apply=False)
-            self.assertFalse(ok)
-            self.assertIn("ERROR", err.getvalue())
 
     def test_missing_openclaw_home_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,8 +1,8 @@
-# OpenClaw 自动化即代码声明（automations-as-code）。
-# nblane 只管理 declarationKey 以 `nblane:` 开头的任务；系统任务与手工任务不触碰。
-# 对账同步：nblane openclaw automations sync <profile>
-#   默认 dry-run（只打印计划与命令）；--apply 执行 add/edit；
-#   --apply --prune 才会删除声明中已移除的 nblane: 任务。
+# 定时任务的参考声明（可选）。定时任务归 OpenClaw 管，直接在 OpenClaw 里建和改即可；
+# 提示词只写任务本身，调用 nblane 的规则在 nblane 技能（skills/nblane/SKILL.md）里。
+# 想用这份声明维护时，手动跑 nblane openclaw automations sync <profile>
+#   （默认 dry-run；--apply 执行 add/edit；--apply --prune 才删除已移除的 nblane: 任务）。
+# 只处理 declarationKey 以 `nblane:` 开头的任务；系统任务与手工任务不触碰。
 # `${VAR}` 从本机 .env / 环境注入，未设置即报错，取值永不入库。
 version: 1
 defaults:

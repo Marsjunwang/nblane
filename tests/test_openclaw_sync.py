@@ -159,7 +159,6 @@ class TestCmdSync(unittest.TestCase):
             self.assertFalse(
                 (skills_dst / "bin" / "tests" / "__pycache__").exists()
             )
-            self.assertIn("跳过自动化对账", out)
 
     def test_check_in_sync_exits_0(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -222,31 +221,8 @@ class TestCmdSync(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("+ kimi-dev", out)
 
-    def test_missing_automations_file_is_skipped_not_error(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _make_profile(root)
-            code, out = self._run(root, profile, check=True)
-            # Only corpus/skills drift (nothing written yet), never an error.
-            self.assertEqual(code, 1)
-            self.assertIn("跳过自动化对账", out)
-            # --check wrote nothing.
-            self.assertFalse(
-                (root / ".openclaw" / "workspace").exists()
-            )
-
-    def test_automations_drift_exits_1(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _make_profile(root)
-            _add_automations(profile)
-            self._run(root, profile)  # corpus + skills now in sync
-            code, out = self._run(root, profile, check=True)
-            self.assertEqual(code, 1)
-            self.assertIn("自动化对账", out)
-            self.assertIn("nblane:daily-plan", out)
-
-    def test_write_mode_reports_automations_drift_without_applying(self) -> None:
+    def test_scheduled_jobs_are_not_touched(self) -> None:
+        """Jobs belong to OpenClaw: sync never even lists them."""
         calls: list[list[str]] = []
 
         def runner(argv) -> CommandResult:
@@ -258,12 +234,9 @@ class TestCmdSync(unittest.TestCase):
             profile = _make_profile(root)
             _add_automations(profile)
             code, out = self._run(root, profile, runner=runner)
-            self.assertEqual(code, 1)
-            self.assertIn("automations sync alice --apply", out)
-            # Only the read-only list call happened; never add/edit/rm.
-            self.assertEqual(
-                calls, [["openclaw", "automations", "list", "--all", "--json"]]
-            )
+            self.assertEqual(code, 0)
+            self.assertNotIn("自动化", out)
+            self.assertEqual(calls, [])
 
     def test_write_removes_stale_skill_files(self) -> None:
         """A file deleted from the skills source is pruned from dst on sync."""

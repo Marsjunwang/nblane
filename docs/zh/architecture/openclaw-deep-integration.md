@@ -24,7 +24,7 @@ source_of_truth: src/nblane/mcp_server.py、src/nblane/core/agent_tasks.py、src
 | L1.4 反向推送 | ✅ 已实现（MVP） | `nblane notify`（webhook 方式；payload 契约待对 live 验证） |
 | L2 灌注流 | ✅ 渲染器已实现 | `core/openclaw_corpus.py` + `nblane openclaw sync [--check]`（语料+技能+自动化对账）；`memory.search.extraPaths` 配置待人工（随 CW-3 的 overlay 一并应用） |
 | L2 巩固流 | ⏳ 命令清单已备，待人工窗口执行 | `profiles/template/assistant/prompts/` 三个 prompt 已改为 MCP 资源式；生产自动化切换清单见接入指南 CW-3 |
-| L3 自动化即代码 | ✅ 已实现 | `core/openclaw_automations.py`（声明/对账/应用，含 adopt 纳管外 key）+ `core/openclaw_ops.py`（doctor 8 项检查）+ `nblane openclaw doctor|sync|install|automations sync` CLI + 顶层 `nblane notify` |
+| L3 自动化即代码 | ✅ 已实现 | `core/openclaw_automations.py`（声明/对账/应用，含 adopt 纳管外 key）+ `core/openclaw_ops.py`（doctor 7 项检查；2026-10-07 起定时任务归 OpenClaw 管，`automations sync` 降为可选手动工具）+ `nblane openclaw doctor|sync|install|automations sync` CLI + 顶层 `nblane notify` |
 | L4 入口统一 | 🔨 Step 2 已落地（仓库侧） | 助手状态 API `web_api/assistant.py` + SPA 页 `/assistant`（状态卡+深链，无 iframe 无写操作）；Caddy `/openclaw` 反代（Step 1）命令清单已备，待人工窗口执行（接入指南 CW-4） |
 | L5 SPA 迁移 | 🔨 M0–M1 进行中 | `src/nblane/web_api/` 已落地：cookie 认证（复用 core/auth HMAC）、profile 作用域 403、只读端点（profiles/summary/health/activity/kanban/inbox/agent-tasks/goals）、activity apply/dismiss（ETag+If-Match 冲突保护）；前端脚手架待建 |
 | L6 生产布局 | ⏳ 部分命令清单已备，待人工窗口执行 | 密钥 SecretRef 迁移清单见接入指南 CW-5；三树归一的文档增补仍待办 |

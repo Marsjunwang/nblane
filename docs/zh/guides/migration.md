@@ -296,11 +296,8 @@ Gateway token、模型 key、微信登录态都在 `~/.openclaw` 内，整目录
 6. **备份调度**：按 **CW-2** 执行（`openclaw backup create` 手动验证一次
    后 `openclaw backup enable --every 24h`）。
 
-7. **自动化纳管**：自动化的声明源在数据仓
-   `profiles/<name>/assistant/automations.yaml`，随数据仓 clone 已就位。
-   执行 **CW-3** 的 `nblane openclaw automations sync <name> --apply`
-   **之前**，先确认新机 Gateway 的模型路由（模型 key 随 `~/.openclaw`
-   迁来，但供应商可用性要重新确认）：
+7. **定时任务**：随 `~/.openclaw` 一起迁移，归 OpenClaw 管，nblane 不需要同步。迁完先确认
+   新机 Gateway 的模型路由（模型 key 随 `~/.openclaw` 迁来，但供应商可用性要重新确认）：
 
    ```bash
    openclaw config get agents.defaults.model --json

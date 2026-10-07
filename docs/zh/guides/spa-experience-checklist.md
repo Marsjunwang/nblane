@@ -205,9 +205,8 @@ scripts/dev-web.sh status       # 确认 nblane-dev-reader-api / nblane-dev-stre
 cd /home/ubuntu/nblane
 nblane validate                                    # 全量校验
 nblane status                                      # 技能树摘要
-nblane openclaw doctor --profile 王军               # 8 项检查（只读）
+nblane openclaw doctor --profile 王军               # 7 项检查（只读）
 nblane openclaw sync --check                       # 语料漂移检查（只读）
-nblane openclaw automations sync 王军               # 自动化对账（默认 dry-run）
 nblane openclaw install --dry-run                  # 安装预演（会向 live 发 dry-run patch，安全）
 nblane notify --dry-run "测试消息"                  # webhook 干跑
 nblane sync-agent-harness --target openclaw --profile 王军   # 看 MCP 注册 snippet
@@ -215,10 +214,9 @@ nblane sync-agent-harness --target openclaw --profile 王军   # 看 MCP 注册 
 
 | # | 检查 | 预期 | 结果 |
 |---|------|------|------|
-| 3.1 | doctor | 8 项检查逐项输出 pass/warn/fail；不会改任何东西 | ☐ |
+| 3.1 | doctor | 7 项检查逐项输出 pass/warn/fail；不会改任何东西 | ☐ |
 | 3.2 | sync --check | 有漂移时列出文件并退出 1；无漂移安静退出 0 | ☐ |
-| 3.3 | automations sync | 打印计划（add/edit/skip）；不写生产 | ☐ |
-| 3.4 | install --dry-run | 打印四步计划 + patch 全文；零落盘 | ☐ |
+| 3.4 | install --dry-run | 打印三步计划 + patch 全文；零落盘 | ☐ |
 | 3.5 | 删除 `~/.openclaw/workspace/memory/nblane/` 里某个生成文件（先备份），再跑 `nblane openclaw sync` | 能重新生成；反向：手动放个旧文件跑 sync 会被清理（M-BE-2 修复验证） | ☐ |
 
 ---

@@ -1124,6 +1124,9 @@ nblane 侧回滚为去掉 systemd unit 里两个 `NBLANE_DATA_GIT_*` 环境变�
 
 ### CW-3 L2 生产自动化切换（automations-as-code 接管）
 
+> 2026-10-07 起定时任务归 OpenClaw 管，直接在 OpenClaw 里建和改；调用 nblane 的规则只写在
+> nblane 技能里，提示词不重复。本节保留作历史记录和可选的手动对账方法。
+
 目标：把 `profiles/王军/assistant/automations.yaml`（声明源）对账到生产 Gateway，
 替换掉 prompt 里写死绝对路径的旧自动化。纳管语义（`core/openclaw_automations.py`）：
 
@@ -1149,11 +1152,11 @@ openclaw automations list --all --json                 # 记录现有任务快�
 
 ```bash
 cd /srv/nblane-app/nblane
-# 1. 只读对账，三项（语料/技能/自动化）有漂移即非零退出
+# 1. 只读对账，语料/技能有漂移即非零退出
 .venv/bin/nblane openclaw sync --check
 # 2. 全量 dry-run：打印技能/语料差异、config patch（含 MCP 注入）全文、自动化计划
 .venv/bin/nblane openclaw install --dry-run
-#    ——人工逐项审阅输出。两个历史核对点已修复（2026-09-20），降级为常规确认：
+#    ——人工逐项审阅输出（定时任务不在 install 范围内，归 OpenClaw 管）。两个历史核对点已修复（2026-09-20），降级为常规确认：
 #    a) config patch 里不应出现未替换的 ${...} 字面量：install 的 overlay 步骤
 #       现在与 automations.yaml 加载器共用同一 ${VAR} 替换实现
 #       （core/openclaw_automations.py 的 substitute_env_text），未设置的
@@ -1166,17 +1169,20 @@ cd /srv/nblane-app/nblane
 .venv/bin/nblane openclaw install --apply
 ```
 
-或分步执行（等价）：
+或只做日常同步：
 
 ```bash
-.venv/bin/nblane openclaw sync                          # 渲染语料+同步技能；自动化仍只出计划
-.venv/bin/nblane openclaw automations sync 王军 --apply  # 应用自动化 add/edit（不含删除）
+.venv/bin/nblane openclaw sync                          # 渲染语料 + 同步技能
 ```
+
+定时任务直接在 OpenClaw 里建和改，不需要 nblane 同步（2026-10-07 起）。提示词只写任务本身，
+调用规则在 nblane 技能里。想沿用 `automations.yaml` 声明的，可以手动跑
+`nblane openclaw automations sync 王军`（默认 dry-run，`--apply` 才执行）。
 
 验证（只读 + 一次实跑）：
 
 ```bash
-.venv/bin/nblane openclaw doctor --profile 王军          # automations_in_sync 应一致
+.venv/bin/nblane openclaw doctor --profile 王军
 openclaw automations list --all --json
 # 手动实跑一次每日计划确认真实投递（消耗 Token）：
 openclaw automations run <实际ID> --wait --expect-final --wait-timeout 8m --json

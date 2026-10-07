@@ -316,33 +316,6 @@ def _sync_skills(src: Path, dst: Path, *, check: bool) -> bool:
     return False
 
 
-def _sync_automations(profile: str, runner: Runner, *, check: bool) -> bool:
-    """Plan-only automations reconcile; return True when drifted."""
-    path = automations_file_path(profile)
-    if not path.is_file():
-        print(f"[提醒] 未找到 {path}，跳过自动化对账。")
-        return False
-    try:
-        specs = load_automations_file(path)
-    except ValueError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        sys.exit(1)
-    try:
-        live_jobs = fetch_live_automations(runner)
-    except RuntimeError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        sys.exit(1)
-    plan = plan_reconcile(specs, live_jobs)
-    print(compute_drift_summary(plan))
-    drift = any(a.kind in (ACTION_ADD, ACTION_UPDATE) for a in plan)
-    if drift and not check:
-        print(
-            f"自动化存在漂移；本命令不做变更，"
-            f"请运行 nblane openclaw automations sync {profile} --apply。"
-        )
-    return drift
-
-
 def cmd_sync(
     profile: str | None = None,
     *,
@@ -352,7 +325,7 @@ def cmd_sync(
     openclaw_home: Path | None = None,
     runner: Runner | None = None,
 ) -> None:
-    """Daily drift reconcile: corpus render, skills copy, automations plan.
+    """Daily drift reconcile: corpus render and skills copy.
 
     Default mode writes the derived artifacts (memory corpus, skills tree)
     and prunes their stale counterparts — generated corpus files whose
@@ -385,7 +358,6 @@ def cmd_sync(
     drift = False
     drift |= _sync_corpus(profile, out_dir, check=check)
     drift |= _sync_skills(src, dst, check=check)
-    drift |= _sync_automations(profile, runner or run_command, check=check)
 
     if check:
         print("存在漂移。" if drift else "全部一致。")
@@ -514,57 +486,6 @@ def _install_overlay(
     return ok
 
 
-def _install_automations(profile: str, runner: Runner, *, apply: bool) -> bool:
-    """Step 4: automations reconcile; plan-only unless *apply*."""
-
-    path = automations_file_path(profile)
-    if not path.is_file():
-        print(f"[跳过] 未找到 {path}，跳过自动化对账。")
-        return True
-    try:
-        specs = load_automations_file(path)
-    except ValueError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return False
-    try:
-        live_jobs = fetch_live_automations(runner)
-    except RuntimeError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return False
-    plan = plan_reconcile(specs, live_jobs)
-    print(compute_drift_summary(plan))
-
-    if not apply:
-        planned = [
-            (action, argv)
-            for action in plan
-            if (argv := build_action_argv(action)) is not None
-        ]
-        if planned:
-            print("将执行的命令（dry-run，未执行）：")
-            for action, argv in planned:
-                note = "（不会自动删除）" if action.kind == ACTION_PRUNE_CANDIDATE else ""
-                print(f"  $ {shlex.join(argv)} {note}".rstrip())
-        print("dry-run：未执行自动化变更；--apply 执行 add/edit（不含删除）。")
-        return True
-
-    results = apply_reconcile(plan, runner, dry_run=False, include_prune=False)
-    failed = 0
-    for result in results:
-        if not result.executed:
-            continue
-        if result.ok:
-            print(f"[OK] {result.action.kind} {result.action.key}")
-        else:
-            failed += 1
-            print(
-                f"[失败] {result.action.kind} {result.action.key}: "
-                f"{result.output or '命令失败'}",
-                file=sys.stderr,
-            )
-    return failed == 0
-
-
 def cmd_install(
     profile: str | None = None,
     *,
@@ -579,11 +500,10 @@ def cmd_install(
 
     Default is ``--dry-run``: print the full action plan and change nothing
     (skills/corpus are diffed, the config patch runs with its own
-    ``--dry-run``, plugin install and automations mutations are printed
-    only).  ``--apply`` executes every step.  Steps whose inputs are missing
-    (plugin dir, overlay, automations file) are skipped with a note.
-    Automations are never pruned here — deletion stays behind
-    ``nblane openclaw automations sync --apply --prune``.
+    ``--dry-run``, the plugin install is printed only).  ``--apply``
+    executes every step.  Steps whose inputs are missing (plugin dir,
+    overlay) are skipped with a note.  Scheduled jobs are owned by OpenClaw
+    and are not touched here.
     """
 
     home = Path(openclaw_home) if openclaw_home is not None else _openclaw_home()
@@ -608,7 +528,7 @@ def cmd_install(
     mode = "apply" if apply else "dry-run"
     print(f"OpenClaw 一键安装（{mode}）：profile={profile}")
 
-    print("\n[1/4] 技能与记忆语料")
+    print("\n[1/3] 技能与记忆语料")
     if apply:
         _sync_corpus(profile, out_dir, check=False)
         _sync_skills(src, dst, check=False)
@@ -617,19 +537,17 @@ def cmd_install(
         _sync_corpus(profile, out_dir, check=True)
         _sync_skills(src, dst, check=True)
 
-    print("\n[2/4] weixin-task-bridge 插件")
+    print("\n[2/3] weixin-task-bridge 插件")
     ok = _install_plugin(plugin_src, runner, apply=apply)
 
-    print("\n[3/4] 配置 overlay + nblane MCP 注入")
+    print("\n[3/3] 配置 overlay + nblane MCP 注入")
     overlay_path = automations_file_path(profile).parent / OVERLAY_FILENAME
     ok &= _install_overlay(profile, overlay_path, runner, apply=apply)
 
-    print("\n[4/4] 自动化对账")
-    ok &= _install_automations(profile, runner, apply=apply)
 
     print("\n提示：安装完成后运行 nblane openclaw doctor 体检。")
     if not apply:
-        print("当前为 dry-run：除自动化的只读对账与 config patch --dry-run 外，未做任何变更。")
+        print("当前为 dry-run：除 config patch --dry-run 外，未做任何变更。")
         print("确认后加 --apply 执行。")
     sys.exit(0 if ok else 1)
 

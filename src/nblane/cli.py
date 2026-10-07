@@ -49,13 +49,13 @@ Commands:
     nblane openclaw doctor [--profile name]
                                     Check OpenClaw host/gateway prerequisites
     nblane openclaw sync [--profile name] [--check]
-                                    Render corpus, sync skills, report drift
+                                    Render corpus and sync skills
     nblane openclaw install [--profile name] [--dry-run|--apply]
                                     One-command idempotent OpenClaw setup
                                     (dry-run by default)
     nblane openclaw automations sync <name> [--apply] [--prune]
-                                    Reconcile assistant/automations.yaml
-                                    (dry-run by default)
+                                    Optional: reconcile assistant/automations.yaml
+                                    with OpenClaw jobs (dry-run by default)
     nblane notify <text> [--dry-run]
                                     Push a message via the OpenClaw webhook
     nblane backup status|run [--target id]

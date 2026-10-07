@@ -2,7 +2,9 @@
 
 Scripts the layered prerequisites from ``docs/zh/guides/openclaw-integration.md``
 and the deep-integration plan (§5.4): Node version, systemd linger, gateway
-port, MCP registration, WeChat plugin, automations drift, backup schedule.
+port, MCP registration, WeChat plugin, backup schedule. Scheduled jobs are
+owned by OpenClaw; ``check_automations_in_sync`` stays available for the
+optional ``nblane openclaw automations sync`` tool but is not part of doctor.
 
 Every check is read-only and takes an injectable ``runner`` (see
 :mod:`nblane.core.openclaw_automations`) so tests never spawn real
@@ -456,9 +458,6 @@ def run_doctor(
         check_gateway_port(connect=connect),
         check_nblane_mcp_registered(runner),
         check_weixin_plugin(runner),
-        check_automations_in_sync(
-            runner, profile_name=profile_name, live_jobs=live_jobs
-        ),
         check_backup_schedule(runner, live_jobs=live_jobs),
     ]
 
