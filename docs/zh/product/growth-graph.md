@@ -1,7 +1,7 @@
 ---
 status: active
 owner: product
-last_verified: 2026-10-07
+last_verified: 2026-10-08
 source_of_truth: true
 ---
 
@@ -118,7 +118,7 @@ nblane 的数据应被理解为一张分层图谱。文件只是 owner，不是�
 | Objective | 这个阶段我要推进什么？ | Primary Goal、Active Goals、success criteria、target skills、target outputs | `goals.yaml` |
 | Work Context | 哪个工作场景承载目标和证据？ | project case、company、role、time range、milestone、scope、decision | 未来 `project-board.yaml`；公开展示用 `projects.yaml` |
 | Activity | 我实际做了哪些事？ | kanban task、daily work、research activity、agent run、review、experiment | `kanban.md`、`learning-log.yaml`、`activity-log.yaml`、Agent logs |
-| Source | 有哪些原始材料或观察？ | commit、PR、doc、metric、screenshot、URL、meeting note、resume import、feedback | `inbox.yaml`、repo、research source、Profile ingest |
+| Source | 有哪些原始材料或观察？ | commit、PR、doc、metric、screenshot、URL、meeting note、resume import、feedback | repo、research source、Profile ingest |
 | Evidence | 哪些事实已经可作为证明？ | atomic evidence、composite evidence、artifact ref、source refs、confidence、visibility | `evidence-pool.yaml` |
 | Claim | 这些证据支撑我对外说什么？ | achievement claim、skill claim、impact claim、role claim、learning claim、project claim | `claims.yaml`；legacy `evidence-pool.yaml.claims` 仅迁移兼容 |
 | Capability | 我具备哪些能力？ | skill node、status、evidence refs、claim refs、gap | `skill-tree.yaml`、`schemas/*.yaml` |

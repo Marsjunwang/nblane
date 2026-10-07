@@ -1,5 +1,5 @@
 /* Divination: pure yao-row ordering + HexagramSymbol rendering + the serious
- * cast 化为任务 bridge (gap nodes → POST /gap/intake per node). */
+ * cast 化为任务 bridge (gap nodes → POST /divination/intake per node). */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -103,14 +103,14 @@ describe('DivinationPanel 化为任务', () => {
     vi.unstubAllGlobals();
   });
 
-  it('serious cast turns each gap node into one kanban task via /gap/intake', async () => {
+  it('serious cast turns each gap node into one kanban task via /divination/intake', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/profiles/alice/divination')) {
         const body = JSON.parse(String(init?.body));
         return jsonResponse(200, body.mode === 'serious' ? SERIOUS_RESPONSE : PLAY_RESPONSE);
       }
-      if (url.endsWith('/profiles/alice/gap/intake')) {
+      if (url.endsWith('/profiles/alice/divination/intake')) {
         return jsonResponse(201, { ok: true, card: {}, section: 'Queue' });
       }
       return jsonResponse(404, { code: 'not_found', message: url });
@@ -132,7 +132,7 @@ describe('DivinationPanel 化为任务', () => {
 
     await screen.findByTestId('divination-intake-done');
     const intakes = fetchMock.mock.calls.filter(([url]) =>
-      String(url).endsWith('/profiles/alice/gap/intake'),
+      String(url).endsWith('/profiles/alice/divination/intake'),
     );
     expect(intakes).toHaveLength(2);
     const bodies = intakes.map(([, init]) => JSON.parse(String(init?.body)));

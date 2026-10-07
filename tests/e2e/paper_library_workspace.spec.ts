@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
-import { e2eDataRoot, readerBaseURL, streamlitPageURL } from "./helpers";
+import { e2eDataRoot, readerBaseURL, spaPageURL } from "./helpers";
 
 const profileName = process.env.NBLANE_PAPER_LIBRARY_E2E_PROFILE || "paper-library-e2e";
 // The standalone Paper Library workspace is served by the Reader API sidecar.
 const e2eBaseUrl = readerBaseURL();
-// Deep-link target exercised by the Overview tests: the Streamlit Research page.
-const overviewReturnURL = streamlitPageURL("/Research");
+// Deep-link target exercised by the Overview tests: the SPA Research page.
+const overviewReturnURL = spaPageURL("/research");
 
 // Fixtures must land in the data root of the instance under test
 // (.dev-data for the isolated dev instance, repo root otherwise).

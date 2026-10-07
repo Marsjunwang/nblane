@@ -1,6 +1,6 @@
 // Shared mutation-conflict (HTTP 412) handling for If-Match flows.
 //
-// Kanban/Inbox/Activity already surface conflicts as a yellow notification +
+// Kanban already surfaces conflicts as a yellow notification +
 // auto refetch. Pages that render mutation errors inline instead share these
 // components so every If-Match mutation gets the same recognition, copy and
 // a manual refresh button: 数据已被他人修改，请刷新后重试。

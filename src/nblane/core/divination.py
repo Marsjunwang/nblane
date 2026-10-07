@@ -1,6 +1,6 @@
 """占卜 (divination): hexagram casts anchored in the real starmap data.
 
-Design: ``docs/zh/dev/home-starmap-enhancements-design.md`` §5.
+Design: ``docs/zh/guides/home.md``
 
 Both modes derive the hexagram deterministically from a hash of the
 profile's real starmap state salted with the date, so the same state

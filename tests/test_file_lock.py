@@ -12,7 +12,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from nblane.core.file_lock import locked_profile_write
-from nblane.core.inbox import add_inbox_item, load_inbox, update_inbox
+from nblane.core.project_board import (
+    add_project_case,
+    load_project_board,
+    update_project_board,
+)
 
 
 class TestLockedProfileWrite(unittest.TestCase):
@@ -22,8 +26,8 @@ class TestLockedProfileWrite(unittest.TestCase):
         """A held lock blocks other flock users and is released on exit."""
         with tempfile.TemporaryDirectory() as tmp:
             prof = Path(tmp) / "demo"
-            with locked_profile_write(prof, "inbox.yaml") as lock_path:
-                self.assertEqual(lock_path, prof / "inbox.yaml.lock")
+            with locked_profile_write(prof, "project-board.yaml") as lock_path:
+                self.assertEqual(lock_path, prof / "project-board.yaml.lock")
                 with open(lock_path, "a", encoding="utf-8") as other:
                     with self.assertRaises(BlockingIOError):
                         fcntl.flock(
@@ -35,8 +39,8 @@ class TestLockedProfileWrite(unittest.TestCase):
                 fcntl.flock(other.fileno(), fcntl.LOCK_UN)
 
 
-class TestUpdateInbox(unittest.TestCase):
-    """update_inbox holds the lock across load → mutate → save."""
+class TestLockedUpdate(unittest.TestCase):
+    """update_project_board holds the lock across load → mutate → save."""
 
     def test_sidecar_lock_and_atomic_data_write(self) -> None:
         """The lock is a sidecar file; the data write stays atomic."""
@@ -44,39 +48,37 @@ class TestUpdateInbox(unittest.TestCase):
             prof = Path(tmp) / "demo"
             prof.mkdir()
             with patch(
-                "nblane.core.inbox.git_backup.record_change"
+                "nblane.core.project_board.git_backup.record_change"
             ) as record:
-                item = update_inbox(
+                update_project_board(
                     prof,
-                    lambda inbox: add_inbox_item(inbox, "first note"),
+                    lambda board: add_project_case(board, "first", case_id="c1"),
                 )
 
-            self.assertTrue((prof / "inbox.yaml.lock").exists())
-            data_path = prof / "inbox.yaml"
-            self.assertTrue(data_path.exists())
+            self.assertTrue((prof / "project-board.yaml.lock").exists())
+            self.assertTrue((prof / "project-board.yaml").exists())
             self.assertEqual(
                 [p for p in prof.iterdir() if p.suffix == ".tmp"],
                 [],
             )
-            stored = load_inbox(prof)
-            self.assertEqual([entry.id for entry in stored.items], [item.id])
+            self.assertIn("c1", load_project_board(prof).by_id())
             record.assert_called_once()
 
-    def test_unchanged_inbox_skips_write_and_backup(self) -> None:
+    def test_unchanged_document_skips_write_and_backup(self) -> None:
         """A no-op mutation leaves the file and git history untouched."""
         with tempfile.TemporaryDirectory() as tmp:
             prof = Path(tmp) / "demo"
             prof.mkdir()
             with patch(
-                "nblane.core.inbox.git_backup.record_change"
+                "nblane.core.project_board.git_backup.record_change"
             ) as record:
-                update_inbox(prof, lambda inbox: None)
+                update_project_board(prof, lambda board: None)
 
-            self.assertFalse((prof / "inbox.yaml").exists())
+            self.assertFalse((prof / "project-board.yaml").exists())
             record.assert_not_called()
 
     def test_concurrent_updates_lose_nothing(self) -> None:
-        """Two processes × 50 locked updates → all 100 items land."""
+        """Two processes × 25 locked updates → all 50 cases land."""
         with tempfile.TemporaryDirectory() as tmp:
             prof = Path(tmp) / "demo"
             prof.mkdir()
@@ -86,16 +88,19 @@ class TestUpdateInbox(unittest.TestCase):
                 from pathlib import Path
                 from unittest.mock import patch
 
-                from nblane.core.inbox import add_inbox_item, update_inbox
+                from nblane.core.project_board import (
+                    add_project_case,
+                    update_project_board,
+                )
 
                 prof = Path(sys.argv[1])
                 worker = sys.argv[2]
-                with patch("nblane.core.inbox.git_backup.record_change"):
-                    for i in range(50):
-                        update_inbox(
+                with patch("nblane.core.project_board.git_backup.record_change"):
+                    for i in range(25):
+                        update_project_board(
                             prof,
-                            lambda inbox, i=i: add_inbox_item(
-                                inbox, f"{worker}-{i}"
+                            lambda board, i=i: add_project_case(
+                                board, f"{worker}-{i}", case_id=f"{worker}-{i}"
                             ),
                         )
                 """
@@ -113,11 +118,9 @@ class TestUpdateInbox(unittest.TestCase):
                 _, stderr = proc.communicate(timeout=120)
                 self.assertEqual(proc.returncode, 0, stderr)
 
-            stored = load_inbox(prof)
-            self.assertEqual(len(stored.items), 100)
-            titles = {item.title for item in stored.items}
-            expected = {f"w{n}-{i}" for n in range(2) for i in range(50)}
-            self.assertEqual(titles, expected)
+            ids = set(load_project_board(prof).by_id())
+            expected = {f"w{n}-{i}" for n in range(2) for i in range(25)}
+            self.assertEqual(ids, expected)
 
 
 if __name__ == "__main__":

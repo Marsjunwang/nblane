@@ -30,5 +30,4 @@ def _detect_repo_root() -> Path:
 REPO_ROOT: Path = _detect_repo_root()
 PROFILES_DIR: Path = REPO_ROOT / "profiles"
 SCHEMAS_DIR: Path = REPO_ROOT / "schemas"
-TEAMS_DIR: Path = REPO_ROOT / "teams"
 TEMPLATE_DIR: Path = PROFILES_DIR / "template"

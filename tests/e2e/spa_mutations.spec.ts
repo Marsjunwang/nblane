@@ -11,9 +11,8 @@ import type { Page } from "@playwright/test";
  *   text/plain). Each test here asserts the request really goes out with
  *   `content-type: application/json` and a 2xx status.
  *
- * P0-2 — Activity offered 应用 for every pending item, but the backend only
- *   applies Review-origin candidates (Streamlit parity: button hidden +
- *   explanation for anything else). Covered by both directions below.
+ * (P0-2 covered the retired Agent Activity approval page and was removed
+ *   with it.)
  *
  * Runs against the isolated sandbox (`scripts/dev-web.sh --isolated`,
  * profile=dev); every entity title is unique per run so reruns never collide
@@ -86,19 +85,6 @@ async function seedKanbanCard(page: Page, title: string): Promise<string> {
 }
 
 test.describe("SPA mutations (P0-1/P0-2 acceptance)", () => {
-  test("inbox capture: 201 as JSON and the item shows up in the list", async ({ page }) => {
-    const title = `e2e-capture-${Date.now()}`;
-    await page.goto(spa("inbox"));
-    await page.getByLabel("随手记").fill(title);
-
-    await expectJsonMutation(page, "/inbox", () =>
-      page.getByRole("button", { name: "记录", exact: true }).click(),
-    );
-
-    await expect(page.getByText(title)).toBeVisible();
-    await expect(page.getByText("已加入收件箱。")).toBeVisible();
-  });
-
   test("projects: seed a card into Queue, then move it to Doing via the detail card", async ({
     page,
   }) => {
@@ -124,29 +110,4 @@ test.describe("SPA mutations (P0-1/P0-2 acceptance)", () => {
       unassigned.getByTestId("lane-column-unassigned-queue").getByText(title),
     ).toHaveCount(0);
   });
-
-  test("activity P0-2: pending non-Review item offers no 应用, with an explanation", async ({
-    page,
-    request,
-  }) => {
-    // The sandbox carries AI-Gateway pending items; the e2e itself never
-    // consumes them. If a regenerated sandbox lacks one, skip loudly.
-    const listResponse = await request.get(
-      `${SPA_BASE_URL}/api/v1/profiles/${encodeURIComponent(PROFILE)}/activity?status=pending&limit=200`,
-    );
-    expect(listResponse.ok()).toBe(true);
-    const list = (await listResponse.json()) as {
-      items: { id: string; title: string; source_page: string }[];
-    };
-    const foreign = (list.items ?? []).find((item) => item.source_page !== "Review");
-    test.skip(!foreign, "sandbox has no pending non-Review activity item to assert against");
-
-    await page.goto(spa("activity"));
-    await page.getByText(foreign!.title, { exact: true }).first().click();
-
-    await expect(page.getByRole("button", { name: "驳回", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "应用", exact: true })).toHaveCount(0);
-    await expect(page.getByText(/只能应用 pending 的 Review 候选/)).toBeVisible();
-  });
-
 });

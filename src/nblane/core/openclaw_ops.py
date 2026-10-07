@@ -1,6 +1,6 @@
 """OpenClaw host/gateway health checks ("doctor").
 
-Scripts the layered prerequisites from ``docs/zh/guides/openclaw-integration.md``
+Scripts the layered prerequisites from ``docs/zh/guides/openclaw-ops.md``
 and the deep-integration plan (§5.4): Node version, systemd linger, gateway
 port, WeChat plugin, backup schedule. The assistant reaches nblane over HTTP
 only, so MCP registration is no longer a prerequisite. Scheduled jobs are
@@ -18,7 +18,6 @@ Exit-code convention: :func:`doctor_exit_code` returns 1 when any check with
 from __future__ import annotations
 
 import getpass
-import json
 import os
 import re
 import socket
@@ -48,7 +47,7 @@ SEVERITY_INFO = "info"
 GATEWAY_HOST = "127.0.0.1"
 GATEWAY_PORT = 18789
 
-# docs/zh/guides/openclaw-integration.md: Node >=24.16.0 <25 or >=26.1.0.
+# docs/zh/guides/openclaw-ops.md: Node >=24.16.0 <25 or >=26.1.0.
 _MIN_NODE_24 = (24, 16, 0)
 _MIN_NODE_26 = (26, 1, 0)
 
@@ -189,66 +188,6 @@ def check_gateway_port(
         SEVERITY_ERROR,
         f"{GATEWAY_HOST}:{GATEWAY_PORT} 未监听",
         "systemctl --user status openclaw-gateway；不要绑定 0.0.0.0",
-    )
-
-
-def check_nblane_mcp_registered(runner: Runner = run_command) -> DoctorCheck:
-    """``openclaw mcp list`` must contain the nblane server entry."""
-
-    result = runner(["openclaw", "mcp", "list", "--json"])
-    if not result.ok:
-        return _check(
-            "nblane_mcp_registered",
-            False,
-            SEVERITY_ERROR,
-            f"openclaw mcp list 失败: {result.output or f'exit {result.returncode}'}",
-            "确认 Gateway 在运行，并按 L0.2 用 `openclaw config patch` 注入 nblane MCP",
-        )
-    try:
-        data = json.loads(result.stdout or "")
-    except json.JSONDecodeError:
-        # Older CLI without --json: degrade to a text match.
-        if re.search(r"\bnblane\b", result.stdout):
-            return _check(
-                "nblane_mcp_registered",
-                True,
-                SEVERITY_INFO,
-                "mcp list 文本输出中包含 nblane（--json 不可用，降级匹配）",
-            )
-        return _check(
-            "nblane_mcp_registered",
-            False,
-            SEVERITY_ERROR,
-            "mcp list 输出中未找到 nblane（--json 不可用，文本降级匹配）",
-            "nblane sync-agent-harness --target openclaw --profile <name> 生成配置后注入",
-        )
-    entries: Any = data
-    if isinstance(data, Mapping):
-        entries = data.get("servers", data.get("mcp"))
-        if entries is None:
-            # Newer CLI prints the servers mapping directly at top level.
-            entries = list(data.keys())
-    if isinstance(entries, Mapping):
-        entries = list(entries.keys())
-    names = {
-        entry.get("name")
-        if isinstance(entry, Mapping)
-        else entry
-        for entry in (entries or [])
-    }
-    if "nblane" in names:
-        return _check(
-            "nblane_mcp_registered",
-            True,
-            SEVERITY_INFO,
-            "mcp.servers 已注册 nblane",
-        )
-    return _check(
-        "nblane_mcp_registered",
-        False,
-        SEVERITY_ERROR,
-        f"mcp.servers 中没有 nblane（现有: {sorted(str(n) for n in names) or '无'}）",
-        "nblane sync-agent-harness --target openclaw --profile <name> 生成配置后注入",
     )
 
 

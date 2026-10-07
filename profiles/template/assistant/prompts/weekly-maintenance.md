@@ -11,8 +11,7 @@
 
 1. 自治整理你的 MEMORY.md / USER.md 与本周 daily notes（情景记忆归你维护）。
 2. 调用 `nblane_api --profile <profile> summary` 与 `nblane_api --profile <profile> goals` 对照成长档案。
-3. 把已稳定的偏好与新认识逐条用
-   `nblane_api --profile <profile> propose <字段> <建议值> --rationale <理由>` 提交人审。
-4. 把与技能树矛盾的记忆条目标记出来，整理成漂移报告提交审批。
-5. 调用 `nblane_api --profile <profile> health` 取档案体检摘要（校验/
+3. 把已稳定的偏好与新认识，以及与技能树矛盾的记忆条目，整理成「画像漂移」一节写进周报，
+   逐条给出建议值与理由，由用户自己决定是否改档案。
+4. 调用 `nblane_api --profile <profile> health` 取档案体检摘要（校验/
    同步类 issue 计数与重点项），作为「档案体检」一节附在周报末尾一并投递。

@@ -278,7 +278,7 @@ def _profile_text_for_agent_context(profile_text: str) -> str:
     """Return SKILL.md verbatim for agent context.
 
     North Star visibility is binary and gates only public artifacts
-    (docs/zh/dev/home-editing-starmap-design.md §1): agents always see the
+    (docs/zh/guides/home.md): agents always see the
     full text — an agent that cannot see the real North Star cannot produce
     a real plan.
     """

@@ -17,7 +17,7 @@ import {
  * Auth-off stacks (no users.yaml) are still supported: /auth/me answers the
  * synthetic admin, so an empty state is baked and every spec behaves exactly
  * as before. An unreachable SPA backend likewise degrades to an empty state
- * so the Streamlit-only specs are not held hostage by a missing 18504.
+ * so the sidecar-only specs are not held hostage by a missing 18504.
  */
 
 setup("bake SPA admin session storageState", async () => {

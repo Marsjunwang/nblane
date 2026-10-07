@@ -363,22 +363,6 @@ class TestChatMessages(unittest.TestCase):
             "1536*864",
         )
 
-    def test_ui_copy_uses_ui_language_not_reply_language(self) -> None:
-        """Interface strings follow UI_LANG independently."""
-        from nblane.web_i18n import common_ui
-
-        with patch("nblane.core.llm._UI_LANG", "zh"):
-            with patch("nblane.core.llm._REPLY_LANG", "en"):
-                zh_ui = common_ui()
-        self.assertEqual(zh_ui["profile_header"], "## 当前档案")
-        self.assertEqual(zh_ui["llm_reply_lang"], "模型回复语言")
-
-        with patch("nblane.core.llm._UI_LANG", "en"):
-            with patch("nblane.core.llm._REPLY_LANG", "zh"):
-                en_ui = common_ui()
-        self.assertEqual(en_ui["profile_header"], "## Current profile")
-        self.assertEqual(en_ui["llm_reply_lang"], "Model reply language")
-
     def test_returns_assistant_content(self) -> None:
         """OpenAI client receives system plus user/assistant turns."""
         mock_client = MagicMock()

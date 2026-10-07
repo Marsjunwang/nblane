@@ -94,35 +94,6 @@ AGENT_ACTIVITY = {
     ],
 }
 
-INBOX = {
-    "profile": "alice",
-    "items": [
-        {
-            "id": "inbox_20260918_001",
-            "title": "Read the SLAM survey",
-            "type": "link",
-            "source": "https://example.org/slam",
-            "status": "inbox",
-            "tags": ["robotics"],
-        },
-        {
-            "id": "inbox_20260918_002",
-            "title": "Captured idea",
-            "status": "captured",
-        },
-        {
-            "id": "inbox_20260917_001",
-            "title": "Clarified note",
-            "status": "clarified",
-        },
-        {
-            "id": "inbox_20260901_001",
-            "title": "Old archived note",
-            "status": "archived",
-        },
-    ],
-}
-
 SKILL_MD = """# SKILL — alice
 
 ## Identity
@@ -280,7 +251,6 @@ def _write_profile(root: Path, name: str = "alice") -> Path:
         )
 
     _dump("agent-activity.yaml", AGENT_ACTIVITY)
-    _dump("inbox.yaml", INBOX)
     _dump("agent-tasks.yaml", AGENT_TASKS)
     _dump("goals.yaml", GOALS)
     _dump("evidence-pool.yaml", EVIDENCE_POOL)
@@ -334,30 +304,6 @@ class TestProfileReads(unittest.TestCase):
             patcher.start()
         return TestClient(app)
 
-    def test_activity_defaults_to_pending_with_summary(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _write_profile(root)
-            client = self._client(root)
-            response = client.get("/api/v1/profiles/alice/activity")
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["profile"], "alice")
-        self.assertEqual(payload["status"], "pending")
-        self.assertEqual(payload["limit"], 50)
-        self.assertEqual(payload["total"], 2)
-        ids = [item["id"] for item in payload["items"]]
-        self.assertEqual(ids, ["act:patch:bbb", "act:candidate:aaa"])
-        item = payload["items"][0]
-        self.assertEqual(item["kind"], "patch")
-        self.assertEqual(item["target_owner"], "skill_tree")
-        # Summary counts the whole queue, not just the filtered page.
-        summary = payload["summary"]
-        self.assertEqual(summary["status"], {"pending": 2, "applied": 1})
-        self.assertEqual(summary["kind"], {"candidate": 2, "patch": 1})
-        self.assertIn("target_owner", summary)
-        self.assertIn("candidate_type", summary)
-
     def test_ai_exceptions_aggregates_persistent_failures(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -387,59 +333,6 @@ class TestProfileReads(unittest.TestCase):
         self.assertEqual(payload["total"], 1)
         self.assertEqual(payload["items"][0]["source"], "AI 调用")
         self.assertEqual(payload["items"][0]["href"], "/p/alice/research")
-
-    def test_activity_status_kind_and_limit_filters(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _write_profile(root)
-            client = self._client(root)
-            applied = client.get(
-                "/api/v1/profiles/alice/activity", params={"status": "applied"}
-            )
-            by_kind = client.get(
-                "/api/v1/profiles/alice/activity",
-                params={"status": "all", "kind": "candidate"},
-            )
-            limited = client.get(
-                "/api/v1/profiles/alice/activity",
-                params={"status": "all", "limit": 2},
-            )
-        self.assertEqual(applied.status_code, 200)
-        self.assertEqual(
-            [i["id"] for i in applied.json()["items"]], ["act:candidate:ccc"]
-        )
-        self.assertEqual(by_kind.status_code, 200)
-        self.assertEqual(
-            {i["kind"] for i in by_kind.json()["items"]}, {"candidate"}
-        )
-        self.assertEqual(by_kind.json()["total"], 2)
-        self.assertEqual(limited.status_code, 200)
-        self.assertEqual(limited.json()["total"], 3)
-        self.assertEqual(len(limited.json()["items"]), 2)
-
-    def test_activity_item_detail(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _write_profile(root)
-            client = self._client(root)
-            response = client.get(
-                "/api/v1/profiles/alice/activity/act:candidate:aaa"
-            )
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["id"], "act:candidate:aaa")
-        self.assertEqual(payload["title"], "Pending candidate")
-        self.assertEqual(payload["payload"], {"agent_task_id": "agenttask_1"})
-        self.assertEqual(payload["candidate_type"], "agent_dispatch")
-
-    def test_activity_item_detail_404(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _write_profile(root)
-            client = self._client(root)
-            response = client.get("/api/v1/profiles/alice/activity/act:nope")
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json()["code"], "activity_item_not_found")
 
     def test_kanban_returns_parsed_board(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -476,41 +369,6 @@ class TestProfileReads(unittest.TestCase):
         )
         # No markdown body leaks into the structured response.
         self.assertNotIn("# alice", str(payload))
-
-    def test_inbox_defaults_to_open_statuses(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _write_profile(root)
-            client = self._client(root)
-            response = client.get("/api/v1/profiles/alice/inbox")
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["statuses"], ["inbox", "captured", "clarified"])
-        self.assertEqual(payload["total"], 3)
-        self.assertNotIn("archived", {i["status"] for i in payload["items"]})
-        first = payload["items"][0]
-        self.assertEqual(first["id"], "inbox_20260918_001")
-        self.assertEqual(first["tags"], ["robotics"])
-        self.assertEqual(first["source"], "https://example.org/slam")
-        self.assertIn("history", first)
-
-    def test_inbox_status_override(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _write_profile(root)
-            client = self._client(root)
-            archived = client.get(
-                "/api/v1/profiles/alice/inbox", params={"status": "archived"}
-            )
-            everything = client.get(
-                "/api/v1/profiles/alice/inbox", params={"status": "all"}
-            )
-        self.assertEqual(archived.status_code, 200)
-        self.assertEqual(archived.json()["total"], 1)
-        self.assertEqual(
-            archived.json()["items"][0]["title"], "Old archived note"
-        )
-        self.assertEqual(everything.json()["total"], 4)
 
     def test_agent_tasks_list_and_status_filter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -742,10 +600,7 @@ class TestProfileReads(unittest.TestCase):
             _write_profile(root)
             client = self._client(root)
             responses = [
-                client.get("/api/v1/profiles/nobody/activity"),
-                client.get("/api/v1/profiles/nobody/activity/act:x"),
                 client.get("/api/v1/profiles/nobody/kanban"),
-                client.get("/api/v1/profiles/nobody/inbox"),
                 client.get("/api/v1/profiles/nobody/agent-tasks"),
                 client.get("/api/v1/profiles/nobody/goals"),
                 client.get("/api/v1/profiles/nobody/evidence"),
@@ -792,9 +647,7 @@ class TestProfileScopeEnforcement(unittest.TestCase):
             )
             self.assertEqual(login.status_code, 200)
             forbidden = [
-                client.get("/api/v1/profiles/alice/activity"),
                 client.get("/api/v1/profiles/alice/kanban"),
-                client.get("/api/v1/profiles/alice/inbox"),
                 client.get("/api/v1/profiles/alice/agent-tasks"),
                 client.get("/api/v1/profiles/alice/goals"),
                 client.get("/api/v1/profiles/alice/evidence"),
@@ -834,7 +687,7 @@ class TestProfileScopeEnforcement(unittest.TestCase):
             self.addCleanup(patcher.stop)
             patcher.start()
             client = TestClient(create_app())
-            response = client.get("/api/v1/profiles/alice/activity")
+            response = client.get("/api/v1/profiles/alice/kanban")
         self.assertEqual(response.status_code, 200)
 
 

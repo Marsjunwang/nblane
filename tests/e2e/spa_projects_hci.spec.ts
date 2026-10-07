@@ -5,7 +5,7 @@ import { SPA_BASE_URL } from "./spa_auth_shared";
 
 /**
  * Acceptance suite for the projects-page HCI frontend package
- * (docs/zh/dev/phase2-projects-hci.md — 总纲/视觉降级规范/五项裁决):
+ * (docs/zh/product/design-language.md — 总纲/视觉降级规范/五项裁决):
  *
  * 1. 归档带展开 — archived strip expands inline to dimmed read-only lanes
  *    (restore + drawer actions, no drag handles, no quick-add).

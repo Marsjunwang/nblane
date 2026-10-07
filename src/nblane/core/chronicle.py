@@ -2,7 +2,7 @@
 
 Narrative-level events for the home briefing line, 拓片 (yearly rubbings),
 and openclaw review material — git history is noise, the chronicle is the
-story (docs/zh/dev/home-editing-starmap-design.md §8). Write endpoints append
+story (docs/zh/guides/home.md). Write endpoints append
 entries themselves, only when the change actually happened (a no-op save logs
 nothing).
 

@@ -9,13 +9,10 @@ command="start"
 reload="0"
 profile="${NBLANE_DEV_PROFILE:-dev}"
 reader_port="${NBLANE_DEV_READER_PORT:-}"
-streamlit_port="${NBLANE_DEV_STREAMLIT_PORT:-}"
 web_api_port="${NBLANE_DEV_WEB_API_PORT:-}"
 grobid_port="${NBLANE_DEV_GROBID_PORT:-18070}"
 use_grobid="0"
 use_web_api="1"
-# Streamlit is retired (2026-10-06); start it only when explicitly asked.
-use_streamlit="0"
 runtime="${NBLANE_PAPER_LIBRARY_RUNTIME:-fastapi_iframe}"
 env_file="${NBLANE_DEV_ENV_FILE:-$repo_root/.env}"
 auth_file="${NBLANE_DEV_AUTH_FILE:-}"
@@ -27,7 +24,7 @@ usage() {
 Usage: scripts/dev-web.sh [start|stop|status] [options]
 
 Starts the FastAPI Reader sidecar and the SPA backend (nblane.web_api) in
-tmux. The retired Streamlit UI only starts with --streamlit.
+tmux.
 
 Commands:
   start              Start or restart dev tmux sessions. This is the default.
@@ -36,12 +33,10 @@ Commands:
 
 Options:
   --isolated         Use isolated dev ports and data:
-                     18502 / 18503 / 18504, .dev-data, .dev-assets.
+                     18502 / 18504, .dev-data, .dev-assets.
   --reload           Start uvicorn with --reload --reload-dir src.
   --no-reload        Start uvicorn without reload. This is the default.
   --reader-port N    Reader sidecar port. Default: 8502, or 18502 with --isolated.
-  --streamlit-port N Streamlit port. Default: 8503, or 18503 with --isolated.
-  --streamlit        Also start the retired Streamlit UI (off by default).
   --web-api-port N   SPA backend (nblane.web_api) port.
                      Default: 8504, or 18504 with --isolated.
   --no-web-api       Do not start the SPA backend service.
@@ -49,8 +44,8 @@ Options:
                      Default: dev.
   --root PATH        NBLANE_ROOT for this dev run.
   --asset-root PATH  NBLANE_RESEARCH_ASSET_ROOT for this dev run.
-  --runtime VALUE    Paper Library runtime: fastapi_iframe, fastapi_link,
-                     or streamlit_component. Default: fastapi_iframe.
+  --runtime VALUE    Paper Library runtime: fastapi_iframe or fastapi_link.
+                     Default: fastapi_iframe.
   --grobid           Point dev extraction at http://127.0.0.1:<grobid-port>.
   --grobid-port N    Host port for a dev GROBID container. Default: 18070.
   --env-file PATH    Source this shell-style env file before starting.
@@ -58,7 +53,7 @@ Options:
                      session with this users.yaml (NBLANE_AUTH_FILE).
                      Default: NBLANE_DEV_AUTH_FILE, or auto-detected
                      .dev-data/auth/users.yaml in --isolated mode.
-                     The Reader/Streamlit sessions stay auth-less.
+                     The Reader session stays auth-less.
 
 Examples:
   scripts/dev-web.sh
@@ -66,7 +61,6 @@ Examples:
   scripts/dev-web.sh --isolated --reload
   scripts/dev-web.sh --isolated --grobid
   scripts/dev-web.sh --no-web-api
-  scripts/dev-web.sh --isolated --streamlit   # also start the retired Streamlit UI
 EOF
 }
 
@@ -92,20 +86,12 @@ while [[ $# -gt 0 ]]; do
       reader_port="${2:?missing reader port}"
       shift 2
       ;;
-    --streamlit-port)
-      streamlit_port="${2:?missing streamlit port}"
-      shift 2
-      ;;
     --web-api-port)
       web_api_port="${2:?missing web api port}"
       shift 2
       ;;
     --no-web-api)
       use_web_api="0"
-      shift
-      ;;
-    --streamlit)
-      use_streamlit="1"
       shift
       ;;
     --profile)
@@ -161,13 +147,6 @@ if [[ -z "$reader_port" ]]; then
     reader_port="8502"
   fi
 fi
-if [[ -z "$streamlit_port" ]]; then
-  if [[ "$mode" == "isolated" ]]; then
-    streamlit_port="18503"
-  else
-    streamlit_port="8503"
-  fi
-fi
 if [[ -z "$web_api_port" ]]; then
   if [[ "$mode" == "isolated" ]]; then
     web_api_port="18504"
@@ -184,11 +163,9 @@ if [[ "$command" == "start" && -f "$env_file" ]]; then
 fi
 
 reader_session="nblane-reader-api"
-streamlit_session="nblane-streamlit-ui"
 web_api_session="nblane-web-api"
 if [[ "$mode" == "isolated" ]]; then
   reader_session="nblane-dev-reader-api"
-  streamlit_session="nblane-dev-streamlit-ui"
   web_api_session="nblane-dev-web-api"
 fi
 
@@ -218,7 +195,6 @@ if [[ "$mode" == "isolated" ]]; then
 fi
 
 reader_base="http://127.0.0.1:${reader_port}"
-streamlit_base="http://127.0.0.1:${streamlit_port}"
 web_api_base="http://127.0.0.1:${web_api_port}"
 
 spa_static_index="$repo_root/src/nblane/web_ui/static/index.html"
@@ -233,7 +209,6 @@ spa_build_hint() {
 
 stop_sessions() {
   tmux kill-session -t "$reader_session" 2>/dev/null || true
-  tmux kill-session -t "$streamlit_session" 2>/dev/null || true
   tmux kill-session -t "$web_api_session" 2>/dev/null || true
 }
 
@@ -256,11 +231,8 @@ sync_tmux_proxy_environment() {
 }
 
 show_status() {
-  tmux ls 2>/dev/null | grep -E "^(${reader_session}|${streamlit_session}|${web_api_session}):" || true
+  tmux ls 2>/dev/null | grep -E "^(${reader_session}|${web_api_session}):" || true
   echo
-  if [[ "$use_streamlit" == "1" ]]; then
-    echo "Streamlit:     ${streamlit_base}  (retired; started with --streamlit)"
-  fi
   echo "Reader API:    ${reader_base}"
   echo "Paper Library: ${reader_base}/paper-library?profile=${profile}"
   if [[ "$use_web_api" == "1" ]]; then
@@ -268,9 +240,6 @@ show_status() {
   fi
   echo
   echo "Health checks:"
-  if [[ "$use_streamlit" == "1" ]]; then
-    echo "  curl -i ${streamlit_base}/_stcore/health"
-  fi
   echo "  curl -i '${reader_base}/paper-library?profile=${profile}'"
   if [[ "$use_web_api" == "1" ]]; then
     echo "  curl -i ${web_api_base}/api/v1/health"
@@ -287,7 +256,7 @@ show_status() {
 
 if [[ "$command" == "stop" ]]; then
   stop_sessions
-  echo "Stopped ${reader_session}, ${streamlit_session} and ${web_api_session}."
+  echo "Stopped ${reader_session} and ${web_api_session}."
   exit 0
 fi
 
@@ -297,7 +266,7 @@ if [[ "$command" == "status" ]]; then
 fi
 
 # --- start-only prerequisites (stop/status above must work without them) ---
-if [[ ! -x ".venv/bin/uvicorn" ]] || [[ "$use_streamlit" == "1" && ! -x ".venv/bin/streamlit" ]]; then
+if [[ ! -x ".venv/bin/uvicorn" ]]; then
   echo "Missing .venv tools. Run: python3 -m venv .venv && .venv/bin/pip install -e ." >&2
   exit 1
 fi
@@ -307,16 +276,13 @@ if ! command -v tmux >/dev/null 2>&1; then
 fi
 
 if [[ "$mode" == "isolated" ]]; then
-  mkdir -p "$dev_root/profiles" "$dev_root/schemas" "$dev_root/teams" "$asset_root"
+  mkdir -p "$dev_root/profiles" "$dev_root/schemas" "$asset_root"
   if [[ ! -d "$dev_root/profiles/template" ]]; then
     cp -a "$repo_root/profiles/template" "$dev_root/profiles/template"
   fi
   if [[ ! -d "$dev_root/schemas" || -z "$(find "$dev_root/schemas" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
     cp -a "$repo_root/schemas/." "$dev_root/schemas/"
     rm -rf "$dev_root/schemas/.learned"
-  fi
-  if [[ ! -d "$dev_root/teams" || -z "$(find "$dev_root/teams" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
-    cp -a "$repo_root/teams/." "$dev_root/teams/"
   fi
   if [[ ! -d "$dev_root/profiles/$profile" ]]; then
     NBLANE_ROOT="$dev_root" PYTHONPATH=src .venv/bin/nblane init "$profile"
@@ -339,8 +305,8 @@ else
   grobid_env="NBLANE_RESEARCH_PDF_BACKEND=pymupdf"
 fi
 
-# Auth in dev is a SPA-backend (web-api) concern: the Reader/Streamlit
-# sessions stay auth-less so their pages and e2e specs keep working, and
+# Auth in dev is a SPA-backend (web-api) concern: the Reader session
+# stays auth-less so its pages and e2e specs keep working, and
 # isolated mode pins NBLANE_AUTH_FILE empty for them so a production value
 # from the env file cannot leak into the sandbox. The web-api session gets
 # the auth file from --auth-file / NBLANE_DEV_AUTH_FILE, or auto-detects
@@ -471,9 +437,6 @@ stop_sessions
 sync_tmux_proxy_environment
 
 ports_to_check=("$reader_port")
-if [[ "$use_streamlit" == "1" ]]; then
-  ports_to_check+=("$streamlit_port")
-fi
 if [[ "$use_web_api" == "1" ]]; then
   ports_to_check+=("$web_api_port")
 fi
@@ -481,7 +444,7 @@ for port in "${ports_to_check[@]}"; do
   if ! wait_for_free_port "$port"; then
     echo "Port ${port} is already in use:" >&2
     port_owner "$port" >&2
-    echo "Stop that process first, or pick another port via --reader-port/--streamlit-port/--web-api-port." >&2
+    echo "Stop that process first, or pick another port via --reader-port/--web-api-port." >&2
     exit 1
   fi
 done
@@ -492,23 +455,9 @@ tmux new-session -d -s "$reader_session" -c "$repo_root" \
    NBLANE_ENV_FILE='$env_file' \
    NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
    NBLANE_SPA_BASE_URL='$web_api_base' \
+   NBLANE_PAPER_LIBRARY_RUNTIME='$runtime' \
    ${auth_env} ${grobid_env} ${lang_env} ${local_models_env} \
    PYTHONPATH=src .venv/bin/uvicorn ${uvicorn_args}"
-
-if [[ "$use_streamlit" == "1" ]]; then
-tmux new-session -d -s "$streamlit_session" -c "$repo_root" \
-  "${env_load} ${reader_token_env} \
-   NBLANE_ROOT='$dev_root' \
-   NBLANE_ENV_FILE='$env_file' \
-   NBLANE_READER_API_BASE='$reader_base' \
-   NBLANE_DASHBOARD_CANVAS_BASE='$reader_base' \
-   NBLANE_STREAMLIT_BASE_URL='$streamlit_base' \
-   NBLANE_PAPER_LIBRARY_RUNTIME='$runtime' \
-   NBLANE_RESEARCH_ASSET_ROOT='$asset_root' \
-   ${auth_env} ${grobid_env} ${lang_env} \
-   PYTHONPATH=src .venv/bin/streamlit run app.py \
-     --server.address=127.0.0.1 --server.port=${streamlit_port} --server.headless=true"
-fi
 
 if [[ "$mode" == "isolated" ]]; then
   workshop_url_expr="/terminal/"
@@ -573,7 +522,6 @@ fi
 echo "Started ${mode} development Web UI."
 echo "  root:        ${dev_root}"
 echo "  assets:      ${asset_root}"
-echo "  streamlit:   ${streamlit_base}"
 echo "  reader API:  ${reader_base}"
 if [[ "$use_web_api" == "1" ]]; then
   echo "  web API:     ${web_api_base} (SPA backend; serves web_ui/static when built)"

@@ -14,7 +14,7 @@ IDENTITY_FIELDS: tuple[str, ...] = (
     "North Star Visibility",
 )
 
-# Binary going forward (docs/zh/dev/home-editing-starmap-design.md §1):
+# Binary going forward (docs/zh/guides/home.md):
 # ``public`` = may appear in public artifacts (public build/拓片/share);
 # ``private`` = local only. Legacy values map on read: ``visible`` ->
 # ``public``, ``discreet``/``hidden`` -> ``private``. Visibility never gates

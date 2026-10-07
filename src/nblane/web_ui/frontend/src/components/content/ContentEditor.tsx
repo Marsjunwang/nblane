@@ -50,7 +50,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
-import { containsDisplayMathBlock } from '../../../../../public_blog_editor_component/frontend/src/blocks/markdown.js';
+import { containsDisplayMathBlock } from '../../blogBlocks/markdown.js';
 import { ifMatch } from '../../api/client';
 import {
   contentBlogApiUrl,

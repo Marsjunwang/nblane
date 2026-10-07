@@ -41,7 +41,6 @@ class CurrentUser(BaseModel):
     role: str
     auth_enabled: bool = False
     profiles: list[str] = Field(default_factory=list)
-    teams: list[str] = Field(default_factory=list)
     agent: bool = False
 
     @classmethod
@@ -53,7 +52,6 @@ class CurrentUser(BaseModel):
             role=user.role,
             auth_enabled=auth_enabled,
             profiles=list(user.profiles),
-            teams=list(user.teams),
             agent=user.agent,
         )
 
@@ -119,7 +117,6 @@ def _local_user() -> auth_core.User:
         display_name="Local",
         password_hash="",
         role="admin",
-        teams=("*",),
     )
 
 

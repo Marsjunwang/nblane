@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-07
+last_verified: 2026-10-08
 source_of_truth: true
 ---
 
@@ -20,7 +20,6 @@ source_of_truth: true
 | `profile://kanban` | `kanban.md` 原文 |
 | `profile://goals` | 目标状态计数、主目标与活跃目标、北极星；private 目标不出现 |
 | `profile://evidence` | 证据池按审阅状态计数 + 最近 20 条 |
-| `profile://inbox` | 未处置条目（`inbox` / `captured` / `clarified`） |
 | `profile://learning` | 学习记录计数、在读资源、最近 10 条 |
 | `agent://tasks` | 外部 agent 任务列表（`agent-tasks.yaml`） |
 | `agent://task/{task_id}` | 单个任务的 handoff、输入 refs、预期产物 |
@@ -33,17 +32,13 @@ source_of_truth: true
 |------|------|------|
 | `add_kanban_card` | 直写 | 加一张卡（`title`、`section` 默认 Queue、`context`、`tags`、`planned_start`、`planned_end`）。返回 `card_id`、`journal_id` |
 | `move_kanban_card` | 直写 | 按 id / 精确标题 / 唯一子串移动到 `target_section`，进出 Done 自动处理完成日期 |
-| `submit_kanban_candidate` | 直写 | `move_kanban_card` 的旧名，直接移动 |
 | `delete_kanban_card` | 确认 | 第一次返回 `confirmation_required` + `summary` + `confirm_id`；用户同意后用相同参数带 `confirm_id` 重调才删除 |
 | `add_checkin` | 直写 | 打卡一次（`habit` id 或标题、`date`、`count`、`unit`、`summary`、`note`、`tags`） |
-| `capture_inbox` | 直写 | 向 `inbox.yaml` 追加一条 |
 | `append_growth_log` | 直写 | 向 SKILL.md Growth Log 追加一行 |
 | `crystallize_method_draft` | 直写 | 写方法草稿到 `methods/` |
 | `log_skill_evidence` | 确认 | 给技能节点加一条内联证据；需要确认时返回以 `CONFIRM REQUIRED:` 开头的一行 |
 | `log_interaction` | 记录 | 追加交互记录到 `interactions/*.jsonl`，不进撤销日志 |
 | `suggest_skill_upgrade` | 只读 | 只返回文本建议，不写文件 |
-| `submit_evidence_candidate` | 记录 | 提交一条证据候选，只追加记录，不写证据池 |
-| `submit_profile_model_candidate` | 记录 | 提交一条 agent-profile 修改建议，只追加记录，不改 `agent-profile.yaml` |
 | `submit_agent_task_candidate` | 记录 | 外部 agent 回传任务结果（`summary`、`changed_paths`、`warnings`、`result_payload`），任务变为 `candidate_ready` |
 | `update_agent_task_status` | 记录 | 更新外部 agent 任务状态 |
 | `recent_actions` | 只读 | 撤销日志最新条目（`limit` 默认 10，上限 50），HTTP 和 MCP 的写入都在里面 |

@@ -33,20 +33,19 @@ jobs:
 
       - name: Import smoke
         run: >
-          python -c "from nblane.kanban_ui import render_kanban_board;
+          python -c "import nblane.web_api, nblane.web_reader_api;
           from nblane.core.profile_ingest import merge_ingest_patch;
           print('imports ok')"
 
   # Freshness check for the bundled frontends: rebuild every
-  # src/nblane/*_component/frontend (Streamlit components) plus the SPA
-  # frontend src/nblane/web_ui/frontend, and fail when the committed
-  # artifacts (frontend/static, frontend/dist for goal_presence,
-  # web_ui/static for the SPA) no longer match the source. We rebuild +
+  # src/nblane/*_component/frontend (today only the Paper Library frontend
+  # served by the Reader API) plus the SPA frontend src/nblane/web_ui/frontend,
+  # and fail when the committed artifacts (frontend/static, web_ui/static for
+  # the SPA) no longer match the source. We rebuild +
   # diff rather than compare git timestamps: timestamp checks
   # false-positive on source edits that do not change the bundle (tests,
   # comments), while a real build is the ground truth. Total cost is a
-  # few minutes on a runner (small Vite apps; the heaviest deps are
-  # three.js in home_dashboard).
+  # few minutes on a runner (small Vite apps).
   frontend-artifacts:
     runs-on: ubuntu-latest
     steps:

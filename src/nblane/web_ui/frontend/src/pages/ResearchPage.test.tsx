@@ -43,7 +43,6 @@ const RESEARCH = {
     auth_enabled: false,
     handoff_token: '',
     paper_library_url: 'http://127.0.0.1:8502/paper-library?profile=alice',
-    dashboard_url: 'http://127.0.0.1:8502/dashboard?profile=alice&embed=1',
   },
 };
 

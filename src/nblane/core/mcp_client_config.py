@@ -154,8 +154,7 @@ def build_openclaw_mcp_snippet(
         "```",
         "",
         f"- {profile_note}",
-        "- 可选环境变量:`NBLANE_CONTEXT_MODE`(chat|review|write|plan,默认 chat)、",
-        "  `NBLANE_GAP_USE_LLM=1`(gap 分析启用 LLM 路由)。",
+        "- 可选环境变量:`NBLANE_CONTEXT_MODE`(chat|review|write|plan,默认 chat)。",
         "",
         "## 验证",
         "",
@@ -170,7 +169,7 @@ def build_openclaw_mcp_snippet(
         "",
         "闭环约定:OpenClaw 是执行层,产出必须经 `submit_agent_task_candidate`",
         "进入 Agent Activity 审批队列,由人在 Web UI 处置——不要绕过审批直写。",
-        "详见 docs/zh/guides/openclaw-integration.md。",
+        "详见 docs/zh/guides/openclaw-ops.md。",
     ]
     return "\n".join(lines).rstrip() + "\n"
 

@@ -4,9 +4,8 @@ import { expect, test } from "@playwright/test";
  * Smoke suite for the React SPA served by the FastAPI backend
  * (nblane.web_api, one process for /api/v1 + web_ui/static).
  *
- * Self-contained: does NOT use helpers.ts (those target the Streamlit UI and
- * the Reader API sidecar). The SPA base URL is independent of the Streamlit
- * baseURL in playwright.config.ts:
+ * Self-contained: does NOT use helpers.ts. The SPA base URL comes from
+ * NBLANE_E2E_SPA_BASE_URL:
  *
  *   default dev  (`scripts/dev-web.sh`):            http://127.0.0.1:8504
  *   isolated dev (`scripts/dev-web.sh --isolated`): http://127.0.0.1:18504

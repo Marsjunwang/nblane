@@ -35,7 +35,6 @@ ACTIVITY_TARGET_OWNERS = (
     "resume",
     "output",
     "work",
-    "team",
     "profile_context",
 )
 

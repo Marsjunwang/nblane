@@ -1,14 +1,14 @@
 """Compatibility facade for nblane file I/O.
 
-Domain-specific implementations live in profile_io, schema_io, kanban_io,
-and team_io. Existing imports from nblane.core.io remain supported.
+Domain-specific implementations live in profile_io, schema_io, and
+kanban_io. Existing imports from nblane.core.io remain supported.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from nblane.core import kanban_io, profile_io, schema_io, team_io
+from nblane.core import kanban_io, profile_io, schema_io
 from nblane.core.file_state import FileSnapshot
 from nblane.core.kanban_io import (
     KANBAN_ARCHIVE_FILENAME,
@@ -26,7 +26,7 @@ from nblane.core.models import (
     SkillNode,
     SkillTree,
 )
-from nblane.core.paths import PROFILES_DIR, SCHEMAS_DIR, TEAMS_DIR
+from nblane.core.paths import PROFILES_DIR, SCHEMAS_DIR
 from nblane.core.profile_io import (
     EVIDENCE_POOL_FILENAME,
     GOALS_FILENAME,
@@ -245,56 +245,6 @@ def archive_kanban_done_tasks(
         kanban_io.profile_dir = old
 
 
-def list_teams() -> list[str]:
-    """Return team IDs (non-template subdirs of teams/)."""
-    if not TEAMS_DIR.exists():
-        return []
-    return sorted(
-        d.name
-        for d in TEAMS_DIR.iterdir()
-        if d.is_dir() and d.name != "_template"
-    )
-
-
-def load_team(team_id: str) -> dict | None:
-    """Load team.yaml for a team."""
-    old = team_io.TEAMS_DIR
-    team_io.TEAMS_DIR = TEAMS_DIR
-    try:
-        return team_io.load_team(team_id)
-    finally:
-        team_io.TEAMS_DIR = old
-
-
-def load_product_pool(team_id: str) -> dict | None:
-    """Load product-pool.yaml for a team."""
-    old = team_io.TEAMS_DIR
-    team_io.TEAMS_DIR = TEAMS_DIR
-    try:
-        return team_io.load_product_pool(team_id)
-    finally:
-        team_io.TEAMS_DIR = old
-
-
-def save_team(team_id: str, data: dict) -> None:
-    """Write team.yaml for a team."""
-    old = team_io.TEAMS_DIR
-    team_io.TEAMS_DIR = TEAMS_DIR
-    try:
-        return team_io.save_team(team_id, data)
-    finally:
-        team_io.TEAMS_DIR = old
-
-
-def save_product_pool(team_id: str, data: dict) -> None:
-    """Write product-pool.yaml for a team."""
-    old = team_io.TEAMS_DIR
-    team_io.TEAMS_DIR = TEAMS_DIR
-    try:
-        return team_io.save_product_pool(team_id, data)
-    finally:
-        team_io.TEAMS_DIR = old
-
 __all__ = [
     "EVIDENCE_POOL_FILENAME",
     "GOALS_FILENAME",
@@ -313,33 +263,27 @@ __all__ = [
     "STATUSES",
     "SkillNode",
     "SkillTree",
-    "TEAMS_DIR",
     "append_kanban_archive",
     "archive_kanban_done_tasks",
     "init_profile",
     "list_profiles",
     "list_schemas",
-    "list_teams",
     "load_evidence_pool",
     "load_evidence_pool_raw",
     "load_goal_book",
     "load_goal_book_raw",
-    "load_product_pool",
     "load_schema",
     "load_schema_raw",
     "load_skill_md",
     "load_skill_tree",
     "load_skill_tree_raw",
-    "load_team",
     "parse_kanban",
     "profile_dir",
     "render_kanban",
     "save_evidence_pool",
     "save_goal_book",
     "save_kanban",
-    "save_product_pool",
     "save_skill_tree",
-    "save_team",
     "safe_profile_dir",
     "schema_node_index",
     "status_by_node_id",

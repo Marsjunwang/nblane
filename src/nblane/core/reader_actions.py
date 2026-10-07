@@ -50,7 +50,7 @@ from nblane.core.research_workspace import (
     load_chunks,
     upsert_research_claim,
 )
-from nblane.research_paper_reader_component.events import (
+from nblane.core.reader_events import (
     ANALYZE_PAPER,
     ANNOTATION_CREATE,
     ANNOTATION_DELETE,

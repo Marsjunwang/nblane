@@ -7,8 +7,8 @@ touch (``snapshot`` before, ``snapshot`` after, ``diff``). Undo writes each
 entity still equals its ``after`` — if a human or another write touched it
 since, the undo is refused instead of clobbering newer edits.
 
-This file is deliberately separate from ``agent-activity.yaml`` (review
-candidates / AI run traces): it is a short-lived operational log — entries
+This file is deliberately separate from ``agent-activity.yaml`` (AI run
+traces / writeback records): it is a short-lived operational log — entries
 older than ``RETENTION_DAYS`` or beyond ``MAX_ENTRIES`` are pruned.
 
 Entity kinds (``ENTITY_KINDS``):
@@ -16,7 +16,7 @@ Entity kinds (``ENTITY_KINDS``):
 - ``kanban_card`` — ``{"section", "index", "task"}`` in kanban.md
 - ``checkin`` / ``habit_plan`` / ``habit`` — rows in activity-log.yaml
 - ``goal`` / ``project_case`` / ``evidence`` / ``skill_node`` /
-  ``inbox_item`` / ``research_source`` / ``learning_resource`` — rows
+  ``research_source`` / ``learning_resource`` — rows
   (``{"index", "item"}``) in their YAML list documents
 - ``north_star`` — the three North Star identity bullets in SKILL.md
 - ``file:<relative path>`` — one whole text file (``{"item": {"text"}}``),
@@ -130,18 +130,6 @@ def _tree_save(pdir: Path, raw: dict[str, Any]) -> None:
     profile_io.save_skill_tree(pdir.name, raw)
 
 
-def _inbox_load(pdir: Path) -> dict[str, Any]:
-    from nblane.core import inbox
-
-    return inbox.load_inbox_raw(pdir) or {}
-
-
-def _inbox_save(pdir: Path, raw: dict[str, Any]) -> None:
-    from nblane.core import inbox
-
-    inbox.save_inbox(pdir, raw)
-
-
 def _sources_load(pdir: Path) -> dict[str, Any]:
     from nblane.core.research_sources import load_research_sources_raw
 
@@ -171,7 +159,6 @@ _LIST_DOCS: dict[str, _ListDoc] = {
     "project_case": _ListDoc("project-board.yaml", "project_cases", _board_load, _board_save),
     "evidence": _ListDoc("evidence-pool.yaml", "evidence_entries", _pool_load, _pool_save),
     "skill_node": _ListDoc("skill-tree.yaml", "nodes", _tree_load, _tree_save),
-    "inbox_item": _ListDoc("inbox.yaml", "items", _inbox_load, _inbox_save),
     "research_source": _ListDoc("research/sources.yaml", "sources", _sources_load, _sources_save),
     "learning_resource": _ListDoc("learning-log.yaml", "resources", _learning_load, _learning_save),
 }

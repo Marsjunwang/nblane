@@ -1,5 +1,5 @@
 /* 铭文卡 (inscription detail card) — read mode + 重刻 edit mode for the pole
- * star (北极星) and goal stars (恒星), per docs/zh/dev/home-editing-starmap-design.md
+ * star (北极星) and goal stars (恒星), per docs/zh/guides/home.md
  * §2. The edit mode stays inside the inscription card visual (dark ground,
  * hairline gold); saving ends with a 落印 seal micro-animation and the
  * starmap refreshes in place via query invalidation. */

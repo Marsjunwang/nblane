@@ -4,7 +4,7 @@ nblane's own data root (``NBLANE_ROOT``) and each connected personal agent's
 workspace are **separate** git repositories: the backup is unified (one
 Settings panel, one daily timer), the repositories are not. Agent episodic
 memory stays owned by the agent; nblane only registers, snapshots and pushes
-it (docs/zh/guides/agent-setup.md).
+it (docs/zh/guides/assistant.md).
 
 Per target this module reports remote/push freshness and drives the guided
 remote setup: generate a per-repository deploy key (GitHub deploy keys are

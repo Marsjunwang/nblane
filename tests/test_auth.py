@@ -37,7 +37,7 @@ class TestAuth(unittest.TestCase):
         self.assertFalse(verify_password("wrong", stored))
 
     def test_load_users_mapping(self) -> None:
-        """users mapping supports profile and team authorization fields."""
+        """users mapping supports profile fields; a legacy ``teams`` key is ignored."""
         stored = hash_password(
             "pw",
             iterations=100_000,
@@ -65,7 +65,7 @@ class TestAuth(unittest.TestCase):
         self.assertIn("wang", users)
         self.assertEqual(users["wang"].profile, "王军")
         self.assertEqual(users["wang"].profiles, ("王军",))
-        self.assertEqual(users["wang"].teams, ("robotics",))
+        self.assertFalse(hasattr(users["wang"], "teams"))
 
     def test_load_users_rejects_missing_hash(self) -> None:
         """A configured user must have a password hash."""

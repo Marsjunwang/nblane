@@ -16,7 +16,6 @@ from nblane.core.openclaw_ops import (
     check_backup_schedule,
     check_gateway_port,
     check_linger,
-    check_nblane_mcp_registered,
     check_node_version,
     check_openclaw_version,
     check_weixin_plugin,
@@ -111,54 +110,6 @@ class TestGatewayPort(unittest.TestCase):
         self.assertFalse(check.ok)
         self.assertEqual(check.severity, SEVERITY_ERROR)
         self.assertEqual(doctor_exit_code([check]), 1)
-
-
-class TestNblaneMcpRegistered(unittest.TestCase):
-    def test_registered_json_list(self) -> None:
-        runner = _runner_for(
-            ("openclaw", "mcp", "list"), _ok(json.dumps([{"name": "nblane"}]))
-        )
-        self.assertTrue(check_nblane_mcp_registered(runner).ok)
-
-    def test_registered_json_mapping(self) -> None:
-        runner = _runner_for(
-            ("openclaw", "mcp", "list"),
-            _ok(json.dumps({"servers": [{"name": "nblane"}]})),
-        )
-        self.assertTrue(check_nblane_mcp_registered(runner).ok)
-
-    def test_registered_top_level_servers_mapping(self) -> None:
-        # OpenClaw 2026.9: `mcp list --json` prints the servers mapping
-        # directly, e.g. {"nblane": {"command": ...}}.
-        runner = _runner_for(
-            ("openclaw", "mcp", "list"),
-            _ok(json.dumps({"nblane": {"command": "/venv/bin/nblane-mcp"}})),
-        )
-        self.assertTrue(check_nblane_mcp_registered(runner).ok)
-
-    def test_missing(self) -> None:
-        runner = _runner_for(
-            ("openclaw", "mcp", "list"), _ok(json.dumps([{"name": "other"}]))
-        )
-        check = check_nblane_mcp_registered(runner)
-        self.assertFalse(check.ok)
-        self.assertEqual(check.severity, SEVERITY_ERROR)
-
-    def test_text_fallback_when_json_unsupported(self) -> None:
-        runner = _runner_for(
-            ("openclaw", "mcp", "list"), _ok("NAME    TRANSPORT\nnblane  stdio\n")
-        )
-        check = check_nblane_mcp_registered(runner)
-        self.assertTrue(check.ok)
-        self.assertIn("降级", check.detail)
-
-    def test_text_fallback_miss(self) -> None:
-        runner = _runner_for(("openclaw", "mcp", "list"), _ok("other  stdio\n"))
-        self.assertFalse(check_nblane_mcp_registered(runner).ok)
-
-    def test_cli_failure(self) -> None:
-        runner = _runner_for(("openclaw",), _fail())
-        self.assertFalse(check_nblane_mcp_registered(runner).ok)
 
 
 class TestOpenclawVersion(unittest.TestCase):

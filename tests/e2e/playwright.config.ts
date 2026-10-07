@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 import fs from "node:fs";
-import { DEFAULT_STREAMLIT_BASE_URL } from "./helpers";
+import { DEFAULT_SPA_BASE_URL } from "./helpers";
 import { SPA_ADMIN_STORAGE_STATE } from "./spa_auth_shared";
 
 const systemChromium =
@@ -8,11 +8,11 @@ const systemChromium =
   (fs.existsSync("/snap/bin/chromium") ? "/snap/bin/chromium" : "");
 
 // Port convention (details in tests/e2e/README.md):
-//   default dev  (`scripts/dev-web.sh`):            Streamlit 8503 + sidecar 8502
-//   isolated dev (`scripts/dev-web.sh --isolated`): Streamlit 18503 + sidecar 18502
-// Every spec derives its URLs from use.baseURL: page.goto("/Some_Page") hits
-// the Streamlit UI; specs that talk to the Reader API sidecar directly use
-// readerBaseURL() from helpers.ts (override via NBLANE_E2E_READER_BASE).
+//   default dev  (`scripts/dev-web.sh`):            SPA 8504 + sidecar 8502
+//   isolated dev (`scripts/dev-web.sh --isolated`): SPA 18504 + sidecar 18502
+// use.baseURL points at the SPA; specs that talk to the Reader API sidecar
+// directly use readerBaseURL() from helpers.ts (override via
+// NBLANE_E2E_READER_BASE).
 export default defineConfig({
   testDir: ".",
   timeout: 45_000,
@@ -21,8 +21,8 @@ export default defineConfig({
   },
   use: {
     // Default matches the isolated dev instance so a bare `npm run test:e2e`
-    // never collides with a developer's live dev server on 8503.
-    baseURL: process.env.NBLANE_E2E_BASE_URL || DEFAULT_STREAMLIT_BASE_URL,
+    // never collides with a developer's live dev server on 8504.
+    baseURL: process.env.NBLANE_E2E_BASE_URL || DEFAULT_SPA_BASE_URL,
     launchOptions: {
       ...(systemChromium ? { executablePath: systemChromium } : {}),
       args: ["--no-sandbox"],
@@ -44,8 +44,7 @@ export default defineConfig({
       use: {
         // The SPA backend may run with NBLANE_AUTH_FILE (isolated stack does
         // since 2026-09-21): pre-existing specs get the baked admin session.
-        // Harmless on auth-less Streamlit/sidecar origins — they ignore the
-        // cookie.
+        // Harmless on the auth-less sidecar origin — it ignores the cookie.
         storageState: SPA_ADMIN_STORAGE_STATE,
       },
     },

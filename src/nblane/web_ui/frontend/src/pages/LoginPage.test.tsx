@@ -14,7 +14,7 @@ function renderLogin(entry: string | { pathname: string; state?: unknown }) {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<div>profiles home</div>} />
-      <Route path="/p/:name/studio" element={<div>studio page</div>} />
+      <Route path="/p/:name/projects" element={<div>projects page</div>} />
     </Routes>,
     entry,
   );
@@ -61,11 +61,11 @@ describe('LoginPage', () => {
     mockLoginApi();
     renderLogin({
       pathname: '/login',
-      state: { from: { pathname: '/p/alice/studio' } },
+      state: { from: { pathname: '/p/alice/projects' } },
     });
 
     await submitLogin();
-    expect(await screen.findByText('studio page')).toBeInTheDocument();
+    expect(await screen.findByText('projects page')).toBeInTheDocument();
   });
 
   it('falls back to / and ignores non-local redirect targets', async () => {

@@ -19,10 +19,9 @@ Contract:
   ``run(profile, input, report) -> result``; ``report(phase, message)``
   appends a progress event and updates the job's phase/message.
 
-Registered kinds: ``gap-analysis`` (Gap deep analysis with the LLM
-router), ``studio-jd-match`` (Output Studio JD match analysis),
-``project-suggest-refs`` (Project Board AI ref suggestion) and
-``evidence-crystallize`` (LLM Done-task -> evidence draft). Records are
+Registered kinds include ``project-suggest-refs`` (Project Board AI ref
+suggestion), ``evidence-crystallize`` (LLM Done-task -> evidence draft),
+the ``content-*`` editor jobs and the ``career-*`` workspace jobs. Records are
 process-local by design (single worker); results live only in memory and
 are pruned after ``_JOB_TTL_SECONDS``.
 """
@@ -39,14 +38,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nblane.core import content_ai, gap
-from nblane.core import career_ai, jd_match
-from nblane.core import llm as llm_client
+from nblane.core import content_ai
+from nblane.core import career_ai
 from nblane.core import profile_io, project_suggest
 from nblane.core.project_board import load_project_board
 
-KIND_GAP_ANALYSIS = "gap-analysis"
-KIND_STUDIO_JD_MATCH = "studio-jd-match"
 KIND_PROJECT_SUGGEST_REFS = "project-suggest-refs"
 KIND_EVIDENCE_CRYSTALLIZE = "evidence-crystallize"
 KIND_CONTENT_REWRITE = "content-rewrite"
@@ -435,147 +431,6 @@ def _watchdog_timeout(job_id: str) -> None:
     time.sleep(_JOB_TIMEOUT_SECONDS)
     with _LOCK:
         _mark_timeout_locked(job_id, time.time())
-
-
-def _validate_gap_analysis_input(job_input: dict[str, Any]) -> dict[str, Any]:
-    task = _clean(job_input.get("task"))
-    if not task:
-        raise JobInputError("empty_task", "Empty task text.")
-    if len(task) > 2000:
-        raise JobInputError(
-            "invalid_job_input", "Task text is too long (max 2000 characters)."
-        )
-    return {"task": task}
-
-
-_GAP_STAGE_MESSAGES = {
-    "routing": "LLM is routing the task to skill nodes.",
-    "merging": "Merging rule and LLM matches; building the requires closure.",
-}
-
-
-def _run_gap_analysis(
-    profile: str,
-    job_input: dict[str, Any],
-    report: Callable[..., None],
-) -> dict[str, Any]:
-    """Run the rule + LLM gap analysis; return the response projection."""
-
-    def core_progress(stage: str) -> None:
-        report(
-            phase=_clean(stage) or "running",
-            message=_GAP_STAGE_MESSAGES.get(_clean(stage), ""),
-        )
-
-    result = gap.analyze(
-        profile,
-        job_input["task"],
-        use_llm_router=True,
-        progress_callback=core_progress,
-    )
-    if result.error:
-        raise JobFailedError(
-            result.error_key or "gap_analysis_failed", result.error
-        )
-    return build_gap_analysis_payload(profile, result, analysis_mode="rule+llm")
-
-
-def build_gap_analysis_payload(
-    profile: str, result: gap.GapResult, *, analysis_mode: str
-) -> dict[str, Any]:
-    """Project a ``GapResult`` into the ``GapAnalysisResponse`` payload.
-
-    Shared by the sync rule-only endpoint and the async LLM job so both
-    surfaces return the identical shape (``analysis_mode`` records which
-    matchers ran; ``llm_router_error`` carries the degradation reason when
-    the LLM router failed but rule roots still produced an analysis).
-    """
-    closure = list(result.closure)
-    coverage = round(1 - len(result.gaps) / len(closure), 4) if closure else 0.0
-    return {
-        "profile": profile,
-        "task": result.task,
-        "top_matches": list(result.top_matches),
-        "closure": closure,
-        "gaps": list(result.gaps),
-        "strong": list(result.strong),
-        "can_solve": result.can_solve,
-        "coverage": coverage,
-        "next_steps": list(result.next_steps),
-        "roots_from_rule": list(result.roots_from_rule),
-        "roots_from_llm": list(result.roots_from_llm),
-        "learned_merged": result.learned_merged,
-        "analysis_mode": analysis_mode,
-        "llm_router_error": result.llm_router_error,
-    }
-
-
-_KINDS[KIND_GAP_ANALYSIS] = JobKind(
-    name=KIND_GAP_ANALYSIS,
-    validate=_validate_gap_analysis_input,
-    run=_run_gap_analysis,
-    queued_message="Queued gap deep analysis.",
-)
-
-
-_JD_MATCH_TEXT_MAX = 50_000
-
-# Same unavailability contract as the sync studio/jd-match endpoint (422),
-# surfaced here as the job's structured error so the SPA renders the same
-# degradation card from the SSE error frame.
-_JD_MATCH_UNAVAILABLE_MESSAGE = (
-    "JD match analysis requires a configured LLM backend "
-    "(set LLM_API_KEY / LLM_BASE_URL); the rest of the studio "
-    "works without it."
-)
-
-
-def _validate_jd_match_input(job_input: dict[str, Any]) -> dict[str, Any]:
-    resume_md = _clean(job_input.get("resume_md"))
-    jd_text = _clean(job_input.get("jd_text"))
-    if not resume_md or not jd_text:
-        raise JobInputError(
-            "invalid_jd_match_request", "Both resume_md and jd_text are required."
-        )
-    if len(resume_md) > _JD_MATCH_TEXT_MAX or len(jd_text) > _JD_MATCH_TEXT_MAX:
-        raise JobInputError(
-            "invalid_jd_match_request",
-            f"resume_md and jd_text are capped at {_JD_MATCH_TEXT_MAX} characters.",
-        )
-    return {"resume_md": resume_md, "jd_text": jd_text}
-
-
-def _run_studio_jd_match(
-    profile: str,
-    job_input: dict[str, Any],
-    report: Callable[..., None],
-) -> dict[str, Any]:
-    """Run the JD match analysis; the result mirrors ``StudioJdMatchResponse``."""
-    if not llm_client.is_configured():
-        raise JobFailedError("studio_jd_match_unavailable", _JD_MATCH_UNAVAILABLE_MESSAGE)
-    report(phase="analyzing", message="分析中:汇总档案证据与简历上下文。")
-    # Real file-IO stage (evidence/claims/skills/SKILL.md); also warms the
-    # memoized context cache analyze_jd reuses, so nothing is read twice.
-    jd_match.gather_profile_context(profile)
-    report(phase="generating", message="生成中:LLM 正在撰写匹配分析。")
-    analysis = jd_match.analyze_jd(
-        profile,
-        resume_md=job_input["resume_md"],
-        jd_text=job_input["jd_text"],
-    )
-    # core.llm returns an error string instead of raising — same failure
-    # detection as the sync endpoint.
-    if analysis.startswith(("LLM error:", "AI features")):
-        raise JobFailedError("studio_jd_match_failed", analysis)
-    return {"ok": True, "analysis": analysis}
-
-
-_KINDS[KIND_STUDIO_JD_MATCH] = JobKind(
-    name=KIND_STUDIO_JD_MATCH,
-    validate=_validate_jd_match_input,
-    run=_run_studio_jd_match,
-    queued_message="Queued JD match analysis.",
-)
 
 
 def _validate_suggest_refs_input(job_input: dict[str, Any]) -> dict[str, Any]:

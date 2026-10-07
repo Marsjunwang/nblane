@@ -205,7 +205,7 @@ goals:
     def test_private_north_star_still_enters_agent_context(self) -> None:
         """Binary North Star visibility gates public output, never agents.
 
-        Per docs/zh/dev/home-editing-starmap-design.md §1, openclaw and local
+        Per docs/zh/guides/home.md, openclaw and local
         agent context always see the full text — an agent that cannot see the
         real North Star cannot produce a real plan.
         """

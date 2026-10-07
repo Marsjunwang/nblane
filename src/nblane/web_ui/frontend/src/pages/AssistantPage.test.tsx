@@ -106,7 +106,7 @@ describe('AssistantPage', () => {
     renderWithProviders(<AssistantPage />, '/assistant');
 
     expect(await screen.findByText('本机未安装 OpenClaw')).toBeInTheDocument();
-    expect(screen.getByText(/openclaw-integration\.md/)).toBeInTheDocument();
+    expect(screen.getByText(/guides\/assistant\.md/)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '打开控制台' })).not.toBeInTheDocument();
   });
 

@@ -33,7 +33,6 @@ class User:
     role: str
     profile: str | None = None
     profiles: tuple[str, ...] = ()
-    teams: tuple[str, ...] = ()
     # Service account for a personal agent (OpenClaw …): its writes follow
     # core/agent_policy.py (journal + undo, chat confirmation for T2).
     agent: bool = False
@@ -402,7 +401,6 @@ def _user_from_mapping(user_id: str, raw: dict[str, Any]) -> User:
         role=role,
         profile=profile,
         profiles=tuple(sorted(profiles)),
-        teams=_as_str_tuple(raw.get("teams")),
         agent=raw.get("agent") is True,
     )
 

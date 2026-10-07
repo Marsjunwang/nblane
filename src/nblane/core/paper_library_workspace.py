@@ -1,4 +1,4 @@
-"""Paper Library workspace payloads and events shared by Streamlit and FastAPI."""
+"""Paper Library workspace payloads and events for the FastAPI Reader API."""
 
 from __future__ import annotations
 
@@ -182,11 +182,8 @@ def _tree_path_label(labels: dict[str, str], value: object) -> str:
 
 PAPER_LIBRARY_RUNTIME_ENV = "NBLANE_PAPER_LIBRARY_RUNTIME"
 PAPER_LIBRARY_RUNTIME_DEFAULT = "fastapi_iframe"
-PAPER_LIBRARY_RUNTIMES = ("streamlit_component", "fastapi_link", "fastapi_iframe")
+PAPER_LIBRARY_RUNTIMES = ("fastapi_link", "fastapi_iframe")
 _PAPER_LIBRARY_RUNTIME_ALIASES = {
-    "streamlit": "streamlit_component",
-    "component": "streamlit_component",
-    "streamlit_component": "streamlit_component",
     "fastapi": "fastapi_iframe",
     "link": "fastapi_link",
     "fastapi_link": "fastapi_link",

@@ -270,66 +270,6 @@ class HealthReportModel(BaseModel):
     issues: list[HealthIssueModel] = Field(default_factory=list)
 
 
-class ActivitySummaryModel(BaseModel):
-    """Counters over the whole Agent Activity queue (unfiltered)."""
-
-    status: dict[str, int] = Field(default_factory=dict)
-    kind: dict[str, int] = Field(default_factory=dict)
-    target_owner: dict[str, int] = Field(default_factory=dict)
-    candidate_type: dict[str, int] = Field(default_factory=dict)
-
-
-class ActivityItemModel(BaseModel):
-    """One normalized Agent Activity item (extension keys preserved)."""
-
-    model_config = ConfigDict(extra="allow")
-
-    id: str
-    kind: str = "candidate"
-    candidate_type: str = "unknown"
-    source_page: str = ""
-    source_ref: str = ""
-    target_owner: str = ""
-    status: str = "pending"
-    title: str = ""
-    summary: str = ""
-    refs: dict[str, Any] = Field(default_factory=dict)
-    payload: dict[str, Any] = Field(default_factory=dict)
-    preview: str = ""
-    warnings: list[str] = Field(default_factory=list)
-    error: str = ""
-    changed_paths: list[str] = Field(default_factory=list)
-    created: str = ""
-    updated: str = ""
-    applied_at: str = ""
-
-
-class ActivityListResponse(BaseModel):
-    """Filtered activity items plus queue-wide summary counters."""
-
-    profile: str
-    status: str = "pending"
-    kind: str = ""
-    limit: int = 50
-    total: int = 0
-    items: list[ActivityItemModel] = Field(default_factory=list)
-    summary: ActivitySummaryModel = Field(default_factory=ActivitySummaryModel)
-
-
-class ActivityDismissRequest(BaseModel):
-    """Optional body for the dismiss mutation."""
-
-    note: str = ""
-
-
-class ProfileModelCandidateRequest(BaseModel):
-    """Body for proposing one agent-profile.yaml field update (human review)."""
-
-    field: str
-    proposed_value: str
-    rationale: str = ""
-
-
 class GrowthLogRequest(BaseModel):
     """Body for appending one row to the SKILL.md Growth Log table."""
 
@@ -341,22 +281,6 @@ class GrowthLogResponse(BaseModel):
 
     ok: bool = True
     event: str
-
-
-class ActivityApplyResponse(BaseModel):
-    """Success body for the apply mutation."""
-
-    ok: bool = True
-    item: ActivityItemModel
-    warnings: list[str] = Field(default_factory=list)
-    changed_paths: list[str] = Field(default_factory=list)
-
-
-class ActivityDismissResponse(BaseModel):
-    """Success body for the dismiss mutation."""
-
-    ok: bool = True
-    item: ActivityItemModel
 
 
 class AIExceptionBulkDismissRequest(BaseModel):
@@ -372,12 +296,6 @@ class AIExceptionBulkDismissResponse(BaseModel):
     ok: bool = True
     dismissed: int = 0
     skipped: list[str] = Field(default_factory=list)
-
-
-class ActivityItemErrorResponse(ErrorResponse):
-    """Error body that also carries the current activity item."""
-
-    item: ActivityItemModel | None = None
 
 
 class AIExceptionModel(BaseModel):
@@ -559,84 +477,6 @@ class KanbanCardDeleteResponse(BaseModel):
     ok: bool = True
     deleted_ref: str
     deleted_title: str
-
-
-class InboxHistoryEventModel(BaseModel):
-    """One transition recorded against an inbox item."""
-
-    at: str = ""
-    action: str = ""
-    from_status: str = ""
-    to_status: str = ""
-    note: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class InboxItemModel(BaseModel):
-    """One inbox item (mirrors core InboxItem)."""
-
-    id: str
-    title: str
-    type: str = "note"
-    source: str = ""
-    created_at: str = ""
-    captured_by: str = "human"
-    raw_text: str = ""
-    tags: list[str] = Field(default_factory=list)
-    visibility: str = "private"
-    status: str = "inbox"
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    history: list[InboxHistoryEventModel] = Field(default_factory=list)
-
-
-class InboxResponse(BaseModel):
-    """Inbox items filtered to the requested statuses."""
-
-    profile: str
-    statuses: list[str] = Field(default_factory=list)
-    total: int = 0
-    items: list[InboxItemModel] = Field(default_factory=list)
-
-
-class InboxCaptureRequest(BaseModel):
-    """Body for the quick-capture mutation (only ``title`` is required)."""
-
-    title: str
-    raw_text: str = ""
-    source: str = "web"
-    tags: list[str] = Field(default_factory=list)
-
-
-class InboxClarifyRequest(BaseModel):
-    """Body for the clarify mutation (``action`` in CLARIFY_ACTIONS)."""
-
-    action: str
-    note: str = ""
-
-
-class InboxNoteRequest(BaseModel):
-    """Optional body for the archive/discard mutations."""
-
-    note: str = ""
-
-
-class InboxMutationResponse(BaseModel):
-    """Success body for inbox mutations.
-
-    ``result`` carries the clarify dispatch outcome (action, target_id,
-    draft) for the clarify endpoint; it stays empty for capture and the
-    archive/discard wrappers.
-    """
-
-    ok: bool = True
-    item: InboxItemModel
-    result: dict[str, Any] = Field(default_factory=dict)
-
-
-class InboxItemErrorResponse(ErrorResponse):
-    """Error body that also carries the current inbox item."""
-
-    item: InboxItemModel | None = None
 
 
 class AgentTaskModel(BaseModel):
@@ -861,70 +701,6 @@ class EvidenceEntryDetailModel(EvidenceEntryModel):
     kanban_ref_details: list[ProvenanceRefModel] = Field(default_factory=list)
 
 
-class GapAnalyzeRequest(BaseModel):
-    """Body for the gap-analysis mutation.
-
-    ``use_llm=False`` runs the synchronous rule-only analysis (200).
-    ``use_llm=True`` creates an async ``gap-analysis`` job (202, see
-    ``JobCreateResponse``); poll ``GET .../jobs/{job_id}`` or subscribe to
-    ``GET .../jobs/{job_id}/stream`` for progress and the final result.
-    """
-
-    task: str = Field(min_length=1, max_length=2000)
-    use_llm: bool = False
-
-
-class GapTopMatchModel(BaseModel):
-    """One rule/LLM-matched schema node from ``GapResult.top_matches``."""
-
-    id: str
-    label: str = ""
-    score: int = 0
-    source: str = "rule"
-
-
-class GapClosureNodeModel(BaseModel):
-    """One node of the requires-closure from ``GapResult.closure``.
-
-    ``is_gap`` mirrors the core rule: status ``locked``/``learning`` counts
-    as a gap, ``solid``/``expert`` as strong.
-    """
-
-    id: str
-    label: str = ""
-    status: str = "locked"
-    is_gap: bool = False
-    evidence_count: int = 0
-
-
-class GapAnalysisResponse(BaseModel):
-    """Faithful projection of ``core.models.GapResult``.
-
-    ``coverage`` is a derived convenience: share of closure nodes that are
-    not gaps (0.0 when the closure is empty), so the SPA can render a
-    coverage indicator without re-deriving it. ``analysis_mode`` records
-    which matchers ran (``rule`` for the sync endpoint, ``rule+llm`` for the
-    async deep-analysis job); ``llm_router_error`` carries the degradation
-    reason when the LLM router failed but rule roots still produced an
-    analysis (``null`` when no LLM path ran or it succeeded).
-    """
-
-    profile: str
-    task: str = ""
-    top_matches: list[GapTopMatchModel] = Field(default_factory=list)
-    closure: list[GapClosureNodeModel] = Field(default_factory=list)
-    gaps: list[str] = Field(default_factory=list)
-    strong: list[str] = Field(default_factory=list)
-    can_solve: bool = False
-    coverage: float = 0.0
-    next_steps: list[str] = Field(default_factory=list)
-    roots_from_rule: list[str] = Field(default_factory=list)
-    roots_from_llm: list[str] = Field(default_factory=list)
-    learned_merged: bool = False
-    analysis_mode: str = "rule"
-    llm_router_error: str | None = None
-
-
 class JobErrorModel(BaseModel):
     """Structured terminal failure of an async job."""
 
@@ -936,9 +712,8 @@ class JobModel(BaseModel):
     """Public snapshot of one async job (no result payload, no event log).
 
     Statuses follow ``queued`` -> ``running`` -> ``done`` | ``failed``;
-    ``phase`` is the kind-specific coarse stage (gap-analysis: queued /
-    starting / routing / merging / done / failed; studio-jd-match:
-    analyzing / generating; project-suggest-refs: collecting / suggesting).
+    ``phase`` is the kind-specific coarse stage (e.g. project-suggest-refs:
+    collecting / suggesting).
     """
 
     job_id: str
@@ -957,16 +732,13 @@ class JobModel(BaseModel):
 class JobCreateRequest(BaseModel):
     """Generic async-job creation body (dispatched by ``kind``).
 
-    ``input`` is validated per kind: ``gap-analysis`` takes ``{task: str}``
-    (1–2000 non-blank chars), ``studio-jd-match`` takes ``{resume_md,
-    jd_text}`` (both non-blank, ≤ 50000 chars each) and
-    ``project-suggest-refs`` takes ``{case_id: str}`` (non-blank);
+    ``input`` is validated per kind: ``project-suggest-refs`` takes ``{case_id: str}`` (non-blank);
     content-workspace AI kinds ``content-rewrite`` (``{operation, selection,
     title?, context?, instruction?}``), ``content-meta`` (``{title, summary,
     tags, body}``) and ``content-cover`` (``{slug, brief?, style?, title?,
     summary?, tags?, body?}``) return candidates only and never write posts.
     Validation failures answer 422 with the kind's error code
-    (``empty_task`` / ``invalid_jd_match_request`` / ``empty_case_id`` /
+    (``empty_case_id`` /
     ``invalid_job_input``).
     """
 
@@ -990,12 +762,12 @@ class JobStatusResponse(BaseModel):
     result: dict[str, Any] | None = None
 
 
-class GapIntakeRequest(BaseModel):
-    """Body for turning one detected gap into a kanban learning task.
+class DivinationIntakeRequest(BaseModel):
+    """Body for turning one divination gap node into a kanban learning task.
 
     ``title`` is required (the SPA pre-fills it from the gap node label);
     ``node_id`` is recorded as context so the card stays traceable to the
-    analysis.
+    cast.
     """
 
     title: str = Field(min_length=1, max_length=200)
@@ -2193,36 +1965,11 @@ class StudioPostModel(BaseModel):
     category_path: list[str] = Field(default_factory=list)
 
 
-class StudioSourceOptionModel(BaseModel):
-    """One {id, label} option row for the candidate-generation pickers."""
-
-    id: str
-    label: str = ""
-
-
-class StudioOptionsModel(BaseModel):
-    """Source pickers for the evidence/claim-first generation form."""
-
-    claims: list[StudioSourceOptionModel] = Field(default_factory=list)
-    evidence: list[StudioSourceOptionModel] = Field(default_factory=list)
-    projects: list[StudioSourceOptionModel] = Field(default_factory=list)
-
-
 class StudioSummaryModel(BaseModel):
     """Blog status counters for the studio header strip."""
 
     status_counts: dict[str, int] = Field(default_factory=dict)
     total_posts: int = 0
-
-
-class StudioResponse(BaseModel):
-    """Output Studio overview: posts, counters, and generation options."""
-
-    profile: str
-    initialized: bool = False
-    summary: StudioSummaryModel = Field(default_factory=StudioSummaryModel)
-    posts: list[StudioPostModel] = Field(default_factory=list)
-    options: StudioOptionsModel = Field(default_factory=StudioOptionsModel)
 
 
 class StudioInitResponse(BaseModel):
@@ -2296,59 +2043,6 @@ class StudioPostMutationResponse(BaseModel):
     post: StudioPostDetailModel
     changed_paths: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-
-
-class StudioCandidateRequest(BaseModel):
-    """Body for candidate preview / draft creation from evidence or claims.
-
-    ``target`` is ``blog`` / ``resume`` / ``project``; ``source`` is
-    ``claims`` / ``evidence``. Resume bullets and project updates only make
-    sense from claims (mirroring the Streamlit form rules); the project
-    target additionally requires ``project_id``.
-    """
-
-    target: str = "blog"
-    source: str = "claims"
-    claim_ids: list[str] = Field(default_factory=list)
-    evidence_id: str = ""
-    project_id: str = ""
-
-
-class StudioCandidateResponse(BaseModel):
-    """Generated candidate preview (nothing persisted).
-
-    ``kind`` is ``blog`` / ``resume`` / ``project_update``; ``candidate`` is
-    the core candidate's ``to_dict()`` payload (blog/project) or
-    ``{body, bullets}`` for resume bullets.
-    """
-
-    ok: bool = True
-    kind: str
-    candidate: dict[str, Any] = Field(default_factory=dict)
-
-
-class StudioDraftResponse(BaseModel):
-    """Result of confirming a candidate into a persisted draft."""
-
-    ok: bool = True
-    kind: str
-    path: str
-    slug: str = ""
-    warnings: list[str] = Field(default_factory=list)
-
-
-class StudioJdMatchRequest(BaseModel):
-    """Body for the JD match analysis (LLM-backed; 422 when unconfigured)."""
-
-    resume_md: str = Field(default="", max_length=50_000)
-    jd_text: str = Field(default="", max_length=50_000)
-
-
-class StudioJdMatchResponse(BaseModel):
-    """JD match analysis Markdown (generated; review before use)."""
-
-    ok: bool = True
-    analysis: str
 
 
 # --- Content / Career workspaces -------------------------------------------
@@ -2660,7 +2354,6 @@ class SidecarInfoModel(BaseModel):
     auth_enabled: bool = False
     handoff_token: str = ""
     paper_library_url: str = ""
-    dashboard_url: str = ""
 
 
 # --- Home (M4): profile dashboard overview -----------------------------------

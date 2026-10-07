@@ -1,7 +1,7 @@
 """OpenClaw memory corpus: render nblane profile data as read-only Markdown.
 
 This is the "priming" half of the OpenClaw dual-memory design
-(``docs/zh/architecture/openclaw-deep-integration.md`` §4.1): profile files
+(``docs/zh/architecture/ai-architecture.md``): profile files
 are rendered into a derived Markdown corpus that OpenClaw's memory search can
 index via ``memory.search.extraPaths``. The corpus is read-only output —
 it is never a source of truth and is never recorded in ``git_backup``.
@@ -10,7 +10,7 @@ Goal privacy matches the agent-context contract used by
 ``core/context.py`` and the ``profile://goals`` MCP resource: private goals
 never reach the rendered corpus. The North Star is always rendered in full —
 its binary visibility gates only public artifacts, never agent/local context
-(``docs/zh/dev/home-editing-starmap-design.md`` §1).
+(``docs/zh/guides/home.md``).
 """
 
 from __future__ import annotations

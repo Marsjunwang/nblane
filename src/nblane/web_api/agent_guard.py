@@ -47,7 +47,7 @@ ROUTE_ACTIONS: dict[tuple[str, str], str] = {
     ("POST", f"{P}/kanban/cards/{{card_ref}}/schedule"): "kanban.card.schedule",
     ("PATCH", f"{P}/kanban/cards/{{card_ref}}"): "kanban.card.patch",
     ("DELETE", f"{P}/kanban/cards/{{card_ref}}"): "kanban.card.delete",
-    ("POST", f"{P}/gap/intake"): "kanban.card.add",
+    ("POST", f"{P}/divination/intake"): "kanban.card.add",
     # habits / check-ins / plans
     ("POST", f"{P}/checkins"): "checkin.add",
     ("DELETE", f"{P}/checkins/{{checkin_id}}"): "checkin.delete",
@@ -79,42 +79,34 @@ ROUTE_ACTIONS: dict[tuple[str, str], str] = {
     ("POST", f"{P}/project-board/cases/{{case_id}}/milestones/{{milestone_id}}/delete"): "project_milestone.delete",
     ("POST", f"{P}/project-board/cases/{{case_id}}/tasks"): "kanban.card.add",
     ("POST", f"{P}/project-board/tasks/{{task_id}}/move"): "kanban.card.move",
-    # inbox / research
-    ("POST", f"{P}/inbox"): "inbox.capture",
-    ("POST", f"{P}/inbox/{{item_id}}/clarify"): "inbox.clarify",
-    ("POST", f"{P}/inbox/{{item_id}}/archive"): "inbox.archive",
-    ("POST", f"{P}/inbox/{{item_id}}/discard"): "inbox.discard",
+    # research
     ("POST", f"{P}/research/sources"): "research_source.add",
     ("PATCH", f"{P}/research/sources/{{source_id}}"): "research_source.patch",
     ("POST", f"{P}/research/sources/{{source_id}}/task"): "research_source.patch",
     ("POST", f"{P}/research/connectors/manual/import"): "research.import",
     ("POST", f"{P}/research/connectors/{{connector_id}}/import"): "research.import",
-    # growth log / review submissions
+    # growth log
     ("POST", f"{P}/growth-log"): "growth_log.append",
-    ("POST", f"{P}/activity/profile-model"): "review.submit",
     # read-like: casts, AI drafts, the undo endpoint itself
     ("POST", f"{P}/divination"): "divination.cast",
     ("POST", f"{P}/jobs"): "ai.draft",
-    ("POST", f"{P}/gap/analyze"): "ai.draft",
     ("POST", f"{P}/crystallize/draft"): "ai.draft",
     ("POST", f"{P}/project-board/cases/{{case_id}}/suggest-refs"): "ai.draft",
     ("POST", f"{P}/research/connectors/manual/preview"): "ai.draft",
     ("POST", f"{P}/research/connectors/{{connector_id}}/preview"): "ai.draft",
     ("POST", f"{P}/research/papers/{{source_id}}/analysis-jobs"): "ai.draft",
     ("POST", f"{P}/agent/journal/{{entry_id}}/undo"): "journal.undo",
-    # human review queue
-    ("POST", f"{P}/activity/{{item_id}}/apply"): "review.decide",
-    ("POST", f"{P}/activity/{{item_id}}/dismiss"): "review.decide",
+    # AI exception triage
     ("POST", f"{P}/ai-exceptions/dismiss"): "review.decide",
 }
 
 # Profile-scoped prefixes that stay in the web UI: publishing, résumé,
-# content studio and per-profile settings are not undoable here.
+# public-layer init and per-profile settings are not undoable here.
 WEB_ONLY_PREFIXES = (
     f"{P}/public-site",
     f"{P}/content",
     f"{P}/career",
-    f"{P}/studio",
+    f"{P}/studio/init",
     f"{P}/settings",
     f"{P}/research/connectors",
     f"{P}/research/ai-config",
@@ -152,10 +144,6 @@ ACTION_KINDS: dict[str, tuple[str, ...]] = {
     "project_case.archive": _PROJECT,
     "project_case.delete": _PROJECT,
     "project_milestone.delete": _PROJECT,
-    "inbox.capture": ("inbox_item",),
-    "inbox.clarify": ("inbox_item", "kanban_card", "learning_resource", "habit", "evidence"),
-    "inbox.archive": ("inbox_item",),
-    "inbox.discard": ("inbox_item",),
     "research_source.add": ("research_source",),
     "research_source.patch": ("research_source", "kanban_card"),
     "research.import": ("research_source",),
@@ -175,7 +163,6 @@ _PARAM_KINDS = {
     "node_id": "skill_node",
     "entry_id": "evidence",
     "case_id": "project_case",
-    "item_id": "inbox_item",
     "source_id": "research_source",
 }
 

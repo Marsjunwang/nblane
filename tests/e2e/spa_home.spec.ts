@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 /**
  * Acceptance suite for the Phase 3 SPA Home: the growth starmap replaces the
  * Phase-1 dashboard cards and the sidecar 3D iframe (the Streamlit home is
- * retired with it — see docs/zh/dev/phase-plan.md).
+ * retired with it — see docs/zh/project/milestones.md).
  *
  * 1. Starmap rendering — the planisphere mounts with real profile data from
  *    the dedicated aggregation (GET /api/v1/profiles/<name>/starmap: sectors
@@ -115,7 +115,7 @@ test.describe("SPA Home (growth starmap)", () => {
         `${endpoint}.sidecar.base must follow the stack's reader port, not the 8502 default`,
       ).toBe(EXPECTED_SIDECAR_BASE);
       expect(sidecar.configured).toBe(true);
-      expect(sidecar.dashboard_url).toContain(`${EXPECTED_SIDECAR_BASE}/dashboard`);
+      expect(sidecar.paper_library_url).toContain(`${EXPECTED_SIDECAR_BASE}/paper-library`);
     }
   });
 });

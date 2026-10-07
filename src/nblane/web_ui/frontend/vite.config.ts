@@ -9,10 +9,9 @@ const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:85
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    // The blog editor reuses block/markdown modules from
-    // public_blog_editor_component/frontend, which has its own node_modules.
-    // Without dedupe those files resolve a second BlockNote/React/Yjs copy,
-    // and BlockNote rejects the schema at editor creation time.
+    // Keep one BlockNote/React/Yjs copy for the blog block modules under
+    // src/blogBlocks: a second copy makes BlockNote reject the schema at
+    // editor creation time.
     dedupe: [
       '@blocknote/core',
       '@blocknote/react',

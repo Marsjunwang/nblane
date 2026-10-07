@@ -6,7 +6,7 @@ mark-crystallized implementations. This module is the single home for that
 state machine; both the SPA API (``web_api/routes_v1.py``) and the legacy
 pages are expected to call here.
 
-Rules (Phase 1 design, docs/zh/dev/phase1-evidence-page-design.md):
+Rules (Phase 1 design, docs/zh/guides/evidence.md):
 
 - Crystallize = snapshot: the task原文 (title/context/why and friends, via
   ``evidence_migrate.render_kanban_task_source``) is written into the

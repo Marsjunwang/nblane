@@ -518,7 +518,7 @@ def update_project_board(
 ) -> _T:
     """Load ``project-board.yaml``, apply *fn*, and persist — under one lock.
 
-    Same contract as ``inbox.update_inbox``: the whole load → mutate →
+    Same locked contract as the other ``update_*`` helpers: the whole load → mutate →
     write cycle holds the project-board write lock. *fn* receives the
     loaded ``ProjectBoard`` and mutates it in place; its return value is
     passed through. When *fn* leaves the document unchanged, no write or

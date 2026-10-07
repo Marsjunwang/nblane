@@ -72,7 +72,7 @@ flowchart TB
 | AI | `ai/`（gateway、router、backends、structured、prompts、runs、exceptions、skill_suggest、local_models、local_translation）、`llm.py`、`jsonutil.py`、`codex_adapter.py`、`agent_tasks.py`、`agent_activity.py`（AI 候选与失败记录） |
 | Agent | `agent_policy.py`、`agent_ops.py`、`agent_journal.py`、`openclaw_setup.py`、`openclaw_ops.py`、`openclaw_corpus.py`、`openclaw_automations.py`（可选手动同步）、`notify.py`、`mcp_client_config.py`、`cursor_rule.py` |
 | 账号、设置、备份 | `auth.py`、`web_preferences.py`、`git_backup.py`、`backup_targets.py`、`workshop_service.py`、`tag_taxonomy.py` |
-| 内部匹配 | `gap.py`、`gap_context.py`、`gap_llm_router.py`、`learned_keywords.py`：技能匹配与任务路由，供技能建议、任务引入等复用；Gap 页面已移除 |
+| 内部匹配 | `gap.py`、`gap_llm_router.py`、`learned_keywords.py`：技能匹配与任务路由，供技能建议、任务引入等复用；Gap 页面已移除 |
 
 ## 前端
 
@@ -90,4 +90,4 @@ flowchart TB
 
 | 模块 | 说明 |
 |------|------|
-| `app.py`、`pages/`、`.streamlit/`、`web_shared.py`、`web_cache.py`、`web_auth.py`、`web_page_shell.py`、`web_output_studio.py`、`web_public_build.py`、`web_linkify.py`、`web_i18n.py`、`kanban_ui/`、`research_ui/`、`evidence_editor_host.py`、`kanban_ai_jobs.py`、`core/ai_stream_tasks.py`、`*_component/`、`core/team.py`、`core/team_io.py`、`teams/` | Streamlit 与 Team 遗留，待删，勿改。删除前注意：Reader API 仍引用 `web_i18n.py`、`research_paper_reader_component.events` 与 `paper_library_component` 前端产物；CI import smoke 仍引用 `kanban_ui` |
+| `app.py`、`pages/`、`.streamlit/`、`web_shared.py`、`web_cache.py`、`web_auth.py`、`web_page_shell.py`、`web_output_studio.py`、`web_public_build.py`、`web_linkify.py`、`web_i18n.py`、`kanban_ui/`、`research_ui/`、`evidence_editor_host.py`、`kanban_ai_jobs.py`、`core/ai_stream_tasks.py`、`*_component/` | Streamlit 遗留，待删，勿改。删除前注意：Reader API 仍引用 `web_i18n.py`、`research_paper_reader_component.events` 与 `paper_library_component` 前端产物；CI import smoke 仍引用 `kanban_ui` |

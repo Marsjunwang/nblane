@@ -251,7 +251,7 @@ export function AssistantPage() {
             <Title order={3}>本机未安装 OpenClaw</Title>
             <Text size="sm" c="dimmed" ta="center">
               助手状态依赖本机的 OpenClaw 网关。安装与接入步骤见仓库文档
-              docs/zh/guides/openclaw-integration.md。
+              docs/zh/guides/assistant.md。
             </Text>
           </Stack>
         </Card>

@@ -48,6 +48,16 @@ describe('LegacyStreamlitRedirect', () => {
     expect(await screen.findByTestId('where')).toHaveTextContent('/p/%E7%8E%8B%E5%86%9B/projects');
   });
 
+  it('sends retired orphan pages to their replacements', async () => {
+    renderAt('/pages/6_Output_Studio.py?profile=dev', []);
+    expect(await screen.findByTestId('where')).toHaveTextContent('/p/dev/content');
+  });
+
+  it('sends the retired Agent Activity page home', async () => {
+    renderAt('/Agent_Activity?profile=dev', []);
+    expect(await screen.findByTestId('where')).toHaveTextContent('/p/dev/home');
+  });
+
   it('uses the only profile when none is given', async () => {
     renderAt('/Research', [{ name: 'dev' }]);
     expect(await screen.findByTestId('where')).toHaveTextContent('/p/dev/research');

@@ -194,7 +194,6 @@ def _write_users_file(path: Path) -> Path:
                         "password_hash": stored,
                         "role": "member",
                         "profile": "wang",
-                        "teams": [],
                     },
                 }
             }
@@ -395,6 +394,95 @@ class TestDivinationLlmSwitch(DivinationApiTestBase):
         self.assertTrue(payload["reading"])
 
 
+class TestDivinationIntake(DivinationApiTestBase):
+    """Turning one serious-cast gap node into a kanban learning task."""
+
+    URL = "/api/v1/profiles/alice/divination/intake"
+
+    def test_intake_creates_kanban_card(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root)
+            schemas = _write_schemas(base)
+            client = self._client(root, schemas)
+            response = client.post(
+                self.URL,
+                json={
+                    "title": "学习 Manipulation",
+                    "node_id": "manipulation",
+                    "why": "grasp manipulation task",
+                },
+            )
+            board = client.get("/api/v1/profiles/alice/kanban")
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["section"], "Queue")
+        card = payload["card"]
+        self.assertEqual(card["title"], "学习 Manipulation")
+        self.assertEqual(card["context"], "Gap analysis node: manipulation")
+        self.assertIn("manipulation", card["tags"])
+        self.assertEqual(board.status_code, 200)
+        titles = [
+            task["title"]
+            for section in board.json()["sections"]
+            for task in section["tasks"]
+        ]
+        self.assertIn("学习 Manipulation", titles)
+
+    def test_intake_unknown_section_422(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root)
+            schemas = _write_schemas(base)
+            response = self._client(root, schemas).post(
+                self.URL, json={"title": "x", "section": "Nope"}
+            )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["code"], "invalid_gap_intake")
+
+    def test_intake_echoes_actual_disk_section(self) -> None:
+        """The response section is read back from kanban.md, not the request."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root)
+            schemas = _write_schemas(base)
+            client = self._client(root, schemas)
+            response = client.post(
+                self.URL, json={"title": "立即学 VLA", "section": "Doing"}
+            )
+            board = client.get("/api/v1/profiles/alice/kanban")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["section"], "Doing")
+        doing_titles = [
+            task["title"]
+            for section in board.json()["sections"]
+            if section["name"] == "Doing"
+            for task in section["tasks"]
+        ]
+        self.assertIn("立即学 VLA", doing_titles)
+
+    def test_old_gap_routes_are_gone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root)
+            schemas = _write_schemas(base)
+            client = self._client(root, schemas)
+            intake = client.post(
+                "/api/v1/profiles/alice/gap/intake", json={"title": "x"}
+            )
+            analyze = client.post(
+                "/api/v1/profiles/alice/gap/analyze", json={"task": "grasp"}
+            )
+        # Unrouted POSTs fall through to the SPA's GET catch-all (405).
+        self.assertIn(intake.status_code, (404, 405))
+        self.assertIn(analyze.status_code, (404, 405))
+
+
 class TestDivinationGuards(DivinationApiTestBase):
     def test_unknown_profile_404(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -452,10 +540,13 @@ class TestDivinationGuards(DivinationApiTestBase):
             root = base / "profiles"
             _write_profile(root)
             schemas = _write_schemas(base)
-            response = self._auth_client(root, schemas).post(
-                "/api/v1/profiles/alice/divination", json={}
+            client = self._auth_client(root, schemas)
+            response = client.post("/api/v1/profiles/alice/divination", json={})
+            intake = client.post(
+                "/api/v1/profiles/alice/divination/intake", json={"title": "x"}
             )
         self.assertEqual(response.status_code, 401)
+        self.assertEqual(intake.status_code, 401)
 
     def test_member_forbidden_from_other_profile(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -473,10 +564,14 @@ class TestDivinationGuards(DivinationApiTestBase):
             forbidden = client.post(
                 "/api/v1/profiles/alice/divination", json={}
             )
+            forbidden_intake = client.post(
+                "/api/v1/profiles/alice/divination/intake", json={"title": "x"}
+            )
             allowed = client.post(
                 "/api/v1/profiles/wang/divination", json={}
             )
         self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(forbidden_intake.status_code, 403)
         self.assertEqual(forbidden.json()["code"], "profile_forbidden")
         self.assertEqual(allowed.status_code, 200)
         self.assertEqual(allowed.json()["profile"], "wang")

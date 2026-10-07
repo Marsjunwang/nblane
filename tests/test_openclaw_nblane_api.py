@@ -193,7 +193,7 @@ def test_persistent_412_fails(authed, server):
 
 def test_delete_discard_hard_refused_without_http(session, server):
     for path in (
-        "/profiles/x/inbox/E1/discard",
+        "/profiles/x/research/sources/s1/discard",
         "/profiles/x/habits/h1/delete",
     ):
         with pytest.raises(nblane_api.ApiFailure, match="page-confirmation"):
@@ -201,7 +201,7 @@ def test_delete_discard_hard_refused_without_http(session, server):
     with pytest.raises(nblane_api.ApiFailure, match=r"\.\."):
         nblane_api.normalize_path("/profiles/x/checkins/c1/../discard")
     # delete only reaches the server-gated routes.
-    for path in ("/profiles/x/inbox/E1", "/profiles/x/evidence/ev1", "/profiles/x/kanban/cards/a/../b"):
+    for path in ("/profiles/x/goals/g1", "/profiles/x/evidence/ev1", "/profiles/x/kanban/cards/a/../b"):
         with pytest.raises(nblane_api.ApiFailure):
             nblane_api.normalize_delete_path(path)
     assert nblane_api.normalize_delete_path("/api/v1/profiles/x/kanban/cards/kb_1") == "/profiles/x/kanban/cards/kb_1"
@@ -266,7 +266,7 @@ def test_recent_and_undo_paths(tmp_path):
     ]
 
 
-def test_summary_goals_growth_propose_paths(tmp_path):
+def test_summary_goals_growth_paths(tmp_path):
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -281,19 +281,14 @@ def test_summary_goals_growth_propose_paths(tmp_path):
         ["summary"],
         ["goals"],
         ["growth", "Shipped the demo"],
-        ["propose", "preferences.tone", "concise", "--rationale", "asked twice"],
     ):
         assert nblane_api.main(["--profile", "x", *argv], session=session) == 0
     assert [(r.method, r.url.path) for r in seen] == [
         ("GET", "/api/v1/profiles/x/summary"),
         ("GET", "/api/v1/profiles/x/goals"),
         ("POST", "/api/v1/profiles/x/growth-log"),
-        ("POST", "/api/v1/profiles/x/activity/profile-model"),
     ]
     assert json.loads(seen[2].content) == {"event": "Shipped the demo"}
-    assert json.loads(seen[3].content) == {
-        "field": "preferences.tone", "proposed_value": "concise", "rationale": "asked twice",
-    }
 
 
 def test_password_never_logged(session, server, capsys, tmp_path):
@@ -354,7 +349,6 @@ def test_semantic_commands_hit_expected_routes(authed, server):
     assert run(ns(["health"]), authed).json()["path"].endswith("/health")
     run(ns(["chronicle"]), authed)
     assert "limit=40" in str(server.requests[-1].url)
-    assert run(ns(["activity", "--status", "all"]), authed).status_code == 200
     assert run(ns(["checkin", "锻炼", "--note", "微信打卡"]), authed).status_code == 201
     checkin = [r for r in server.requests if r.url.path.endswith("/checkins")][-1]
     assert json.loads(checkin.content) == {"habit": "锻炼", "note": "微信打卡"}
@@ -415,3 +409,10 @@ def test_checkin_plan_flag_sends_plan_id(authed, server):
     run(ns(["checkin", "锻炼"]), authed)
     checkin = [r for r in server.requests if r.url.path.endswith("/checkins")][-1]
     assert json.loads(checkin.content) == {"habit": "锻炼"}
+
+
+def test_removed_review_queue_commands_are_gone():
+    parser = nblane_api.build_parser()
+    for argv in (["propose", "f", "v"], ["activity"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args(argv)

@@ -1,6 +1,6 @@
 # nblane Web UI(SPA 迁移)
 
-新一代单页应用(SPA)前端,用于替代 Streamlit 界面。技术栈:Vite + React 18 +
+nblane 的单页应用(SPA)前端,是唯一的 Web 界面。技术栈:Vite + React 18 +
 TypeScript + Mantine 8 + TanStack Query + React Router。对应设计文档:
 `docs/zh/architecture/frontend-spa-migration.md` §2。
 
@@ -62,8 +62,8 @@ CI 的 `frontend-artifacts` job 会重建并比对,产物过期即红。
 - `src/api/schema.d.ts` — `openapi-typescript`(v7)从快照生成的原始类型,
   已提交,不要手改。
 - `src/api/types.ts` — 稳定导出面:对 `schema.d.ts` 组件类型的别名
-  (如 `ActivityItem = components['schemas']['ActivityItemModel']`),
-  外加少量纯前端复合类型(ETag 包装、clarify 动作枚举)。页面/hooks 只
+  (如 `Goal = components['schemas']['GoalModel']`),
+  外加少量纯前端复合类型(如 ETag 包装)。页面/hooks 只
   从这里 import。
 
 后端契约变更后的再生成流程:
@@ -77,9 +77,5 @@ npm run test && npm run build                    # 3. 类型漂移会在 tsc 暴
 
 ## 待办 / 开放问题
 
-- **页面覆盖**:16 个页面已实现——登录、档案列表,以及 profile 下的
-  health、activity、kanban、inbox、skill-tree、gap(规则版)、goals、
-  evidence、evidence-review、review、project-board、studio、research、
-  home、assistant。逐里程碑进度与剩余子切片(Public Build、Studio 站点
-  预览/博客编辑器、Home 目标编辑器/命令条等)见
-  `docs/zh/architecture/frontend-spa-migration.md` 实施进度表。
+- **页面覆盖**:路由与导航以 `src/App.tsx`、`src/components/AppLayout.tsx` 为准,
+  使用手册见 `docs/zh/guides/web-ui.md`。

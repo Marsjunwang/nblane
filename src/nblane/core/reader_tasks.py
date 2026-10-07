@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
-from nblane.research_paper_reader_component.events import (
+from nblane.core.reader_events import (
     ANALYZE_PAPER,
     ASK_PAPER,
     EXPLAIN_SELECTION,

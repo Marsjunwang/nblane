@@ -18,7 +18,7 @@ summary, and once the user agrees it repeats the *identical* request with
 caller, and fingerprinted on method + path + body, so a confirmation for
 "delete card A" can never authorize "delete card B". The server cannot prove
 that a human typed the confirmation — that is the agent's contract (see
-docs/zh/guides/agent-write-policy.md).
+docs/zh/guides/assistant.md).
 
 Pending confirmations of the HTTP API live in process memory
 (single-process uvicorn); a restart simply means the agent asks again. MCP
@@ -75,9 +75,6 @@ ACTION_TIERS: dict[str, str] = {
     "project_case.save": T1,
     "project_case.archive": T1,
     "goal.add": T1,
-    "inbox.capture": T1,
-    "inbox.clarify": T1,
-    "inbox.archive": T1,
     "research_source.add": T1,
     "research_source.patch": T1,
     # T2 — destructive or identity-level.
@@ -87,7 +84,6 @@ ACTION_TIERS: dict[str, str] = {
     "habit_plan.delete": T2,
     "project_case.delete": T2,
     "project_milestone.delete": T2,
-    "inbox.discard": T2,
     "research.import": T2,
     "plan_template.instantiate": T2,
     "skill_node.patch": T2,
@@ -104,15 +100,14 @@ ACTION_TIERS: dict[str, str] = {
     "public.publish": T3,
     "settings.system": T3,
     "auth.permissions": T3,
-    # Approving review candidates is the human's job, even for agent-made ones.
+    # Dismissing AI exceptions is the human's job.
     "review.decide": T3,
     "workshop.terminal": T3,
-    # MCP-only writes. Append-only logs (interaction log) and review-queue
-    # submissions change no profile facts and are not journaled.
+    # MCP-only writes. Append-only logs (interaction log) change no
+    # profile facts and are not journaled.
     "growth_log.append": T1,
     "method_draft.write": T1,
     "interaction.log": T1,
-    "review.submit": T1,
     "agent_task.report": T1,
 }
 
@@ -148,17 +143,12 @@ ACTION_LABELS: dict[str, str] = {
     "project_case.archive": "归档项目",
     "project_case.delete": "删除项目",
     "project_milestone.delete": "删除项目里程碑",
-    "inbox.capture": "记入收件箱",
-    "inbox.clarify": "整理收件箱条目",
-    "inbox.archive": "归档收件箱条目",
-    "inbox.discard": "丢弃收件箱条目",
     "research_source.add": "添加资料",
     "research_source.patch": "修改资料",
     "research.import": "批量导入资料",
     "growth_log.append": "记一条成长日志",
     "method_draft.write": "写方法草稿",
     "interaction.log": "记录问答",
-    "review.submit": "提交候选待审",
     "agent_task.report": "回报 agent 任务",
     "skill_evidence.add": "给技能点添加证据",
     "unknown": "执行未登记的写操作",

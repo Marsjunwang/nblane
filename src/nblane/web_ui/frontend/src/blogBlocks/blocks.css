@@ -1,0 +1,452 @@
+/* Custom BlockNote block styles (math / video / visual / mermaid / AI
+ * placeholders) for the React SPA blog editor. It must stay free of global
+ * selectors; it only relies on the --nb-* custom properties defined by the
+ * host. */
+
+.bn-editor * {
+  letter-spacing: 0;
+}
+
+.nb-custom-block {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  margin: 4px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: #fbfcfb;
+  color: var(--nb-ink);
+}
+
+.nb-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nb-block-header strong {
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.nb-block-header span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--nb-accent-soft);
+  color: var(--nb-accent-strong);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.nb-math-preview {
+  overflow-x: auto;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--nb-paper);
+}
+
+.nb-math-preview .katex-display {
+  margin: 0;
+}
+
+.nb-math-fallback,
+.nb-block-empty {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px dashed var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-soft);
+  color: var(--nb-muted);
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.nb-block-empty {
+  display: grid;
+  min-height: 56px;
+  place-items: center;
+  font-family: inherit;
+  font-weight: 800;
+}
+
+.nb-block-video,
+.nb-block-image {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-soft);
+  object-fit: contain;
+}
+
+.nb-block-video {
+  background: #111816;
+}
+
+.nb-block-caption {
+  color: var(--nb-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.nb-block-details {
+  display: grid;
+  gap: 6px;
+}
+
+.nb-block-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--nb-muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.nb-block-details summary:hover {
+  color: var(--nb-accent-strong);
+}
+
+.nb-block-details-body {
+  display: grid;
+  gap: 8px;
+}
+
+.nb-block-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.nb-block-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.nb-block-field span {
+  color: var(--nb-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.nb-block-field input,
+.nb-block-field select,
+.nb-block-field textarea {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--nb-paper);
+  color: var(--nb-ink);
+  font-size: 0.84rem;
+}
+
+.nb-block-field textarea {
+  resize: vertical;
+}
+
+.nb-block-field input:focus,
+.nb-block-field select:focus,
+.nb-block-field textarea:focus {
+  border-color: rgba(33, 104, 91, 0.65);
+  box-shadow: 0 0 0 3px rgba(33, 104, 91, 0.1);
+}
+
+.nb-loading-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--nb-muted);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.nb-ai-loading-preview {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #243431;
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.nb-ai-loading-formula,
+.nb-ai-loading-visual {
+  padding: 12px;
+  border: 1px dashed rgba(33, 104, 91, 0.28);
+  border-radius: 8px;
+  background: #f6faf8;
+}
+
+.nb-ai-loading-visual {
+  display: grid;
+  gap: 8px;
+}
+
+.nb-ai-loading-visual p {
+  margin: 0;
+  color: var(--nb-muted);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.nb-ai-candidate-placeholder {
+  display: grid;
+  grid-template-columns: minmax(96px, 180px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(33, 104, 91, 0.28);
+  border-radius: 8px;
+  background: #f6faf8;
+}
+
+.nb-ai-candidate-placeholder.is-no-preview {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.nb-ai-candidate-placeholder strong {
+  display: block;
+  color: var(--nb-ink);
+  font-size: 0.88rem;
+}
+
+.nb-ai-candidate-placeholder p {
+  margin: 4px 0 0;
+  color: var(--nb-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.nb-ai-candidate-image {
+  display: block;
+  width: 100%;
+  max-height: 150px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-paper);
+  object-fit: contain;
+}
+
+.nb-ai-candidate-diagram {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.nb-ai-candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 520px) {
+  .nb-ai-candidate-placeholder {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.nb-ai-loading-progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(33, 104, 91, 0.12);
+}
+
+.nb-ai-loading-progress span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--nb-accent);
+  animation: nb-progress 1.25s ease-in-out infinite;
+}
+
+.nb-loading-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--nb-accent);
+  animation: nb-pulse 1.2s ease-in-out infinite;
+}
+
+.nb-ai-prompt-panel {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.nb-ai-prompt-dialog.is-anchored {
+  background: transparent;
+}
+
+.nb-ai-prompt-dialog.is-anchored .nb-ai-prompt-panel {
+  transform: none;
+  box-shadow: 0 18px 42px rgba(23, 33, 31, 0.22);
+}
+
+.nb-ai-prompt-input {
+  width: 100%;
+  min-height: 108px;
+  padding: 10px 12px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  outline: 0;
+  resize: vertical;
+  background: var(--nb-paper);
+  color: var(--nb-ink);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.nb-ai-prompt-input:focus {
+  border-color: rgba(33, 104, 91, 0.65);
+  box-shadow: 0 0 0 3px rgba(33, 104, 91, 0.1);
+}
+
+.nb-slash-icon {
+  display: inline-grid;
+  min-width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--nb-accent-soft);
+  color: var(--nb-accent-strong);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.nb-outline-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0 12px;
+  border-top: 1px solid var(--nb-line);
+  border-bottom: 1px solid var(--nb-line);
+}
+
+.nb-outline-list {
+  display: grid;
+  gap: 4px;
+}
+
+.nb-outline-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding-left: calc(var(--nb-outline-depth, 1) * 10px);
+}
+
+.nb-outline-title {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--nb-ink);
+  cursor: pointer;
+  overflow: hidden;
+  padding: 5px 4px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nb-outline-title:hover {
+  color: var(--nb-accent-strong);
+}
+
+.nb-outline-expand {
+  min-height: 26px;
+  border: 1px solid var(--nb-line);
+  border-radius: 6px;
+  background: var(--nb-soft);
+  color: var(--nb-muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  padding: 3px 7px;
+}
+
+.nb-outline-title:disabled,
+.nb-outline-expand:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.nb-ai-formula-preview,
+.nb-mermaid-renderer,
+.nb-mermaid-fallback {
+  overflow: auto;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-soft);
+}
+
+.nb-ai-formula-preview {
+  padding: 12px;
+}
+
+.nb-mermaid-renderer {
+  padding: 10px;
+}
+
+.nb-mermaid-renderer svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.nb-mermaid-fallback {
+  margin: 0;
+  max-height: 260px;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
+@keyframes nb-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.86);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes nb-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  50% {
+    transform: translateX(70%);
+  }
+
+  100% {
+    transform: translateX(240%);
+  }
+}

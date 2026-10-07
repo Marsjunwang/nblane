@@ -109,126 +109,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/activity": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Profile Activity
-         * @description Agent Activity review queue items plus queue-wide summary counters.
-         *
-         *     ``status`` defaults to ``pending``; pass ``all`` to disable the status
-         *     filter. ``kind`` filters on the item kind (candidate/patch/writeback).
-         *     The summary block counts the whole queue, ignoring filters.
-         */
-        get: operations["get_profile_activity_api_v1_profiles__name__activity_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/activity/profile-model": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Submit Profile Model Candidate
-         * @description Queue one proposed agent-profile.yaml field update for human review.
-         *
-         *     Nothing in the profile changes: the item lands pending in the review
-         *     queue and the human edits agent-profile.yaml by hand.
-         */
-        post: operations["submit_profile_model_candidate_api_v1_profiles__name__activity_profile_model_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/activity/{item_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Profile Activity Item
-         * @description One full Agent Activity item by id (404 when missing).
-         *
-         *     The response carries the activity-file ETag (see module docstring) for
-         *     use as ``If-Match`` on the apply/dismiss mutations.
-         */
-        get: operations["get_profile_activity_item_api_v1_profiles__name__activity__item_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/activity/{item_id}/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Apply Profile Activity Item
-         * @description Apply one pending Review-origin activity item.
-         *
-         *     Outcome mapping: success → 200 ``{"ok": true, item}``; item not
-         *     pending → 409 with the current item; item not appliable (non-Review
-         *     origin, unknown candidate type) → 409; applier failure → 409 with the
-         *     item now in ``failed`` status and the error message. Honors
-         *     ``If-Match`` (412 on mismatch, current item in the body).
-         */
-        post: operations["apply_profile_activity_item_api_v1_profiles__name__activity__item_id__apply_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/activity/{item_id}/dismiss": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Dismiss Profile Activity Item
-         * @description Dismiss one pending or failed activity item (``note`` optional).
-         *
-         *     Pending and failed items are dismissable; applied/dismissed/superseded
-         *     items answer 409 with the current item. Honors ``If-Match`` (412 on
-         *     mismatch, current item in the body).
-         */
-        post: operations["dismiss_profile_activity_item_api_v1_profiles__name__activity__item_id__dismiss_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/profiles/{name}/agent-tasks": {
         parameters: {
             query?: never;
@@ -966,6 +846,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/divination/intake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Intake Divination Gap
+         * @description Turn one gap node from a serious divination cast into a kanban task.
+         *
+         *     Thin wrapper over ``core.task_intake.create_learning_task`` (kanban
+         *     append + project-board sync). The gap node id is recorded on the card's
+         *     context line so the task stays traceable to the cast.
+         */
+        post: operations["intake_divination_gap_api_v1_profiles__name__divination_intake_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/evidence": {
         parameters: {
             query?: never;
@@ -1201,62 +1105,6 @@ export interface paths {
         get: operations["get_profile_evidence_skill_suggestions_api_v1_profiles__name__evidence__entry_id__skill_suggestions_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/gap/analyze": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Analyze Profile Gap
-         * @description Gap analysis for a free-text task description.
-         *
-         *     ``use_llm=false`` (default) wraps ``core.gap.analyze`` with rule
-         *     matching only and answers 200 synchronously. ``use_llm=true`` runs the
-         *     same analysis plus the LLM router (a live blocking provider call that
-         *     also persists learned keywords under ``schemas/.learned/``), so it is
-         *     dispatched as an async ``gap-analysis`` job answering 202 — subscribe
-         *     to the job's SSE stream for 路由中/合并中/完成 phases and the final
-         *     ``GapAnalysisResponse`` payload (``analysis_mode == "rule+llm"``; when
-         *     the LLM router fails but rule roots suffice, the job still completes
-         *     with ``llm_router_error`` set). Analysis errors (no matching nodes,
-         *     missing skill tree/schema) surface as 422 sync, or as a failed job
-         *     with the same error code async.
-         */
-        post: operations["analyze_profile_gap_api_v1_profiles__name__gap_analyze_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/gap/intake": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Intake Profile Gap
-         * @description Turn one detected gap into a kanban learning task.
-         *
-         *     Thin wrapper over ``core.task_intake.create_learning_task`` (kanban
-         *     append + project-board sync). The gap node id is recorded on the card's
-         *     context line so the task stays traceable to the analysis.
-         */
-        post: operations["intake_profile_gap_api_v1_profiles__name__gap_intake_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1534,109 +1382,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/inbox": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Profile Inbox
-         * @description Inbox items; defaults to open statuses, ``status=`` overrides.
-         *
-         *     ``status`` accepts a comma-separated list (``all`` disables filtering).
-         *     The response carries the inbox-source ETag (inbox.yaml plus the clarify
-         *     dispatch targets kanban.md / learning-log.yaml / activity-log.yaml) for
-         *     use as ``If-Match`` on the capture/clarify/archive/discard mutations.
-         */
-        get: operations["get_profile_inbox_api_v1_profiles__name__inbox_get"];
-        put?: never;
-        /**
-         * Capture Profile Inbox Item
-         * @description Quick-capture one inbox item (only ``title`` is required).
-         *
-         *     ``source`` defaults to ``web`` and lands on the item's ``source``
-         *     field; ``captured_by`` is derived as ``human-<source>`` so web captures
-         *     stay distinguishable from agent captures (MCP uses ``openclaw``).
-         *     Honors ``If-Match`` (412 on mismatch).
-         */
-        post: operations["capture_profile_inbox_item_api_v1_profiles__name__inbox_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/inbox/{item_id}/archive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Archive Profile Inbox Item
-         * @description Archive one inbox item (``note`` optional). Honors ``If-Match``.
-         */
-        post: operations["archive_profile_inbox_item_api_v1_profiles__name__inbox__item_id__archive_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/inbox/{item_id}/clarify": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Clarify Profile Inbox Item
-         * @description Dispatch one clarify action (kanban/learning/habit/evidence/close).
-         *
-         *     Unknown actions answer 422, unknown items 404. The dispatch writes to
-         *     kanban.md / learning-log.yaml / activity-log.yaml depending on the
-         *     action; the response ``result`` carries the core dispatch outcome
-         *     (``target_id`` or ``draft``). Honors ``If-Match`` (412 on mismatch,
-         *     current item in the body) — the inbox ETag covers inbox.yaml plus all
-         *     dispatch target files, the kanban write 3-way merges concurrent board
-         *     edits, and the remaining writes re-check their request-start snapshot
-         *     inside the write lock (412 on conflict).
-         */
-        post: operations["clarify_profile_inbox_item_api_v1_profiles__name__inbox__item_id__clarify_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/inbox/{item_id}/discard": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Discard Profile Inbox Item
-         * @description Discard one inbox item (``note`` optional). Honors ``If-Match``.
-         */
-        post: operations["discard_profile_inbox_item_api_v1_profiles__name__inbox__item_id__discard_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/profiles/{name}/jobs": {
         parameters: {
             query?: never;
@@ -1650,11 +1395,8 @@ export interface paths {
          * Create Profile Job
          * @description Create an async job for one profile (LLM long tasks).
          *
-         *     Kinds are registered in ``nblane.web_api.jobs``: ``gap-analysis``
-         *     (also wired into ``POST .../gap/analyze`` with ``use_llm=true``),
-         *     ``studio-jd-match`` and ``project-suggest-refs`` (the SPA's async
-         *     paths for the sync studio/jd-match and suggest-refs endpoints, which
-         *     stay unchanged for backward compatibility). The job runs on a daemon
+         *     Kinds are registered in ``nblane.web_api.jobs`` (e.g.
+         *     ``project-suggest-refs``, ``content-*``, ``career-*``). The job runs on a daemon
          *     thread inside this single-worker process, tracked by the in-memory
          *     registry (same design as the reader sidecar's paper-library search
          *     jobs): poll ``GET .../jobs/{job_id}`` or subscribe to
@@ -1700,8 +1442,7 @@ export interface paths {
          *
          *     Frames: ``job`` (initial snapshot, replay-safe for late subscribers),
          *     ``progress`` (one per logged phase event; phases are kind-specific —
-         *     gap-analysis: starting/routing/merging, studio-jd-match:
-         *     analyzing/generating, project-suggest-refs: collecting/suggesting),
+         *     e.g. project-suggest-refs: collecting/suggesting),
          *     then a terminal ``done`` (carries the result payload) or ``error``
          *     (carries the structured ``{code, message}``). Terminal frames are
          *     re-derivable on reconnect — a late subscriber still receives the full
@@ -2898,205 +2639,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{name}/studio": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Profile Studio
-         * @description Output Studio overview: blog posts, counters, and generation options.
-         *
-         *     Lists every blog post (drafts and archived included; trashed excluded,
-         *     mirroring the Streamlit blog tab). ``initialized`` is false until the
-         *     profile's public layer exists (POST ``/studio/init`` creates it).
-         *     ``options`` feeds the evidence/claim-first candidate form. The response
-         *     carries the public-layer ETag (see module docstring) for use as
-         *     ``If-Match`` on the init/create mutations.
-         */
-        get: operations["get_profile_studio_api_v1_profiles__name__studio_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/studio/blog": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create Profile Studio Post
-         * @description Create one blog draft from a title (status starts as ``draft``).
-         *
-         *     Mirrors the Streamlit "new blog draft" form: the slug is derived from
-         *     today's date plus the title, with a taxonomy category prefix when the
-         *     taxonomy is enabled. Honors ``If-Match`` (412 on mismatch).
-         */
-        post: operations["create_profile_studio_post_api_v1_profiles__name__studio_blog_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/studio/blog/{slug}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Profile Studio Post
-         * @description One blog post for the editor (meta + Markdown body).
-         *
-         *     ``slug`` accepts the full route (``category/leaf``) or an unambiguous
-         *     legacy leaf slug (same resolution as the core). The response carries the
-         *     per-post ETag (Markdown + sidecar) for use as ``If-Match`` on save and
-         *     publish.
-         */
-        get: operations["get_profile_studio_post_api_v1_profiles__name__studio_blog__slug__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/studio/blog/{slug}/check": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Check Profile Studio Post
-         * @description Run the publish-readiness check on the (optionally edited) post.
-         *
-         *     Accepts the same partial-save body so the SPA can validate unsaved
-         *     edits; absent fields fall back to the on-disk document. Read-only —
-         *     nothing is persisted.
-         */
-        post: operations["check_profile_studio_post_api_v1_profiles__name__studio_blog__slug__check_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/studio/blog/{slug}/publish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Publish Profile Studio Post
-         * @description Publish one blog post (full publish-readiness validation gate).
-         *
-         *     Accepts the same partial-save body so unsaved editor content can be
-         *     published in one call; validation failures answer 422
-         *     (``blog_publish_blocked``) with the checker messages and write nothing.
-         *     Honors ``If-Match`` (412 on mismatch, fresh ETag in the header).
-         */
-        post: operations["publish_profile_studio_post_api_v1_profiles__name__studio_blog__slug__publish_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/studio/blog/{slug}/save": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Save Profile Studio Post
-         * @description Save one blog post's front matter + Markdown body.
-         *
-         *     ``None`` fields keep the current value; unknown front-matter keys are
-         *     preserved. ``blocks_json`` is intentionally not accepted: the Markdown
-         *     body is the source of truth in this slice and the BlockNote sidecar
-         *     keeps its existing blocks (the BlockNote editor slice will write them).
-         *     Honors ``If-Match`` (412 on mismatch, fresh ETag in the header).
-         */
-        post: operations["save_profile_studio_post_api_v1_profiles__name__studio_blog__slug__save_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/studio/candidates/create": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create Profile Studio Draft
-         * @description Confirm a candidate into a persisted draft (blog or project update).
-         *
-         *     Resume bullets are preview-only (they are pasted into resume-source.yaml
-         *     by hand, same as the Streamlit page). The write is recorded to Agent
-         *     Activity as a provenance writeback, mirroring the Streamlit flow.
-         *     Honors ``If-Match`` (412 on mismatch).
-         */
-        post: operations["create_profile_studio_draft_api_v1_profiles__name__studio_candidates_create_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/studio/candidates/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preview Profile Studio Candidate
-         * @description Generate a candidate preview without writing anything.
-         *
-         *     Mirrors the Streamlit "generate preview" step: the SPA shows the
-         *     candidate and only the explicit create call persists a draft.
-         */
-        post: operations["preview_profile_studio_candidate_api_v1_profiles__name__studio_candidates_preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/profiles/{name}/studio/init": {
         parameters: {
             query?: never;
@@ -3115,37 +2657,6 @@ export interface paths {
          *     created. Honors ``If-Match`` (412 on mismatch).
          */
         post: operations["init_profile_studio_api_v1_profiles__name__studio_init_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/profiles/{name}/studio/jd-match": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Analyze Profile Studio Jd Match
-         * @description JD match analysis for one resume text (LLM-backed, synchronous).
-         *
-         *     Answers 422 (``studio_jd_match_unavailable``) when no LLM backend is
-         *     configured, so the SPA can show a degradation card instead of the
-         *     analysis — same degradation contract as the other LLM slices. A failed
-         *     provider call (core returns an error string, never raises) answers 422
-         *     ``studio_jd_match_failed``. Nothing is persisted.
-         *
-         *     Kept as the synchronous contract for backward compatibility; the SPA
-         *     now dispatches this LLM long task as an async ``studio-jd-match`` job
-         *     (``POST /profiles/{name}/jobs``, 分析中/生成中 phases over SSE) instead,
-         *     with the same error codes surfaced as the job's structured error.
-         */
-        post: operations["analyze_profile_studio_jd_match_api_v1_profiles__name__studio_jd_match_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3935,196 +3446,6 @@ export interface components {
              * @default 0
              */
             total: number;
-        };
-        /**
-         * ActivityApplyResponse
-         * @description Success body for the apply mutation.
-         */
-        ActivityApplyResponse: {
-            /** Changed Paths */
-            changed_paths?: string[];
-            item: components["schemas"]["ActivityItemModel"];
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-            /** Warnings */
-            warnings?: string[];
-        };
-        /**
-         * ActivityDismissRequest
-         * @description Optional body for the dismiss mutation.
-         */
-        ActivityDismissRequest: {
-            /**
-             * Note
-             * @default
-             */
-            note: string;
-        };
-        /**
-         * ActivityDismissResponse
-         * @description Success body for the dismiss mutation.
-         */
-        ActivityDismissResponse: {
-            item: components["schemas"]["ActivityItemModel"];
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-        };
-        /**
-         * ActivityItemErrorResponse
-         * @description Error body that also carries the current activity item.
-         */
-        ActivityItemErrorResponse: {
-            /** Code */
-            code: string;
-            item?: components["schemas"]["ActivityItemModel"] | null;
-            /** Message */
-            message: string;
-        };
-        /**
-         * ActivityItemModel
-         * @description One normalized Agent Activity item (extension keys preserved).
-         */
-        ActivityItemModel: {
-            /**
-             * Applied At
-             * @default
-             */
-            applied_at: string;
-            /**
-             * Candidate Type
-             * @default unknown
-             */
-            candidate_type: string;
-            /** Changed Paths */
-            changed_paths?: string[];
-            /**
-             * Created
-             * @default
-             */
-            created: string;
-            /**
-             * Error
-             * @default
-             */
-            error: string;
-            /** Id */
-            id: string;
-            /**
-             * Kind
-             * @default candidate
-             */
-            kind: string;
-            /** Payload */
-            payload?: {
-                [key: string]: unknown;
-            };
-            /**
-             * Preview
-             * @default
-             */
-            preview: string;
-            /** Refs */
-            refs?: {
-                [key: string]: unknown;
-            };
-            /**
-             * Source Page
-             * @default
-             */
-            source_page: string;
-            /**
-             * Source Ref
-             * @default
-             */
-            source_ref: string;
-            /**
-             * Status
-             * @default pending
-             */
-            status: string;
-            /**
-             * Summary
-             * @default
-             */
-            summary: string;
-            /**
-             * Target Owner
-             * @default
-             */
-            target_owner: string;
-            /**
-             * Title
-             * @default
-             */
-            title: string;
-            /**
-             * Updated
-             * @default
-             */
-            updated: string;
-            /** Warnings */
-            warnings?: string[];
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * ActivityListResponse
-         * @description Filtered activity items plus queue-wide summary counters.
-         */
-        ActivityListResponse: {
-            /** Items */
-            items?: components["schemas"]["ActivityItemModel"][];
-            /**
-             * Kind
-             * @default
-             */
-            kind: string;
-            /**
-             * Limit
-             * @default 50
-             */
-            limit: number;
-            /** Profile */
-            profile: string;
-            /**
-             * Status
-             * @default pending
-             */
-            status: string;
-            summary?: components["schemas"]["ActivitySummaryModel"];
-            /**
-             * Total
-             * @default 0
-             */
-            total: number;
-        };
-        /**
-         * ActivitySummaryModel
-         * @description Counters over the whole Agent Activity queue (unfiltered).
-         */
-        ActivitySummaryModel: {
-            /** Candidate Type */
-            candidate_type?: {
-                [key: string]: number;
-            };
-            /** Kind */
-            kind?: {
-                [key: string]: number;
-            };
-            /** Status */
-            status?: {
-                [key: string]: number;
-            };
-            /** Target Owner */
-            target_owner?: {
-                [key: string]: number;
-            };
         };
         /**
          * AgentJobModel
@@ -5553,8 +4874,6 @@ export interface components {
             profiles?: string[];
             /** Role */
             role: string;
-            /** Teams */
-            teams?: string[];
         };
         /**
          * DivinationHexagramModel
@@ -5573,6 +4892,35 @@ export interface components {
             name: string;
             /** Symbol Lines */
             symbol_lines?: number[];
+        };
+        /**
+         * DivinationIntakeRequest
+         * @description Body for turning one divination gap node into a kanban learning task.
+         *
+         *     ``title`` is required (the SPA pre-fills it from the gap node label);
+         *     ``node_id`` is recorded as context so the card stays traceable to the
+         *     cast.
+         */
+        DivinationIntakeRequest: {
+            /**
+             * Node Id
+             * @default
+             */
+            node_id: string;
+            /**
+             * Section
+             * @default Queue
+             */
+            section: string;
+            /** Tags */
+            tags?: string[];
+            /** Title */
+            title: string;
+            /**
+             * Why
+             * @default
+             */
+            why: string;
         };
         /**
          * DivinationRequest
@@ -6275,164 +5623,6 @@ export interface components {
              * @default 0
              */
             entries: number;
-        };
-        /**
-         * GapAnalysisResponse
-         * @description Faithful projection of ``core.models.GapResult``.
-         *
-         *     ``coverage`` is a derived convenience: share of closure nodes that are
-         *     not gaps (0.0 when the closure is empty), so the SPA can render a
-         *     coverage indicator without re-deriving it. ``analysis_mode`` records
-         *     which matchers ran (``rule`` for the sync endpoint, ``rule+llm`` for the
-         *     async deep-analysis job); ``llm_router_error`` carries the degradation
-         *     reason when the LLM router failed but rule roots still produced an
-         *     analysis (``null`` when no LLM path ran or it succeeded).
-         */
-        GapAnalysisResponse: {
-            /**
-             * Analysis Mode
-             * @default rule
-             */
-            analysis_mode: string;
-            /**
-             * Can Solve
-             * @default false
-             */
-            can_solve: boolean;
-            /** Closure */
-            closure?: components["schemas"]["GapClosureNodeModel"][];
-            /**
-             * Coverage
-             * @default 0
-             */
-            coverage: number;
-            /** Gaps */
-            gaps?: string[];
-            /**
-             * Learned Merged
-             * @default false
-             */
-            learned_merged: boolean;
-            /** Llm Router Error */
-            llm_router_error?: string | null;
-            /** Next Steps */
-            next_steps?: string[];
-            /** Profile */
-            profile: string;
-            /** Roots From Llm */
-            roots_from_llm?: string[];
-            /** Roots From Rule */
-            roots_from_rule?: string[];
-            /** Strong */
-            strong?: string[];
-            /**
-             * Task
-             * @default
-             */
-            task: string;
-            /** Top Matches */
-            top_matches?: components["schemas"]["GapTopMatchModel"][];
-        };
-        /**
-         * GapAnalyzeRequest
-         * @description Body for the gap-analysis mutation.
-         *
-         *     ``use_llm=False`` runs the synchronous rule-only analysis (200).
-         *     ``use_llm=True`` creates an async ``gap-analysis`` job (202, see
-         *     ``JobCreateResponse``); poll ``GET .../jobs/{job_id}`` or subscribe to
-         *     ``GET .../jobs/{job_id}/stream`` for progress and the final result.
-         */
-        GapAnalyzeRequest: {
-            /** Task */
-            task: string;
-            /**
-             * Use Llm
-             * @default false
-             */
-            use_llm: boolean;
-        };
-        /**
-         * GapClosureNodeModel
-         * @description One node of the requires-closure from ``GapResult.closure``.
-         *
-         *     ``is_gap`` mirrors the core rule: status ``locked``/``learning`` counts
-         *     as a gap, ``solid``/``expert`` as strong.
-         */
-        GapClosureNodeModel: {
-            /**
-             * Evidence Count
-             * @default 0
-             */
-            evidence_count: number;
-            /** Id */
-            id: string;
-            /**
-             * Is Gap
-             * @default false
-             */
-            is_gap: boolean;
-            /**
-             * Label
-             * @default
-             */
-            label: string;
-            /**
-             * Status
-             * @default locked
-             */
-            status: string;
-        };
-        /**
-         * GapIntakeRequest
-         * @description Body for turning one detected gap into a kanban learning task.
-         *
-         *     ``title`` is required (the SPA pre-fills it from the gap node label);
-         *     ``node_id`` is recorded as context so the card stays traceable to the
-         *     analysis.
-         */
-        GapIntakeRequest: {
-            /**
-             * Node Id
-             * @default
-             */
-            node_id: string;
-            /**
-             * Section
-             * @default Queue
-             */
-            section: string;
-            /** Tags */
-            tags?: string[];
-            /** Title */
-            title: string;
-            /**
-             * Why
-             * @default
-             */
-            why: string;
-        };
-        /**
-         * GapTopMatchModel
-         * @description One rule/LLM-matched schema node from ``GapResult.top_matches``.
-         */
-        GapTopMatchModel: {
-            /** Id */
-            id: string;
-            /**
-             * Label
-             * @default
-             */
-            label: string;
-            /**
-             * Score
-             * @default 0
-             */
-            score: number;
-            /**
-             * Source
-             * @default rule
-             */
-            source: string;
         };
         /**
          * GoalCreateRequest
@@ -7521,199 +6711,16 @@ export interface components {
             total: number;
         };
         /**
-         * InboxCaptureRequest
-         * @description Body for the quick-capture mutation (only ``title`` is required).
-         */
-        InboxCaptureRequest: {
-            /**
-             * Raw Text
-             * @default
-             */
-            raw_text: string;
-            /**
-             * Source
-             * @default web
-             */
-            source: string;
-            /** Tags */
-            tags?: string[];
-            /** Title */
-            title: string;
-        };
-        /**
-         * InboxClarifyRequest
-         * @description Body for the clarify mutation (``action`` in CLARIFY_ACTIONS).
-         */
-        InboxClarifyRequest: {
-            /** Action */
-            action: string;
-            /**
-             * Note
-             * @default
-             */
-            note: string;
-        };
-        /**
-         * InboxHistoryEventModel
-         * @description One transition recorded against an inbox item.
-         */
-        InboxHistoryEventModel: {
-            /**
-             * Action
-             * @default
-             */
-            action: string;
-            /**
-             * At
-             * @default
-             */
-            at: string;
-            /**
-             * From Status
-             * @default
-             */
-            from_status: string;
-            /** Metadata */
-            metadata?: {
-                [key: string]: unknown;
-            };
-            /**
-             * Note
-             * @default
-             */
-            note: string;
-            /**
-             * To Status
-             * @default
-             */
-            to_status: string;
-        };
-        /**
-         * InboxItemErrorResponse
-         * @description Error body that also carries the current inbox item.
-         */
-        InboxItemErrorResponse: {
-            /** Code */
-            code: string;
-            item?: components["schemas"]["InboxItemModel"] | null;
-            /** Message */
-            message: string;
-        };
-        /**
-         * InboxItemModel
-         * @description One inbox item (mirrors core InboxItem).
-         */
-        InboxItemModel: {
-            /**
-             * Captured By
-             * @default human
-             */
-            captured_by: string;
-            /**
-             * Created At
-             * @default
-             */
-            created_at: string;
-            /** History */
-            history?: components["schemas"]["InboxHistoryEventModel"][];
-            /** Id */
-            id: string;
-            /** Metadata */
-            metadata?: {
-                [key: string]: unknown;
-            };
-            /**
-             * Raw Text
-             * @default
-             */
-            raw_text: string;
-            /**
-             * Source
-             * @default
-             */
-            source: string;
-            /**
-             * Status
-             * @default inbox
-             */
-            status: string;
-            /** Tags */
-            tags?: string[];
-            /** Title */
-            title: string;
-            /**
-             * Type
-             * @default note
-             */
-            type: string;
-            /**
-             * Visibility
-             * @default private
-             */
-            visibility: string;
-        };
-        /**
-         * InboxMutationResponse
-         * @description Success body for inbox mutations.
-         *
-         *     ``result`` carries the clarify dispatch outcome (action, target_id,
-         *     draft) for the clarify endpoint; it stays empty for capture and the
-         *     archive/discard wrappers.
-         */
-        InboxMutationResponse: {
-            item: components["schemas"]["InboxItemModel"];
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-            /** Result */
-            result?: {
-                [key: string]: unknown;
-            };
-        };
-        /**
-         * InboxNoteRequest
-         * @description Optional body for the archive/discard mutations.
-         */
-        InboxNoteRequest: {
-            /**
-             * Note
-             * @default
-             */
-            note: string;
-        };
-        /**
-         * InboxResponse
-         * @description Inbox items filtered to the requested statuses.
-         */
-        InboxResponse: {
-            /** Items */
-            items?: components["schemas"]["InboxItemModel"][];
-            /** Profile */
-            profile: string;
-            /** Statuses */
-            statuses?: string[];
-            /**
-             * Total
-             * @default 0
-             */
-            total: number;
-        };
-        /**
          * JobCreateRequest
          * @description Generic async-job creation body (dispatched by ``kind``).
          *
-         *     ``input`` is validated per kind: ``gap-analysis`` takes ``{task: str}``
-         *     (1–2000 non-blank chars), ``studio-jd-match`` takes ``{resume_md,
-         *     jd_text}`` (both non-blank, ≤ 50000 chars each) and
-         *     ``project-suggest-refs`` takes ``{case_id: str}`` (non-blank);
+         *     ``input`` is validated per kind: ``project-suggest-refs`` takes ``{case_id: str}`` (non-blank);
          *     content-workspace AI kinds ``content-rewrite`` (``{operation, selection,
          *     title?, context?, instruction?}``), ``content-meta`` (``{title, summary,
          *     tags, body}``) and ``content-cover`` (``{slug, brief?, style?, title?,
          *     summary?, tags?, body?}``) return candidates only and never write posts.
          *     Validation failures answer 422 with the kind's error code
-         *     (``empty_task`` / ``invalid_jd_match_request`` / ``empty_case_id`` /
+         *     (``empty_case_id`` /
          *     ``invalid_job_input``).
          */
         JobCreateRequest: {
@@ -7753,9 +6760,8 @@ export interface components {
          * @description Public snapshot of one async job (no result payload, no event log).
          *
          *     Statuses follow ``queued`` -> ``running`` -> ``done`` | ``failed``;
-         *     ``phase`` is the kind-specific coarse stage (gap-analysis: queued /
-         *     starting / routing / merging / done / failed; studio-jd-match:
-         *     analyzing / generating; project-suggest-refs: collecting / suggesting).
+         *     ``phase`` is the kind-specific coarse stage (e.g. project-suggest-refs:
+         *     collecting / suggesting).
          */
         JobModel: {
             /**
@@ -9335,21 +8341,6 @@ export interface components {
             /** Profile */
             profile: string;
             skill_tree?: components["schemas"]["SkillTreeSummary"];
-        };
-        /**
-         * ProfileModelCandidateRequest
-         * @description Body for proposing one agent-profile.yaml field update (human review).
-         */
-        ProfileModelCandidateRequest: {
-            /** Field */
-            field: string;
-            /** Proposed Value */
-            proposed_value: string;
-            /**
-             * Rationale
-             * @default
-             */
-            rationale: string;
         };
         /**
          * ProfileSettingsPatch
@@ -11529,11 +10520,6 @@ export interface components {
              */
             configured: boolean;
             /**
-             * Dashboard Url
-             * @default
-             */
-            dashboard_url: string;
-            /**
              * Handoff Token
              * @default
              */
@@ -11996,82 +10982,6 @@ export interface components {
             status: string;
         };
         /**
-         * StudioCandidateRequest
-         * @description Body for candidate preview / draft creation from evidence or claims.
-         *
-         *     ``target`` is ``blog`` / ``resume`` / ``project``; ``source`` is
-         *     ``claims`` / ``evidence``. Resume bullets and project updates only make
-         *     sense from claims (mirroring the Streamlit form rules); the project
-         *     target additionally requires ``project_id``.
-         */
-        StudioCandidateRequest: {
-            /** Claim Ids */
-            claim_ids?: string[];
-            /**
-             * Evidence Id
-             * @default
-             */
-            evidence_id: string;
-            /**
-             * Project Id
-             * @default
-             */
-            project_id: string;
-            /**
-             * Source
-             * @default claims
-             */
-            source: string;
-            /**
-             * Target
-             * @default blog
-             */
-            target: string;
-        };
-        /**
-         * StudioCandidateResponse
-         * @description Generated candidate preview (nothing persisted).
-         *
-         *     ``kind`` is ``blog`` / ``resume`` / ``project_update``; ``candidate`` is
-         *     the core candidate's ``to_dict()`` payload (blog/project) or
-         *     ``{body, bullets}`` for resume bullets.
-         */
-        StudioCandidateResponse: {
-            /** Candidate */
-            candidate?: {
-                [key: string]: unknown;
-            };
-            /** Kind */
-            kind: string;
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-        };
-        /**
-         * StudioDraftResponse
-         * @description Result of confirming a candidate into a persisted draft.
-         */
-        StudioDraftResponse: {
-            /** Kind */
-            kind: string;
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-            /** Path */
-            path: string;
-            /**
-             * Slug
-             * @default
-             */
-            slug: string;
-            /** Warnings */
-            warnings?: string[];
-        };
-        /**
          * StudioInitResponse
          * @description Result of initializing the profile's public layer (idempotent).
          */
@@ -12083,47 +10993,6 @@ export interface components {
              * @default true
              */
             ok: boolean;
-        };
-        /**
-         * StudioJdMatchRequest
-         * @description Body for the JD match analysis (LLM-backed; 422 when unconfigured).
-         */
-        StudioJdMatchRequest: {
-            /**
-             * Jd Text
-             * @default
-             */
-            jd_text: string;
-            /**
-             * Resume Md
-             * @default
-             */
-            resume_md: string;
-        };
-        /**
-         * StudioJdMatchResponse
-         * @description JD match analysis Markdown (generated; review before use).
-         */
-        StudioJdMatchResponse: {
-            /** Analysis */
-            analysis: string;
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-        };
-        /**
-         * StudioOptionsModel
-         * @description Source pickers for the evidence/claim-first generation form.
-         */
-        StudioOptionsModel: {
-            /** Claims */
-            claims?: components["schemas"]["StudioSourceOptionModel"][];
-            /** Evidence */
-            evidence?: components["schemas"]["StudioSourceOptionModel"][];
-            /** Projects */
-            projects?: components["schemas"]["StudioSourceOptionModel"][];
         };
         /**
          * StudioPostCreateRequest
@@ -12305,36 +11174,6 @@ export interface components {
             tags?: string[] | null;
             /** Title */
             title?: string | null;
-        };
-        /**
-         * StudioResponse
-         * @description Output Studio overview: posts, counters, and generation options.
-         */
-        StudioResponse: {
-            /**
-             * Initialized
-             * @default false
-             */
-            initialized: boolean;
-            options?: components["schemas"]["StudioOptionsModel"];
-            /** Posts */
-            posts?: components["schemas"]["StudioPostModel"][];
-            /** Profile */
-            profile: string;
-            summary?: components["schemas"]["StudioSummaryModel"];
-        };
-        /**
-         * StudioSourceOptionModel
-         * @description One {id, label} option row for the candidate-generation pickers.
-         */
-        StudioSourceOptionModel: {
-            /** Id */
-            id: string;
-            /**
-             * Label
-             * @default
-             */
-            label: string;
         };
         /**
          * StudioSummaryModel
@@ -12739,369 +11578,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfileSummary"][];
-                };
-            };
-        };
-    };
-    get_profile_activity_api_v1_profiles__name__activity_get: {
-        parameters: {
-            query?: {
-                status?: string;
-                kind?: string;
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityListResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    submit_profile_model_candidate_api_v1_profiles__name__activity_profile_model_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProfileModelCandidateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityItemModel"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Item state conflict (not pending/appliable, apply failed). */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityItemErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the current activity file. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityItemErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_profile_activity_item_api_v1_profiles__name__activity__item_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityItemModel"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    apply_profile_activity_item_api_v1_profiles__name__activity__item_id__apply_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
-            path: {
-                name: string;
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityApplyResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Item state conflict (not pending/appliable, apply failed). */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityItemErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the current activity file. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityItemErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    dismiss_profile_activity_item_api_v1_profiles__name__activity__item_id__dismiss_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
-            path: {
-                name: string;
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["ActivityDismissRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityDismissResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Item state conflict (not pending/appliable, apply failed). */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityItemErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the current activity file. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityItemErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -15580,6 +14056,68 @@ export interface operations {
             };
         };
     };
+    intake_divination_gap_api_v1_profiles__name__divination_intake_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DivinationIntakeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KanbanMutationResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Empty title or invalid kanban section. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_profile_evidence_api_v1_profiles__name__evidence_get: {
         parameters: {
             query?: {
@@ -16256,148 +14794,6 @@ export interface operations {
             };
         };
     };
-    analyze_profile_gap_api_v1_profiles__name__gap_analyze_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GapAnalyzeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GapAnalysisResponse"];
-                };
-            };
-            /** @description use_llm=true: the deep analysis runs as an async gap-analysis job; poll or stream the returned job_id. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JobCreateResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Empty/unmatched task, missing skill tree or schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    intake_profile_gap_api_v1_profiles__name__gap_intake_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GapIntakeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KanbanMutationResponse"];
-                };
-            };
-            /** @description use_llm=true: the deep analysis runs as an async gap-analysis job; poll or stream the returned job_id. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JobCreateResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Empty/unmatched task, missing skill tree or schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     get_profile_goals_api_v1_profiles__name__goals_get: {
         parameters: {
             query?: never;
@@ -16654,22 +15050,22 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Item state conflict (not pending/appliable, apply failed). */
+            /** @description State conflict (stale or concurrent write). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ActivityItemErrorResponse"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description If-Match ETag does not match the current activity file. */
+            /** @description If-Match ETag does not match the current file. */
             412: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ActivityItemErrorResponse"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -17225,361 +15621,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_profile_inbox_api_v1_profiles__name__inbox_get: {
-        parameters: {
-            query?: {
-                status?: string;
-            };
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InboxResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    capture_profile_inbox_item_api_v1_profiles__name__inbox_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["InboxCaptureRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InboxMutationResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the current inbox file. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InboxItemErrorResponse"];
-                };
-            };
-            /** @description Blank title or unsupported clarify action. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    archive_profile_inbox_item_api_v1_profiles__name__inbox__item_id__archive_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
-            path: {
-                name: string;
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["InboxNoteRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InboxMutationResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the current inbox file. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InboxItemErrorResponse"];
-                };
-            };
-            /** @description Blank title or unsupported clarify action. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    clarify_profile_inbox_item_api_v1_profiles__name__inbox__item_id__clarify_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
-            path: {
-                name: string;
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["InboxClarifyRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InboxMutationResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the current inbox file. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InboxItemErrorResponse"];
-                };
-            };
-            /** @description Blank title or unsupported clarify action. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    discard_profile_inbox_item_api_v1_profiles__name__inbox__item_id__discard_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
-            path: {
-                name: string;
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["InboxNoteRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InboxMutationResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the current inbox file. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InboxItemErrorResponse"];
-                };
-            };
-            /** @description Blank title or unsupported clarify action. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -21407,560 +19448,6 @@ export interface operations {
             };
         };
     };
-    get_profile_studio_api_v1_profiles__name__studio_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StudioResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_profile_studio_post_api_v1_profiles__name__studio_blog_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["StudioPostCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StudioPostMutationResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile or blog post not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the studio source files. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    get_profile_studio_post_api_v1_profiles__name__studio_blog__slug__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StudioPostDetailModel"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    check_profile_studio_post_api_v1_profiles__name__studio_blog__slug__check_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["StudioPostSaveRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StudioValidationResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile or blog post not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the studio source files. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    publish_profile_studio_post_api_v1_profiles__name__studio_blog__slug__publish_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
-            path: {
-                name: string;
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["StudioPostSaveRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StudioPostMutationResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile or blog post not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the studio source files. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    save_profile_studio_post_api_v1_profiles__name__studio_blog__slug__save_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
-            path: {
-                name: string;
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["StudioPostSaveRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StudioPostMutationResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile or blog post not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the studio source files. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_profile_studio_draft_api_v1_profiles__name__studio_candidates_create_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "if-match"?: string | null;
-            };
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["StudioCandidateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StudioDraftResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile or blog post not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the studio source files. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    preview_profile_studio_candidate_api_v1_profiles__name__studio_candidates_preview_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["StudioCandidateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StudioCandidateResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile or blog post not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the studio source files. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     init_profile_studio_api_v1_profiles__name__studio_init_post: {
         parameters: {
             query?: never;
@@ -21981,77 +19468,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StudioInitResponse"];
-                };
-            };
-            /** @description Invalid profile name. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile access denied. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Profile or blog post not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description If-Match ETag does not match the studio source files. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    analyze_profile_studio_jd_match_api_v1_profiles__name__studio_jd_match_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["StudioJdMatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StudioJdMatchResponse"];
                 };
             };
             /** @description Invalid profile name. */

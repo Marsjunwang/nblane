@@ -380,7 +380,7 @@ def test_template_overlay_substituted_hierarchy(monkeypatch) -> None:
     """The template overlay must land on the documented config paths.
 
     Guards against schema drift: the verified production paths are
-    ``agents.defaults.*`` (see docs/zh/guides/openclaw-integration.md,
+    ``agents.defaults.*`` (see docs/zh/guides/openclaw-ops.md,
     2026-09-19 实测), not top-level ``model`` / ``heartbeat``.
     """
     monkeypatch.setenv("WEIXIN_OWNER_ID", "owner123@im.wechat")

@@ -179,7 +179,7 @@ def update_skill_tree(
 ) -> _T:
     """Load skill-tree.yaml, apply *fn*, and persist — under one lock.
 
-    Same contract as ``inbox.update_inbox``: the whole load → mutate →
+    Same locked contract as the other ``update_*`` helpers: the whole load → mutate →
     write cycle holds the profile write lock. *fn* receives the raw
     document dict and mutates it in place; its return value is passed
     through. When *fn* leaves the document unchanged, no write or backup
@@ -285,7 +285,7 @@ def update_evidence_pool(
 ) -> _T:
     """Load evidence-pool.yaml, apply *fn*, and persist — under one lock.
 
-    Same contract as ``inbox.update_inbox``: the whole load → mutate →
+    Same locked contract as the other ``update_*`` helpers: the whole load → mutate →
     write cycle holds the profile write lock. *fn* receives the raw
     document dict and mutates it in place; its return value is passed
     through. When *fn* leaves the document unchanged, no write or backup

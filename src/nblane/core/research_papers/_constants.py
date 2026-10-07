@@ -57,11 +57,6 @@ from nblane.core.research_workspace import (
 )
 from nblane.core.yaml_io import _load_yaml_dict
 
-try:
-    import streamlit as st
-except Exception:  # pragma: no cover - Streamlit is optional for core imports.
-    st = None
-
 LIBRARY_TREE_FILENAME = "library-tree.yaml"
 PAPER_PAGES_DIRNAME = "paper-pages"
 PAPER_SEGMENTS_DIRNAME = "paper-segments"

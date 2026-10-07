@@ -8,8 +8,6 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-import app as home_app
-
 from nblane.core import command_bar
 from nblane.core.command_bar import (
     apply_kanban_add_intent,
@@ -19,7 +17,6 @@ from nblane.core.command_bar import (
 )
 from nblane.core.intent import IntentAction
 from nblane.core.kanban_io import parse_kanban
-from nblane.core.models import KanbanTask
 
 
 def _profile(tmp: Path) -> Path:
@@ -164,169 +161,6 @@ class TestApplyKanbanAddIntent(unittest.TestCase):
             after = (profile / "kanban.md").read_text(encoding="utf-8")
         self.assertIsNone(result)
         self.assertEqual(before, after)
-
-
-class TestCommandBarEventHandlers(unittest.TestCase):
-    """app.py handler branches: stash/confirm/discard/navigate semantics."""
-
-    def setUp(self) -> None:
-        self.profile = "cmdbar_test_profile"
-        self.pending_key = home_app._command_bar_pending_key(self.profile)
-        self.help_key = home_app._command_bar_help_key(self.profile)
-        self._event_seq = 0
-
-    def tearDown(self) -> None:
-        for key in (self.pending_key, self.help_key, f"_home_dashboard_event_{self.profile}"):
-            home_app.st.session_state.pop(key, None)
-
-    def _event(self, action: str, payload: dict) -> dict:
-        self._event_seq += 1
-        return {
-            "action": action,
-            "event_id": f"test-{self.profile}-{self._event_seq}",
-            "payload": payload,
-        }
-
-    def test_submit_write_intent_stashes_pending_and_writes_nothing(self) -> None:
-        pending = {
-            "id": "intent:kanban.add:abc123",
-            "kind": "kanban.add",
-            "title": "X",
-            "column": "Doing",
-            "due": "",
-            "tags": [],
-            "raw": "add X",
-        }
-        with patch.object(
-            home_app,
-            "resolve_command_text",
-            return_value={"outcome": "pending", "intent": pending},
-        ), patch.object(home_app, "apply_kanban_add_intent") as apply_mock:
-            handled = home_app._handle_home_dashboard_event(
-                self._event("command_bar_submit", {"text": "add X"}),
-                self.profile,
-            )
-        self.assertTrue(handled)
-        self.assertEqual(home_app.st.session_state.get(self.pending_key), pending)
-        apply_mock.assert_not_called()  # submit never writes
-
-    def test_submit_navigate_switches_page_without_pending(self) -> None:
-        with patch.object(
-            home_app,
-            "resolve_command_text",
-            return_value={"outcome": "navigate", "page": "pages/3_Kanban.py"},
-        ), patch.object(home_app.st, "switch_page") as nav_mock:
-            handled = home_app._handle_home_dashboard_event(
-                self._event("command_bar_submit", {"text": "打开看板"}),
-                self.profile,
-            )
-        self.assertTrue(handled)
-        nav_mock.assert_called_once_with("pages/3_Kanban.py")
-        self.assertIsNone(home_app.st.session_state.get(self.pending_key))
-
-    def test_submit_unknown_sets_one_shot_help_flag(self) -> None:
-        with patch.object(
-            home_app,
-            "resolve_command_text",
-            return_value={"outcome": "help", "raw": "???"},
-        ):
-            handled = home_app._handle_home_dashboard_event(
-                self._event("command_bar_submit", {"text": "???"}),
-                self.profile,
-            )
-        self.assertTrue(handled)
-        self.assertTrue(home_app.st.session_state.get(self.help_key))
-        self.assertIsNone(home_app.st.session_state.get(self.pending_key))
-
-    def test_confirm_runs_merge_write_and_clears_pending(self) -> None:
-        pending = {
-            "id": "intent:kanban.add:abc123",
-            "kind": "kanban.add",
-            "title": "校准数据集",
-            "column": "Doing",
-            "due": "2026-09-17",
-            "tags": ["robot"],
-            "raw": "raw",
-        }
-        home_app.st.session_state[self.pending_key] = pending
-        with patch.object(
-            home_app,
-            "apply_kanban_add_intent",
-            return_value=KanbanTask(title="校准数据集", id="kb_new1"),
-        ) as apply_mock, patch.object(
-            home_app, "refresh_file_snapshots"
-        ) as refresh_mock, patch.object(
-            home_app, "stash_git_backup_results"
-        ), patch.object(home_app, "clear_web_cache"), patch.object(
-            home_app.st, "toast"
-        ) as toast_mock:
-            handled = home_app._handle_home_dashboard_event(
-                self._event(
-                    "command_bar_confirm", {"intent_id": "intent:kanban.add:abc123"}
-                ),
-                self.profile,
-            )
-        self.assertTrue(handled)
-        apply_mock.assert_called_once_with(self.profile, pending)
-        refresh_mock.assert_called_once()
-        toast_mock.assert_called_once()
-        self.assertIsNone(home_app.st.session_state.get(self.pending_key))
-
-    def test_confirm_evidence_capture_reuses_capture_channel(self) -> None:
-        pending = {
-            "id": "intent:evidence.capture:def456",
-            "kind": "evidence.capture",
-            "title": "完成了 demo 联调",
-            "column": "Doing",
-            "due": "",
-            "tags": [],
-            "raw": "raw",
-        }
-        home_app.st.session_state[self.pending_key] = pending
-        with patch.object(
-            home_app, "_capture_home_research_source"
-        ) as capture_mock:
-            handled = home_app._handle_home_dashboard_event(
-                self._event(
-                    "command_bar_confirm",
-                    {"intent_id": "intent:evidence.capture:def456"},
-                ),
-                self.profile,
-            )
-        self.assertTrue(handled)
-        capture_mock.assert_called_once_with(
-            self.profile,
-            {"title": "完成了 demo 联调", "type": "note"},
-            capture_event="command_bar",
-        )
-        self.assertIsNone(home_app.st.session_state.get(self.pending_key))
-
-    def test_confirm_id_mismatch_keeps_pending(self) -> None:
-        pending = {"id": "intent:kanban.add:abc123", "kind": "kanban.add", "title": "X"}
-        home_app.st.session_state[self.pending_key] = pending
-        with patch.object(home_app, "apply_kanban_add_intent") as apply_mock:
-            handled = home_app._handle_home_dashboard_event(
-                self._event("command_bar_confirm", {"intent_id": "intent:kanban.add:other"}),
-                self.profile,
-            )
-        self.assertTrue(handled)
-        apply_mock.assert_not_called()
-        self.assertEqual(home_app.st.session_state.get(self.pending_key), pending)
-
-    def test_discard_clears_pending_without_writing(self) -> None:
-        home_app.st.session_state[self.pending_key] = {
-            "id": "intent:kanban.add:abc123",
-            "kind": "kanban.add",
-            "title": "X",
-        }
-        with patch.object(home_app, "apply_kanban_add_intent") as apply_mock:
-            handled = home_app._handle_home_dashboard_event(
-                self._event("command_bar_discard", {"intent_id": "intent:kanban.add:abc123"}),
-                self.profile,
-            )
-        self.assertTrue(handled)
-        apply_mock.assert_not_called()
-        self.assertIsNone(home_app.st.session_state.get(self.pending_key))
 
 
 if __name__ == "__main__":

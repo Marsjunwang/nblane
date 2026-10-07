@@ -2,7 +2,7 @@
  * server-side semantics (locked schema nodes, guest window/floor, zh
  * category names). Replaces the Phase 3 kickoff's 5-endpoint composition.
  *
- * Home-editing slice (design docs/zh/dev/home-editing-starmap-design.md):
+ * Home-editing slice (design docs/zh/guides/home.md):
  * useStarmapEditingData merges the goal book (GET .../goals — full detail,
  * ALL statuses, authoritative NorthStarModel) over the aggregation, because
  * the aggregation carries active goals only and a bare north-star string. */

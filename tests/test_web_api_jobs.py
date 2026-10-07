@@ -1,13 +1,10 @@
 """Tests for the web_api async-jobs slice (jobs registry + SSE + LLM kinds).
 
 Covers ``POST /profiles/{name}/jobs``, ``GET .../jobs/{job_id}``, and
-``GET .../jobs/{job_id}/stream`` (SSE), plus the registered kinds:
-``gap-analysis`` (wired into ``POST .../gap/analyze?use_llm=true``),
-``studio-jd-match`` (Output Studio JD match) and ``project-suggest-refs``
-(Project Board AI ref suggestion). The LLM router / gateway / core LLM
-entry points are always patched — tests never touch the network or the
-real ``.env`` key, and the learned-keyword store is redirected into the
-tmp schemas tree so ``schemas/.learned/`` in the repo is never written.
+``GET .../jobs/{job_id}/stream`` (SSE), plus the registered
+``project-suggest-refs`` kind (Project Board AI ref suggestion). Registry/SSE mechanics run on a
+synthetic ``test-echo`` kind. The gateway / core LLM entry points are
+always patched — tests never touch the network or the real ``.env`` key.
 """
 
 from __future__ import annotations
@@ -25,7 +22,6 @@ from fastapi.testclient import TestClient
 
 from nblane.core import auth as auth_core
 from nblane.core.ai.actions import AIActionResult
-from nblane.core.gap_llm_router import RouterOutcome
 from nblane.web_api import app, create_app
 from nblane.web_api import jobs as jobs_module
 
@@ -114,7 +110,6 @@ def _write_users_file(path: Path) -> Path:
                         "password_hash": stored,
                         "role": "member",
                         "profile": "wang",
-                        "teams": ["example-team"],
                     },
                 }
             }
@@ -150,12 +145,7 @@ class JobsTestBase(unittest.TestCase):
             ("nblane.core.profile_io.PROFILES_DIR", root),
             ("nblane.core.io.PROFILES_DIR", root),
             ("nblane.core.io.SCHEMAS_DIR", schemas),
-            ("nblane.core.gap.PROFILES_DIR", root),
             ("nblane.core.project_board.PROFILES_DIR", root),
-            (
-                "nblane.core.learned_keywords._LEARNED_DIR",
-                schemas / ".learned",
-            ),
         ):
             patcher = patch(target, value)
             self.addCleanup(patcher.stop)
@@ -163,16 +153,27 @@ class JobsTestBase(unittest.TestCase):
 
     def _client(self, root: Path, schemas: Path) -> TestClient:
         self._patch_roots(root, schemas)
+        self._register_echo_kind()
         return TestClient(app)
 
-    def _patch_router(self, outcome: RouterOutcome | None = None, **kwargs) -> None:
-        """Patch the LLM router so gap jobs never hit the network."""
-        if outcome is None:
-            outcome = RouterOutcome(ok=True, **kwargs)
-        patcher = patch(
-            "nblane.core.gap_llm_router.route_task_to_nodes",
-            return_value=outcome,
-        )
+    def _register_echo_kind(self) -> None:
+        """Register ``test-echo``: two progress phases, fails on task "fail"."""
+
+        def validate(job_input: dict) -> dict:
+            task = str(job_input.get("task") or "").strip()
+            if not task:
+                raise jobs_module.JobInputError("empty_task", "Empty task text.")
+            return {"task": task}
+
+        def run(profile, job_input, report):
+            report(phase="routing", message="Routing.")
+            report(phase="merging", message="Merging.")
+            if job_input["task"] == "fail":
+                raise jobs_module.JobFailedError("no_roots", "Nothing matched.")
+            return {"profile": profile, "task": job_input["task"]}
+
+        spec = jobs_module.JobKind(name="test-echo", validate=validate, run=run)
+        patcher = patch.dict(jobs_module._KINDS, {"test-echo": spec})
         self.addCleanup(patcher.stop)
         patcher.start()
 
@@ -218,7 +219,7 @@ class TestJobCreation(JobsTestBase):
             client = self._client(root, schemas)
             response = client.post(
                 "/api/v1/profiles/alice/jobs",
-                json={"kind": "gap-analysis", "input": {"task": "   "}},
+                json={"kind": "test-echo", "input": {"task": "   "}},
             )
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["code"], "empty_task")
@@ -248,11 +249,10 @@ class TestJobCreation(JobsTestBase):
             _write_profile(root, "wang", SKILL_TREE)
             schemas = _write_schemas(base)
             client = self._client(root, schemas)
-            self._patch_router(node_ids=[], keywords={})
             created = client.post(
                 "/api/v1/profiles/alice/jobs",
                 json={
-                    "kind": "gap-analysis",
+                    "kind": "test-echo",
                     "input": {"task": "grasp manipulation"},
                 },
             )
@@ -267,123 +267,6 @@ class TestJobCreation(JobsTestBase):
         self.assertEqual(stream.json()["code"], "job_not_found")
 
 
-class TestGapAnalysisJob(JobsTestBase):
-    """The gap-analysis kind: lifecycle, LLM degradation, structured failure."""
-
-    def test_lifecycle_rule_plus_llm(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            root = base / "profiles"
-            _write_profile(root, tree=SKILL_TREE)
-            schemas = _write_schemas(base)
-            client = self._client(root, schemas)
-            self._patch_router(
-                node_ids=["navigation"],
-                keywords={"navigation": ["路径规划/path planning"]},
-            )
-            created = client.post(
-                "/api/v1/profiles/alice/gap/analyze",
-                json={"task": "grasp manipulation task", "use_llm": True},
-            )
-            self.assertEqual(created.status_code, 202)
-            job_id = created.json()["job_id"]
-            final = self._wait_final(client, job_id)
-            learned_path = schemas / ".learned" / "test-domain.yaml"
-            learned = (
-                yaml.safe_load(learned_path.read_text(encoding="utf-8"))
-                if learned_path.exists()
-                else None
-            )
-        job = final["job"]
-        self.assertEqual(job["status"], "done")
-        self.assertEqual(job["kind"], "gap-analysis")
-        self.assertEqual(job["phase"], "done")
-        self.assertIsNone(job["error"])
-        self.assertGreaterEqual(job["elapsed_ms"], 0)
-        result = final["result"]
-        self.assertEqual(result["profile"], "alice")
-        self.assertEqual(result["analysis_mode"], "rule+llm")
-        self.assertIn("navigation", result["roots_from_llm"])
-        self.assertIn("manipulation", result["roots_from_rule"])
-        self.assertIsNone(result["llm_router_error"])
-        # LLM-only root joins the closure; the sync rule path never sees it.
-        closure_ids = [node["id"] for node in result["closure"]]
-        self.assertIn("navigation", closure_ids)
-        # Router keywords persisted into the *tmp* learned store.
-        self.assertTrue(result["learned_merged"])
-        self.assertIsNotNone(learned)
-        self.assertIn("navigation", learned)
-
-    def test_llm_failure_degrades_to_rule_roots(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            root = base / "profiles"
-            _write_profile(root, tree=SKILL_TREE)
-            schemas = _write_schemas(base)
-            client = self._client(root, schemas)
-            self._patch_router(
-                outcome=RouterOutcome(ok=False, error="LLM not configured")
-            )
-            created = client.post(
-                "/api/v1/profiles/alice/gap/analyze",
-                json={"task": "grasp manipulation task", "use_llm": True},
-            )
-            self.assertEqual(created.status_code, 202)
-            job_id = created.json()["job_id"]
-            final = self._wait_final(client, job_id)
-        self.assertEqual(final["job"]["status"], "done")
-        result = final["result"]
-        self.assertEqual(result["analysis_mode"], "rule+llm")
-        self.assertEqual(result["llm_router_error"], "LLM not configured")
-        self.assertEqual(result["roots_from_llm"], [])
-        self.assertIn("manipulation", result["roots_from_rule"])
-        self.assertFalse(result["learned_merged"])
-
-    def test_no_roots_fails_with_structured_error(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            root = base / "profiles"
-            _write_profile(root, tree=SKILL_TREE)
-            schemas = _write_schemas(base)
-            client = self._client(root, schemas)
-            self._patch_router(node_ids=[], keywords={})
-            created = client.post(
-                "/api/v1/profiles/alice/gap/analyze",
-                json={"task": "zzqqxxyy nothing matches", "use_llm": True},
-            )
-            self.assertEqual(created.status_code, 202)
-            job_id = created.json()["job_id"]
-            final = self._wait_final(client, job_id)
-        job = final["job"]
-        self.assertEqual(job["status"], "failed")
-        self.assertEqual(job["error"]["code"], "no_roots")
-        self.assertIn("No skill nodes matched", job["error"]["message"])
-        self.assertIsNone(final["result"])
-
-    def test_generic_jobs_endpoint_creates_gap_job(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            root = base / "profiles"
-            _write_profile(root, tree=SKILL_TREE)
-            schemas = _write_schemas(base)
-            client = self._client(root, schemas)
-            self._patch_router(node_ids=[], keywords={})
-            created = client.post(
-                "/api/v1/profiles/alice/jobs",
-                json={
-                    "kind": "gap-analysis",
-                    "input": {"task": "grasp manipulation"},
-                },
-            )
-            self.assertEqual(created.status_code, 202)
-            payload = created.json()
-            self.assertEqual(payload["job"]["status"], "queued")
-            self.assertEqual(payload["job"]["phase"], "queued")
-            final = self._wait_final(client, payload["job_id"])
-        self.assertEqual(final["job"]["status"], "done")
-        self.assertEqual(final["result"]["analysis_mode"], "rule+llm")
-
-
 class TestJobStream(JobsTestBase):
     """SSE stream: initial snapshot, replayed progress, terminal frame."""
 
@@ -394,10 +277,9 @@ class TestJobStream(JobsTestBase):
             _write_profile(root, tree=SKILL_TREE)
             schemas = _write_schemas(base)
             client = self._client(root, schemas)
-            self._patch_router(node_ids=["navigation"], keywords={})
             created = client.post(
-                "/api/v1/profiles/alice/gap/analyze",
-                json={"task": "grasp manipulation task", "use_llm": True},
+                "/api/v1/profiles/alice/jobs",
+                json={"kind": "test-echo", "input": {"task": "grasp"}},
             )
             self.assertEqual(created.status_code, 202)
             job_id = created.json()["job_id"]
@@ -421,15 +303,14 @@ class TestJobStream(JobsTestBase):
             for event, data in frames
             if event == "progress"
         ]
-        # Core-reported stages survive even when the subscriber connects
+        # Runner-reported stages survive even when the subscriber connects
         # after the job already finished (seq-log replay).
         self.assertIn("routing", phases)
         self.assertIn("merging", phases)
         done = frames[-1][1]
         self.assertTrue(done["ok"])
         self.assertEqual(done["job"]["status"], "done")
-        self.assertEqual(done["result"]["analysis_mode"], "rule+llm")
-        self.assertIn("navigation", done["result"]["roots_from_llm"])
+        self.assertEqual(done["result"]["task"], "grasp")
 
     def test_stream_terminal_error_frame(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -438,10 +319,9 @@ class TestJobStream(JobsTestBase):
             _write_profile(root, tree=SKILL_TREE)
             schemas = _write_schemas(base)
             client = self._client(root, schemas)
-            self._patch_router(node_ids=[], keywords={})
             created = client.post(
-                "/api/v1/profiles/alice/gap/analyze",
-                json={"task": "zzqqxxyy nothing matches", "use_llm": True},
+                "/api/v1/profiles/alice/jobs",
+                json={"kind": "test-echo", "input": {"task": "fail"}},
             )
             self.assertEqual(created.status_code, 202)
             job_id = created.json()["job_id"]
@@ -574,6 +454,7 @@ class TestJobsScope(JobsTestBase):
 
     def _auth_client(self, root: Path, schemas: Path) -> TestClient:
         self._patch_roots(root, schemas)
+        self._register_echo_kind()
         users_file = _write_users_file(root / "users.yaml")
         env = {
             "NBLANE_AUTH_FILE": str(users_file),
@@ -593,7 +474,7 @@ class TestJobsScope(JobsTestBase):
             client = self._auth_client(root, schemas)
             create = client.post(
                 "/api/v1/profiles/alice/jobs",
-                json={"kind": "gap-analysis", "input": {"task": "grasp"}},
+                json={"kind": "test-echo", "input": {"task": "grasp"}},
             )
             status = client.get("/api/v1/profiles/alice/jobs/job-x")
             stream = client.get("/api/v1/profiles/alice/jobs/job-x/stream")
@@ -609,7 +490,6 @@ class TestJobsScope(JobsTestBase):
             _write_profile(root, "wang", SKILL_TREE)
             schemas = _write_schemas(base)
             client = self._auth_client(root, schemas)
-            self._patch_router(node_ids=[], keywords={})
             login = client.post(
                 "/api/v1/auth/login",
                 json={"username": "wang", "password": PASSWORD},
@@ -617,14 +497,14 @@ class TestJobsScope(JobsTestBase):
             self.assertEqual(login.status_code, 200)
             create = client.post(
                 "/api/v1/profiles/alice/jobs",
-                json={"kind": "gap-analysis", "input": {"task": "grasp"}},
+                json={"kind": "test-echo", "input": {"task": "grasp"}},
             )
             status = client.get("/api/v1/profiles/alice/jobs/job-x")
             stream = client.get("/api/v1/profiles/alice/jobs/job-x/stream")
             # Member may still run jobs on their own profile.
             own = client.post(
                 "/api/v1/profiles/wang/jobs",
-                json={"kind": "gap-analysis", "input": {"task": "grasp"}},
+                json={"kind": "test-echo", "input": {"task": "grasp"}},
             )
             self.assertEqual(own.status_code, 202)
             self._wait_final(client, own.json()["job_id"], name="wang")
@@ -632,135 +512,6 @@ class TestJobsScope(JobsTestBase):
         self.assertEqual(create.json()["code"], "profile_forbidden")
         self.assertEqual(status.status_code, 403)
         self.assertEqual(stream.status_code, 403)
-
-
-class TestStudioJdMatchJob(JobsTestBase):
-    """The studio-jd-match kind: lifecycle plus unavailable/failed mapping.
-
-    ``llm.is_configured`` and the core ``jd_match`` entry points are always
-    patched — tests never touch the network or the real .env key.
-    """
-
-    def _patch_llm(self, configured: bool = True) -> None:
-        patcher = patch("nblane.core.llm.is_configured", return_value=configured)
-        self.addCleanup(patcher.stop)
-        patcher.start()
-
-    def _patch_core(self, analysis: str = "## 匹配分析\n\n✅ 符合") -> None:
-        for target, value in (
-            ("nblane.core.jd_match.gather_profile_context", "(context)"),
-            ("nblane.core.jd_match.analyze_jd", analysis),
-        ):
-            patcher = patch(target, return_value=value)
-            self.addCleanup(patcher.stop)
-            patcher.start()
-
-    def _create(self, client: TestClient, **job_input: str):
-        return client.post(
-            "/api/v1/profiles/alice/jobs",
-            json={"kind": "studio-jd-match", "input": job_input},
-        )
-
-    def test_success_phases_result_and_sse_replay(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            root = base / "profiles"
-            _write_profile(root, tree=SKILL_TREE)
-            schemas = _write_schemas(base)
-            client = self._client(root, schemas)
-            self._patch_llm(configured=True)
-            self._patch_core()
-            created = self._create(
-                client, resume_md="# Resume", jd_text="Robotics engineer"
-            )
-            self.assertEqual(created.status_code, 202)
-            job = created.json()["job"]
-            self.assertEqual(job["kind"], "studio-jd-match")
-            self.assertEqual(job["status"], "queued")
-            job_id = created.json()["job_id"]
-            final = self._wait_final(client, job_id)
-            with client.stream(
-                "GET", f"/api/v1/profiles/alice/jobs/{job_id}/stream"
-            ) as response:
-                frames = _read_sse_frames(response)
-        self.assertEqual(final["job"]["status"], "done")
-        result = final["result"]
-        self.assertTrue(result["ok"])
-        self.assertIn("匹配分析", result["analysis"])
-        kinds = [event for event, _ in frames]
-        self.assertEqual(kinds[0], "job")
-        self.assertEqual(kinds[-1], "done")
-        phases = [
-            data["event"]["phase"] for event, data in frames if event == "progress"
-        ]
-        # The two real stages (context gather, LLM write) replay in order.
-        self.assertEqual(phases, ["analyzing", "generating"])
-        done = frames[-1][1]
-        self.assertEqual(done["result"]["analysis"], result["analysis"])
-
-    def test_unavailable_without_llm_fails_structured(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            root = base / "profiles"
-            _write_profile(root, tree=SKILL_TREE)
-            schemas = _write_schemas(base)
-            client = self._client(root, schemas)
-            self._patch_llm(configured=False)
-            created = self._create(
-                client, resume_md="# Resume", jd_text="Robotics engineer"
-            )
-            self.assertEqual(created.status_code, 202)
-            job_id = created.json()["job_id"]
-            final = self._wait_final(client, job_id)
-            with client.stream(
-                "GET", f"/api/v1/profiles/alice/jobs/{job_id}/stream"
-            ) as response:
-                frames = _read_sse_frames(response)
-        job = final["job"]
-        self.assertEqual(job["status"], "failed")
-        # Same code as the sync endpoint's 422 — the SPA maps it to the
-        # same yellow degradation card.
-        self.assertEqual(job["error"]["code"], "studio_jd_match_unavailable")
-        self.assertIsNone(final["result"])
-        self.assertEqual(frames[-1][0], "error")
-        self.assertEqual(
-            frames[-1][1]["error"]["code"], "studio_jd_match_unavailable"
-        )
-
-    def test_provider_error_fails_with_failed_code(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            root = base / "profiles"
-            _write_profile(root, tree=SKILL_TREE)
-            schemas = _write_schemas(base)
-            client = self._client(root, schemas)
-            self._patch_llm(configured=True)
-            self._patch_core(analysis="LLM error: provider timeout")
-            created = self._create(
-                client, resume_md="# Resume", jd_text="Robotics engineer"
-            )
-            self.assertEqual(created.status_code, 202)
-            final = self._wait_final(client, created.json()["job_id"])
-        self.assertEqual(final["job"]["status"], "failed")
-        self.assertEqual(final["job"]["error"]["code"], "studio_jd_match_failed")
-        self.assertIn("provider timeout", final["job"]["error"]["message"])
-
-    def test_blank_input_422_at_creation(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            root = base / "profiles"
-            _write_profile(root, tree=SKILL_TREE)
-            schemas = _write_schemas(base)
-            client = self._client(root, schemas)
-            self._patch_llm(configured=True)
-            response = self._create(client, resume_md="   ", jd_text="JD")
-            too_long = self._create(
-                client, resume_md="x" * 50_001, jd_text="JD"
-            )
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(response.json()["code"], "invalid_jd_match_request")
-        self.assertEqual(too_long.status_code, 422)
-        self.assertEqual(too_long.json()["code"], "invalid_jd_match_request")
 
 
 SUGGEST_KANBAN = """# alice · Kanban
@@ -962,7 +713,7 @@ class TestProjectSuggestRefsJob(JobsTestBase):
 
 
 class TestNewKindsScope(JobsTestBase):
-    """The two new kinds ride the same auth-guarded generic endpoints."""
+    """LLM kinds ride the same auth-guarded generic endpoints."""
 
     def test_new_kinds_unauthenticated_401(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -979,13 +730,6 @@ class TestNewKindsScope(JobsTestBase):
             self.addCleanup(patcher.stop)
             patcher.start()
             client = TestClient(create_app())
-            jd = client.post(
-                "/api/v1/profiles/alice/jobs",
-                json={
-                    "kind": "studio-jd-match",
-                    "input": {"resume_md": "r", "jd_text": "j"},
-                },
-            )
             suggest = client.post(
                 "/api/v1/profiles/alice/jobs",
                 json={
@@ -993,7 +737,6 @@ class TestNewKindsScope(JobsTestBase):
                     "input": {"case_id": "project:robot-arm"},
                 },
             )
-        self.assertEqual(jd.status_code, 401)
         self.assertEqual(suggest.status_code, 401)
 
 

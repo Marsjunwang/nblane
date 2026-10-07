@@ -59,10 +59,6 @@ from nblane.core.research_workspace import (
 )
 from nblane.core.yaml_io import _load_yaml_dict
 
-try:
-    import streamlit as st
-except Exception:  # pragma: no cover - Streamlit is optional for core imports.
-    st = None
 from ._constants import (
     PAPER_ANALYSIS_DIRNAME,
     PAPER_EXPORTS_DIRNAME,

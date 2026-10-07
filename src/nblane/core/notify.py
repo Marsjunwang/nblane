@@ -1,6 +1,6 @@
 """Reverse push channel: nblane -> OpenClaw webhook -> WeChat.
 
-MVP for docs/zh/architecture/openclaw-deep-integration.md section 3.4
+MVP for docs/zh/architecture/ai-architecture.md
 (option 1, webhook automation). A ``webhooks`` mapping in ``openclaw.json``
 routes ``/hooks/<name>`` to a gateway automation; nblane only POSTs to the
 hook URL and never talks to WeChat directly.

@@ -65,8 +65,7 @@ Design principles that shape all changes:
   Codex CLI, visual generation.
 - Key deps: pyyaml, pydantic v2, fastapi, uvicorn, openai, httpx, PyMuPDF,
   pypdf, mcp. Lockfile: `uv.lock` (uv) — `requirements.txt` mirrors
-  `pyproject.toml` for pip users. `streamlit` is still a dependency only
-  because legacy code has not been deleted yet.
+  `pyproject.toml` for pip users.
 
 ## Repository layout
 
@@ -94,15 +93,9 @@ Design principles that shape all changes:
   - `web_ui/frontend/` — SPA source (`src/pages`, `src/components`,
     `src/starmap`, `src/api`); `web_ui/static/` — committed build output.
   - `mcp_server.py` — local MCP stdio server.
-  - `i18n/{en,zh}/*.yaml` — Python-side UI copy.
-  - **Streamlit legacy, pending deletion, do not modify**: `app.py`,
-    `pages/`, `src/nblane/*_component/` (the Reader API still serves the
-    `paper_library_component` frontend and imports
-    `research_paper_reader_component.events`), `web_*.py` helpers
-    (`web_shared`, `web_cache`, `web_auth`, `web_page_shell`,
-    `web_output_studio`, `web_public_build`, …), `kanban_ui/`,
-    `research_ui/`, `evidence_editor_host.py`, `.streamlit/`; also
-    `core/team*.py` and `teams/`.
+  - `paper_library_component/frontend/` — Paper Library frontend (Vite +
+    React); its committed `static/` build is served by the Reader API.
+  - `i18n/{en,zh}/paper_library.yaml` — Paper Library copy (Reader API).
 - `profiles/template/` — the only committed profile; copied by `nblane init`.
 - `schemas/` — domain skill-tree definitions; `schemas/.learned/` is
   local-only, gitignored.
@@ -125,7 +118,7 @@ nblane init yourname
 nblane validate               # validate all profiles against schemas/
 nblane status                 # skill tree summary
 
-# Web dev: Reader API 8502 + SPA backend 8504 in tmux (Streamlit is off)
+# Web dev: Reader API 8502 + SPA backend 8504 in tmux
 scripts/dev-web.sh            # start (default command)
 scripts/dev-web.sh --reload   # uvicorn --reload --reload-dir src
 scripts/dev-web.sh --isolated # ports 18502/18504, data in .dev-data/ + .dev-assets/,
@@ -147,8 +140,8 @@ npm run test                  # vitest
 scripts/dump-openapi.sh       # from repo root: updates openapi.json
 cd src/nblane/web_ui/frontend && npm run gen:api
 
-# Legacy component frontends (still built by CI)
-cd src/nblane/<name>_component/frontend && npm install && npm run build
+# Paper Library frontend (served by the Reader API; built by CI)
+cd src/nblane/paper_library_component/frontend && npm install && npm run build
 ```
 
 Environment variables that matter: `NBLANE_ROOT` (data root; defaults to repo

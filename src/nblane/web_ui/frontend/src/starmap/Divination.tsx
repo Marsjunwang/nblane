@@ -11,9 +11,9 @@
  * spinner, however long it takes). `source: "rule"` shows a 「离线卦」 note.
  *
  * 正占 readings whose gap analysis found missing nodes carry a 「化为任务」
- * action: each gap node becomes one kanban learning task via the existing
- * POST /profiles/{name}/gap/intake endpoint (same contract as the retired
- * GapPage 加入看板 button), then kanban/projects-board queries invalidate.
+ * action: each gap node becomes one kanban learning task via
+ * POST /profiles/{name}/divination/intake, then kanban/projects-board
+ * queries invalidate.
  *
  * Backend: POST /api/v1/profiles/{name}/divination (single-consumption,
  * nothing persisted; 60s LLM timeout with deterministic rule fallback).
@@ -275,7 +275,7 @@ export function DivinationPanel({
     setIntake({ state: 'working', count: 0, error: '' });
     try {
       for (const node of nodes) {
-        await apiPost(`/profiles/${encodeURIComponent(profile)}/gap/intake`, {
+        await apiPost(`/profiles/${encodeURIComponent(profile)}/divination/intake`, {
           title: `学习 ${node.label || node.id}`,
           node_id: node.id,
           why: q,

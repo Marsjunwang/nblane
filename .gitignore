@@ -8,9 +8,6 @@ __pycache__/
 dist/
 build/
 .venv/
-.streamlit/
-!.streamlit/
-!.streamlit/config.toml
 node_modules
 node_modules/
 .dev-data/

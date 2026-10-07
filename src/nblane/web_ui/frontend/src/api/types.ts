@@ -63,21 +63,6 @@ export type SkillNodePatchResponse = Schemas['SkillNodePatchResponse'];
 /** Structured error body (web_api/schemas.py ErrorResponse, via ApiError). */
 export type ErrorResponseBody = Schemas['ErrorResponse'];
 
-/** ActivityItemModel from web_api/schemas.py (extension keys allowed). */
-export type ActivityItem = Schemas['ActivityItemModel'];
-
-/** ActivitySummaryModel — queue-wide counters, ignoring list filters. */
-export type ActivitySummary = Schemas['ActivitySummaryModel'];
-
-/** ActivityListResponse from web_api/schemas.py. */
-export type ActivityListResponse = Schemas['ActivityListResponse'];
-
-/** ActivityApplyResponse from web_api/schemas.py. */
-export type ActivityApplyResponse = Schemas['ActivityApplyResponse'];
-
-/** ActivityDismissResponse from web_api/schemas.py. */
-export type ActivityDismissResponse = Schemas['ActivityDismissResponse'];
-
 /** Bulk dismissal result for Activity-backed AI exceptions. */
 export type AIExceptionBulkDismissResponse = Schemas['AIExceptionBulkDismissResponse'];
 
@@ -116,21 +101,6 @@ export type KanbanCardDeleteRequest = Schemas['KanbanCardDeleteRequest'];
 
 /** KanbanCardDeleteResponse from web_api/schemas.py. */
 export type KanbanCardDeleteResponse = Schemas['KanbanCardDeleteResponse'];
-
-/** InboxHistoryEventModel from web_api/schemas.py. */
-export type InboxHistoryEvent = Schemas['InboxHistoryEventModel'];
-
-/** InboxItemModel from web_api/schemas.py. */
-export type InboxItem = Schemas['InboxItemModel'];
-
-/** InboxResponse from web_api/schemas.py. */
-export type InboxResponse = Schemas['InboxResponse'];
-
-/** InboxCaptureRequest from web_api/schemas.py. */
-export type InboxCaptureRequest = Schemas['InboxCaptureRequest'];
-
-/** InboxMutationResponse from web_api/schemas.py. */
-export type InboxMutationResponse = Schemas['InboxMutationResponse'];
 
 /** GoalSkillLinkModel from web_api/schemas.py. */
 export type GoalSkillLink = Schemas['GoalSkillLinkModel'];
@@ -243,18 +213,6 @@ export type CrystallizeApplyRequest = Schemas['CrystallizeApplyRequest'];
 /** CrystallizeApplyResponse from web_api/schemas.py. */
 export type CrystallizeApplyResponse = Schemas['CrystallizeApplyResponse'];
 
-/** GapAnalyzeRequest from web_api/schemas.py (sync rule / async LLM dispatch). */
-export type GapAnalyzeRequest = Schemas['GapAnalyzeRequest'];
-
-/** GapTopMatchModel from web_api/schemas.py. */
-export type GapTopMatch = Schemas['GapTopMatchModel'];
-
-/** GapClosureNodeModel from web_api/schemas.py. */
-export type GapClosureNode = Schemas['GapClosureNodeModel'];
-
-/** GapAnalysisResponse from web_api/schemas.py (GapResult projection). */
-export type GapAnalysisResult = Schemas['GapAnalysisResponse'];
-
 /** JobModel from web_api/schemas.py (async-job snapshot). */
 export type JobModel = Schemas['JobModel'];
 
@@ -286,8 +244,8 @@ export interface JobStreamFrame {
   error?: { code: string; message: string } | null;
 }
 
-/** GapIntakeRequest from web_api/schemas.py. */
-export type GapIntakeRequest = Schemas['GapIntakeRequest'];
+/** DivinationIntakeRequest from web_api/schemas.py. */
+export type DivinationIntakeRequest = Schemas['DivinationIntakeRequest'];
 
 /** AssistantGatewayStatus from web_api/assistant.py. */
 export type AssistantGatewayStatus = Schemas['AssistantGatewayStatus'];
@@ -358,17 +316,8 @@ export type StudioPostDetail = Schemas['StudioPostDetailModel'] & {
   blocks_json?: Array<Record<string, unknown>>;
 };
 
-/** StudioSourceOptionModel from web_api/schemas.py ({id, label} picker row). */
-export type StudioSourceOption = Schemas['StudioSourceOptionModel'];
-
-/** StudioOptionsModel from web_api/schemas.py (generation form pickers). */
-export type StudioOptions = Schemas['StudioOptionsModel'];
-
 /** StudioSummaryModel from web_api/schemas.py (blog status counters). */
 export type StudioSummary = Schemas['StudioSummaryModel'];
-
-/** StudioResponse from web_api/schemas.py (studio overview). */
-export type StudioResponse = Schemas['StudioResponse'];
 
 /** StudioInitResponse from web_api/schemas.py. */
 export type StudioInitResponse = Schemas['StudioInitResponse'];
@@ -386,21 +335,6 @@ export type StudioValidationResponse = Schemas['StudioValidationResponse'];
 
 /** StudioPostMutationResponse from web_api/schemas.py. */
 export type StudioPostMutationResponse = Schemas['StudioPostMutationResponse'];
-
-/** StudioCandidateRequest from web_api/schemas.py. */
-export type StudioCandidateRequest = Schemas['StudioCandidateRequest'];
-
-/** StudioCandidateResponse from web_api/schemas.py (preview, no write). */
-export type StudioCandidateResponse = Schemas['StudioCandidateResponse'];
-
-/** StudioDraftResponse from web_api/schemas.py (confirmed draft write). */
-export type StudioDraftResponse = Schemas['StudioDraftResponse'];
-
-/** StudioJdMatchRequest from web_api/schemas.py. */
-export type StudioJdMatchRequest = Schemas['StudioJdMatchRequest'];
-
-/** StudioJdMatchResponse from web_api/schemas.py. */
-export type StudioJdMatchResponse = Schemas['StudioJdMatchResponse'];
 
 /** ContentWorkspaceResponse from web_api/schemas.py (blog list only). */
 export type ContentWorkspaceResponse = Schemas['ContentWorkspaceResponse'];
@@ -646,21 +580,9 @@ export type ProjectsBoardHabitRecentDay = Schemas['ProjectsBoardHabitRecentDayMo
 // ---------------------------------------------------------------------------
 // Frontend-only composite types (not part of the OpenAPI contract).
 
-/** Detail GET result: the item plus its activity-file ETag (W/"<sha256>"). */
-export interface ActivityItemDetail {
-  item: ActivityItem;
-  etag: string;
-}
-
 /** Board GET result: the payload plus the kanban.md ETag (W/"<sha256>"). */
 export interface KanbanBoardResult {
   board: KanbanBoard;
-  etag: string;
-}
-
-/** List GET result: the payload plus the inbox-file ETag (W/"<sha256>"). */
-export interface InboxListResult {
-  data: InboxResponse;
   etag: string;
 }
 
@@ -673,12 +595,6 @@ export interface EvidenceReviewListResult {
 /** Board GET result: the payload plus the board-source ETag (W/"<sha256>"). */
 export interface ProjectBoardResult {
   data: ProjectBoard;
-  etag: string;
-}
-
-/** Studio GET result: the payload plus the public-layer ETag (W/"<sha256>"). */
-export interface StudioResult {
-  data: StudioResponse;
   etag: string;
 }
 
@@ -699,15 +615,6 @@ export interface PlanTemplateListResult {
   data: PlanTemplateListResponse;
   etag: string;
 }
-
-/** Clarify actions accepted by POST .../inbox/{id}/clarify (CLARIFY_ACTIONS). */
-export type InboxClarifyAction =
-  | 'to_kanban_queue'
-  | 'to_learning_resource'
-  | 'to_activity_habit'
-  | 'to_evidence_draft'
-  | 'discard'
-  | 'archive';
 
 // ---------------------------------------------------------------------------
 // Habit lifecycle + skill progression (contract landed 2026-09-24; openapi.json

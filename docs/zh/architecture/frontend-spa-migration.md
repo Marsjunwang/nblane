@@ -1,7 +1,7 @@
 ---
 status: active
 owner: 王军
-last_verified: 2026-10-07
+last_verified: 2026-10-08
 source_of_truth: src/nblane/web_ui/、src/nblane/web_api/、src/nblane/web_reader_api/、tests/e2e/
 ---
 
@@ -50,7 +50,7 @@ Streamlit 已退役（ad87958，2026-10-06）。React SPA 是唯一 Web 界面�
 
 ## 已移除
 
-Team、Gap Analysis、Agent Activity 审批页、Inbox 页、Studio 页不再出现在导航里。`ActivityPage`、`InboxPage`、`StudioPage` 的路由和代码仍在，待删。
+Team、Gap Analysis、Agent Activity 审批页、Inbox 页、Studio 页已删（页面、路由、hooks 与对应端点）。旧 Streamlit URL 中 `Agent_Activity` 重定向到首页，`Output_Studio` 重定向到内容工作台。
 
 ## 收尾待办
 

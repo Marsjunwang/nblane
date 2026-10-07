@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import re
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -1945,40 +1944,6 @@ class TestPublicSite(unittest.TestCase):
             self.assertTrue(candidate.cover_prompt)
             self.assertTrue(candidate.warnings)
             self.assertIn("## Opening", candidate.body)
-
-    def test_blocknote_component_bundle_is_available(self) -> None:
-        """The packaged BlockNote Streamlit component has a built frontend."""
-        from pathlib import Path
-
-        import nblane.public_blog_editor_component as component
-        from nblane.public_blog_editor_component import blocknote_component_available
-
-        self.assertTrue(blocknote_component_available())
-        static_index = (
-            Path(component.__file__).parent
-            / "frontend"
-            / "static"
-            / "index.html"
-        )
-        html = static_index.read_text(encoding="utf-8")
-        self.assertIn("./assets/", html)
-        asset_refs = {
-            match.group("path").split("?", 1)[0].split("#", 1)[0]
-            for match in re.finditer(r"""(?:src|href)=["']\./(?P<path>assets/[^"']+)["']""", html)
-        }
-        self.assertTrue(asset_refs)
-        for asset_ref in asset_refs:
-            self.assertTrue((static_index.parent / asset_ref).is_file(), asset_ref)
-        self.assertNotIn('src="/assets/', html)
-        self.assertNotIn('href="/assets/', html)
-        bundle_text = "\n".join(
-            path.read_text(encoding="utf-8", errors="ignore")
-            for path in (static_index.parent / "assets").glob("index-*.js")
-        )
-        self.assertIn("nb-shell", bundle_text)
-        self.assertIn("save_post", bundle_text)
-        self.assertIn("publish_request", bundle_text)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
 # Agent Activity for {Name}
-# Internal candidate, patch, and writeback review queue.
+# Append-only trace of AI runs, failures, and agent writebacks (not a review queue).
 # This file is not part of the public surface.
 
 schema_version: "1.0"

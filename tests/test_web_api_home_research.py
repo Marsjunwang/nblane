@@ -299,9 +299,10 @@ class TestHomeEndpoint(_HomeResearchBase):
         self.assertFalse(sidecar["auth_enabled"])
         self.assertEqual(sidecar["handoff_token"], "")
         self.assertEqual(
-            sidecar["dashboard_url"],
-            "http://127.0.0.1:8502/dashboard?profile=alice&embed=1&view=3d&compact=1",
+            sidecar["paper_library_url"],
+            "http://127.0.0.1:8502/paper-library?profile=alice",
         )
+        self.assertNotIn("dashboard_url", sidecar)
 
     def test_home_sidecar_same_origin_sentinel(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -312,9 +313,6 @@ class TestHomeEndpoint(_HomeResearchBase):
         sidecar = response.json()["sidecar"]
         self.assertEqual(sidecar["base"], "")
         self.assertTrue(sidecar["configured"])
-        self.assertEqual(
-            sidecar["dashboard_url"], "/dashboard?profile=alice&embed=1&view=3d&compact=1"
-        )
         self.assertEqual(
             sidecar["paper_library_url"], "/paper-library?profile=alice"
         )
@@ -331,8 +329,8 @@ class TestHomeEndpoint(_HomeResearchBase):
         self.assertEqual(sidecar["base"], "https://reader.example.com")
         self.assertTrue(sidecar["configured"])
         self.assertTrue(
-            sidecar["dashboard_url"].startswith(
-                "https://reader.example.com/dashboard?"
+            sidecar["paper_library_url"].startswith(
+                "https://reader.example.com/paper-library?"
             )
         )
 
@@ -383,10 +381,6 @@ class TestResearchEndpoint(_HomeResearchBase):
         self.assertEqual(
             sidecar["paper_library_url"],
             "http://127.0.0.1:8502/paper-library?profile=alice",
-        )
-        self.assertEqual(
-            sidecar["dashboard_url"],
-            "http://127.0.0.1:8502/dashboard?profile=alice&embed=1&view=3d&compact=1",
         )
 
     def test_research_translation_progress_uses_canonical_structure(self) -> None:

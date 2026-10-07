@@ -13,7 +13,7 @@ scripts/openclaw/
 │   └── bin/                   # 两个 Skill 共用的 wrapper（dev-delegate.sh、
 │                              #   dev_delegate.py、delegation.md、tests/）
 │                              #   + nblane_api.py(8504 HTTP API 客户端,
-│                              #   见 docs/zh/dev/production-launch-plan.md §3.1)
+│                              #   见 docs/zh/guides/openclaw-ops.md)
 ├── plugins/
 │   └── weixin-task-bridge/    # 微信任务桥插件源码（package.json、
 │                              #   openclaw.plugin.json、dist/index.js），
@@ -49,6 +49,6 @@ openclaw plugins inspect weixin-task-bridge --runtime --json
 - 本脚本**必须在目标主机上人工运行**，不属于任何自动化流程；执行前请先用
   `--dry-run` 确认动作。
 - 仓库内的插件源码不含 Owner ID、密钥或任何凭据；`ownerId` 等配置项在
-  安装后写入 `openclaw.json`（见 `docs/zh/guides/openclaw-integration.md`
+  安装后写入 `openclaw.json`（见 `docs/zh/guides/openclaw-ops.md`
   「Weixin Task Bridge 插件」一节），不要提交真实值到仓库。
-- 详细配置与验收步骤见 `docs/zh/guides/openclaw-integration.md`。
+- 详细配置与验收步骤见 `docs/zh/guides/openclaw-ops.md`。

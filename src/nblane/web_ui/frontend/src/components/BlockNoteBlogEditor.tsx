@@ -19,15 +19,14 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import {
   blocksToNblaneMarkdown,
   parseMarkdownToEditorBlocks,
-} from '../../../../public_blog_editor_component/frontend/src/blocks/markdown.js';
+} from '../blogBlocks/markdown.js';
 import {
   blogSchema,
   getBlogSlashMenuItems,
-} from '../../../../public_blog_editor_component/frontend/src/blocks/blogBlocks.jsx';
-// Block-level styles only (no global selectors), shared with the Streamlit
-// component; blogEditor.css supplies the dark --nb-* variables they rely on
+} from '../blogBlocks/blogBlocks.jsx';
+// Block-level styles only (no global selectors); blogEditor.css supplies the dark --nb-* variables they rely on
 // and the dark BlockNote palette.
-import '../../../../public_blog_editor_component/frontend/src/blocks/blocks.css';
+import '../blogBlocks/blocks.css';
 import './blogEditor.css';
 
 export type EditorBlocks = Array<Record<string, unknown>>;

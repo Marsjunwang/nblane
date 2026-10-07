@@ -15,8 +15,6 @@ dependencies = [
     "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.27",
     "markdown>=3.6",
-    "streamlit>=1.56",
-    "streamlit-crepe>=0.1.5",
     "openai>=1.30",
     "httpx[socks]>=0.28",
     "Pillow>=10",
@@ -49,10 +47,6 @@ include = ["nblane*", "schemas*"]
     "data/*.csv",
     "data/*.yaml",
 ]
-"nblane.public_blog_editor_component" = [
-    "frontend/static/index.html",
-    "frontend/static/assets/*",
-]
 "nblane.core.ai_blog_prompts" = [
     "en/*.md",
     "zh/*.md",
@@ -60,27 +54,6 @@ include = ["nblane*", "schemas*"]
 "nblane.i18n" = [
     "en/*.yaml",
     "zh/*.yaml",
-]
-"nblane.kanban_drag_component" = [
-    "frontend/static/index.html",
-]
-"nblane.kanban_board_component" = [
-    "frontend/static/index.html",
-    "frontend/static/assets/*",
-]
-"nblane.checkin_calendar_component" = [
-    "frontend/static/index.html",
-]
-"nblane.goal_presence_component" = [
-    "frontend/dist/assets/*",
-]
-"nblane.home_dashboard_component" = [
-    "frontend/static/index.html",
-    "frontend/static/assets/*",
-]
-"nblane.evidence_editor_component" = [
-    "frontend/static/index.html",
-    "frontend/static/assets/*",
 ]
 "nblane.web_reader_api" = [
     "templates/*.html",
@@ -94,18 +67,6 @@ include = ["nblane*", "schemas*"]
     "static/index.html",
     "static/assets/*",
 ]
-"nblane.project_board_component" = [
-    "frontend/static/index.html",
-]
-"nblane.project_timeline_component" = [
-    "frontend/static/index.html",
-    "frontend/static/assets/*",
-]
 "schemas" = [
     "*.yaml",
-]
-
-[tool.streamlit.component]
-components = [
-    { name = "nblane_goal_presence", asset_dir = "goal_presence_component/frontend/dist" },
 ]

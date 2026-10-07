@@ -5,7 +5,7 @@ import { SPA_BASE_URL, SPA_E2E_PROFILE } from "./spa_auth_shared";
 
 /**
  * Acceptance suite for the home-starmap editing slice
- * (docs/zh/dev/home-editing-starmap-design.md):
+ * (docs/zh/guides/home.md):
  *
  * 1. 重刻铭文 — pole-star card edit round-trip (brief change → 落印 →
  *    persisted on reopen; original value restored afterwards).

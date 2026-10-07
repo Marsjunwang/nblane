@@ -6,7 +6,7 @@ connect / migrate run in a background thread (``core/openclaw_setup``) and
 the SPA polls ``GET /settings/agents/openclaw`` for the log.
 
 Only registered target ids reach ``core/backup_targets`` — the browser never
-sends a filesystem path. See docs/zh/guides/agent-setup.md.
+sends a filesystem path. See docs/zh/guides/assistant.md.
 """
 
 from __future__ import annotations

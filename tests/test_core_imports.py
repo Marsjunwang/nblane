@@ -33,24 +33,20 @@ class TestCoreImports(unittest.TestCase):
         from nblane.core.io import (
             list_profiles,
             list_schemas,
-            list_teams,
         )
 
         self.assertIsInstance(list_profiles(), list)
         self.assertIsInstance(list_schemas(), list)
-        self.assertIsInstance(list_teams(), list)
 
     def test_import_split_io_modules(self) -> None:
         """Split I/O modules should expose domain-specific loaders."""
         from nblane.core.kanban_io import parse_kanban
         from nblane.core.profile_io import load_skill_tree_raw
         from nblane.core.schema_io import load_schema_raw
-        from nblane.core.team_io import load_team
 
         self.assertTrue(callable(parse_kanban))
         self.assertTrue(callable(load_skill_tree_raw))
         self.assertTrue(callable(load_schema_raw))
-        self.assertTrue(callable(load_team))
 
     def test_import_gap(self) -> None:
         """nblane.core.gap should expose analyze."""
@@ -89,12 +85,6 @@ class TestCoreImports(unittest.TestCase):
         from nblane.core.status import summarize_all
 
         self.assertTrue(callable(summarize_all))
-
-    def test_import_team(self) -> None:
-        """nblane.core.team should expose summarize_team."""
-        from nblane.core.team import summarize_team
-
-        self.assertTrue(callable(summarize_team))
 
     def test_import_llm(self) -> None:
         """nblane.core.llm should expose is_configured."""

@@ -42,7 +42,6 @@ from nblane.core.research_papers import (
     extract_paper_figures,
     extract_paper_segments,
     format_research_citations,
-    get_stable_pdf_url,
     grobid_readiness,
     grobid_tei_to_bibliography,
     grobid_tei_to_segments,
@@ -144,10 +143,10 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(resolve_paper_library_runtime("fastapi-link"), ("fastapi_link", ""))
         self.assertEqual(resolve_paper_library_runtime("fastapi"), ("fastapi_iframe", ""))
         self.assertEqual(resolve_paper_library_runtime("iframe"), ("fastapi_iframe", ""))
-        self.assertEqual(resolve_paper_library_runtime("streamlit"), ("streamlit_component", ""))
+        self.assertEqual(resolve_paper_library_runtime("streamlit"), (PAPER_LIBRARY_RUNTIME_DEFAULT, "streamlit"))
         self.assertEqual(resolve_paper_library_runtime("surprise"), (PAPER_LIBRARY_RUNTIME_DEFAULT, "surprise"))
-        with patch.dict(os.environ, {"NBLANE_PAPER_LIBRARY_RUNTIME": "component"}):
-            self.assertEqual(resolve_paper_library_runtime(), ("streamlit_component", ""))
+        with patch.dict(os.environ, {"NBLANE_PAPER_LIBRARY_RUNTIME": "link"}):
+            self.assertEqual(resolve_paper_library_runtime(), ("fastapi_link", ""))
 
     def test_pdf_asset_lives_outside_profile_and_updates_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1147,7 +1146,6 @@ class TestResearchPapers(unittest.TestCase):
 
             with (
                 patch("nblane.core.research_papers.render_paper_page_preview", return_value={"page": 1, "data_url": "data:image/png;base64,x"}),
-                patch("nblane.core.research_papers.get_stable_pdf_url", return_value="/media/stable.pdf"),
             ):
                 payload = build_reader_payload(
                     profile,
@@ -1295,15 +1293,14 @@ class TestResearchPapers(unittest.TestCase):
                     ],
                 )
 
-            with patch("nblane.core.research_papers.get_stable_pdf_url", return_value="/media/stable.pdf"):
-                payload = build_reader_payload(
-                    profile,
-                    source_id,
-                    page=1,
-                    requested_pages={1},
-                    target_lang="zh",
-                    include_page_previews=False,
-                )
+            payload = build_reader_payload(
+                profile,
+                source_id,
+                page=1,
+                requested_pages={1},
+                target_lang="zh",
+                include_page_previews=False,
+            )
 
         self.assertNotIn("seg:front-matter", [row.get("segment_id") for row in payload["segments"]])
         self.assertNotIn("seg:front-matter", [row.get("segment_id") for row in payload["translation_units"]])
@@ -1378,7 +1375,6 @@ class TestResearchPapers(unittest.TestCase):
             with (
                 patch("nblane.core.research_papers.build_paper_structure_units", return_value=structure),
                 patch("nblane.core.research_papers.build_paper_layout_units", return_value=[]),
-                patch("nblane.core.research_papers.get_stable_pdf_url", return_value="/media/stable.pdf"),
             ):
                 payload = build_reader_payload(
                     profile,
@@ -1441,7 +1437,6 @@ class TestResearchPapers(unittest.TestCase):
             with (
                 patch("nblane.core.research_papers.build_paper_structure_units", return_value=structure),
                 patch("nblane.core.research_papers.build_paper_layout_units", return_value=[]),
-                patch("nblane.core.research_papers.get_stable_pdf_url", return_value="/media/stable.pdf"),
             ):
                 payload = build_reader_payload(
                     profile,
@@ -2830,23 +2825,6 @@ class TestResearchPapers(unittest.TestCase):
         only_seg = [{"title": "1 Intro", "page": 1, "order": 1, "level": 1}]
         self.assertEqual(_merge_reader_outlines(only_struct, []), only_struct)
         self.assertEqual(_merge_reader_outlines([], only_seg), only_seg)
-
-    def test_get_stable_pdf_url_uses_fingerprint_cache_key(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            profile = self._profile(Path(tmp))
-            source_id = "source:paper:grounded"
-            with patch.dict(os.environ, {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")}):
-                import_paper_pdf(profile, source_id, PDF_BYTES, "paper.pdf")
-
-                with patch("nblane.core.research_papers._stable_pdf_url_cached") as cached:
-                    cached.return_value = "/media/stable.pdf"
-                    first = get_stable_pdf_url(profile, source_id)
-                    second = get_stable_pdf_url(profile, source_id)
-
-        self.assertEqual(first, "/media/stable.pdf")
-        self.assertEqual(second, "/media/stable.pdf")
-        self.assertEqual(cached.call_count, 2)
-        self.assertEqual(cached.call_args.args[1], source_id)
 
     def test_reader_payload_can_skip_page_previews_and_override_pdf_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-07
+last_verified: 2026-10-08
 source_of_truth: true
 ---
 
@@ -32,7 +32,6 @@ source_of_truth: true
 | `goals.yaml` | 阶段目标(title/status/target/summary/skill_links) | 目标事实源 |
 | `chronicle.yaml` | append-only 叙事级事件 `{date, kind, ref, note}` | 大事记事实源;只由写端点追加,人不手改 |
 | `learning-log.yaml` | paper/article/book/repo/course 等资源 | 学习资源事实源 |
-| `inbox.yaml` | 捕获、澄清、归档的输入项 | 捕获入口事实源 |
 | `public-profile.yaml` | 公开姓名、简介、联系方式 | 公开 profile 事实源 |
 | `resume-source.yaml` | 可公开简历事实 | 简历事实源 |
 | `projects.yaml` | 公开项目展示 | Public Surface 项目，不是内部项目管理 |
@@ -296,7 +295,7 @@ entries:
     undone_by: ""
 ```
 
-实体类型（`ENTITY_KINDS`）：`kanban_card`；`activity-log.yaml` 中的 `checkin` / `habit_plan` / `habit`；列表文档行 `goal` / `project_case` / `evidence` / `skill_node` / `inbox_item` / `research_source` / `learning_resource`；`north_star`（SKILL.md Identity 三行）；`file:<相对路径>`（整文件文本，用于 Growth Log 等无行结构的写入）。
+实体类型（`ENTITY_KINDS`）：`kanban_card`；`activity-log.yaml` 中的 `checkin` / `habit_plan` / `habit`；列表文档行 `goal` / `project_case` / `evidence` / `skill_node` / `research_source` / `learning_resource`；`north_star`（SKILL.md Identity 三行）；`file:<相对路径>`（整文件文本，用于 Growth Log 等无行结构的写入）。
 
 不变量：
 
@@ -311,7 +310,7 @@ API：`GET /api/v1/profiles/{name}/agent/journal`、`POST /api/v1/profiles/{name
 
 ### agent-activity.yaml 与 AI 异常
 
-`agent-activity.yaml` 现在只承载 AI Gateway 的 run 候选与失败记录（`core/ai/runs.py`、`core/agent_activity.py`），供顶栏「AI 异常」抽屉读取失败项并忽略（`core/ai/exceptions.py`，非 activity 来源的忽略记录在 `ai-exception-dismissals.yaml`）。它不是审批队列，也不记 Agent 写入。旧 profile 没有该文件时按空读取。
+`agent-activity.yaml` 是 AI 运行与写回的追加式痕迹（`core/agent_activity.py`），不是审批队列：没有「待审候选」，也没有应用/驳回入口。写入方：AI Gateway 的 run 记录与失败（`core/ai/runs.py`）、看板 AI 失败记录（`core/kanban_ai.py`）、研究来源与连接器导入的写回痕迹（`core/research_sources.py`、`core/research_connectors.py`）、助手服务账号 HTTP 写入后的 `applied` 写回痕迹（`core/review_actions.record_writeback_activity`）、外部 agent 任务回传（`core/agent_tasks.py`）。顶栏「AI 异常」抽屉读取其中的失败项并可忽略（`core/ai/exceptions.py`，非 activity 来源的忽略记录在 `ai-exception-dismissals.yaml`）。撤销只看 `agent-journal`，不看本文件。旧 profile 没有该文件时按空读取。
 
 ### Web Preferences and Profile Codex Home
 

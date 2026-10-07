@@ -20,7 +20,7 @@ import './starmap.css';
  * opacity/text through refs during the morph, exactly like the playground
  * drove its own DOM.
  *
- * Home-editing slice (design docs/zh/dev/home-editing-starmap-design.md):
+ * Home-editing slice (design docs/zh/guides/home.md):
  * the inscription card gains 重刻 edit mode (pole star + goal stars), a
  * pale-gold「+」seal button opens the 星表 catalog (locate → focusStar →
  * card), and the briefing line appends a chronicle coda (本月新立目标 N).

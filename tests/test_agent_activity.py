@@ -276,26 +276,5 @@ class TestAgentActivity(unittest.TestCase):
             ["act:pending-kanban", "act:failed-review"],
         )
 
-    def test_activity_page_supports_query_focus_and_source_grouping(self) -> None:
-        """The Streamlit page accepts activity_item/source_page query jumps."""
-
-        source = Path("pages/9_Agent_Activity.py").read_text(encoding="utf-8")
-
-        self.assertIn('_query_value("activity_item")', source)
-        self.assertIn('_query_value("source_page")', source)
-        self.assertIn("def _group_items_by_source", source)
-        self.assertIn("def _render_activity_module", source)
-        self.assertIn("module_tabs = st.tabs", source)
-        self.assertIn("source_module", source)
-        self.assertIn("def _render_focus_scroll", source)
-        self.assertIn("scrollIntoView", source)
-        self.assertIn("focused_item_highlight", source)
-        self.assertNotIn("source_module = st.radio", source)
-        self.assertNotIn(
-            "key=lambda item: 0 if str(item.get(\"id\") or \"\") == target_activity_item else 1",
-            source,
-        )
-
-
 if __name__ == "__main__":
     unittest.main()

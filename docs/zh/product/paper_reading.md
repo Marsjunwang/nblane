@@ -1108,7 +1108,7 @@ NBLANE_RESEARCH_ASSET_ROOT=/srv/nblane-assets/research
 
 ```text
 /srv/nblane-app       # 应用代码
-/srv/nblane-data      # 私有数据 Git 仓库，含 profiles/ schemas/ teams/ auth/
+/srv/nblane-data      # 私有数据 Git 仓库，含 profiles/ schemas/ auth/
 /srv/nblane-assets    # 大文件资产，不进 Git，含 research PDFs
 ```
 

@@ -1,0 +1,254 @@
+import assert from "node:assert/strict";
+import { test } from "vitest";
+
+import {
+  blockToSpecialMarkdown,
+  blocksToNblaneMarkdown,
+  containsDisplayMathBlock,
+  containsRawMarkdownDirective,
+  parseVideoDirectiveLine,
+  splitMarkdownSpecialBlocks,
+} from "./markdown.js";
+
+test("parses video directives as custom blocks", () => {
+  assert.deepEqual(parseVideoDirectiveLine("::video[Clip](media/blog/post/clip.mp4)"), {
+    caption: "Clip",
+    src: "media/blog/post/clip.mp4",
+  });
+
+  const segments = splitMarkdownSpecialBlocks(
+    "Intro.\n\n::video[Clip](media/blog/post/clip.mp4)\n\nOutro.",
+  );
+
+  assert.equal(segments.length, 3);
+  assert.equal(segments[0].kind, "markdown");
+  assert.equal(segments[1].block.type, "video_block");
+  assert.equal(segments[1].block.props.src, "media/blog/post/clip.mp4");
+  assert.equal(segments[2].value, "Outro.");
+});
+
+test("does not parse directives inside fenced code", () => {
+  const segments = splitMarkdownSpecialBlocks(
+    "```md\n::video[Clip](secret.mp4)\n```\n\nAfter.",
+  );
+
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].kind, "markdown");
+  assert.match(segments[0].value, /::video\[Clip\]/u);
+});
+
+test("parses fenced mermaid as a diagram visual block", () => {
+  const segments = splitMarkdownSpecialBlocks(
+    "Intro.\n\n```mermaid\nflowchart LR\n  A[Start] --> B[End]\n```\n\nOutro.",
+  );
+
+  assert.equal(segments.length, 3);
+  assert.equal(segments[0].value, "Intro.");
+  assert.equal(segments[1].kind, "block");
+  assert.equal(segments[1].block.type, "visual_block");
+  assert.equal(segments[1].block.props.asset_type, "diagram");
+  assert.equal(segments[1].block.props.visual_kind, "flowchart");
+  assert.equal(
+    segments[1].block.props.mermaid,
+    "flowchart LR\n  A[Start] --> B[End]",
+  );
+  assert.equal(segments[2].value, "Outro.");
+});
+
+test("leaves non-mermaid fenced code as markdown", () => {
+  const segments = splitMarkdownSpecialBlocks(
+    "```python\nprint('hi')\n```",
+  );
+
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].kind, "markdown");
+  assert.match(segments[0].value, /print\('hi'\)/u);
+});
+
+test("parses display math as math blocks", () => {
+  const segments = splitMarkdownSpecialBlocks(
+    "Before.\n\n$$\nJ(\\theta)=\\sum_t r_t\n$$\n\nAfter.",
+  );
+
+  assert.equal(segments.length, 3);
+  assert.equal(segments[1].block.type, "math_block");
+  assert.equal(segments[1].block.props.latex, "J(\\theta)=\\sum_t r_t");
+});
+
+test("detects display math for math-safe mode", () => {
+  assert.equal(containsDisplayMathBlock("Before\n\n$$\nx^2\n$$"), true);
+  assert.equal(containsDisplayMathBlock("\\[x^2\\]"), true);
+  assert.equal(containsDisplayMathBlock("\\begin{align}x&=1\\end{align}"), true);
+  assert.equal(containsDisplayMathBlock("Inline $x$ only"), false);
+});
+
+test("parses standalone markdown images as visual blocks", () => {
+  const segments = splitMarkdownSpecialBlocks(
+    "Intro.\n\n![Chart](media/blog/post/chart.png)\n\n_Flow_\n\nOutro.",
+  );
+
+  assert.equal(segments.length, 3);
+  assert.equal(segments[1].block.type, "visual_block");
+  assert.equal(segments[1].block.props.asset_type, "image");
+  assert.equal(segments[1].block.props.src, "media/blog/post/chart.png");
+  assert.equal(segments[1].block.props.alt, "Chart");
+  assert.equal(segments[1].block.props.caption, "Flow");
+  assert.equal(segments[1].block.props.status, "accepted");
+  assert.equal(segments[1].block.props.accepted, true);
+});
+
+test("does not parse markdown images inside fenced code", () => {
+  const segments = splitMarkdownSpecialBlocks(
+    "```md\n![Chart](media/blog/post/chart.png)\n```\n\nAfter.",
+  );
+
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].kind, "markdown");
+  assert.match(segments[0].value, /!\[Chart\]/u);
+});
+
+test("serializes custom blocks to public-site markdown", () => {
+  assert.equal(
+    blockToSpecialMarkdown({
+      type: "math_block",
+      props: { latex: "E=mc^2" },
+    }),
+    "$$\nE=mc^2\n$$",
+  );
+
+  assert.equal(
+    blockToSpecialMarkdown({
+      type: "video_block",
+      props: { src: "media/blog/post/clip.mp4", caption: "Clip" },
+    }),
+    "::video[Clip](media/blog/post/clip.mp4)",
+  );
+
+  assert.equal(
+    blockToSpecialMarkdown({
+      type: "visual_block",
+      props: {
+        asset_type: "image",
+        src: "media/blog/post/chart.png",
+        alt: "Chart",
+        caption: "Flow",
+      },
+    }),
+    "![Chart](media/blog/post/chart.png)\n\n_Flow_",
+  );
+
+  assert.equal(
+    blockToSpecialMarkdown({
+      type: "visual_block",
+      props: {
+        asset_type: "diagram",
+        visual_kind: "flowchart",
+        mermaid: "flowchart TD\\nA-->B",
+        src: "media/blog/post/chart.png",
+        alt: "Chart",
+        caption: "Flow",
+        ai_generated: true,
+        accepted: true,
+      },
+    }),
+    '<!-- nblane:visual_block {"asset_type":"diagram","visual_kind":"flowchart","src":"media/blog/post/chart.png","candidate_path":"","mermaid":"flowchart TD\\\\nA\\u002d\\u002d>B","prompt":"","status":"draft","caption":"Flow","alt":"Chart","ai_generated":true,"ai_source_id":"","ai_model":"","accepted":true,"evidence_id":""} -->',
+  );
+});
+
+test("parses visual block comments with visual kind", () => {
+  const segments = splitMarkdownSpecialBlocks(
+    '<!-- nblane:visual_block {"asset_type":"diagram","visual_kind":"flowchart","src":"media/blog/post/chart.png","caption":"Flow","mermaid":"flowchart TD\\\\nA\\u002d\\u002d>B"} -->',
+  );
+
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].block.type, "visual_block");
+  assert.equal(segments[0].block.props.asset_type, "diagram");
+  assert.equal(segments[0].block.props.visual_kind, "flowchart");
+  assert.equal(segments[0].block.props.src, "media/blog/post/chart.png");
+  assert.equal(segments[0].block.props.mermaid, "flowchart TD\\nA-->B");
+});
+
+test("round-trips visual candidate paths through comments", () => {
+  const markdown = blockToSpecialMarkdown({
+    type: "visual_block",
+    props: {
+      asset_type: "image",
+      visual_kind: "example",
+      candidate_path: "blog/.candidates/ai-123/example.png",
+      caption: "Candidate",
+      ai_generated: true,
+    },
+  });
+
+  assert.match(markdown, /"candidate_path":"blog\/\.candidates\/ai-123\/example\.png"/);
+  const [segment] = splitMarkdownSpecialBlocks(markdown);
+  assert.equal(
+    segment.block.props.candidate_path,
+    "blog/.candidates/ai-123/example.png",
+  );
+});
+
+test("parses AI loading diagram candidates from comments", () => {
+  const markdown =
+    '<!-- nblane:ai_loading {"prompt":"flowchart TD\\n  A[Login] \\u002d\\u002d> B{Valid?}\\n  B \\u002d\\u002d>|Yes| C[Home]","mode":"diagram","status":"candidate","ai_source_id":"ai-stream-1","patch_id":"ai-patch-1","summary":"flowchart TD\\n  A[Login] \\u002d\\u002d> B{Valid?}\\n  B \\u002d\\u002d>|Yes| C[Home]","candidate_path":"","accepted":false,"evidence_id":""} -->';
+
+  const segments = splitMarkdownSpecialBlocks(markdown);
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].block.type, "ai_loading_block");
+  assert.equal(segments[0].block.props.mode, "diagram");
+  assert.equal(segments[0].block.props.status, "candidate");
+  assert.equal(
+    segments[0].block.props.summary,
+    "flowchart TD\n  A[Login] --> B{Valid?}\n  B -->|Yes| C[Home]",
+  );
+});
+
+test("round-trips AI math block metadata through comments", () => {
+  const markdown = blockToSpecialMarkdown({
+    type: "math_block",
+    props: {
+      latex: "x^2+y^2=z^2",
+      ai_generated: true,
+      ai_source_id: "ai-123",
+      ai_model: "qwen-test",
+      accepted: false,
+      evidence_id: "ev-1",
+    },
+  });
+
+  assert.equal(
+    markdown,
+    '<!-- nblane:math_block {"latex":"x^2+y^2=z^2","ai_generated":true,"ai_source_id":"ai-123","ai_model":"qwen-test","accepted":false,"evidence_id":"ev-1"} -->',
+  );
+
+  const segments = splitMarkdownSpecialBlocks(markdown);
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].block.type, "math_block");
+  assert.equal(segments[0].block.props.latex, "x^2+y^2=z^2");
+  assert.equal(segments[0].block.props.ai_generated, true);
+  assert.equal(segments[0].block.props.ai_source_id, "ai-123");
+  assert.equal(segments[0].block.props.ai_model, "qwen-test");
+  assert.equal(segments[0].block.props.accepted, false);
+  assert.equal(segments[0].block.props.evidence_id, "ev-1");
+});
+
+test("interleaves native BlockNote markdown with custom block markdown", () => {
+  const editor = {
+    blocksToMarkdownLossy(blocks) {
+      return blocks.map((block) => block.content).join("\n\n");
+    },
+  };
+
+  const markdown = blocksToNblaneMarkdown(editor, [
+    { type: "paragraph", content: "Intro." },
+    { type: "math_block", props: { latex: "x^2" } },
+    { type: "paragraph", content: "Done." },
+  ]);
+
+  assert.equal(markdown, "Intro.\n\n$$\nx^2\n$$\n\nDone.\n");
+});
+
+test("detects raw standalone directives", () => {
+  assert.equal(containsRawMarkdownDirective("Text\n\n::video[](a.mp4)"), true);
+  assert.equal(containsRawMarkdownDirective("Text ::video[](a.mp4)"), false);
+});

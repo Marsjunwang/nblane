@@ -4,12 +4,10 @@ import { BrowserRouter, Navigate, Route, Routes, useParams, useSearchParams } fr
 
 import { RequireAuth } from './auth/RequireAuth';
 import { AppLayout } from './components/AppLayout';
-import { ActivityPage } from './pages/ActivityPage';
 import { CareerWorkspacePage } from './pages/CareerWorkspacePage';
 import { AssistantPage } from './pages/AssistantPage';
 import { EvidencePage, EvidenceReviewRedirect, HealthRedirect } from './pages/EvidencePage';
 import { HomePage } from './pages/HomePage';
-import { InboxPage } from './pages/InboxPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { LegacyStreamlitRedirect } from './pages/LegacyStreamlitRedirect';
@@ -23,7 +21,6 @@ import { PaperOverviewPage } from './pages/PaperOverviewPage';
 import { PaperLibraryPage } from './pages/PaperLibraryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { SkillTreePage } from './pages/SkillTreePage';
-import { StudioPage } from './pages/StudioPage';
 import { WorkshopPage } from './pages/WorkshopPage';
 
 // The blog editor pulls in BlockNote/KaTeX/Mermaid; keep it out of the
@@ -64,8 +61,6 @@ export function App() {
           {/* Legacy route: the health page dissolved — 证据风险 lives under
               证据「待补强」; GET /health API stays for openclaw/CLI. */}
           <Route path="/p/:name/health" element={<HealthRedirect />} />
-          <Route path="/p/:name/activity" element={<ActivityPage />} />
-          <Route path="/p/:name/inbox" element={<InboxPage />} />
           {/* Legacy route: the kanban board merged into the Projects page. */}
           <Route path="/p/:name/kanban" element={<KanbanRedirect />} />
           <Route path="/p/:name/skill-tree" element={<SkillTreePage />} />
@@ -78,7 +73,6 @@ export function App() {
           {/* Legacy route: the project board merged into the Projects page. */}
           <Route path="/p/:name/project-board" element={<ProjectBoardRedirect />} />
           <Route path="/p/:name/projects" element={<ProjectsPage />} />
-          <Route path="/p/:name/studio" element={<StudioPage />} />
           <Route path="/p/:name/content/*" element={<Suspense fallback={<Center py="xl"><Loader /></Center>}><ContentWorkspacePage /></Suspense>} />
           <Route path="/p/:name/career/*" element={<CareerWorkspacePage />} />
           <Route path="/p/:name/public-build" element={<PublicBuildPage />} />

@@ -5,12 +5,7 @@ import type { QueryClient } from '@tanstack/react-query';
 
 import { ApiError, apiBase, apiDelete, apiDeleteWithHeaders, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, apiPostForm, apiPut, apiPutWithHeaders, ifMatch } from './client';
 import type {
-  ActivityApplyResponse,
-  ActivityDismissResponse,
   AIExceptionBulkDismissResponse,
-  ActivityItem,
-  ActivityItemDetail,
-  ActivityListResponse,
   AIExceptionsResponse,
   AssistantStatus,
   CheckinCreateRequest,
@@ -51,11 +46,6 @@ import type {
   HabitPlanMutationResponse,
   HabitPlanPatchRequest,
   HomeResponse,
-  InboxCaptureRequest,
-  InboxClarifyAction,
-  InboxListResult,
-  InboxMutationResponse,
-  InboxResponse,
   JobCreateRequest,
   JobCreateResponse,
   KanbanBoard,
@@ -98,17 +88,12 @@ import type {
   SkillNodePatchRequest,
   SkillNodePatchResponse,
   SkillTreeResponse,
-  StudioCandidateRequest,
-  StudioCandidateResponse,
-  StudioDraftResponse,
   StudioInitResponse,
   StudioPostCreateRequest,
   StudioPostDetail,
   StudioPostMutationResponse,
   StudioPostResult,
   StudioPostSaveRequest,
-  StudioResponse,
-  StudioResult,
   StudioValidationResponse,
   ContentAIStatus,
   ContentMedia,
@@ -1212,154 +1197,6 @@ export function useDismissAIExceptions(profile: string) {
   });
 }
 
-function activityBase(profile: string): string {
-  return `/profiles/${encodeURIComponent(profile)}/activity`;
-}
-
-export function useActivityList(profile: string, filters: ActivityFilters) {
-  return useQuery({
-    queryKey: ['profiles', profile, 'activity', filters],
-    queryFn: () => {
-      const params = new URLSearchParams({ status: filters.status, limit: '200' });
-      if (filters.kind) {
-        params.set('kind', filters.kind);
-      }
-      return apiGet<ActivityListResponse>(`${activityBase(profile)}?${params.toString()}`);
-    },
-    enabled: profile.length > 0,
-  });
-}
-
-/** Detail fetch that captures the response ETag for If-Match mutations. */
-export function useActivityItem(profile: string, itemId: string) {
-  return useQuery({
-    queryKey: ['profiles', profile, 'activity', 'item', itemId],
-    queryFn: async (): Promise<ActivityItemDetail> => {
-      const { data, headers } = await apiGetWithHeaders<ActivityItem>(
-        `${activityBase(profile)}/${encodeURIComponent(itemId)}`,
-      );
-      return { item: data, etag: headers.get('ETag') ?? '' };
-    },
-    enabled: profile.length > 0 && itemId.length > 0,
-  });
-}
-
-function useInvalidateActivity(profile: string) {
-  const queryClient = useQueryClient();
-  return () =>
-    queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'activity'] });
-}
-
-export function useApplyActivity(profile: string) {
-  const invalidate = useInvalidateActivity(profile);
-  return useMutation({
-    mutationFn: ({ itemId, etag }: { itemId: string; etag: string }) =>
-      apiPost<ActivityApplyResponse>(
-        `${activityBase(profile)}/${encodeURIComponent(itemId)}/apply`,
-        undefined,
-        { headers: ifMatch(etag) },
-      ),
-    onSuccess: invalidate,
-  });
-}
-
-export function useDismissActivity(profile: string) {
-  const invalidate = useInvalidateActivity(profile);
-  return useMutation({
-    mutationFn: ({ itemId, etag, note }: { itemId: string; etag: string; note: string }) =>
-      apiPost<ActivityDismissResponse>(
-        `${activityBase(profile)}/${encodeURIComponent(itemId)}/dismiss`,
-        { note },
-        { headers: ifMatch(etag) },
-      ),
-    onSuccess: invalidate,
-  });
-}
-
-function inboxBase(profile: string): string {
-  return `/profiles/${encodeURIComponent(profile)}/inbox`;
-}
-
-/** Inbox list fetch that captures the response ETag for If-Match mutations. */
-export function useInboxList(profile: string, status: string) {
-  return useQuery({
-    queryKey: ['profiles', profile, 'inbox', status],
-    queryFn: async (): Promise<InboxListResult> => {
-      const params = new URLSearchParams({ status });
-      const { data, headers } = await apiGetWithHeaders<InboxResponse>(
-        `${inboxBase(profile)}?${params.toString()}`,
-      );
-      return { data, etag: headers.get('ETag') ?? '' };
-    },
-    enabled: profile.length > 0,
-  });
-}
-
-function useInvalidateInbox(profile: string) {
-  const queryClient = useQueryClient();
-  return () => queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'inbox'] });
-}
-
-export function useCaptureInbox(profile: string) {
-  const invalidate = useInvalidateInbox(profile);
-  return useMutation({
-    mutationFn: ({ body, etag }: { body: InboxCaptureRequest; etag: string }) =>
-      apiPost<InboxMutationResponse>(inboxBase(profile), body, {
-        headers: ifMatch(etag),
-      }),
-    onSuccess: invalidate,
-  });
-}
-
-export function useClarifyInbox(profile: string) {
-  const invalidate = useInvalidateInbox(profile);
-  return useMutation({
-    mutationFn: ({
-      itemId,
-      action,
-      note,
-      etag,
-    }: {
-      itemId: string;
-      action: InboxClarifyAction;
-      note: string;
-      etag: string;
-    }) =>
-      apiPost<InboxMutationResponse>(
-        `${inboxBase(profile)}/${encodeURIComponent(itemId)}/clarify`,
-        { action, note },
-        { headers: ifMatch(etag) },
-      ),
-    onSuccess: invalidate,
-  });
-}
-
-export function useArchiveInboxItem(profile: string) {
-  const invalidate = useInvalidateInbox(profile);
-  return useMutation({
-    mutationFn: ({ itemId, note, etag }: { itemId: string; note: string; etag: string }) =>
-      apiPost<InboxMutationResponse>(
-        `${inboxBase(profile)}/${encodeURIComponent(itemId)}/archive`,
-        { note },
-        { headers: ifMatch(etag) },
-      ),
-    onSuccess: invalidate,
-  });
-}
-
-export function useDiscardInboxItem(profile: string) {
-  const invalidate = useInvalidateInbox(profile);
-  return useMutation({
-    mutationFn: ({ itemId, note, etag }: { itemId: string; note: string; etag: string }) =>
-      apiPost<InboxMutationResponse>(
-        `${inboxBase(profile)}/${encodeURIComponent(itemId)}/discard`,
-        { note },
-        { headers: ifMatch(etag) },
-      ),
-    onSuccess: invalidate,
-  });
-}
-
 export function useGoals(profile: string) {
   return useQuery({
     queryKey: ['profiles', profile, 'goals'],
@@ -1368,7 +1205,7 @@ export function useGoals(profile: string) {
   });
 }
 
-// --- Home starmap editing (design: docs/zh/dev/home-editing-starmap-design.md) ---
+// --- Home starmap editing (design: docs/zh/guides/home.md) ---
 // The starmap GET ETag covers SKILL.md + goals.yaml, so every north-star /
 // goal mutation invalidates the starmap snapshot (in-place refresh), the
 // goal book, and the chronicle (briefing-line flavor).
@@ -1896,7 +1733,7 @@ export function useCrystallizeApply(profile: string) {
 
 
 /**
- * Generic async-job creation (LLM long tasks: `studio-jd-match`,
+ * Generic async-job creation (LLM long tasks:
  * `project-suggest-refs`, ...). Answers 202 with a job handle; the page
  * then subscribes to the job's SSE stream (see api/jobs.ts) for progress
  * phases and the kind-specific result payload.
@@ -2119,24 +1956,6 @@ export function useDeleteProjectCase(profile: string) {
 
 function studioBase(profile: string): string {
   return `/profiles/${encodeURIComponent(profile)}/studio`;
-}
-
-function studioPostPath(profile: string, slug: string): string {
-  // Slugs may be categorized routes (category/leaf); keep the slashes.
-  const encoded = slug.split('/').map(encodeURIComponent).join('/');
-  return `${studioBase(profile)}/blog/${encoded}`;
-}
-
-/** Studio overview fetch that captures the public-layer ETag for If-Match. */
-export function useStudio(profile: string) {
-  return useQuery({
-    queryKey: ['profiles', profile, 'studio'],
-    queryFn: async (): Promise<StudioResult> => {
-      const { data, headers } = await apiGetWithHeaders<StudioResponse>(studioBase(profile));
-      return { data, etag: headers.get('ETag') ?? '' };
-    },
-    enabled: profile.length > 0,
-  });
 }
 
 /** Content workspace projection (blog list only; never evidence/claims). */
@@ -2431,20 +2250,6 @@ export async function downloadCareerExport(
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** Blog detail fetch that captures the per-post ETag for If-Match. */
-export function useStudioPost(profile: string, slug: string) {
-  return useQuery({
-    queryKey: ['profiles', profile, 'studio', 'post', slug],
-    queryFn: async (): Promise<StudioPostResult> => {
-      const { data, headers } = await apiGetWithHeaders<StudioPostDetail>(
-        studioPostPath(profile, slug),
-      );
-      return { post: data, etag: headers.get('ETag') ?? '' };
-    },
-    enabled: profile.length > 0 && slug.length > 0,
-  });
-}
-
 function useInvalidateStudio(profile: string) {
   const queryClient = useQueryClient();
   return () =>
@@ -2457,87 +2262,6 @@ export function useInitStudio(profile: string) {
   return useMutation({
     mutationFn: ({ etag }: { etag: string }) =>
       apiPost<StudioInitResponse>(`${studioBase(profile)}/init`, undefined, {
-        headers: ifMatch(etag),
-      }),
-    onSuccess: invalidate,
-  });
-}
-
-export function useCreateStudioPost(profile: string) {
-  const invalidate = useInvalidateStudio(profile);
-  return useMutation({
-    mutationFn: ({ body, etag }: { body: StudioPostCreateRequest; etag: string }) =>
-      apiPost<StudioPostMutationResponse>(`${studioBase(profile)}/blog`, body, {
-        headers: ifMatch(etag),
-      }),
-    onSuccess: invalidate,
-  });
-}
-
-export function useSaveStudioPost(profile: string) {
-  const invalidate = useInvalidateStudio(profile);
-  return useMutation({
-    mutationFn: ({
-      slug,
-      body,
-      etag,
-    }: {
-      slug: string;
-      body: StudioPostSaveRequest;
-      etag: string;
-    }) =>
-      apiPost<StudioPostMutationResponse>(
-        `${studioPostPath(profile, slug)}/save`,
-        body,
-        { headers: ifMatch(etag) },
-      ),
-    onSuccess: invalidate,
-  });
-}
-
-/** Publish-readiness check on the (optionally edited) post; read-only. */
-export function useCheckStudioPost(profile: string) {
-  return useMutation({
-    mutationFn: ({ slug, body }: { slug: string; body: StudioPostSaveRequest }) =>
-      apiPost<StudioValidationResponse>(`${studioPostPath(profile, slug)}/check`, body),
-  });
-}
-
-export function usePublishStudioPost(profile: string) {
-  const invalidate = useInvalidateStudio(profile);
-  return useMutation({
-    mutationFn: ({
-      slug,
-      body,
-      etag,
-    }: {
-      slug: string;
-      body: StudioPostSaveRequest;
-      etag: string;
-    }) =>
-      apiPost<StudioPostMutationResponse>(
-        `${studioPostPath(profile, slug)}/publish`,
-        body,
-        { headers: ifMatch(etag) },
-      ),
-    onSuccess: invalidate,
-  });
-}
-
-/** Candidate preview (rule fallback when no LLM); nothing is persisted. */
-export function usePreviewStudioCandidate(profile: string) {
-  return useMutation({
-    mutationFn: (body: StudioCandidateRequest) =>
-      apiPost<StudioCandidateResponse>(`${studioBase(profile)}/candidates/preview`, body),
-  });
-}
-
-/** Confirm a candidate into a persisted draft (blog or project update). */
-export function useCreateStudioDraft(profile: string) {
-  const invalidate = useInvalidateStudio(profile);
-  return useMutation({
-    mutationFn: ({ body, etag }: { body: StudioCandidateRequest; etag: string }) =>
-      apiPost<StudioDraftResponse>(`${studioBase(profile)}/candidates/create`, body, {
         headers: ifMatch(etag),
       }),
     onSuccess: invalidate,

@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 
 /**
  * Desktop viewport layout regression for the SPA — the automated arm of the
- * wide-screen rules in docs/zh/guides/spa-experience-checklist.md §5, against
+ * wide-screen rules in docs/zh/guides/web-ui.md, against
  * the isolated sandbox (`scripts/dev-web.sh --isolated`, profile=dev).
  *
  * Covers the 2026-09-21 wide-screen fixes (plus the Phase 3 home swap and the
@@ -88,18 +88,6 @@ for (const viewport of VIEWPORTS) {
       await page.goto(spa("health"));
       await expect(page).toHaveURL(/\/evidence\?stage=strengthen/);
       await expect(page.getByTestId("stage-nav")).toBeVisible();
-    });
-
-    test("兼容内容编辑页(/studio): 内容限宽居中且无横向溢出", async ({ page }) => {
-      await page.goto(spa("studio"));
-      await expect(page.getByRole("heading", { name: /兼容内容编辑页/ })).toBeVisible();
-
-      const width = await containerWidth(page);
-      expect(width).toBeLessThanOrEqual(CONTENT_MAX_WIDTH);
-      if (viewport.width >= 1920) {
-        expect(width).toBeGreaterThan(1100);
-      }
-      await expectNoHorizontalOverflow(page);
     });
 
     test("项目页: 全宽豁免生效且无横向溢出", async ({ page }) => {

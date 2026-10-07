@@ -3,7 +3,7 @@ import type { APIRequestContext, Page } from "@playwright/test";
 
 /**
  * Mobile viewport (375×812, iPhone) spot-checks for the SPA — the automated
- * arm of the experience manual §5 (docs/zh/guides/spa-experience-checklist.md),
+ * arm of the SPA manual (docs/zh/guides/web-ui.md),
  * against the isolated sandbox (`scripts/dev-web.sh --isolated`, profile=dev).
  * 9 tests across four groups:
  *
@@ -17,9 +17,7 @@ import type { APIRequestContext, Page } from "@playwright/test";
  *  c) projects lane touch drag: a real CDP touch gesture (press-and-hold past
  *     the dnd-kit TouchSensor 250ms delay, then drag) moves a card
  *     Queue→Doing inside its lane, plus the detail-card 移至 Doing fallback
- *     over tap;
- *  d) inbox quick capture at 375px: usable input width, submit succeeds, no
- *     horizontal overflow.
+ *     over tap.
  *
  * Touch-drag geometry notes (hard-won, do not "simplify"):
  *  - The dragged card is seeded via API and moved to the Queue HEAD: the
@@ -348,35 +346,5 @@ test.describe("SPA mobile 375px — 项目泳道触屏", () => {
     await page.getByRole("button", { name: "移至 Doing" }).tap();
     expect((await moveResponse).status()).toBeLessThan(300);
     await expect(page.getByTestId("lane-column-unassigned-doing").getByText(title)).toBeVisible();
-  });
-});
-
-test.describe("SPA mobile 375px — 收件箱", () => {
-  test("快速捕获: 输入可用、提交成功、无横向溢出", async ({ page }) => {
-    await page.goto(spa("inbox"));
-    const title = `e2e-mob-inbox-${Date.now()}`;
-    const input = page.getByLabel("随手记");
-    await expect(input).toBeVisible();
-
-    // One-handed usability: the title field must stay wide enough to see what
-    // you type (regression: it used to be squeezed to ~26px by the fixed-width
-    // tags field + submit button on a nowrap row).
-    const inputBox = await input.boundingBox();
-    expect(inputBox, "capture input must be laid out").toBeTruthy();
-    expect(
-      inputBox!.width,
-      `capture input width ${inputBox!.width}px is too narrow for a phone`,
-    ).toBeGreaterThan(140);
-
-    await input.fill(title);
-    const captureResponse = page.waitForResponse(
-      (res) =>
-        res.url().includes(`/profiles/${encodeURIComponent(PROFILE)}/inbox`) &&
-        res.request().method() === "POST",
-    );
-    await page.getByRole("button", { name: "记录" }).tap();
-    expect((await captureResponse).status(), "capture should succeed").toBeLessThan(300);
-    await expect(page.getByText(title)).toBeVisible();
-    await expectNoHorizontalOverflow(page);
   });
 });

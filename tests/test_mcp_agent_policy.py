@@ -80,8 +80,8 @@ class TestDirectWrites(McpPolicyTestBase):
         again = self.mcp.tool_undo_action(result["journal_id"])
         self.assertEqual(again["code"], "journal_entry_already_undone")
 
-    def test_move_applies_directly_with_legacy_alias(self) -> None:
-        moved = self.mcp.tool_submit_kanban_candidate("move", "Card One", target_section="Doing")
+    def test_move_applies_directly(self) -> None:
+        moved = self.mcp.tool_move_kanban_card("Card One", "Doing")
         self.assertTrue(moved["ok"], moved)
         self.assertEqual(moved["from_section"], "Queue")
         self.assertIn("Card One", _titles(self.profile)["Doing"])
@@ -93,8 +93,7 @@ class TestDirectWrites(McpPolicyTestBase):
 
     def test_move_errors_are_payloads(self) -> None:
         self.assertIn("unknown section", self.mcp.tool_move_kanban_card("Card One", "Someday")["error"])
-        self.assertIn("target_section is required", self.mcp.tool_submit_kanban_candidate("move", "Card One")["error"])
-        self.assertIn("unsupported action", self.mcp.tool_submit_kanban_candidate("delete", "Card One")["error"])
+        self.assertIn("target_section is required", self.mcp.tool_move_kanban_card("Card One", "")["error"])
         self.assertIn("no kanban card", self.mcp.tool_move_kanban_card("nope", "Doing")["error"])
         self.assertEqual(self.mcp.tool_recent_actions()["entries"], [])
 
@@ -106,13 +105,6 @@ class TestDirectWrites(McpPolicyTestBase):
         self.undo(result["journal_id"])
         log = yaml.safe_load((self.profile / "activity-log.yaml").read_text(encoding="utf-8"))
         self.assertNotIn(result["checkin_id"], [c["id"] for c in log["checkins"]])
-
-    def test_capture_inbox_is_journaled(self) -> None:
-        result = self.mcp.tool_capture_inbox("Read the SLAM paper")
-        self.assertTrue(result["ok"], result)
-        self.undo(result["journal_id"])
-        raw = yaml.safe_load((self.profile / "inbox.yaml").read_text(encoding="utf-8")) or {}
-        self.assertNotIn("Read the SLAM paper", [i.get("title") for i in raw.get("items") or []])
 
     def test_growth_log_undo_restores_skill_md(self) -> None:
         before = (self.profile / "SKILL.md").read_text(encoding="utf-8")

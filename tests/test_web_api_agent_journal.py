@@ -246,15 +246,6 @@ class TestPhase2Undo(JournalTestBase):
         ids = [c["id"] for c in _yaml(self.profile, "project-board.yaml").get("project_cases") or []]
         self.assertNotIn(case_id, ids)
 
-    def test_inbox_capture_undo(self) -> None:
-        client = self._agent()
-        response = client.post(f"{BASE}/inbox", json={"title": "Read the SLAM paper"})
-        self.assertEqual(response.status_code, 201, response.text)
-        entry = self._undo_latest(client)
-        self.assertIn("Read the SLAM paper", entry["summary"])
-        titles = [i["title"] for i in _yaml(self.profile, "inbox.yaml").get("items") or []]
-        self.assertNotIn("Read the SLAM paper", titles)
-
 
 class TestGuardPolicy(JournalTestBase):
     def test_web_only_routes_refused_for_agents(self) -> None:
@@ -262,7 +253,8 @@ class TestGuardPolicy(JournalTestBase):
         for method, url in (
             ("POST", f"{BASE}/public-site/deploy"),
             ("PATCH", f"{BASE}/settings"),
-            ("POST", f"{BASE}/activity/act:x/apply"),
+            ("POST", f"{BASE}/ai-exceptions/dismiss"),
+            ("POST", f"{BASE}/studio/init"),
         ):
             response = client.request(method, url, json={})
             self.assertEqual(response.status_code, 403, (url, response.text))
@@ -307,7 +299,7 @@ class TestGuardPolicy(JournalTestBase):
 
 
 class TestHttpOnlyAssistantEndpoints(JournalTestBase):
-    """Growth log + profile-model candidates are reachable over HTTP."""
+    """The growth log is reachable over HTTP."""
 
     def test_growth_log_append_is_journaled_and_undoable(self) -> None:
         client = self._client(self.root, login="openclaw")
@@ -326,23 +318,3 @@ class TestHttpOnlyAssistantEndpoints(JournalTestBase):
         client = self._client(self.root, login="wang")
         response = client.post(f"{BASE}/growth-log", json={"event": "  "})
         self.assertEqual(response.status_code, 422)
-
-    def test_profile_model_candidate_queues_pending_item(self) -> None:
-        client = self._client(self.root, login="openclaw")
-        response = client.post(
-            f"{BASE}/activity/profile-model",
-            json={"field": "preferences.tone", "proposed_value": "concise", "rationale": "asked twice"},
-        )
-        self.assertEqual(response.status_code, 201, response.text)
-        item = response.json()
-        self.assertEqual(item["status"], "pending")
-        self.assertEqual(item["candidate_type"], "profile_model")
-        self.assertEqual(item["payload"]["proposed_value"], "concise")
-        # A review submission changes no profile facts: nothing to undo.
-        self.assertEqual(self.journal(client), [])
-
-    def test_profile_model_candidate_validation(self) -> None:
-        client = self._client(self.root, login="openclaw")
-        response = client.post(f"{BASE}/activity/profile-model", json={"field": "x", "proposed_value": " "})
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(response.json()["code"], "invalid_profile_model_candidate")

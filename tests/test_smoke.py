@@ -29,45 +29,12 @@ class TestCoreSmoke(unittest.TestCase):
         self.assertTrue(len(result.top_matches) > 0)
         self.assertTrue(len(result.closure) > 0)
 
-    def test_team_summary(self) -> None:
-        """summarize_team should succeed on example-team."""
-        from nblane.core.team import summarize_team
-
-        team_dir = REPO_ROOT / "teams" / "example-team"
-        rc = summarize_team(team_dir)
-        self.assertEqual(rc, 0)
-
-    def test_team_scope_descriptor(self) -> None:
-        """Team View exposes hard write owner and paths."""
-        from nblane.core.team import team_scope_descriptor
-
-        scope = team_scope_descriptor("example-team", "alice")
-
-        self.assertEqual(scope["write_owner"], "team")
-        self.assertEqual(scope["team_scope"], "teams/example-team/")
-        self.assertEqual(
-            scope["writes"],
-            [
-                "teams/example-team/team.yaml",
-                "teams/example-team/product-pool.yaml",
-            ],
-        )
-        self.assertEqual(scope["view_as_profile"], "alice")
-
     def test_list_profiles(self) -> None:
         """list_profiles should return a list."""
         from nblane.core.io import list_profiles
 
         profiles = list_profiles()
         self.assertIsInstance(profiles, list)
-
-    def test_list_teams(self) -> None:
-        """list_teams should find example-team."""
-        from nblane.core.io import list_teams
-
-        teams = list_teams()
-        self.assertIn("example-team", teams)
-
 
 class TestCliEntryPoint(unittest.TestCase):
     """Ensure the ``nblane`` console script works."""
@@ -99,37 +66,6 @@ class TestCliEntryPoint(unittest.TestCase):
                 "nblane.cli",
                 "context",
                 "template",
-            ],
-            cwd=REPO_ROOT,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0)
-
-    def test_team_cli(self) -> None:
-        """``nblane team example-team`` should exit 0."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "nblane.cli",
-                "team",
-                "example-team",
-            ],
-            cwd=REPO_ROOT,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0)
-
-    def test_gap_cli(self) -> None:
-        """``nblane gap`` should exit 0 on repo fixture."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "nblane.cli",
-                "gap",
-                "template",
-                "OpenVLA robot control",
             ],
             cwd=REPO_ROOT,
             check=False,

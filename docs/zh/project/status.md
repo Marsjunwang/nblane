@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-07
+last_verified: 2026-10-08
 source_of_truth: true
 ---
 
@@ -30,11 +30,11 @@ nblane 是单人加自己的 Agent 的成长系统。唯一界面是 React SPA�
 ## 已移除
 
 - Streamlit 多页应用（2026-10-06 退出主界面，旧 URL 重定向到 SPA；代码待删）。
-- Team View 与团队产品池。
-- Gap Analysis 页与 `nblane gap` 命令（缺口计算 `core/gap.py` 保留，供首页占卜使用）。
-- Agent Activity 审批页。
-- Inbox 页。
-- Output Studio 页（由内容工作台、求职工作台、公开站点承接）。
+- Team View 与团队产品池（`teams/`、`core/team*.py`、`nblane team` 已删）。
+- Gap Analysis 页、`nblane gap` 命令、`POST .../gap/analyze` 与 MCP `profile://gap`（缺口计算 `core/gap.py` 保留，供首页占卜使用；化为任务走 `POST .../divination/intake`）。
+- Agent Activity 审批页与待审候选：`GET/POST .../activity*`、`.../activity/profile-model`、MCP `submit_evidence_candidate` / `submit_profile_model_candidate` / `submit_kanban_candidate` 与 `agent://activity`、助手 `nblane_api propose` / `activity` 已删；Agent 写入改为直写可撤销。
+- 收件箱：Inbox 页、`.../inbox*` 端点、`core/inbox.py`、MCP `capture_inbox` 与 `profile://inbox` 已删（已有的 `inbox.yaml` 不再读写，可自行删除）。
+- Output Studio 页与 `.../studio`、`.../studio/blog*`、`.../studio/candidates/*`、`.../studio/jd-match` 端点（由内容工作台、求职工作台、公开站点承接；只保留 `POST .../studio/init` 初始化公开层）。
 - 独立的目标页、档案体检页（分别并入首页星表、证据页「待补强」）。
 
 ## 当前技术边界

@@ -9,7 +9,7 @@ If-Match; on 412 the fresh ETag is taken from the 412 response header (the
 server always sets it) or, failing that, by re-GETting the resource, and the
 POST is retried exactly once with If-Match.
 
-Write policy (core/agent_policy.py, docs/zh/guides/agent-write-policy.md):
+Write policy (core/agent_policy.py, docs/zh/guides/assistant.md):
 
 - Daily writes (check-in, add/edit/move a task, tick a todo, habit plans)
   apply directly and are journaled; ``recent`` lists them and ``undo <id>``
@@ -20,7 +20,7 @@ Write policy (core/agent_policy.py, docs/zh/guides/agent-write-policy.md):
   agrees, repeat the *same* command with ``--confirm <confirm_id>``.
 - ``delete`` covers the server-gated routes only (kanban cards, check-ins,
   habits, habit plans). The generic post/patch escape hatches still refuse
-  any path carrying a delete/discard segment (inbox discard is a POST).
+  any path carrying a delete/discard segment.
 
 Habit-plan creation has no dedicated subcommand either (the body shape is
 too complex for flags); use the escape hatch instead:
@@ -439,14 +439,6 @@ def run(args: argparse.Namespace, session: Session) -> object:
         return session.get(profile_path(args, "/goals"))
     if command == "growth":
         return session.mutation(profile_path(args, "/growth-log"), {"event": args.event})
-    if command == "propose":
-        body = {"field": args.field, "proposed_value": args.value, "rationale": args.rationale}
-        return session.mutation(profile_path(args, "/activity/profile-model"), body)
-    if command == "activity":
-        query = f"/activity?status={args.status}&limit={args.limit}"
-        if args.kind:
-            query += f"&kind={args.kind}"
-        return session.get(profile_path(args, query))
     raise ApiFailure(f"unknown command: {command}")
 
 
@@ -530,16 +522,6 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("goals", help="GET goals and the North Star")
     growth = commands.add_parser("growth", help="append one row to the SKILL.md Growth Log")
     growth.add_argument("event")
-    propose = commands.add_parser(
-        "propose", help="queue one agent-profile.yaml field update for human review"
-    )
-    propose.add_argument("field")
-    propose.add_argument("value")
-    propose.add_argument("--rationale", default="")
-    activity = commands.add_parser("activity", help="GET the agent activity queue")
-    activity.add_argument("--status", default="pending")
-    activity.add_argument("--kind", default="")
-    activity.add_argument("--limit", type=int, default=50)
     return parser
 
 

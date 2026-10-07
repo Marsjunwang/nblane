@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-10-07
+last_verified: 2026-10-08
 source_of_truth: true
 ---
 
@@ -85,7 +85,7 @@ SPA 里改技能点和证据关联时会自动重写生成块；只改看板时 
 
 ## agent-profile.yaml（可选）
 
-与 `SKILL.md` 并列，结构化描述 Agent 对你强项、弱项与协作风格的建模。存在时，`nblane context` 会追加 **Agent profile (structured)** 区块（只渲染白名单字段）。助手可以用 `nblane_api propose` 提交修改建议，但不会直接改这个文件。模板见 `profiles/template/agent-profile.yaml`，不需要可删除。
+与 `SKILL.md` 并列，结构化描述 Agent 对你强项、弱项与协作风格的建模。存在时，`nblane context` 会追加 **Agent profile (structured)** 区块（只渲染白名单字段）。助手不会改这个文件；它在每周巩固的周报里列出建议，由你自己决定是否修改。模板见 `profiles/template/agent-profile.yaml`，不需要可删除。
 
 ## 更新节奏
 

@@ -10,11 +10,9 @@ users:
     display_name: Admin
     password_hash: "<pbkdf2_sha256$...>"
     role: admin
-    teams: ["*"]
 
   wang:
     display_name: 王军
     password_hash: "<pbkdf2_sha256$...>"
     role: member
     profile: 王军
-    teams: [example-team]

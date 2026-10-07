@@ -5,7 +5,7 @@ import { SPA_BASE_URL, SPA_E2E_PROFILE } from "./spa_auth_shared";
 
 /**
  * Acceptance suite for the star-catalog interaction + goal start-date slice
- * (docs/zh/dev/home-starmap-enhancements-design.md §2/§3):
+ * (docs/zh/guides/home.md):
  *
  * A1. Esc = one-key return to the pure chart from every state (catalog,
  *     card, edit mode, catalog+card) — no layering.

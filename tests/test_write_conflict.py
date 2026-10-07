@@ -26,7 +26,6 @@ from nblane.core.activity_log import ACTIVITY_LOG_FILENAME, load_activity_log
 from nblane.core.activity_log import save as save_activity_log
 from nblane.core.file_state import FileConflictError, snapshot_file
 from nblane.core.growth_log import append_growth_log_row
-from nblane.core.inbox import add_inbox_item, load_inbox, update_inbox
 from nblane.core.kanban_io import KANBAN_QUEUE, parse_kanban, save_kanban
 from nblane.core.kanban_io import update_kanban
 from nblane.core.kanban_merge import copy_kanban_sections
@@ -55,7 +54,6 @@ from nblane.core.public_site import (
     parse_blog_post,
     save_blog_post,
 )
-from nblane.core.review_actions import apply_review_kanban_candidate
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = REPO_ROOT / "profiles" / "template"
@@ -271,48 +269,8 @@ class TestUpdateKanban(unittest.TestCase):
         self.assertEqual(sorted(titles), ["外部卡片", "我的卡片"])
 
 
-class TestInboxActivityConflict(unittest.TestCase):
-    """update_inbox / update_agent_activity re-check inside the lock."""
-
-    def test_update_inbox_stale_snapshot_raises_before_fn(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            profile = _template_profile(Path(tmp))
-            with _suppress_backup():
-                update_inbox(
-                    profile, lambda doc: add_inbox_item(doc, "第一条")
-                )
-                stale = snapshot_file(profile / "inbox.yaml")
-                # External writer lands after the caller's snapshot.
-                update_inbox(
-                    profile, lambda doc: add_inbox_item(doc, "外部并发")
-                )
-                with self.assertRaises(FileConflictError):
-                    update_inbox(
-                        profile,
-                        lambda doc: add_inbox_item(doc, "我的写入"),
-                        expected_snapshot=stale,
-                    )
-                stored = load_inbox(profile)
-        titles = [item.title for item in stored.items]
-        self.assertIn("外部并发", titles)
-        self.assertNotIn("我的写入", titles)
-
-    def test_update_inbox_matching_snapshot_writes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            profile = _template_profile(Path(tmp))
-            with _suppress_backup():
-                update_inbox(
-                    profile, lambda doc: add_inbox_item(doc, "第一条")
-                )
-                snapshot = snapshot_file(profile / "inbox.yaml")
-                item = update_inbox(
-                    profile,
-                    lambda doc: add_inbox_item(doc, "第二条"),
-                    expected_snapshot=snapshot,
-                )
-                stored = load_inbox(profile)
-        self.assertEqual(item.title, "第二条")
-        self.assertEqual(len(stored.items), 2)
+class TestAgentActivityConflict(unittest.TestCase):
+    """agent-activity appends re-check the snapshot inside the lock."""
 
     def test_append_activity_item_stale_snapshot_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -536,100 +494,6 @@ class TestGrowthLogLock(unittest.TestCase):
         for index in range(6):
             self.assertIn(f"event-{index}", content)
         self.assertTrue(lock_exists)
-
-
-class TestReviewKanbanMoveLock(unittest.TestCase):
-    """The kanban_move applier moves cards inside the kanban write lock."""
-
-    def _profile(self, tmp: str) -> Path:
-        profile = _template_profile(Path(tmp), "alice")
-        (profile / "kanban.md").write_text(
-            KANBAN_FIXTURE.replace("demo · Kanban", "alice · Kanban"),
-            encoding="utf-8",
-        )
-        return profile
-
-    def _patches(self, profile: Path):
-        return (
-            patch(
-                "nblane.core.review_actions.profile_dir",
-                lambda _name: profile,
-            ),
-            patch(
-                "nblane.core.agent_activity.profile_dir",
-                lambda _name: profile,
-            ),
-            patch(
-                "nblane.core.kanban_io.profile_dir",
-                lambda _name: profile,
-            ),
-            _suppress_backup(),
-        )
-
-    def test_move_runs_through_update_kanban(self) -> None:
-        import nblane.core.review_actions as review_actions
-
-        real_update = review_actions.update_kanban
-        calls: list[bool] = []
-
-        def _spy(profile_arg, fn, **kwargs):
-            calls.append(True)
-            return real_update(profile_arg, fn, **kwargs)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            profile = self._profile(tmp)
-            patches = self._patches(profile)
-            with patches[0], patches[1], patches[2], patches[3], patch(
-                "nblane.core.review_actions.update_kanban", _spy
-            ):
-                result = apply_review_kanban_candidate(
-                    "alice",
-                    {
-                        "action": "move",
-                        "card_ref": "Write VLA survey",
-                        "target_section": "Done",
-                    },
-                )
-                sections = parse_kanban("alice")
-        self.assertTrue(calls)
-        self.assertTrue(result.ok, result.errors)
-        self.assertEqual(
-            [task.title for task in sections["Done"]], ["Write VLA survey"]
-        )
-
-    def test_stale_kanban_snapshot_raises_not_failed_item(self) -> None:
-        """A kanban write between request start and apply must surface as
-        FileConflictError (→ 412), never as a swallowed ``failed`` item."""
-        with tempfile.TemporaryDirectory() as tmp:
-            profile = self._profile(tmp)
-            patches = self._patches(profile)
-            with patches[0], patches[1], patches[2], patches[3]:
-                stale = snapshot_file(profile / "kanban.md")
-                # External writer lands after the request-start snapshot.
-                external = parse_kanban("alice")
-                external[KANBAN_QUEUE].append(KanbanTask(title="外部卡片"))
-                save_kanban("alice", external)
-                with self.assertRaises(FileConflictError):
-                    apply_review_kanban_candidate(
-                        "alice",
-                        {
-                            "action": "move",
-                            "card_ref": "Write VLA survey",
-                            "target_section": "Done",
-                        },
-                        kanban_snapshot=stale,
-                    )
-                activity = agent_activity.load_agent_activity("alice")
-                sections = parse_kanban("alice")
-        # The item was appended but never marked failed/applied, and the
-        # external kanban write is untouched.
-        self.assertEqual(activity["items"][0]["status"], "pending")
-        self.assertEqual(
-            [task.title for task in sections["Queue"]], ["外部卡片"]
-        )
-        self.assertEqual(
-            [task.title for task in sections["Doing"]], ["Write VLA survey"]
-        )
 
 
 if __name__ == "__main__":

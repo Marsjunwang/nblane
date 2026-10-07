@@ -9,8 +9,6 @@ Commands:
     nblane sync <name> [--check|--write]
                                     Sync generated sections
     nblane validate [name]          Validate skill-tree
-    nblane gap <name> [task]        Task -> skills / gaps
-    nblane team <team_id>           Show team summary
     nblane evidence <name> <skill_id> add --type <t> --title <t>
                                     Append inline evidence on a node
     nblane evidence <name> pool add --type <t> --title <t>
@@ -70,8 +68,6 @@ Examples:
     nblane log alice "finished first manipulation demo"
     nblane sync alice --check
     nblane validate
-    nblane gap alice "VLM robot control"
-    nblane team example-team
     nblane evidence alice ros2_basics add \\
         --type project --title "Bringup demo"
     nblane evidence alice pool add --type project --title "Demo"
@@ -100,7 +96,6 @@ from nblane.commands.codex import (
     cmd_codex_status,
 )
 from nblane.commands.evidence import cmd_evidence_dispatch
-from nblane.commands.gap import cmd_gap
 from nblane.commands.health import cmd_health
 from nblane.commands.ingest import (
     cmd_ingest_kanban,
@@ -126,7 +121,6 @@ from nblane.commands.profile import (
     cmd_validate,
 )
 from nblane.commands.research import cmd_research_connector_sync
-from nblane.commands.team import cmd_team
 
 
 # -- main -------------------------------------------------------------------
@@ -227,43 +221,6 @@ def main() -> None:
         nargs="?",
         default=None,
         help="Profile name (omit to validate all)",
-    )
-
-    p_gap = sub.add_parser(
-        "gap",
-        help="Match a task to skills and list gaps",
-    )
-    p_gap.add_argument("name", help="Profile name")
-    p_gap.add_argument(
-        "task",
-        nargs="?",
-        default="",
-        help="Natural language task (optional if --node)",
-    )
-    p_gap.add_argument(
-        "--node",
-        dest="node",
-        default=None,
-        help="Target schema node id",
-    )
-    p_gap.add_argument(
-        "--llm-router",
-        action="store_true",
-        help="Use LLM to suggest schema nodes (requires API key)",
-    )
-    p_gap.add_argument(
-        "--no-rule",
-        action="store_true",
-        help="Disable rule-based keyword overlap",
-    )
-
-    p_team = sub.add_parser(
-        "team",
-        help="Show team.yaml and product-pool summary",
-    )
-    p_team.add_argument(
-        "team_id",
-        help="Directory name under teams/",
     )
 
     p_evidence = sub.add_parser(
@@ -1029,7 +986,7 @@ def main() -> None:
 
     p_auth = sub.add_parser(
         "auth",
-        help="Authentication helpers for the Streamlit Web UI",
+        help="Authentication helpers for the Web UI",
     )
     auth_sub = p_auth.add_subparsers(
         dest="auth_command",
@@ -1071,16 +1028,6 @@ def main() -> None:
         cmd_sync(args.name, args.check, args.write)
     elif args.command == "validate":
         cmd_validate(args.name)
-    elif args.command == "gap":
-        cmd_gap(
-            args.name,
-            args.task,
-            args.node,
-            use_llm_router=args.llm_router,
-            use_rule_match=not args.no_rule,
-        )
-    elif args.command == "team":
-        cmd_team(args.team_id)
     elif args.command == "evidence":
         cmd_evidence_dispatch(args.name, args.tokens)
     elif args.command == "ingest-resume":

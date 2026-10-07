@@ -1146,7 +1146,7 @@ function CrystallizeWizard({
       {step === 2 && draft && (
         <Stack gap="xs">
           <Text size="sm" c="dimmed">
-            草稿来源:{draft.backend === 'llm' ? 'AI' : '规则'} · 勾选入库条目并定分量(置信度按来源自动推导)
+            草稿来源:{({ llm: 'AI', codex: 'Codex', rule: '规则' } as Record<string, string>)[draft.backend] ?? '规则'} · 勾选入库条目并定分量(置信度按来源自动推导)
           </Text>
           {((draft.patch?.evidence_entries ?? []) as Record<string, unknown>[]).length === 0 ? (
             <Alert color="yellow" title="草稿为空" data-testid="wizard-empty-draft">

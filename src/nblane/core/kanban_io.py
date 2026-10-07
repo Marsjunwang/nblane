@@ -988,7 +988,7 @@ def update_kanban(
 ) -> _T:
     """Parse kanban.md, apply *fn*, and persist — under one lock.
 
-    Same contract as ``inbox.update_inbox``: the whole parse → mutate →
+    Same locked contract as the other ``update_*`` helpers: the whole parse → mutate →
     write cycle holds the kanban.md write lock, so read-modify-write
     flows (e.g. the Review kanban-move applier) cannot lose a concurrent
     writer's change. *fn* receives the parsed sections and mutates them

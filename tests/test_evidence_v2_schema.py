@@ -13,7 +13,6 @@ from pathlib import Path
 
 from nblane.core.evidence_review import _evidence_row_payload
 from nblane.core.ingest_parse import _normalize_evidence_row
-from nblane.evidence_editor_host import compact_evidence_row
 from nblane.core.models import (
     EVIDENCE_POOL_SCHEMA_VERSION,
     EvidencePool,
@@ -122,52 +121,6 @@ class TestNormalizeEvidenceRowV2(unittest.TestCase):
         assert out is not None
         self.assertNotIn("origin", out)
         self.assertNotIn("original_content", out)
-
-
-class TestCompactRowV2(unittest.TestCase):
-    """compact_evidence_row (shared host helper) preserves v2 provenance fields
-    and drops empty ones. Now importable, so assert behavior directly instead of
-    scraping the page source.
-    """
-
-    def test_compact_row_keeps_v2_fields_when_present(self) -> None:
-        row = {
-            "id": "e1",
-            "type": "project",
-            "title": "T",
-            "origin": "resume_parse",
-            "origin_ref": "resume",
-            "origin_detail": "section 2",
-            "language": "en",
-            "original_language": "zh",
-            "original_content_hash": "sha256:abc",
-            "source_content_hash": "sha256:def",
-            "original_content": "原文",
-            "formatted_content": "# Body",
-        }
-        out = compact_evidence_row(row)
-        for field_name in (
-            "origin",
-            "origin_ref",
-            "origin_detail",
-            "language",
-            "original_language",
-            "original_content_hash",
-            "source_content_hash",
-            "original_content",
-            "formatted_content",
-        ):
-            self.assertEqual(
-                out.get(field_name),
-                row[field_name],
-                f"compact_evidence_row dropped {field_name}",
-            )
-
-    def test_compact_row_omits_blank_v2_fields(self) -> None:
-        out = compact_evidence_row(
-            {"id": "e1", "type": "project", "title": "T", "origin": "  "}
-        )
-        self.assertNotIn("origin", out)
 
 
 class TestEvidenceRowPayloadV2(unittest.TestCase):

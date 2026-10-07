@@ -34,9 +34,9 @@ metadata:
 
 | 类型 | 例子 | 你要做的 |
 |------|------|----------|
-| 日常操作 | 打卡、加任务、改任务字段、勾子任务/todo、移动列、排期、阶段计划增改、新建目标/项目、记入收件箱、添加资料、结晶草稿 | 用户下了指令就直接执行，执行后用一句话告诉用户做了什么 |
+| 日常操作 | 打卡、加任务、改任务字段、勾子任务/todo、移动列、排期、阶段计划增改、新建目标/项目、添加资料、结晶草稿 | 用户下了指令就直接执行，执行后用一句话告诉用户做了什么 |
 | 重要操作 | 所有删除、一次超过 3 条的批量操作、修改目标/北极星/技能点、编辑或评审证据、结晶 apply、套用计划模板、批量导入资料 | 先在聊天里确认，用户同意后再执行（见下） |
-| 只能在页面做 | 发布公开站、简历、内容工作台、审批队列、权限、系统设置 | 接口会返回 403 `agent_forbidden`；告诉用户去 nblane 页面操作，附上相关页面链接 |
+| 只能在页面做 | 发布公开站、简历、内容工作台、权限、系统设置 | 接口会返回 403 `agent_forbidden`；告诉用户去 nblane 页面操作，附上相关页面链接 |
 
 读取和占卜不用确认。你主动提出的建议（"要不要把 X 移到 Done？"）先问，用户回「好」再做。
 
@@ -77,7 +77,6 @@ nblane_api post "/profiles/<档案>/kanban/cards/<任务id>/move" '{"target_sect
 nblane_api post "/profiles/<档案>/crystallize/draft" '{"task_ids": ["<任务id>"]}'
 nblane_api summary | goals | plans | plan-show <计划id> | board | starmap | chronicle [--limit N] | health
 nblane_api growth "<一句话进展>"                       # 写进成长日志（可撤销）
-nblane_api propose <字段> <建议值> --rationale <理由>   # 画像更新提交人审
 nblane_api get "/profiles/<档案>/evidence-stages"
 nblane_api divine --mode play|serious [--question …]
 ```

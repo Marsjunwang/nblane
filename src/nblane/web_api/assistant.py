@@ -23,7 +23,7 @@ uvicorn).
 ``console_url`` comes from ``NBLANE_OPENCLAW_CONSOLE_URL`` (default
 ``http://127.0.0.1:18789/``). In production this becomes the Caddy
 subpath reverse proxy (``https://<domain>/openclaw/``) once L4 step 1
-lands — see docs/zh/architecture/openclaw-deep-integration.md §6.2.
+lands — see docs/zh/architecture/ai-architecture.md
 """
 
 from __future__ import annotations

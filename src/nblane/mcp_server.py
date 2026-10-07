@@ -3,7 +3,7 @@
 Resources are read-only. Every write tool runs through the same agent write
 policy as the HTTP API (``core/agent_policy`` via ``core/agent_ops``):
 
-- T1 daily ops (add/move a card, check in, capture to the inbox, growth log)
+- T1 daily ops (add/move a card, check in, growth log)
   apply directly and land in the undo journal (``recent_actions`` /
   ``undo_action``).
 - T2 tools (``delete_kanban_card``, ``log_skill_evidence``) answer
@@ -11,8 +11,7 @@ policy as the HTTP API (``core/agent_policy`` via ``core/agent_ops``):
   summary, and only after the user agrees in the chat repeats the identical
   call with ``confirm_id``. Confirmations are shared across MCP processes
   (``FileConfirmStore``), so a sibling session can redeem them.
-- ``submit_*_candidate`` still queue review items; ``run_validate`` /
-  ``run_sync_check`` are read-only self-checks.
+- ``run_validate`` / ``run_sync_check`` are read-only self-checks.
 
 New tools return structured dicts and carry ``ToolAnnotations``; the
 legacy tools keep their ``OK:``/``ERROR:`` string contract.
@@ -23,7 +22,6 @@ Environment:
   NBLANE_AGENT_STATE_DIR — where MCP confirmations live (see agent_policy).
   NBLANE_ROOT — repo root override (see nblane.core.paths).
   NBLANE_CONTEXT_MODE — chat | review | write | plan for profile://context.
-  NBLANE_GAP_USE_LLM — if ``1`` / ``true``, enable LLM routing in gap analysis.
 """
 
 from __future__ import annotations
@@ -41,11 +39,6 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from nblane.core import agent_journal, agent_ops, agent_policy
-from nblane.core.agent_activity import (
-    activity_items_for_page,
-    activity_summary,
-    append_activity_item,
-)
 from nblane.core.context import generate
 from nblane.core.crystallize import write_method_draft
 from nblane.core.agent_tasks import (
@@ -56,7 +49,6 @@ from nblane.core.agent_tasks import (
     submit_agent_task_candidate,
     update_agent_task_status,
 )
-from nblane.core.gap import analyze, format_text
 from nblane.core.goals import (
     GOAL_STATUSES,
     current_goal,
@@ -64,13 +56,6 @@ from nblane.core.goals import (
     load_goal_book,
 )
 from nblane.core.growth_log import append_growth_log_row
-from nblane.core.inbox import (
-    Inbox,
-    InboxItem,
-    add_inbox_item,
-    load_inbox,
-    update_inbox,
-)
 from nblane.core.interaction import append_interaction_record
 from nblane.core.io import (
     KANBAN_DOING,
@@ -93,31 +78,19 @@ from nblane.core.kanban_io import (
 from nblane.core.learning_log import load_learning_log, summarize_learning_log
 from nblane.core import activity_log
 from nblane.core.crystallize import _slug as _method_slug
-from nblane.core.models import EVIDENCE_TYPES, KanbanTask
+from nblane.core.models import KanbanTask
 from nblane.core.paths import PROFILES_DIR
 from nblane.core.profile_context import (
     north_star_context_from_identity,
     parse_identity_fields,
 )
 from nblane.core.profile_io import load_evidence_pool
-from nblane.core.review_actions import (
-    activity_item_from_profile_model_candidate,
-    activity_item_from_review_candidate,
-)
 from nblane.core.skill_evidence_inline import add_inline_evidence
 from nblane.core.status import STATUS_ICONS, count_nodes, lit_fraction
 from nblane.core.sync import get_drifted_blocks
 from nblane.core.validate import validate_one
 
 _PROFILE_ENV_KEYS = ("NBLANE_PROFILE", "NBLANE_MCP_PROFILE")
-
-
-def _truthy_env(name: str) -> bool:
-    """Return True if env *name* is set to a truthy string."""
-    v = os.getenv(name)
-    if v is None:
-        return False
-    return v.strip().lower() in ("1", "true", "yes", "on")
 
 
 def resolve_active_profile() -> tuple[str | None, str | None]:
@@ -304,9 +277,7 @@ def build_agent_task_handoff_text(profile_name: str, task_id: str) -> str:
     )
 
 
-_INBOX_OPEN_STATUSES = ("inbox", "captured", "clarified")
 _EVIDENCE_RECENT_LIMIT = 20
-_ACTIVITY_PENDING_LIMIT = 10
 _LEARNING_RECENT_LIMIT = 10
 
 
@@ -418,32 +389,6 @@ def build_evidence_text(profile_name: str) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def build_inbox_text(profile_name: str) -> str:
-    """Open inbox items (status inbox / captured / clarified)."""
-    pdir = profile_dir(profile_name)
-    inbox = load_inbox(pdir)
-    open_items = [
-        item for item in inbox.items if item.status in _INBOX_OPEN_STATUSES
-    ]
-    lines: list[str] = [
-        f"# Inbox: {profile_name}",
-        "",
-        f"Open items: {len(open_items)} (total: {len(inbox.items)})",
-        "",
-    ]
-    if not open_items:
-        lines.append("(no open inbox items)")
-        return "\n".join(lines).rstrip() + "\n"
-    for item in open_items:
-        tags = f" tags: {', '.join(item.tags)}" if item.tags else ""
-        created = f" — {item.created_at}" if item.created_at else ""
-        lines.append(
-            f"- `{item.id}` [{item.type}/{item.status}] "
-            f"{item.title}{tags}{created}"
-        )
-    return "\n".join(lines).rstrip() + "\n"
-
-
 def build_learning_text(profile_name: str) -> str:
     """Learning-log summary: active (reading) resources + recent entries."""
     pdir = profile_dir(profile_name)
@@ -487,49 +432,6 @@ def build_learning_text(profile_name: str) -> str:
         lines.append(
             f"- {when} [{resource.kind}/{resource.status}] {resource.title}"
         )
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def build_agent_activity_text(profile_name: str) -> str:
-    """Pending Agent Activity review queue summary."""
-    pdir = profile_dir(profile_name)
-    summary = activity_summary(pdir)
-    pending = activity_items_for_page(pdir, {"status": "pending"})
-    lines: list[str] = [f"# Agent activity: {profile_name}", ""]
-
-    status_counts = summary.get("status") or {}
-    lines.append("## Status counts")
-    if status_counts:
-        for status, count in sorted(status_counts.items()):
-            lines.append(f"- {status}: {count}")
-    else:
-        lines.append("- (empty queue)")
-
-    kind_counts = summary.get("kind") or {}
-    if kind_counts:
-        lines.append("")
-        lines.append("## Kind counts")
-        for kind, count in sorted(kind_counts.items()):
-            lines.append(f"- {kind}: {count}")
-    lines.append("")
-
-    shown = pending[:_ACTIVITY_PENDING_LIMIT]
-    lines.append(
-        f"## Pending review ({len(pending)} total, {len(shown)} shown)"
-    )
-    if not shown:
-        lines.append("- (nothing pending)")
-    for item in shown:
-        created = str(item.get("created") or "")[:10]
-        lines.append(
-            f"- `{item.get('id')}` "
-            f"[{item.get('kind')}/{item.get('candidate_type')}] "
-            f"{item.get('title')} — created {created}"
-        )
-    lines.append("")
-    lines.append(
-        "Apply or dismiss pending items in the web UI (Agent Activity page)."
-    )
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -586,38 +488,6 @@ def resource_context() -> str:
 
 
 @mcp.resource(
-    "profile://gap/{task}",
-    mime_type="text/plain",
-)
-def resource_gap(task: str) -> str:
-    """Gap analysis for a natural-language task (URL-encode spaces in *task*)."""
-    name, err = resolve_active_profile()
-    if err is not None:
-        return f"ERROR [profile://gap]: {err}\n"
-
-    decoded = urllib.parse.unquote(task)
-    if not decoded.strip():
-        return (
-            "ERROR [profile://gap]: Empty task. "
-            "Use a non-empty path segment, e.g. "
-            "profile://gap/VLM%20robot%20control\n"
-        )
-
-    use_llm = _truthy_env("NBLANE_GAP_USE_LLM")
-    result = analyze(
-        name,
-        decoded.strip(),
-        explicit_node=None,
-        use_rule_match=True,
-        use_llm_router=use_llm,
-        persist_router_keywords=False,
-    )
-    if result.error:
-        return f"ERROR [profile://gap]: {result.error}\n"
-    return format_text(result) + "\n"
-
-
-@mcp.resource(
     "agent://tasks",
     mime_type="text/markdown",
 )
@@ -662,30 +532,12 @@ def resource_evidence() -> str:
 
 
 @mcp.resource(
-    "profile://inbox",
-    mime_type="text/markdown",
-)
-def resource_inbox() -> str:
-    """Open inbox items (status inbox / captured / clarified)."""
-    return _profile_text_resource("profile://inbox", build_inbox_text)
-
-
-@mcp.resource(
     "profile://learning",
     mime_type="text/markdown",
 )
 def resource_learning() -> str:
     """Learning-log summary: active (reading) resources and recent entries."""
     return _profile_text_resource("profile://learning", build_learning_text)
-
-
-@mcp.resource(
-    "agent://activity",
-    mime_type="text/markdown",
-)
-def resource_agent_activity() -> str:
-    """Pending Agent Activity review queue summary."""
-    return _profile_text_resource("agent://activity", build_agent_activity_text)
 
 
 def _tool_profile_or_error() -> tuple[str | None, str | None]:
@@ -1017,201 +869,6 @@ def _tool_error_payload(message: str) -> dict[str, Any]:
 _TOOL_STORE_ERRORS = (OSError, ValueError, yaml.YAMLError)
 
 
-@mcp.tool(
-    name="capture_inbox",
-    annotations=ToolAnnotations(
-        title="Capture an inbox item",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=False,
-        openWorldHint=False,
-    ),
-    structured_output=True,
-)
-def tool_capture_inbox(
-    title: str,
-    raw_text: str = "",
-    source: str = "openclaw",
-    tags: list[str] | None = None,
-    note: str = "",
-) -> dict[str, Any]:
-    """Capture a quick note/link into the profile inbox (direct append).
-
-    This is the low-risk fast-capture path (e.g. a chat message worth
-    triaging later). The item lands with status ``inbox`` and is processed
-    by the human during review; nothing else in the profile is touched.
-    """
-    name, err = _tool_profile_or_error()
-    if err is not None or name is None:
-        return _tool_error_payload(err or "no active profile")
-    clean_title = str(title or "").strip()
-    if not clean_title:
-        return _tool_error_payload("title must not be empty")
-    clean_source = str(source or "").strip() or "openclaw"
-
-    def _capture(inbox: Inbox) -> InboxItem:
-        return add_inbox_item(
-            inbox,
-            clean_title,
-            source=clean_source,
-            captured_by=clean_source,
-            raw_text=raw_text,
-            tags=tags or [],
-            status="inbox",
-            note=note,
-        )
-
-    try:
-        item, entry = _policy_write(
-            name,
-            "capture_inbox",
-            "inbox.capture",
-            lambda: update_inbox(profile_dir(name), _capture),
-            args={"title": clean_title, "raw_text": raw_text, "tags": tags or []},
-            kinds=("inbox_item",),
-            describe=lambda _before: f"记入收件箱「{clean_title}」",
-        )
-    except _TOOL_STORE_ERRORS as exc:
-        return _tool_error_payload(str(exc))
-    return {
-        "ok": True,
-        "profile": name,
-        "item_id": item.id,
-        "status": item.status,
-        "captured_by": item.captured_by,
-        **_journal_fields(entry),
-    }
-
-
-@mcp.tool(
-    name="submit_evidence_candidate",
-    annotations=ToolAnnotations(
-        title="Submit an evidence candidate for human review",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
-    ),
-    structured_output=True,
-)
-def tool_submit_evidence_candidate(
-    skill_id: str,
-    title: str,
-    evidence_type: str,
-    date: str,
-    url: str = "",
-    summary: str = "",
-) -> dict[str, Any]:
-    """Queue one evidence candidate for human review (no direct pool write).
-
-    The item appears in Agent Activity as a pending Review candidate; only
-    when the human applies it does the evidence land in evidence-pool.yaml
-    (linked to ``skill_id`` via a ``skill:<id>`` source ref for later
-    wiring in Evidence Review).
-    """
-    name, err = _tool_profile_or_error()
-    if err is not None or name is None:
-        return _tool_error_payload(err or "no active profile")
-    clean_skill = str(skill_id or "").strip()
-    clean_title = str(title or "").strip()
-    if not clean_skill:
-        return _tool_error_payload("skill_id must not be empty")
-    if not clean_title:
-        return _tool_error_payload("title must not be empty")
-    clean_type = str(evidence_type or "").strip() or "practice"
-    if clean_type not in EVIDENCE_TYPES:
-        return _tool_error_payload(
-            f"unknown evidence_type {evidence_type!r} "
-            f"(expected one of {sorted(EVIDENCE_TYPES)})"
-        )
-    today = _today_iso()
-    candidate = {
-        "source": "mcp_agent",
-        "skill_id": clean_skill,
-        "type": clean_type,
-        "title": clean_title,
-        "date": str(date or "").strip(),
-        "url": str(url or "").strip(),
-        "summary": str(summary or "").strip(),
-    }
-    try:
-        item = activity_item_from_review_candidate(
-            name,
-            today,
-            today,
-            "evidence",
-            candidate,
-        )
-        stored, _entry = _policy_write(
-            name,
-            "submit_evidence_candidate",
-            "review.submit",
-            lambda: append_activity_item(name, item),
-            args=candidate,
-        )
-    except _TOOL_STORE_ERRORS as exc:
-        return _tool_error_payload(str(exc))
-    return {
-        "ok": True,
-        "profile": name,
-        "item_id": stored.get("id"),
-        "status": stored.get("status"),
-        "candidate_type": stored.get("candidate_type"),
-        "target_owner": stored.get("target_owner"),
-    }
-
-
-@mcp.tool(
-    name="submit_profile_model_candidate",
-    annotations=ToolAnnotations(
-        title="Submit a profile-model candidate for human review",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
-    ),
-    structured_output=True,
-)
-def tool_submit_profile_model_candidate(
-    field: str,
-    proposed_value: str,
-    rationale: str,
-) -> dict[str, Any]:
-    """Queue a proposed agent-profile.yaml field update for manual review.
-
-    There is intentionally no auto-applier: the human reads the
-    self-describing payload in Agent Activity and edits the profile by
-    hand. Use this for stable, durable facts or preferences about the
-    user — not for session state.
-    """
-    name, err = _tool_profile_or_error()
-    if err is not None or name is None:
-        return _tool_error_payload(err or "no active profile")
-    try:
-        item = activity_item_from_profile_model_candidate(field, proposed_value, rationale)
-    except ValueError as exc:
-        return _tool_error_payload(str(exc))
-    payload = item["payload"]
-    try:
-        stored, _entry = _policy_write(
-            name,
-            "submit_profile_model_candidate",
-            "review.submit",
-            lambda: append_activity_item(name, item),
-            args=payload,
-        )
-    except _TOOL_STORE_ERRORS as exc:
-        return _tool_error_payload(str(exc))
-    return {
-        "ok": True,
-        "profile": name,
-        "item_id": stored.get("id"),
-        "status": stored.get("status"),
-        "candidate_type": stored.get("candidate_type"),
-        "target_owner": stored.get("target_owner"),
-    }
-
-
 def _write_annotations(title: str, *, destructive: bool = False) -> ToolAnnotations:
     return ToolAnnotations(
         title=title,
@@ -1393,33 +1050,6 @@ def tool_move_kanban_card(card_ref: str, target_section: str) -> dict[str, Any]:
     name, err = _tool_profile_or_error()
     if err is not None or name is None:
         return _tool_error_payload(err or "no active profile")
-    return _move_card(name, "move_kanban_card", card_ref, target_section)
-
-
-@mcp.tool(
-    name="submit_kanban_candidate",
-    annotations=_write_annotations("Move a kanban card (legacy name)"),
-    structured_output=True,
-)
-def tool_submit_kanban_candidate(
-    action: str,
-    card_ref: str,
-    target_section: str = "",
-    note: str = "",
-) -> dict[str, Any]:
-    """Legacy alias of ``move_kanban_card``: the move now applies directly.
-
-    Kept so older prompts keep working; there is no review step anymore
-    (undo with ``undo_action``). ``note`` is ignored.
-    """
-    name, err = _tool_profile_or_error()
-    if err is not None or name is None:
-        return _tool_error_payload(err or "no active profile")
-    clean_action = str(action or "").strip().lower() or "move"
-    if clean_action != "move":
-        return _tool_error_payload(
-            f"unsupported action {action!r} (only 'move' is supported)"
-        )
     return _move_card(name, "move_kanban_card", card_ref, target_section)
 
 

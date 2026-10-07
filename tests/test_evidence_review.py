@@ -473,38 +473,5 @@ class TestEvidenceReview(unittest.TestCase):
             "strong",
         )
 
-    def test_page_exposes_done_housekeeping_workbench(self) -> None:
-        """Evidence Review owns Done batch cleanup and writeback activity."""
-        source = Path("pages/2_Evidence_Review.py").read_text(encoding="utf-8")
-
-        self.assertIn("_render_done_housekeeping", source)
-        self.assertIn("archive_kanban_done_tasks", source)
-        self.assertIn("sync_project_board_from_kanban", source)
-        self.assertIn("done_housekeeping_confirm_delete", source)
-        self.assertIn("record_writeback_activity", source)
-        self.assertIn("kanban_ai_backend(selected)", source)
-
-    def test_page_exposes_claim_studio_scopes(self) -> None:
-        """Claim Studio exposes all generation scopes via the scope selector."""
-        source = Path("pages/2_Evidence_Review.py").read_text(encoding="utf-8")
-
-        self.assertIn("_render_claim_studio", source)
-        self.assertIn('options=["project", "goal", "skill", "all", "manual"]', source)
-        self.assertIn("claim_generate_scope_label", source)
-        self.assertIn("_render_claim_scope_generator", source)
-        self.assertIn("_render_claim_manual", source)
-        self.assertIn("generate_claim_candidates_for_scope", source)
-        self.assertIn("apply_claim_candidates_to_book", source)
-        self.assertIn("migrate_legacy_claims", source)
-
-    def test_page_exposes_project_ref_backfill(self) -> None:
-        """Project-ref backfill is owned by Evidence Review, not Project Board."""
-        source = Path("pages/2_Evidence_Review.py").read_text(encoding="utf-8")
-
-        self.assertIn("_render_project_ref_backfill", source)
-        self.assertIn("apply_project_ref_inferences", source)
-        self.assertIn("refs_project_backfill_title", source)
-
-
 if __name__ == "__main__":
     unittest.main()
