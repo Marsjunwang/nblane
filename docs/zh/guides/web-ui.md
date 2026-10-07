@@ -284,6 +284,10 @@ Direct LLM 的 `research.paper_translate` 默认启用流式请求（`NBLANE_STR
 用于规避 SOCKS 代理或供应商网关在长非流式 JSON 响应上一直不返回的问题；如需回退旧行为，可设为 `0`。
 大论文的全文翻译可能持续十几分钟以上，生产 sidecar 建议把 `NBLANE_READER_TASK_TIMEOUT_SECONDS`
 设为不低于 `3600`，让 Reader 任务状态和已落库进度保持可见。
+论文概览的「快速分析」（`research.paper_review_card` / `paper_source_guide`）只发送按章节采样的
+最多 60 段、约 3.6 万字正文，同样默认流式（`NBLANE_STREAM_PAPER_ANALYSIS=1`），单次调用预算
+`NBLANE_PAPER_ANALYSIS_MODEL_TIMEOUT_SECONDS=300` 秒、最多重试 1 次。模型失败而退回规则占位时，
+这次调用会以「AI 降级」出现在右上角「AI 异常」里，附带原始错误（例如 `Request timed out`）。
 详情页 `Retry translation` 旁可选择翻译模式：
 
 - `Fast body`：默认值。使用带 PDF 定位的 structure 单元，只翻正文、标题和图表 caption，跳过参考文献。

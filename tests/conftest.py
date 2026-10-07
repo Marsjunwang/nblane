@@ -18,3 +18,7 @@ os.environ.setdefault("NBLANE_DISABLE_NETWORK_LOOKUPS", "1")
 _STATE_DIR = Path(tempfile.mkdtemp(prefix="nblane-test-state-"))
 os.environ["NBLANE_LOCAL_MODELS_DIR"] = str(_STATE_DIR / "local-models")
 os.environ["NBLANE_GROBID_SERVICE_DIR"] = str(_STATE_DIR / "grobid")
+# The Quadlet path and unit name are real systemd --user state: without these
+# a test that calls stop()/uninstall() acts on the production GROBID.
+os.environ["XDG_CONFIG_HOME"] = str(_STATE_DIR / "config")
+os.environ["NBLANE_GROBID_UNIT"] = "nblane-grobid-pytest"

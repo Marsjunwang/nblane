@@ -409,6 +409,61 @@ def _compact_picked_segments(
     return rows
 
 
+def _compact_paper_for_analysis(
+    segment_rows,
+    chunk_rows,
+    annotation_rows,
+    *,
+    segment_limit: int = 60,
+    char_limit: int = 36_000,
+) -> dict[str, Any]:
+    """Return a bounded whole-paper context for quick analysis / review card.
+
+    Sending every segment (with rects and hashes) made long papers exceed
+    the provider timeout, so sample across sections and keep only the
+    fields the model needs to cite refs.
+    """
+
+    picked = _section_aware_paper_segments(segment_rows, limit=segment_limit)
+    segments = _compact_picked_segments(picked, limit=segment_limit, char_limit=char_limit)
+    for row in segments:
+        row.pop("source_id", None)
+        row.pop("text_hash", None)
+    chunks = [
+        {
+            "id": row.id,
+            "title": row.title,
+            "kind": row.kind,
+            "locator": row.locator,
+            "text": str(row.text or "").strip()[:800],
+        }
+        for row in list(chunk_rows)[:20]
+    ]
+    annotations = [
+        {
+            "id": row.id,
+            "kind": row.kind,
+            "page": row.page,
+            "selected_text": str(row.selected_text or "").strip()[:600],
+            "note": str(row.note or "").strip()[:600],
+        }
+        for row in list(annotation_rows)[:30]
+        if str(row.status or "active") == "active"
+    ]
+    pages = sorted({int(row.get("page") or 0) for row in segments if int(row.get("page") or 0) > 0})
+    return {
+        "segments": segments,
+        "chunks": chunks,
+        "annotations": annotations,
+        "paper_context": {
+            "source_segments": len(list(segment_rows)),
+            "supplied_segments": len(segments),
+            "pages_covered": pages,
+            "sections_covered": _deep_read_sections_covered(segments),
+        },
+    }
+
+
 def _compact_segments_for_deep_read(
     payload: dict[str, Any],
     segment_rows,
@@ -1984,13 +2039,15 @@ def _handle_reader_action_inner(
             current=2,
             total=5,
         )
+        analysis_context = _compact_paper_for_analysis(segment_rows, chunk_rows, annotation_rows)
         ai_result = generate_paper_review_card(
             ctx.profile_name,
             source_id,
-            source=source.to_dict() if source is not None else {"id": source_id},
-            segments=[row.to_dict() for row in segment_rows],
-            chunks=[row.to_dict() for row in chunk_rows],
-            annotations=[row.to_dict() for row in annotation_rows],
+            source=_compact_source_for_deep_read(source, source_id),
+            segments=analysis_context["segments"],
+            chunks=analysis_context["chunks"],
+            annotations=analysis_context["annotations"],
+            paper_context=analysis_context["paper_context"],
             require_review=False,
         )
         emit_analysis_progress("normalizing", "Normalizing analysis output…", current=3, total=5)
@@ -2275,13 +2332,15 @@ def _handle_reader_action_inner(
         segment_rows = load_paper_segments(profile, source_id)
         artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
         source = load_research_sources(profile).by_id().get(source_id)
+        analysis_context = _compact_paper_for_analysis(segment_rows, chunk_rows, annotation_rows)
         ai_result = generate_paper_review_card(
             ctx.profile_name,
             source_id,
-            source=source.to_dict() if source is not None else {"id": source_id},
-            segments=[row.to_dict() for row in segment_rows],
-            chunks=[row.to_dict() for row in chunk_rows],
-            annotations=[row.to_dict() for row in annotation_rows],
+            source=_compact_source_for_deep_read(source, source_id),
+            segments=analysis_context["segments"],
+            chunks=analysis_context["chunks"],
+            annotations=analysis_context["annotations"],
+            paper_context=analysis_context["paper_context"],
             require_review=False,
         )
         structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}

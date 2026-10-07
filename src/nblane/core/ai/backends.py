@@ -675,16 +675,25 @@ def _nonnegative_int_override(payload: dict[str, Any], *keys: str) -> int | None
     return None
 
 
-def _stream_llm_action(request: AIActionRequest) -> bool:
-    """Return True for long JSON actions that are safer over streaming HTTP."""
+_STREAMED_LLM_ACTIONS = {
+    # action -> env switch that can turn streaming back off
+    "research.paper_translate": "NBLANE_STREAM_PAPER_TRANSLATION",
+    "research.paper_review_card": "NBLANE_STREAM_PAPER_ANALYSIS",
+    "research.paper_source_guide": "NBLANE_STREAM_PAPER_ANALYSIS",
+}
 
-    if request.action != "research.paper_translate":
+
+def _stream_llm_action(request: AIActionRequest) -> bool:
+    """Return True for long JSON actions that are safer over streaming HTTP.
+
+    A non-streaming request sends no bytes until the whole reply is
+    generated, so long whole-paper outputs hit the read timeout.
+    """
+
+    env_name = _STREAMED_LLM_ACTIONS.get(request.action)
+    if not env_name:
         return False
-    configured = (
-        str(os.getenv("NBLANE_STREAM_PAPER_TRANSLATION", "1") or "")
-        .strip()
-        .lower()
-    )
+    configured = str(os.getenv(env_name, "1") or "").strip().lower()
     return configured not in {"0", "false", "no", "off"}
 
 

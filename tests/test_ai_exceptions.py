@@ -94,3 +94,39 @@ def test_collects_failures_across_ai_sources_and_deduplicates_activity(tmp_path:
     assert run_item["source"] == "AI 调用"
     assert run_item["href"] == "/p/alice/research"
     assert all(item["retryable"] for item in items)
+
+
+def test_fallback_runs_surface_primary_failure_as_warning(tmp_path: Path) -> None:
+    profile = tmp_path / "alice"
+    profile.mkdir()
+    _dump(
+        profile / "ai-runs.yaml",
+        {
+            "runs": [
+                {
+                    "id": "run-fb",
+                    "action": "research.paper_review_card",
+                    "backend": "rule_fallback",
+                    "ok": True,
+                    "warnings": [
+                        "direct_llm failed (provider_error: LLM error: Request timed out.); used rule_fallback."
+                    ],
+                    "created": "2026-10-07T01:00:00+00:00",
+                },
+                {
+                    "id": "run-ok",
+                    "action": "research.paper_review_card",
+                    "backend": "direct_llm",
+                    "ok": True,
+                    "warnings": [],
+                },
+            ]
+        },
+    )
+
+    items = collect_profile_exceptions(profile)
+
+    assert [item["id"] for item in items] == ["run:run-fb"]
+    assert items[0]["severity"] == "warning"
+    assert items[0]["source"] == "AI 降级"
+    assert "Request timed out" in items[0]["message"]

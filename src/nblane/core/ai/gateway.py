@@ -24,6 +24,9 @@ from nblane.core.ai.local_translation import LOCAL_TRANSLATION_BACKEND, is_avail
 
 
 PAPER_TRANSLATION_MODEL_TIMEOUT_SECONDS_DEFAULT = 180.0
+# Whole-paper analysis streams its reply; this bounds the gap between chunks
+# and the connection, not the total generation time.
+PAPER_ANALYSIS_MODEL_TIMEOUT_SECONDS_DEFAULT = 300.0
 
 
 def run_ai_action(
@@ -375,22 +378,29 @@ def generate_paper_review_card(
     segments: list[dict[str, Any]] | None = None,
     chunks: list[dict[str, Any]] | None = None,
     annotations: list[dict[str, Any]] | None = None,
+    paper_context: dict[str, Any] | None = None,
     model: str | None = None,
     context_refs: list[str] | None = None,
     require_review: bool = True,
 ) -> AIActionResult:
     """Typed helper for ``research.paper_review_card``."""
 
+    body_in: dict[str, Any] = {
+        "source_id": source_id,
+        "source": source or {},
+        "segments": segments or [],
+        "chunks": chunks or [],
+        "annotations": annotations or [],
+        "model_timeout_seconds": _paper_analysis_model_timeout_seconds(),
+        # A timed-out whole-paper call should not silently run twice more.
+        "llm_max_retries": 1,
+    }
+    if paper_context:
+        body_in["paper_context"] = paper_context
     body, preferred_backend = _with_action_ai_preferences(
         profile,
         "research.paper_review_card",
-        {
-            "source_id": source_id,
-            "source": source or {},
-            "segments": segments or [],
-            "chunks": chunks or [],
-            "annotations": annotations or [],
-        },
+        body_in,
         model=model,
     )
     return run_ai_action(
@@ -804,6 +814,13 @@ def _paper_translation_model_timeout_seconds() -> float:
     if configured is not None:
         return configured
     return PAPER_TRANSLATION_MODEL_TIMEOUT_SECONDS_DEFAULT
+
+
+def _paper_analysis_model_timeout_seconds() -> float:
+    configured = _positive_float(os.getenv("NBLANE_PAPER_ANALYSIS_MODEL_TIMEOUT_SECONDS"))
+    if configured is not None:
+        return configured
+    return PAPER_ANALYSIS_MODEL_TIMEOUT_SECONDS_DEFAULT
 
 
 def _paper_ai_model(profile: str, key: str) -> str:

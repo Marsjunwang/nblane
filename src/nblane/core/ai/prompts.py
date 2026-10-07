@@ -20,6 +20,8 @@ class PromptBundle:
     prompt_version: str
 
 
+_COMPACT_PAYLOAD_ACTIONS = {"research.paper_review_card", "research.paper_source_guide"}
+
 _ACTION_INSTRUCTIONS: dict[str, str] = {
     "research.reading_draft": (
         "Turn research source metadata and excerpts into source-scoped reading "
@@ -250,7 +252,8 @@ def prompt_for_action(
             "output_contract": output_contract,
         },
         ensure_ascii=False,
-        indent=2,
+        # Whole-paper payloads are large; indentation only costs tokens.
+        **({"separators": (",", ":")} if spec.name in _COMPACT_PAYLOAD_ACTIONS else {"indent": 2}),
     )
     return PromptBundle(
         system=system,

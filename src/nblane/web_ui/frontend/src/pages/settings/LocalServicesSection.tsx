@@ -160,7 +160,9 @@ function GrobidCard({ data, refetch, fetching }: { data: GrobidStatus; refetch: 
   const state = GROBID_STATE[data.state] ?? { label: data.state, color: 'gray' };
   const installing = data.install.status === 'running';
   const managed = data.unit_state.installed;
-  const backend = data.backend_override || data.backend;
+  // Without an override each service follows its own startup env, which can
+  // differ (Reader vs SPA backend), so show "unset" instead of guessing.
+  const backend = data.backend_override;
   const pending = (name: string) => action.isPending && action.variables === name;
   return (
     <SettingsCard icon={<IconFileText size={22} />} title="GROBID 结构化抽取" description="把论文 PDF 解析成章节、段落和参考文献；Reader 的段落定位、结构化翻译和参考文献卡片都依赖它。">
@@ -187,9 +189,11 @@ function GrobidCard({ data, refetch, fetching }: { data: GrobidStatus; refetch: 
       {showLogs && <Card withBorder radius="sm" padding="xs"><Text component="pre" size="xs" style={{ whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto', margin: 0 }}>{logs.data?.text || (logs.isPending ? '加载中…' : '暂无日志')}</Text></Card>}
       <Divider />
       <Stack gap={6}>
-        <div><Text fw={600} size="sm">PDF 结构后端</Text><Text size="xs" c="dimmed">Reader 和 SPA 后端共用这个选择，点选立即生效；已抽取的论文不受影响，重新抽取时才会用新后端。{data.env_backend && !data.backend_override ? `当前沿用服务配置（${data.env_backend}）。` : ''}</Text></div>
+        <div><Text fw={600} size="sm">PDF 结构后端</Text><Text size="xs" c="dimmed">Reader 和 SPA 后端共用这个选择，点选立即生效；已抽取的论文不受影响，重新抽取时才会用新后端。</Text></div>
         <SegmentedControl aria-label="PDF 结构后端" w="fit-content" value={backend} onChange={(value) => setBackend.mutate(value, onError('保存失败'))} data={PDF_BACKENDS.map(({ value, label }) => ({ value, label }))} />
-        <Text size="xs" c="dimmed">{PDF_BACKENDS.find((item) => item.value === backend)?.description}</Text>
+        {backend
+          ? <Text size="xs" c="dimmed">{PDF_BACKENDS.find((item) => item.value === backend)?.description}</Text>
+          : <Text size="xs" c="orange">未设置：Reader 和 SPA 后端各按自己的启动配置（可能不一致，例如 Reader 设成了只用 PyMuPDF）。选一个即可统一。</Text>}
       </Stack>
     </SettingsCard>
   );

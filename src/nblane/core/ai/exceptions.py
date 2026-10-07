@@ -53,6 +53,7 @@ def _base_item(
     source_ref: str = "",
     retryable: bool = True,
     href: str = "",
+    severity: str = "error",
 ) -> dict[str, Any]:
     return {
         "id": item_id,
@@ -64,8 +65,23 @@ def _base_item(
         "created": _timestamp(created),
         "retryable": retryable,
         "href": href,
-        "severity": "error",
+        "severity": severity,
     }
+
+
+def _fallback_failure(run: dict[str, Any]) -> str:
+    """Return the primary-backend failure of a run that fell back, if any.
+
+    The gateway records a fallback as ``ok: True`` with a warning like
+    ``direct_llm failed (provider_error: ...); used rule_fallback.``; the
+    owner still needs to see why the model call failed.
+    """
+
+    for warning in run.get("warnings") or []:
+        text = _text(warning)
+        if " failed (" in text and "; used " in text:
+            return text
+    return ""
 
 
 def collect_profile_exceptions(
@@ -116,7 +132,28 @@ def collect_profile_exceptions(
 
     runs = load_ai_runs(profile).get("runs") or []
     for run in runs:
-        if not isinstance(run, dict) or run.get("ok") is not False:
+        if not isinstance(run, dict):
+            continue
+        if run.get("ok") is not False:
+            fallback = _fallback_failure(run)
+            if not fallback:
+                continue
+            action = _text(run.get("action"))
+            run_id = _text(run.get("id"))
+            output.append(
+                _base_item(
+                    item_id=f"run:{run_id}",
+                    source="AI 降级",
+                    title=action or "AI 调用降级",
+                    message=fallback,
+                    action=action,
+                    created=run.get("created"),
+                    source_ref=run_id,
+                    retryable=True,
+                    href=_href(profile_name, action, "AI Gateway"),
+                    severity="warning",
+                )
+            )
             continue
         run_id = _text(run.get("id"))
         activity_id = _text(run.get("activity_item_id"))

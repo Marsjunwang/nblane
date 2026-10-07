@@ -254,6 +254,36 @@ class TestAIGateway(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertFalse(chat.call_args.kwargs["stream"])
 
+    def test_direct_backend_streams_paper_review_card(self) -> None:
+        """Whole-paper analysis streams so slow generations do not hit the read timeout."""
+
+        spec = get_action_spec("research.paper_review_card")
+        request = AIActionRequest(
+            action="research.paper_review_card",
+            profile="",
+            payload={"source_id": "source:paper:1", "model_timeout_seconds": 300},
+        )
+        with (
+            patch("nblane.core.llm.is_configured", return_value=True),
+            patch("nblane.core.llm.chat", return_value="LLM error: boom") as chat,
+        ):
+            DirectLLMBackend().run(request, spec)  # type: ignore[arg-type]
+
+        self.assertTrue(chat.call_args.kwargs["stream"])
+        self.assertEqual(chat.call_args.kwargs["timeout"], 300.0)
+
+    def test_review_card_sets_analysis_timeout_and_one_retry(self) -> None:
+        with (
+            patch("nblane.core.ai.gateway.load_web_preferences", return_value={}),
+            patch("nblane.core.ai.gateway.run_ai_action") as run,
+        ):
+            run.return_value = SimpleNamespace(ok=True)
+            generate_paper_review_card("alice", "source:paper:1", require_review=False)
+
+        payload = run.call_args.args[1]
+        self.assertEqual(payload["model_timeout_seconds"], 300.0)
+        self.assertEqual(payload["llm_max_retries"], 1)
+
     def test_translate_paper_segments_sets_long_translation_timeout(self) -> None:
         """Full-paper translation batches should not inherit short UI polling limits."""
 

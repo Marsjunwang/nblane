@@ -1025,6 +1025,42 @@ class TestReaderActions(unittest.TestCase):
         self.assertEqual(analysis["scores"]["novelty"], 6)
         self.assertEqual(analysis["cited_segment_refs"], ["seg:1"])
 
+    def test_analyze_paper_sends_bounded_compact_context(self) -> None:
+        """Long papers must not ship every segment (with rects/hashes) at once."""
+
+        ai_result = SimpleNamespace(ok=True, backend="direct_llm", structured={"tldr": "ok", "key_points": ["p"]}, warnings=[], error="")
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            segments = [
+                PaperSegment(
+                    segment_id=f"seg:{index}",
+                    source_id=ctx.source_id,
+                    page=max(1, (index + 6) // 7),
+                    order=index,
+                    text=f"Passage {index} " + "x" * 400,
+                    text_hash=text_hash(f"Passage {index}"),
+                )
+                for index in range(1, 219)
+            ]
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                save_paper_segments(profile, ctx.source_id, segments)
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.reader_actions.ensure_paper_reading_artifacts", return_value={"warnings": []}),
+                patch("nblane.core.reader_actions.generate_paper_review_card", return_value=ai_result) as card,
+            ):
+                handle_reader_action(ctx, "analyze_paper", {"page": 1})
+
+        kwargs = card.call_args.kwargs
+        rows = kwargs["segments"]
+        self.assertLessEqual(len(rows), 60)
+        self.assertLessEqual(sum(len(row["text"]) for row in rows), 36_000)
+        self.assertIn("seg:218", [row["segment_id"] for row in rows])
+        self.assertNotIn("rects", rows[0])
+        self.assertNotIn("text_hash", rows[0])
+        self.assertEqual(kwargs["paper_context"]["source_segments"], 218)
+
     def test_analyze_paper_rule_fallback_keeps_existing_analysis(self) -> None:
         good = SimpleNamespace(
             ok=True,

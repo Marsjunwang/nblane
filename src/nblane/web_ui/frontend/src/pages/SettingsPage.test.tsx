@@ -141,7 +141,8 @@ describe('SettingsPage', () => {
 
     expect(await screen.findByText('运行中（外部服务）')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
-    expect(screen.getByText(/当前沿用服务配置（pymupdf）/)).toBeInTheDocument();
+    expect(screen.getByText(/未设置：Reader 和 SPA 后端各按自己的启动配置/)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '自动' })).not.toBeChecked();
     fireEvent.click(screen.getByRole('radio', { name: '自动' }));
     await waitFor(() => expect(calls.some((call) => call.url === '/settings/grobid/backend')).toBe(true));
     expect(calls.find((call) => call.url === '/settings/grobid/backend')?.body).toEqual({ backend: 'auto' });

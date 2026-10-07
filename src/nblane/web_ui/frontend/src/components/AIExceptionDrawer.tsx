@@ -122,7 +122,7 @@ export function AIExceptionDrawer({ profile, opened, onClose }: AIExceptionDrawe
                   <div>
                     <Text fw={600}>{item.title}</Text>
                     <Group gap="xs" mt={4}>
-                      <Badge size="sm" variant="light" color="red">
+                      <Badge size="sm" variant="light" color={item.severity === 'warning' ? 'orange' : 'red'}>
                         {item.source || 'AI'}
                       </Badge>
                       {item.action && (

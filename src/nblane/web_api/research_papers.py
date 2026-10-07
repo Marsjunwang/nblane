@@ -905,25 +905,26 @@ def _make_runner(kind: str) -> Callable[[str, dict[str, Any], Callable[..., None
             {"source_id": source_id, "scope": "paper", "full_paper": True, "target_lang": "zh"},
             progress_callback=_progress_bridge(report),
         )
+        fallback_warning = next(
+            (str(item) for item in result.warnings if _FALLBACK_MARKER in str(item)),
+            "",
+        )
         if not result.ok and ANALYSIS_FALLBACK_KEPT_WARNING in (result.message or ""):
+            reason = f"（{fallback_warning[:160]}）" if fallback_warning else ""
             raise jobs.JobFailedError(
                 "paper_analysis_fallback",
-                "模型没有返回可靠结果，已保留原有结果。请稍后重试。",
+                f"模型没有返回可靠结果{reason}，已保留原有结果。详情见右上角「AI 异常」。",
             )
         if not result.ok:
             raise jobs.JobFailedError(
                 "paper_analysis_failed",
                 result.message or "AI 没有返回可用的结构化结果，请重试。",
             )
-        fallback_warning = next(
-            (str(item) for item in result.warnings if _FALLBACK_MARKER in str(item)),
-            "",
-        )
         if fallback_warning and had_previous and previous_text:
             atomic_write_text(analysis_path, previous_text)
             raise jobs.JobFailedError(
                 "paper_analysis_fallback",
-                "模型没有返回可靠结果（" + fallback_warning[:160] + "），已保留原有结果。请稍后重试。",
+                "模型没有返回可靠结果（" + fallback_warning[:160] + "），已保留原有结果。详情见右上角「AI 异常」。",
             )
         analysis = load_paper_analysis(pdir, source_id)
         updated_key = "codex_deep_read_updated" if kind == KIND_PAPER_DEEP_READ else "updated"
