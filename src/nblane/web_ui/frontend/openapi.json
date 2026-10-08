@@ -131,6 +131,168 @@
     "title": "AIExceptionsResponse",
     "type": "object"
    },
+   "AccountCreateRequest": {
+    "properties": {
+     "create_profile": {
+      "default": false,
+      "title": "Create Profile",
+      "type": "boolean"
+     },
+     "display_name": {
+      "default": "",
+      "title": "Display Name",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "password": {
+      "title": "Password",
+      "type": "string"
+     },
+     "profiles": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Profiles",
+      "type": "array"
+     },
+     "role": {
+      "default": "member",
+      "title": "Role",
+      "type": "string"
+     },
+     "schema": {
+      "default": "",
+      "title": "Schema",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "password"
+    ],
+    "title": "AccountCreateRequest",
+    "type": "object"
+   },
+   "AccountInfo": {
+    "description": "One account as shown in Settings → 账号管理.",
+    "properties": {
+     "agent": {
+      "default": false,
+      "title": "Agent",
+      "type": "boolean"
+     },
+     "disabled": {
+      "default": false,
+      "title": "Disabled",
+      "type": "boolean"
+     },
+     "display_name": {
+      "title": "Display Name",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "must_change_password": {
+      "default": false,
+      "title": "Must Change Password",
+      "type": "boolean"
+     },
+     "profiles": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Profiles",
+      "type": "array"
+     },
+     "role": {
+      "title": "Role",
+      "type": "string"
+     },
+     "tokens": {
+      "items": {
+       "$ref": "#/components/schemas/ApiTokenInfo"
+      },
+      "title": "Tokens",
+      "type": "array"
+     }
+    },
+    "required": [
+     "id",
+     "display_name",
+     "role"
+    ],
+    "title": "AccountInfo",
+    "type": "object"
+   },
+   "AccountPatchRequest": {
+    "properties": {
+     "disabled": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Disabled"
+     },
+     "display_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Display Name"
+     },
+     "profiles": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Profiles"
+     },
+     "role": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Role"
+     }
+    },
+    "title": "AccountPatchRequest",
+    "type": "object"
+   },
+   "AccountsOk": {
+    "properties": {
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "title": "AccountsOk",
+    "type": "object"
+   },
    "AgentJobModel": {
     "description": "Background install/connect/migrate job (process-local).",
     "properties": {
@@ -427,6 +589,30 @@
      "id"
     ],
     "title": "AgentTaskModel",
+    "type": "object"
+   },
+   "ApiTokenInfo": {
+    "description": "One API token without its hash.",
+    "properties": {
+     "created": {
+      "default": "",
+      "title": "Created",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "name": {
+      "default": "",
+      "title": "Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "ApiTokenInfo",
     "type": "object"
    },
    "AssistantAutomationsStatus": {
@@ -1360,6 +1546,25 @@
     "title": "CareerWorkspaceResponse",
     "type": "object"
    },
+   "ChangePasswordRequest": {
+    "description": "Self-service password change.",
+    "properties": {
+     "current_password": {
+      "title": "Current Password",
+      "type": "string"
+     },
+     "new_password": {
+      "title": "New Password",
+      "type": "string"
+     }
+    },
+    "required": [
+     "current_password",
+     "new_password"
+    ],
+    "title": "ChangePasswordRequest",
+    "type": "object"
+   },
    "CheckinCreateRequest": {
     "description": "Body for POST .../checkins (append one habit check-in).\n\n``habit`` accepts a habit id or title (resolved like the core helpers);\n``project_id`` is an alternative entry point that resolves through the\nhabit<->project link. ``date`` defaults to today; ``count`` must be\ngreater than zero. ``plan_id`` optionally binds the check-in to an\nactive habit plan of the same habit; the backend then derives and\nstores the plan-relative ``week_number`` (clients never send it).",
     "properties": {
@@ -2283,6 +2488,11 @@
      "id": {
       "title": "Id",
       "type": "string"
+     },
+     "must_change_password": {
+      "default": false,
+      "title": "Must Change Password",
+      "type": "boolean"
      },
      "profiles": {
       "items": {
@@ -10563,6 +10773,53 @@
     "title": "ResearchSummaryModel",
     "type": "object"
    },
+   "ResetPasswordRequest": {
+    "properties": {
+     "password": {
+      "title": "Password",
+      "type": "string"
+     }
+    },
+    "required": [
+     "password"
+    ],
+    "title": "ResetPasswordRequest",
+    "type": "object"
+   },
+   "SchemaInfo": {
+    "description": "One available domain skill-tree schema (``GET /api/v1/schemas``).\n\n``source`` is ``data`` for ``<NBLANE_ROOT>/schemas/*.yaml`` (admin-added\nor overriding) and ``builtin`` for the schemas shipped with the code.",
+    "properties": {
+     "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+     },
+     "domain": {
+      "title": "Domain",
+      "type": "string"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "node_count": {
+      "default": 0,
+      "title": "Node Count",
+      "type": "integer"
+     },
+     "source": {
+      "default": "builtin",
+      "title": "Source",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "domain"
+    ],
+    "title": "SchemaInfo",
+    "type": "object"
+   },
    "SidecarInfoModel": {
     "description": "Browser-facing Reader API sidecar coordinates for iframe/link entries.\n\n``base`` is the resolved sidecar origin: ``NBLANE_READER_API_BASE`` (or\n``NBLANE_PAPER_LIBRARY_BASE``), defaulting to ``http://127.0.0.1:8502``;\nthe ``0``/``false``/``off``/``none`` sentinel resolves to ``\"\"``, meaning\nsame-origin (production single-port deployment) — the SPA then uses the\nrelative ``*_url`` paths as-is. ``handoff_token`` is a short-lived\n``core.auth`` handoff token for the sidecar's ``POST /auth/session``\ncookie bootstrap; it is empty when auth is off (the default single-user\nlocal mode), in which case the sidecar pages need no session at all.",
     "properties": {
@@ -10688,7 +10945,7 @@
     "type": "object"
    },
    "SkillTreeCategoryModel": {
-    "description": "Per-category rollup for the category banner headers.\n\n``name`` is the zh display name (``core.starmap_snapshot.CATEGORY_ZH``,\nid as fallback) — the same source the home starmap sector band uses, so\nthe skill-tree banners and the starmap agree on 官名 lookup keys.\n``lit_count`` folds solid+expert (the 点亮 tier); locked = count − lit −\nlearning.",
+    "description": "Per-category rollup for the category banner headers.\n\n``name`` is the zh display name (the schema's ``categories:`` map, then\n``core.starmap_snapshot.CATEGORY_ZH``, id as fallback) — the same source the home starmap sector band uses, so\nthe skill-tree banners and the starmap agree on 官名 lookup keys.\n``lit_count`` folds solid+expert (the 点亮 tier); locked = count − lit −\nlearning.",
     "properties": {
      "count": {
       "default": 0,
@@ -11660,6 +11917,48 @@
     "title": "StudioValidationResponse",
     "type": "object"
    },
+   "TokenCreateRequest": {
+    "properties": {
+     "name": {
+      "title": "Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "title": "TokenCreateRequest",
+    "type": "object"
+   },
+   "TokenCreateResponse": {
+    "description": "The plaintext token is only ever returned here.",
+    "properties": {
+     "created": {
+      "title": "Created",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "token": {
+      "title": "Token",
+      "type": "string"
+     }
+    },
+    "required": [
+     "token",
+     "id",
+     "name",
+     "created"
+    ],
+    "title": "TokenCreateResponse",
+    "type": "object"
+   },
    "ValidationError": {
     "properties": {
      "ctx": {
@@ -12219,6 +12518,528 @@
  },
  "openapi": "3.1.0",
  "paths": {
+  "/api/v1/accounts": {
+   "get": {
+    "operationId": "list_accounts_api_v1_accounts_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/AccountInfo"
+         },
+         "title": "Response List Accounts Api V1 Accounts Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Conflict"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unprocessable Entity"
+     }
+    },
+    "summary": "List Accounts",
+    "tags": [
+     "accounts"
+    ]
+   },
+   "post": {
+    "operationId": "create_account_api_v1_accounts_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AccountCreateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AccountInfo"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Conflict"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unprocessable Entity"
+     }
+    },
+    "summary": "Create Account",
+    "tags": [
+     "accounts"
+    ]
+   }
+  },
+  "/api/v1/accounts/{user_id}": {
+   "patch": {
+    "operationId": "patch_account_api_v1_accounts__user_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "user_id",
+      "required": true,
+      "schema": {
+       "title": "User Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AccountPatchRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AccountInfo"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Conflict"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unprocessable Entity"
+     }
+    },
+    "summary": "Patch Account",
+    "tags": [
+     "accounts"
+    ]
+   }
+  },
+  "/api/v1/accounts/{user_id}/reset-password": {
+   "post": {
+    "description": "Set a temporary password; the user must change it at next login.",
+    "operationId": "reset_password_api_v1_accounts__user_id__reset_password_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "user_id",
+      "required": true,
+      "schema": {
+       "title": "User Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ResetPasswordRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AccountInfo"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Conflict"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unprocessable Entity"
+     }
+    },
+    "summary": "Reset Password",
+    "tags": [
+     "accounts"
+    ]
+   }
+  },
+  "/api/v1/accounts/{user_id}/tokens": {
+   "post": {
+    "operationId": "create_token_api_v1_accounts__user_id__tokens_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "user_id",
+      "required": true,
+      "schema": {
+       "title": "User Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TokenCreateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TokenCreateResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Conflict"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unprocessable Entity"
+     }
+    },
+    "summary": "Create Token",
+    "tags": [
+     "accounts"
+    ]
+   }
+  },
+  "/api/v1/accounts/{user_id}/tokens/{token_id}": {
+   "delete": {
+    "operationId": "revoke_token_api_v1_accounts__user_id__tokens__token_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "user_id",
+      "required": true,
+      "schema": {
+       "title": "User Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "token_id",
+      "required": true,
+      "schema": {
+       "title": "Token Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AccountsOk"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Conflict"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unprocessable Entity"
+     }
+    },
+    "summary": "Revoke Token",
+    "tags": [
+     "accounts"
+    ]
+   }
+  },
   "/api/v1/auth/login": {
    "post": {
     "description": "Verify credentials and set the shared session cookie.",
@@ -12283,6 +13104,28 @@
     ]
    }
   },
+  "/api/v1/auth/logout-all": {
+   "post": {
+    "description": "Sign out every session of the current user (this one included).",
+    "operationId": "logout_all_api_v1_auth_logout_all_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Logout All",
+    "tags": [
+     "auth"
+    ]
+   }
+  },
   "/api/v1/auth/me": {
    "get": {
     "description": "Return the current user (or the synthetic local admin when auth is off).",
@@ -12300,6 +13143,48 @@
      }
     },
     "summary": "Me",
+    "tags": [
+     "auth"
+    ]
+   }
+  },
+  "/api/v1/auth/password": {
+   "post": {
+    "description": "Change your own password; every other session is signed out.",
+    "operationId": "change_password_api_v1_auth_password_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ChangePasswordRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CurrentUser"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Change Password",
     "tags": [
      "auth"
     ]
@@ -23461,6 +24346,29 @@
      }
     },
     "summary": "Get Profile Summary"
+   }
+  },
+  "/api/v1/schemas": {
+   "get": {
+    "description": "Available domain schemas (data dir ∪ built-in), for 新建用户 / init.",
+    "operationId": "get_schemas_api_v1_schemas_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/SchemaInfo"
+         },
+         "title": "Response Get Schemas Api V1 Schemas Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Get Schemas"
    }
   },
   "/api/v1/settings/agents/openclaw": {

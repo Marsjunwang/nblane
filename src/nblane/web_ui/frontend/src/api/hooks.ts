@@ -5,6 +5,13 @@ import type { QueryClient } from '@tanstack/react-query';
 
 import { ApiError, apiBase, apiDelete, apiDeleteWithHeaders, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, apiPostForm, apiPut, apiPutWithHeaders, ifMatch } from './client';
 import type {
+  AccountCreate,
+  AccountInfo,
+  AccountPatch,
+  AccountsOk,
+  SchemaInfo,
+  ChangePasswordRequest,
+  TokenCreateResult,
   AIExceptionBulkDismissResponse,
   AIExceptionsResponse,
   AssistantStatus,
@@ -157,6 +164,89 @@ export function useLogout() {
     onSettled: () => {
       queryClient.clear();
     },
+  });
+}
+
+/** Change your own password; the server reissues this session's cookie. */
+export function useChangePassword() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ChangePasswordRequest) =>
+      apiPost<CurrentUser>('/auth/password', body),
+    onSuccess: (user) => {
+      queryClient.setQueryData(['auth', 'me'], user);
+    },
+  });
+}
+
+/** Sign out every session of this account (including this one). */
+export function useLogoutAll() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<AccountsOk>('/auth/logout-all'),
+    onSuccess: () => {
+      queryClient.clear();
+    },
+  });
+}
+
+const ACCOUNTS_KEY = ['accounts'] as const;
+
+/** Admin-only account list (Settings → 账号管理). */
+export function useAccounts(enabled = true) {
+  return useQuery({
+    queryKey: ACCOUNTS_KEY,
+    queryFn: () => apiGet<AccountInfo[]>('/accounts'),
+    enabled,
+  });
+}
+
+function useAccountMutation<TVars, TResult>(fn: (vars: TVars) => Promise<TResult>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY });
+      // Creating a user may also create a profile.
+      void queryClient.invalidateQueries({ queryKey: ['profiles'] });
+    },
+  });
+}
+
+const accountPath = (id: string) => `/accounts/${encodeURIComponent(id)}`;
+
+export function useCreateAccount() {
+  return useAccountMutation((body: AccountCreate) => apiPost<AccountInfo>('/accounts', body));
+}
+
+export function useUpdateAccount() {
+  return useAccountMutation(({ id, patch }: { id: string; patch: AccountPatch }) =>
+    apiPatch<AccountInfo>(accountPath(id), patch));
+}
+
+export function useResetAccountPassword() {
+  return useAccountMutation(({ id, password }: { id: string; password: string }) =>
+    apiPost<AccountInfo>(`${accountPath(id)}/reset-password`, { password }));
+}
+
+/** The plaintext token is only in this response; never cached. */
+export function useCreateAccountToken() {
+  return useAccountMutation(({ id, name }: { id: string; name: string }) =>
+    apiPost<TokenCreateResult>(`${accountPath(id)}/tokens`, { name }));
+}
+
+export function useRevokeAccountToken() {
+  return useAccountMutation(({ id, tokenId }: { id: string; tokenId: string }) =>
+    apiDelete<AccountsOk>(`${accountPath(id)}/tokens/${encodeURIComponent(tokenId)}`));
+}
+
+/** Available domain schemas (data dir ∪ built-in) for profile creation. */
+export function useSchemas(enabled = true) {
+  return useQuery({
+    queryKey: ['schemas'],
+    queryFn: () => apiGet<SchemaInfo[]>('/schemas'),
+    enabled,
+    staleTime: 60_000,
   });
 }
 

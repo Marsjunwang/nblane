@@ -103,6 +103,13 @@ class FakeServer:
         return httpx.MockTransport(self.handler)
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_token(monkeypatch, tmp_path):
+    """Keep a real NBLANE_OPENCLAW_API_TOKEN (env or api.env) out of tests."""
+    monkeypatch.delenv(nblane_api.TOKEN_ENV, raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "isolated-config"))
+
+
 @pytest.fixture
 def server():
     return FakeServer()
@@ -416,3 +423,52 @@ def test_removed_review_queue_commands_are_gone():
     for argv in (["propose", "f", "v"], ["activity"]):
         with pytest.raises(SystemExit):
             parser.parse_args(argv)
+
+
+TOKEN = "nbl_ab12cd34_test-secret"
+
+
+def _token_transport(seen: list[httpx.Request], *, status: int = 200) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(status, json={"ok": True} if status == 200 else {"code": "unauthorized"})
+
+    return httpx.MockTransport(handler)
+
+
+def test_token_sends_bearer_and_never_logs_in(tmp_path):
+    seen: list[httpx.Request] = []
+    jar = tmp_path / "api-cookies.json"
+    session = nblane_api.Session(
+        "http://127.0.0.1:8504", token=TOKEN, jar_path=jar, transport=_token_transport(seen),
+    )
+    response = session.request("GET", "/profiles/x/summary")
+    assert response.status_code == 200
+    assert seen[0].headers["authorization"] == f"Bearer {TOKEN}"
+    assert not any(r.url.path.endswith("/auth/login") for r in seen)
+    assert not jar.exists()
+
+
+def test_rejected_token_fails_without_password_fallback(tmp_path):
+    seen: list[httpx.Request] = []
+    session = nblane_api.Session(
+        "http://127.0.0.1:8504", token=TOKEN, password=PASSWORD,
+        jar_path=tmp_path / "jar.json", transport=_token_transport(seen, status=401),
+    )
+    with pytest.raises(nblane_api.ApiFailure, match=nblane_api.TOKEN_ENV):
+        session.request("GET", "/profiles/x/summary")
+    assert len(seen) == 1
+    assert TOKEN not in str(seen[0].content)
+
+
+def test_token_falls_back_to_config_file(tmp_path, monkeypatch):
+    config = tmp_path / "config" / "nblane"
+    config.mkdir(parents=True)
+    (config / "api.env").write_text(f"{nblane_api.PASSWORD_ENV}={PASSWORD}\n{nblane_api.TOKEN_ENV}={TOKEN}\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    seen: list[httpx.Request] = []
+    session = nblane_api.Session(
+        "http://127.0.0.1:8504", jar_path=tmp_path / "jar.json", transport=_token_transport(seen),
+    )
+    session.request("GET", "/profiles/x/summary")
+    assert seen[0].headers["authorization"] == f"Bearer {TOKEN}"

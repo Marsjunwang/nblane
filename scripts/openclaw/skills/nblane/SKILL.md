@@ -18,8 +18,8 @@ metadata:
 - 读写一律用 `{baseDir}/../bin/nblane_api <子命令>`（以 `openclaw` 服务账号访问 nblane
   HTTP API），输出 JSON。完整子命令见 `nblane_api --help`。不要用 nblane 的 MCP 工具或
   `profile://` 资源：那条通道不经过账号权限，留给 Cursor 这类本机客户端。
-- 服务账号密码从环境变量 `NBLANE_OPENCLAW_API_PASSWORD` 读取。若报密码未设置，告诉用户
-  「nblane 服务账号密码未配置」，不要索要或转述密码本身。
+- 服务账号凭据（API token `NBLANE_OPENCLAW_API_TOKEN`，或旧的密码）由服务器配置。若报凭据未设置
+  或 token 被拒，告诉用户「nblane 服务账号凭据未配置或已失效」，不要索要或转述 token、密码本身。
 - 不要读取 nblane 数据目录下的文件，也不要直接改文件；一律走 `nblane_api`。
 
 ## 成功与失败

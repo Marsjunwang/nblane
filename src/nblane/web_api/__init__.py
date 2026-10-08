@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
 
+from nblane.web_api.accounts import router as accounts_router
 from nblane.web_api.agent_guard import agent_write_guard
 from nblane.web_api.agents_setup import router as agents_setup_router
 from nblane.web_api.assistant import router as assistant_router
@@ -67,6 +68,7 @@ def create_app(
     app.include_router(local_models_router)
     app.include_router(grobid_router)
     app.include_router(agents_setup_router)
+    app.include_router(accounts_router)
     # /terminal/* (authenticated ttyd proxy) must also win over the SPA fallback.
     app.include_router(workshop_terminal_router)
     # Mounted last so API routes win over the SPA catch-all fallback.

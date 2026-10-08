@@ -211,9 +211,12 @@ def _set_auth_session_cookie(
     request: Request,
     user_id: str,
     *,
+    session_version: int = 0,
     ttl_seconds: int = 12 * 3600,
 ) -> None:
-    token = auth_core.mint_auth_session_token(user_id, ttl_seconds=ttl_seconds)
+    token = auth_core.mint_auth_session_token(
+        user_id, ttl_seconds=ttl_seconds, session_version=session_version
+    )
     claims = auth_core.verify_auth_session_token(token)
     max_age = _auth_cookie_max_age(claims.exp) if claims else ttl_seconds
     response.set_cookie(
@@ -237,7 +240,9 @@ def _delete_auth_session_cookie(response: Response, request: Request) -> None:
     )
 
 
-def _load_auth_user(user_id: str) -> auth_core.User:
+def _load_auth_user(claims: auth_core.AuthSessionClaims) -> auth_core.User:
+    """User for verified session/handoff claims (disabled + session version checked)."""
+    user_id = claims.user_id
     if not auth_core.auth_configured():
         if user_id and user_id != "local":
             return auth_core.User(
@@ -251,7 +256,7 @@ def _load_auth_user(user_id: str) -> auth_core.User:
         users = auth_core.load_users()
     except auth_core.AuthConfigError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    user = users.get(str(user_id or "").strip())
+    user = auth_core.resolve_session_user(claims, users)
     if user is None:
         raise HTTPException(status_code=401, detail="invalid auth session")
     return user
@@ -271,7 +276,7 @@ def _auth_user_from_request(request: Request) -> auth_core.User:
     if cookie:
         claims = _verify_auth_token(cookie, expected_kind=auth_core.AUTH_SESSION_KIND)
         if claims is not None:
-            return _load_auth_user(claims.user_id)
+            return _load_auth_user(claims)
     handoff = (
         request.query_params.get("auth_handoff", "")
         or request.query_params.get("handoff", "")
@@ -279,8 +284,9 @@ def _auth_user_from_request(request: Request) -> auth_core.User:
     if handoff:
         claims = _verify_auth_token(handoff, expected_kind=auth_core.AUTH_HANDOFF_KIND)
         if claims is not None:
-            user = _load_auth_user(claims.user_id)
+            user = _load_auth_user(claims)
             request.state.nblane_auth_handoff_user_id = user.id
+            request.state.nblane_auth_handoff_sv = user.session_version
             return user
     raise HTTPException(status_code=401, detail="auth session required")
 
@@ -288,7 +294,8 @@ def _auth_user_from_request(request: Request) -> auth_core.User:
 def _apply_handoff_cookie(response: Response, request: Request) -> None:
     user_id = str(getattr(request.state, "nblane_auth_handoff_user_id", "") or "").strip()
     if user_id:
-        _set_auth_session_cookie(response, request, user_id)
+        sv = int(getattr(request.state, "nblane_auth_handoff_sv", 0) or 0)
+        _set_auth_session_cookie(response, request, user_id, session_version=sv)
 
 
 def _safe_auth_next(next_url: str) -> str:
@@ -314,7 +321,7 @@ def _auth_session_response(request: Request, token: str, next: str = "") -> Resp
     claims = _verify_auth_token(token, expected_kind=auth_core.AUTH_HANDOFF_KIND)
     if claims is None:
         raise HTTPException(status_code=401, detail="invalid auth handoff")
-    user = _load_auth_user(claims.user_id)
+    user = _load_auth_user(claims)
     if next:
         response: Response = RedirectResponse(_safe_auth_next(next), status_code=303)
     else:
@@ -322,7 +329,9 @@ def _auth_session_response(request: Request, token: str, next: str = "") -> Resp
             "<!doctype html><html><body>ok</body></html>",
             media_type="text/html",
         )
-    _set_auth_session_cookie(response, request, user.id)
+    _set_auth_session_cookie(
+        response, request, user.id, session_version=user.session_version
+    )
     return response
 
 
@@ -415,7 +424,7 @@ def _user_for_claims(claims: auth_core.ReaderTokenClaims) -> auth_core.User:
     except auth_core.AuthConfigError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     user = users.get(claims.user_id)
-    if user is None:
+    if user is None or user.disabled:
         raise HTTPException(status_code=401, detail="invalid reader session")
     if not auth_core.can_access_profile(user, claims.profile):
         raise HTTPException(status_code=403, detail="profile forbidden")

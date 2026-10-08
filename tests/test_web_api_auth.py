@@ -234,6 +234,121 @@ class TestAuthOn(unittest.TestCase):
             )
 
 
+class TestSessionsAndTokens(unittest.TestCase):
+    """Session versions, password change, logout-all, disable, API tokens."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.users_file = _write_users_file(Path(tmp.name) / "users.yaml")
+        patcher = patch.dict(
+            os.environ,
+            {
+                "NBLANE_AUTH_FILE": str(self.users_file),
+                "NBLANE_AUTH_SESSION_SECRET": TEST_SESSION_SECRET,
+            },
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        auth_core.clear_users_cache()
+        self.addCleanup(auth_core.clear_users_cache)
+        self.app = create_app()
+
+    def _login(self, username: str = "admin", password: str = PASSWORD) -> TestClient:
+        client = TestClient(self.app)
+        response = client.post(
+            "/api/v1/auth/login", json={"username": username, "password": password}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return client
+
+    def _edit_user(self, user_id: str, **fields) -> None:
+        raw = yaml.safe_load(self.users_file.read_text(encoding="utf-8"))
+        raw["users"][user_id].update(fields)
+        self.users_file.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    def test_legacy_cookie_without_sv_still_valid(self) -> None:
+        import json
+
+        payload = {"user_id": "admin", "kind": auth_core.AUTH_SESSION_KIND, "iat": 1,
+                   "exp": 4_000_000_000}
+        b64 = auth_core._b64(json.dumps(payload, separators=(",", ":")).encode())
+        token = f"{b64}.{auth_core._auth_session_token_signature(b64)}"
+        client = TestClient(self.app)
+        client.cookies.set(auth_core.AUTH_SESSION_COOKIE_NAME, token)
+        self.assertEqual(client.get("/api/v1/auth/me").status_code, 200)
+
+    def test_password_change_invalidates_other_sessions(self) -> None:
+        current = self._login()
+        other = self._login()
+        wrong = current.post(
+            "/api/v1/auth/password",
+            json={"current_password": "nope", "new_password": "brand-new-password"},
+        )
+        self.assertEqual(wrong.status_code, 401)
+        self.assertEqual(wrong.json()["code"], "invalid_current_password")
+        weak = current.post(
+            "/api/v1/auth/password",
+            json={"current_password": PASSWORD, "new_password": "short"},
+        )
+        self.assertEqual(weak.status_code, 422)
+        self.assertEqual(weak.json()["code"], "weak_password")
+        ok = current.post(
+            "/api/v1/auth/password",
+            json={"current_password": PASSWORD, "new_password": "brand-new-password"},
+        )
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertFalse(ok.json()["must_change_password"])
+        self.assertEqual(current.get("/api/v1/auth/me").status_code, 200)
+        self.assertEqual(other.get("/api/v1/auth/me").status_code, 401)
+        self._login(password="brand-new-password")
+
+    def test_logout_all(self) -> None:
+        first = self._login()
+        second = self._login()
+        response = first.post("/api/v1/auth/logout-all")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(first.get("/api/v1/auth/me").status_code, 401)
+        self.assertEqual(second.get("/api/v1/auth/me").status_code, 401)
+        self._login()
+
+    def test_disabled_user_cookie_and_login_401(self) -> None:
+        client = self._login("wang")
+        self._edit_user("wang", disabled=True)
+        self.assertEqual(client.get("/api/v1/auth/me").status_code, 401)
+        response = TestClient(self.app).post(
+            "/api/v1/auth/login", json={"username": "wang", "password": PASSWORD}
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], GENERIC_LOGIN_ERROR)
+
+    def test_bearer_token_and_revoke(self) -> None:
+        from nblane.core import auth_store
+
+        token, record = auth_store.create_api_token("wang", "cli")
+        client = TestClient(self.app)
+        headers = {"Authorization": f"Bearer {token}"}
+        me = client.get("/api/v1/auth/me", headers=headers)
+        self.assertEqual(me.status_code, 200)
+        self.assertEqual(me.json()["id"], "wang")
+        bad = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}x"})
+        self.assertEqual(bad.status_code, 401)
+        auth_store.revoke_api_token("wang", record.id)
+        self.assertEqual(client.get("/api/v1/auth/me", headers=headers).status_code, 401)
+
+    def test_must_change_password_in_me(self) -> None:
+        self._edit_user("wang", must_change_password=True)
+        client = self._login("wang")
+        self.assertTrue(client.get("/api/v1/auth/me").json()["must_change_password"])
+
+    def test_load_users_cache_invalidates_on_file_change(self) -> None:
+        self.assertEqual(auth_core.load_users()["wang"].display_name, "Wang")
+        self._edit_user("wang", display_name="Wang Jun Changed")
+        self.assertEqual(
+            auth_core.load_users()["wang"].display_name, "Wang Jun Changed"
+        )
+
+
 class TestProfilesListingScope(unittest.TestCase):
     """GET /api/v1/profiles is scope-filtered (M-API-1)."""
 

@@ -1,0 +1,607 @@
+# Autonomous Driving Engineer · Skill Tree Schema
+# nblane shared schema — autonomous-driving.yaml
+#
+# This defines ALL nodes in the tree.
+# Each person's skill-tree.yaml references node IDs from here.
+#
+# NOTE:
+# - Keep `id` in ASCII snake_case for CLI compatibility.
+# - Keep `label` English or bilingual so token matching still works.
+# - Generic ids (foundations / research / influence / leadership / strategy)
+#   are shared with robotics-engineer.yaml on purpose, so switching domains
+#   keeps as much of a profile's tree as possible.
+#
+# levels:
+#   1 = foundation (unlock first)
+#   2 = intermediate (requires level-1 parents)
+#   3 = advanced
+#   4 = expert / research frontier / industry leverage
+
+schema_version: "1.0"
+domain: "Autonomous Driving Engineer / 自动驾驶工程师"
+description: >
+  Skill tree for engineers building autonomous driving systems:
+  perception, localization and mapping, prediction and planning, control,
+  learning-based and end-to-end driving, simulation, onboard systems and
+  data closed loop, functional safety, research expression, public
+  influence, leadership, and strategic judgment.
+
+# Display names per category (zh). The SPA maps these names to 星官.
+categories:
+  foundations: 基础
+  perception: 感知
+  navigation: 导航
+  planning: 规划
+  control: 控制
+  learning: 学习力
+  simulation: 仿真
+  systems: 系统
+  safety: 安全
+  research: 研究
+  influence: 影响力
+  leadership: 领导力
+  strategy: 战略
+
+nodes:
+
+  # ── FOUNDATIONS / 基础能力 ───────────────────────────────────────────────────
+
+  - id: linux_basics
+    label: Linux & Shell
+    level: 1
+    category: foundations
+
+  - id: python_core
+    label: Python (numpy, scipy, matplotlib)
+    level: 1
+    category: foundations
+
+  - id: cpp_core
+    label: C++ (modern, real-time aware)
+    level: 1
+    category: foundations
+
+  - id: git_workflow
+    label: Git / GitHub workflow
+    level: 1
+    category: foundations
+
+  - id: math_linalg
+    label: Linear Algebra
+    level: 1
+    category: foundations
+
+  - id: math_probability
+    label: Probability & Statistics
+    level: 1
+    category: foundations
+
+  - id: math_optimization
+    label: Optimization (convex basics)
+    level: 1
+    category: foundations
+
+  - id: math_calculus_ode
+    label: Calculus & ODE
+    level: 1
+    category: foundations
+
+  - id: geometry_transforms
+    label: 3D Geometry & Coordinate Transforms / 三维几何与坐标变换
+    level: 1
+    category: foundations
+    requires: [math_linalg]
+    keywords: [坐标系, 坐标变换, 四元数, se3, quaternion, 李群]
+
+  # ── PERCEPTION / 感知 ────────────────────────────────────────────────────────
+
+  - id: camera_calibration
+    label: Camera Calibration & Projection
+    level: 1
+    category: perception
+    requires: [geometry_transforms]
+    keywords: [相机标定, 内参, 畸变, 投影]
+
+  - id: sensor_calibration
+    label: Multi-Sensor Calibration & Time Sync / 多传感器标定与时间同步
+    level: 2
+    category: perception
+    requires: [camera_calibration]
+    keywords: [外参标定, 联合标定, lidar, radar, 毫米波, 时间同步, ptp]
+
+  - id: object_detection
+    label: 2D Object Detection (YOLO family)
+    level: 2
+    category: perception
+    requires: [python_core]
+    keywords: [目标检测, yolo, 2d 检测]
+
+  - id: detection_3d
+    label: 3D Object Detection (LiDAR / camera) / 三维目标检测
+    level: 3
+    category: perception
+    requires: [object_detection, sensor_calibration]
+    keywords: [3d 检测, 点云检测, pointpillars, centerpoint, 激光雷达]
+
+  - id: multi_object_tracking
+    label: Multi-Object Tracking / 多目标跟踪
+    level: 2
+    category: perception
+    requires: [object_detection, math_probability]
+    keywords: [多目标跟踪, mot, 卡尔曼滤波, kalman]
+
+  - id: traffic_light_sign
+    label: Traffic Light & Sign Recognition / 红绿灯与交通标志识别
+    level: 2
+    category: perception
+    requires: [object_detection]
+    keywords: [红绿灯, 交通标志, 信号灯]
+
+  - id: bev_perception
+    label: BEV Perception (BEVFormer / LSS) / BEV 感知
+    level: 3
+    category: perception
+    requires: [detection_3d]
+    keywords: [bev, 鸟瞰图, bevformer, lss, bevfusion]
+
+  - id: multimodal_fusion
+    label: Multimodal Sensor Fusion (camera + LiDAR + radar) / 多模态融合
+    level: 3
+    category: perception
+    requires: [detection_3d, sensor_calibration]
+    keywords: [多模态融合, 前融合, 后融合, 传感器融合]
+
+  - id: occupancy_network
+    label: Occupancy Networks / 占用网络
+    level: 4
+    category: perception
+    requires: [bev_perception]
+    keywords: [占用网络, occupancy, 通用障碍物, occ]
+
+  - id: online_mapping
+    label: Lane & Map Element Perception (MapTR) / 在线建图
+    level: 3
+    category: perception
+    requires: [bev_perception]
+    keywords: [车道线, 在线建图, maptr, 矢量地图, 局部地图]
+
+  - id: foundation_models_perception
+    label: Foundation Models for Perception (SAM, CLIP, DINO)
+    level: 3
+    category: perception
+    requires: [object_detection]
+    keywords: [基础模型, vlm, 视觉语言模型, dino, clip, 开放词汇]
+
+  # ── NAVIGATION / 定位与建图 ──────────────────────────────────────────────────
+
+  - id: localization
+    label: Localization (GNSS / IMU / odometry fusion) / 组合定位
+    level: 2
+    category: navigation
+    requires: [math_probability, geometry_transforms]
+    keywords: [定位, 组合导航, gnss, rtk, imu, 惯导, ekf]
+
+  - id: slam_basics
+    label: SLAM Fundamentals (factor graphs, EKF-SLAM)
+    level: 2
+    category: navigation
+    requires: [math_probability, geometry_transforms]
+    keywords: [slam, 因子图, 位姿图]
+
+  - id: lidar_slam
+    label: LiDAR SLAM (LOAM / LIO-SAM / FAST-LIO)
+    level: 3
+    category: navigation
+    requires: [slam_basics]
+    keywords: [激光 slam, loam, lio-sam, fast-lio]
+
+  - id: visual_slam
+    label: Visual SLAM (ORB-SLAM3 / VINS)
+    level: 3
+    category: navigation
+    requires: [slam_basics, camera_calibration]
+    keywords: [视觉 slam, vio, vins, orb-slam]
+
+  - id: hd_map
+    label: HD Map Production & Usage / 高精地图
+    level: 3
+    category: navigation
+    requires: [localization, lidar_slam]
+    keywords: [高精地图, hd map, 地图生产, lanelet2, opendrive]
+
+  - id: mapless_driving
+    label: Mapless / Light-Map Driving / 无图方案
+    level: 4
+    category: navigation
+    requires: [online_mapping, hd_map]
+    keywords: [无图, 轻图, 去高精地图, sd map]
+
+  # ── PLANNING / 规划 ──────────────────────────────────────────────────────────
+
+  - id: route_planning
+    label: Route Planning & Graph Search (A* / Hybrid A*) / 全局路径规划
+    level: 2
+    category: planning
+    requires: [math_optimization, python_core]
+    keywords: [路径规划, a*, hybrid a*, 导航路径, 泊车规划]
+
+  - id: motion_prediction
+    label: Motion Prediction / 轨迹预测
+    level: 3
+    category: planning
+    requires: [multi_object_tracking, math_probability]
+    keywords: [轨迹预测, 行为预测, prediction, vectornet, mtr]
+
+  - id: trajectory_planning
+    label: Trajectory Planning (lattice / optimization-based) / 轨迹规划
+    level: 3
+    category: planning
+    requires: [route_planning, math_optimization]
+    keywords: [轨迹规划, lattice, em planner, frenet, 速度规划, 运动规划]
+
+  - id: behavior_decision
+    label: Behavior Decision Making / 行为决策
+    level: 3
+    category: planning
+    requires: [motion_prediction]
+    keywords: [行为决策, 决策, 状态机, pomdp, 变道决策]
+
+  - id: interaction_aware_planning
+    label: Interaction-Aware Planning / 交互式规划
+    level: 4
+    category: planning
+    requires: [behavior_decision, trajectory_planning]
+    keywords: [交互, 博弈, 交互式规划, 拥堵博弈]
+
+  - id: joint_prediction_planning
+    label: Game-Theoretic / Joint Prediction-Planning / 预测规划联合
+    level: 4
+    category: planning
+    requires: [interaction_aware_planning, motion_prediction]
+    keywords: [博弈论, 联合预测规划, game theory, 预测规划一体化]
+
+  # ── CONTROL / 控制 ───────────────────────────────────────────────────────────
+
+  - id: classical_control
+    label: Classical Control (PID, state-space)
+    level: 1
+    category: control
+    requires: [math_linalg, math_calculus_ode]
+    keywords: [pid, 状态空间, 经典控制]
+
+  - id: vehicle_dynamics
+    label: Vehicle Dynamics & Modeling / 车辆动力学
+    level: 2
+    category: control
+    requires: [math_calculus_ode]
+    keywords: [车辆动力学, 自行车模型, 轮胎模型, bicycle model]
+
+  - id: optimal_control
+    label: Optimal Control & MPC (LQR / MPC)
+    level: 2
+    category: control
+    requires: [classical_control, math_optimization]
+    keywords: [lqr, mpc, 模型预测控制, 最优控制]
+
+  - id: lateral_longitudinal_control
+    label: Lateral & Longitudinal Control / 横纵向控制
+    level: 3
+    category: control
+    requires: [vehicle_dynamics, optimal_control]
+    keywords: [横向控制, 纵向控制, pure pursuit, stanley, acc]
+
+  - id: drive_by_wire
+    label: Chassis & Drive-by-Wire Interface / 线控底盘接口
+    level: 3
+    category: control
+    requires: [lateral_longitudinal_control, vehicle_middleware]
+    keywords: [线控, 线控底盘, can, 底盘接口, eps]
+
+  # ── LEARNING / 学习式驾驶 ────────────────────────────────────────────────────
+
+  - id: rl_basics
+    label: Reinforcement Learning (MDP, Q-learning, PPO)
+    level: 2
+    category: learning
+    requires: [math_probability, math_optimization, python_core]
+    keywords: [强化学习, ppo, mdp]
+
+  - id: imitation_learning
+    label: Imitation Learning (BC, DAgger)
+    level: 3
+    category: learning
+    requires: [python_core, math_probability]
+    keywords: [模仿学习, 行为克隆, behavior cloning]
+
+  - id: end_to_end_driving
+    label: End-to-End Driving (UniAD / VAD) / 端到端自动驾驶
+    level: 4
+    category: learning
+    requires: [imitation_learning, bev_perception, motion_prediction]
+    keywords: [端到端, e2e, uniad, vad, 一段式, 两段式]
+
+  - id: diffusion_planning
+    label: Diffusion-Based Planning / 扩散规划
+    level: 4
+    category: learning
+    requires: [imitation_learning, trajectory_planning]
+    keywords: [扩散模型, diffusion planner, 扩散策略, 生成式规划]
+
+  - id: world_models
+    label: Driving World Models (generative) / 驾驶世界模型
+    level: 4
+    category: learning
+    requires: [end_to_end_driving, foundation_models_perception]
+    keywords: [world model, 世界模型, gaia, 生成式仿真, 视频生成]
+
+  - id: vla_driving
+    label: VLM / VLA for Driving / 视觉语言动作模型
+    level: 4
+    category: learning
+    requires: [end_to_end_driving, foundation_models_perception]
+    keywords: [vla, vlm, 大模型, drivevlm, emma, 多模态大模型]
+
+  # ── SIMULATION / 仿真 ────────────────────────────────────────────────────────
+
+  - id: driving_simulators
+    label: Driving Simulators (CARLA / LGSVL / commercial) / 驾驶仿真器
+    level: 2
+    category: simulation
+    requires: [python_core]
+    keywords: [仿真, carla, 仿真器, prescan, vtd]
+
+  - id: log_replay
+    label: Log Replay & Re-simulation / 回灌仿真
+    level: 2
+    category: simulation
+    requires: [driving_simulators]
+    keywords: [回灌, 日志回放, rosbag, 重仿真]
+
+  - id: scenario_generation
+    label: Scenario Generation (OpenSCENARIO) / 场景生成
+    level: 3
+    category: simulation
+    requires: [driving_simulators]
+    keywords: [场景生成, openscenario, 场景库, 长尾场景]
+
+  - id: closed_loop_evaluation
+    label: Closed-Loop Evaluation (nuPlan / NAVSIM / Bench2Drive) / 闭环评测
+    level: 3
+    category: simulation
+    requires: [driving_simulators, log_replay]
+    keywords: [闭环评测, nuplan, navsim, bench2drive, 开环, 闭环]
+
+  - id: neural_reconstruction_sim
+    label: Neural Reconstruction Simulation (NeRF / 3DGS) / 神经重建仿真
+    level: 4
+    category: simulation
+    requires: [scenario_generation, visual_slam]
+    keywords: [nerf, 3dgs, 高斯泼溅, 重建仿真, 4d 重建]
+
+  # ── SYSTEMS / 系统与部署 ─────────────────────────────────────────────────────
+
+  - id: docker_deploy
+    label: Docker & containerized stacks
+    level: 2
+    category: systems
+    requires: [linux_basics]
+
+  - id: vehicle_middleware
+    label: Vehicle Compute & Middleware (ROS2 / Cyber RT / AUTOSAR) / 车载中间件
+    level: 2
+    category: systems
+    requires: [linux_basics, cpp_core]
+    keywords: [ros2, cyber rt, apollo, autosar, 中间件, 域控]
+
+  - id: realtime_systems
+    label: Real-Time Systems (RTOS, deterministic latency)
+    level: 3
+    category: systems
+    requires: [cpp_core, vehicle_middleware]
+    keywords: [rtos, 实时系统, 确定性延迟, qnx]
+
+  - id: edge_inference
+    label: Edge Inference (TensorRT / ONNX / Orin)
+    level: 3
+    category: systems
+    requires: [docker_deploy]
+    keywords: [边缘推理, tensorrt, onnx, 量化, orin, 车端部署]
+
+  - id: model_distillation
+    label: Model Compression & Distillation
+    level: 3
+    category: systems
+    requires: [edge_inference]
+    keywords: [模型蒸馏, 压缩, 剪枝, distillation]
+
+  - id: data_closed_loop
+    label: Data Closed Loop (data engine, triggering, mining) / 数据闭环
+    level: 3
+    category: systems
+    requires: [docker_deploy, python_core]
+    keywords: [数据闭环, 数据引擎, 影子模式, 触发采集, 数据挖掘]
+
+  - id: auto_labeling
+    label: Auto-Labeling (4D labeling, offboard models) / 自动标注
+    level: 3
+    category: systems
+    requires: [data_closed_loop, detection_3d]
+    keywords: [自动标注, 4d 标注, 真值, 离线大模型]
+
+  - id: ota_fleet_ops
+    label: OTA & Fleet Operations / OTA 与车队运营
+    level: 3
+    category: systems
+    requires: [docker_deploy, data_closed_loop]
+    keywords: [ota, 车队, 远程升级, 灰度发布]
+
+  # ── SAFETY / 安全 ────────────────────────────────────────────────────────────
+
+  - id: functional_safety
+    label: Functional Safety (ISO 26262) / 功能安全
+    level: 3
+    category: safety
+    requires: [vehicle_middleware]
+    keywords: [功能安全, iso 26262, asil, fmea, fta]
+
+  - id: sotif
+    label: SOTIF (ISO 21448) / 预期功能安全
+    level: 3
+    category: safety
+    requires: [functional_safety]
+    keywords: [预期功能安全, sotif, iso 21448, 触发条件]
+
+  - id: scenario_based_testing
+    label: Scenario-Based Testing / 场景化测试
+    level: 3
+    category: safety
+    requires: [scenario_generation]
+    keywords: [场景测试, 测试用例, 实车测试, 封闭场地]
+
+  - id: safety_case
+    label: Safety Case, Validation & Verification / 安全论证与验证
+    level: 4
+    category: safety
+    requires: [sotif, scenario_based_testing, closed_loop_evaluation]
+    keywords: [安全论证, safety case, v&v, 验证与确认, ul 4600]
+
+  - id: redundancy_fallback
+    label: Redundancy & Fallback (MRM) / 冗余与降级
+    level: 4
+    category: safety
+    requires: [functional_safety, drive_by_wire]
+    keywords: [冗余, 降级, mrm, 最小风险策略, fail-operational]
+
+  - id: regulations
+    label: Regulations & Standards (UN R157, L2/L3 rules) / 法规与准入
+    level: 3
+    category: safety
+    requires: [functional_safety]
+    keywords: [法规, 准入, un r157, alks, l3, gb]
+
+  - id: cybersecurity
+    label: Automotive Cybersecurity (ISO 21434) / 信息安全
+    level: 3
+    category: safety
+    requires: [vehicle_middleware]
+    keywords: [信息安全, 网络安全, iso 21434, un r155]
+
+  # ── RESEARCH SKILLS / 研究能力 ───────────────────────────────────────────────
+
+  - id: paper_reading
+    label: Paper Reading (structured, systematic)
+    level: 1
+    category: research
+
+  - id: experiment_design
+    label: Experiment Design & Ablation Studies
+    level: 2
+    category: research
+    requires: [paper_reading]
+
+  - id: paper_writing
+    label: Paper Writing (CVPR / ICRA / CoRL level)
+    level: 3
+    category: research
+    requires: [experiment_design]
+
+  - id: first_author_pub
+    label: First-Author Publication (top venue)
+    level: 4
+    category: research
+    requires: [paper_writing]
+
+  - id: open_source_impact
+    label: Open Source Project with Real Users
+    level: 3
+    category: research
+
+  # ── INFLUENCE & PUBLIC PRESENCE / 影响力与公开表达 ───────────────────────────
+
+  - id: technical_writing
+    label: Technical Writing / 技术写作
+    level: 1
+    category: influence
+
+  - id: public_sharing
+    label: Public Sharing / 公开分享
+    level: 2
+    category: influence
+    requires: [technical_writing]
+
+  - id: peer_networking
+    label: Peer Networking / 同行连接
+    level: 2
+    category: influence
+    requires: [public_sharing]
+
+  - id: personal_brand
+    label: Personal Brand Positioning / 个人品牌定位
+    level: 3
+    category: influence
+    requires: [technical_writing, public_sharing, peer_networking]
+
+  - id: industry_trust
+    label: Industry Trust & Recognition / 行业信任与认可
+    level: 4
+    category: influence
+    requires: [personal_brand, technical_strategy, open_source_impact]
+
+  # ── COLLABORATION & LEADERSHIP / 协作与领导力 ───────────────────────────────
+
+  - id: cross_team_collaboration
+    label: Cross-Team Collaboration / 跨团队协作
+    level: 2
+    category: leadership
+    requires: [git_workflow]
+
+  - id: project_leadership
+    label: Project Leadership / 项目带领
+    level: 2
+    category: leadership
+    requires: [experiment_design]
+
+  - id: mentoring
+    label: Mentoring / 带人与反馈
+    level: 3
+    category: leadership
+    requires: [project_leadership]
+
+  - id: team_building
+    label: Team Building / 团队搭建
+    level: 4
+    category: leadership
+    requires: [mentoring, cross_team_collaboration]
+
+  # ── STRATEGY & PRODUCT JUDGMENT / 方向感与产品判断 ──────────────────────────
+
+  - id: problem_framing
+    label: Problem Framing / 问题定义与范围界定
+    level: 2
+    category: strategy
+    requires: [paper_reading]
+
+  - id: product_judgment
+    label: Product Judgment for AI Systems / AI 产品判断
+    level: 2
+    category: strategy
+    requires: [problem_framing]
+
+  - id: technical_strategy
+    label: Technical Strategy / 技术路线判断
+    level: 3
+    category: strategy
+    requires: [problem_framing, experiment_design]
+
+  - id: ecosystem_leverage
+    label: Ecosystem Leverage / 生态位与资源整合
+    level: 4
+    category: strategy
+    requires: [technical_strategy, peer_networking, project_leadership]
+
+  - id: adas_productization
+    label: ADAS / ADS Productization & Mass Production / 智驾量产交付
+    level: 3
+    category: strategy
+    requires: [product_judgment, data_closed_loop]
+    keywords: [量产, 智驾量产, adas, noa, 城市 noa, 工程化交付, sop]

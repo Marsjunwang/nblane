@@ -8,6 +8,7 @@ import hmac
 import json
 import os
 import secrets
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,16 @@ class AuthConfigError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ApiTokenRecord:
+    """One stored API token (only the sha256 of the plaintext is kept)."""
+
+    id: str
+    name: str
+    hash: str
+    created: str = ""
+
+
+@dataclass(frozen=True)
 class User:
     """One authenticated nblane user."""
 
@@ -36,6 +47,14 @@ class User:
     # Service account for a personal agent (OpenClaw …): its writes follow
     # core/agent_policy.py (journal + undo, chat confirmation for T2).
     agent: bool = False
+    # Disabled accounts cannot log in; their sessions and tokens stop working.
+    disabled: bool = False
+    # Set by admins on create/reset; the SPA forces a password change.
+    must_change_password: bool = False
+    # Bumped on password change / logout-all / disable: session tokens
+    # carry ``sv`` and only the current version is accepted.
+    session_version: int = 0
+    api_tokens: tuple[ApiTokenRecord, ...] = ()
 
     @property
     def is_admin(self) -> bool:
@@ -60,6 +79,8 @@ class AuthSessionClaims:
     user_id: str
     exp: int
     kind: str
+    # Tokens minted before session versions existed carry no ``sv``: 0.
+    session_version: int = 0
 
 
 AUTH_SESSION_COOKIE_NAME = "nblane_auth_session"
@@ -164,7 +185,13 @@ def _auth_session_token_signature(payload_b64: str) -> str:
     return _b64(digest)
 
 
-def _signed_auth_payload(user_id: str, *, kind: str, ttl_seconds: int) -> str:
+def _signed_auth_payload(
+    user_id: str,
+    *,
+    kind: str,
+    ttl_seconds: int,
+    session_version: int = 0,
+) -> str:
     clean_user = str(user_id or "").strip()
     clean_kind = str(kind or "").strip()
     if not clean_user or not clean_kind:
@@ -175,6 +202,7 @@ def _signed_auth_payload(user_id: str, *, kind: str, ttl_seconds: int) -> str:
         "kind": clean_kind,
         "iat": now,
         "exp": now + max(30, int(ttl_seconds or 0)),
+        "sv": int(session_version or 0),
     }
     payload_json = json.dumps(
         payload,
@@ -186,13 +214,28 @@ def _signed_auth_payload(user_id: str, *, kind: str, ttl_seconds: int) -> str:
     return f"{payload_b64}.{_auth_session_token_signature(payload_b64)}"
 
 
-def mint_auth_session_token(user_id: str, ttl_seconds: int = 12 * 3600) -> str:
-    """Mint a signed browser session token shared by Streamlit and FastAPI."""
+def mint_auth_session_token(
+    user_id: str,
+    ttl_seconds: int = 12 * 3600,
+    *,
+    session_version: int = 0,
+) -> str:
+    """Mint a signed browser session token shared by the API and Reader."""
 
-    return _signed_auth_payload(user_id, kind=AUTH_SESSION_KIND, ttl_seconds=ttl_seconds)
+    return _signed_auth_payload(
+        user_id,
+        kind=AUTH_SESSION_KIND,
+        ttl_seconds=ttl_seconds,
+        session_version=session_version,
+    )
 
 
-def mint_auth_handoff_token(user_id: str, ttl_seconds: int = 60) -> str:
+def mint_auth_handoff_token(
+    user_id: str,
+    ttl_seconds: int = 60,
+    *,
+    session_version: int = 0,
+) -> str:
     """Mint a short-lived token the web frontends hand to the sidecar for a cookie.
 
     The token is bearer-style and replayable within its TTL, so the lifetime
@@ -202,7 +245,12 @@ def mint_auth_handoff_token(user_id: str, ttl_seconds: int = 60) -> str:
     tracked as sidecar-side follow-up work.
     """
 
-    return _signed_auth_payload(user_id, kind=AUTH_HANDOFF_KIND, ttl_seconds=ttl_seconds)
+    return _signed_auth_payload(
+        user_id,
+        kind=AUTH_HANDOFF_KIND,
+        ttl_seconds=ttl_seconds,
+        session_version=session_version,
+    )
 
 
 def verify_auth_session_token(
@@ -242,7 +290,12 @@ def verify_auth_session_token(
         return None
     if kind != str(expected_kind or "").strip():
         return None
-    return AuthSessionClaims(user_id=user_id, exp=exp, kind=kind)
+    sv_raw = payload.get("sv", 0)
+    if isinstance(sv_raw, bool) or not isinstance(sv_raw, int):
+        return None
+    return AuthSessionClaims(
+        user_id=user_id, exp=exp, kind=kind, session_version=sv_raw
+    )
 
 
 def mint_reader_token(
@@ -394,6 +447,10 @@ def _user_from_mapping(user_id: str, raw: dict[str, Any]) -> User:
     profiles = set(_as_str_tuple(raw.get("profiles")))
     if profile:
         profiles.add(profile)
+    sv_raw = raw.get("session_version", 0)
+    session_version = (
+        sv_raw if isinstance(sv_raw, int) and not isinstance(sv_raw, bool) and sv_raw >= 0 else 0
+    )
     return User(
         id=user_id,
         display_name=str(raw.get("display_name", user_id) or user_id),
@@ -402,17 +459,77 @@ def _user_from_mapping(user_id: str, raw: dict[str, Any]) -> User:
         profile=profile,
         profiles=tuple(sorted(profiles)),
         agent=raw.get("agent") is True,
+        disabled=raw.get("disabled") is True,
+        must_change_password=raw.get("must_change_password") is True,
+        session_version=session_version,
+        api_tokens=_tokens_from_raw(raw.get("api_tokens")),
     )
 
 
+def _tokens_from_raw(raw: Any) -> tuple[ApiTokenRecord, ...]:
+    """Parse ``api_tokens`` tolerantly; malformed rows are skipped."""
+    if not isinstance(raw, list):
+        return ()
+    tokens: list[ApiTokenRecord] = []
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        token_id = str(row.get("id", "") or "").strip()
+        token_hash = str(row.get("hash", "") or "").strip().lower()
+        if not token_id or len(token_hash) != 64:
+            continue
+        tokens.append(
+            ApiTokenRecord(
+                id=token_id,
+                name=str(row.get("name", "") or ""),
+                hash=token_hash,
+                created=str(row.get("created", "") or ""),
+            )
+        )
+    return tuple(tokens)
+
+
+_users_cache: dict[Path, tuple[tuple[int, int, int], dict[str, User]]] = {}
+_users_cache_lock = threading.Lock()
+
+
+def clear_users_cache() -> None:
+    """Drop cached ``load_users`` results (after writes; test helper)."""
+    with _users_cache_lock:
+        _users_cache.clear()
+
+
 def load_users(path: Path | None = None) -> dict[str, User]:
-    """Load users from ``auth/users.yaml`` style config."""
+    """Load users from ``auth/users.yaml`` style config.
+
+    Parsed results are cached per file keyed on ``(st_mtime_ns, st_size,
+    st_ino)``; each call returns a fresh dict (``User`` is frozen).
+    """
     cfg_path = path if path is not None else auth_file_path()
     if cfg_path is None:
         return {}
-    if not cfg_path.exists():
-        raise AuthConfigError(f"auth file not found: {cfg_path}")
-    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    cfg_path = Path(cfg_path).expanduser().resolve()
+    try:
+        stat = cfg_path.stat()
+    except FileNotFoundError:
+        raise AuthConfigError(f"auth file not found: {cfg_path}") from None
+    key = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+    with _users_cache_lock:
+        cached = _users_cache.get(cfg_path)
+        if cached is not None and cached[0] == key:
+            return dict(cached[1])
+    users = _parse_users_file(cfg_path)
+    with _users_cache_lock:
+        _users_cache[cfg_path] = (key, users)
+    return dict(users)
+
+
+def _parse_users_file(cfg_path: Path) -> dict[str, User]:
+    try:
+        text = cfg_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise AuthConfigError(f"auth file not found: {cfg_path}") from None
+    raw = yaml.safe_load(text)
     if not isinstance(raw, dict):
         raise AuthConfigError("auth file must be a YAML mapping")
     users_raw = raw.get("users")
@@ -439,3 +556,68 @@ def load_users(path: Path | None = None) -> dict[str, User]:
             raise AuthConfigError(f"user {user_id!r} must be a mapping")
         users[user_id] = _user_from_mapping(user_id, user_raw)
     return users
+
+
+def resolve_session_user(
+    claims: AuthSessionClaims | None,
+    users: dict[str, User],
+) -> User | None:
+    """User for verified session/handoff *claims*, or ``None``.
+
+    Rejects unknown users, disabled accounts and stale session versions.
+    """
+    if claims is None:
+        return None
+    user = users.get(claims.user_id)
+    if user is None or user.disabled:
+        return None
+    if claims.session_version != user.session_version:
+        return None
+    return user
+
+
+API_TOKEN_PREFIX = "nbl_"
+
+
+def hash_api_token(token: str) -> str:
+    """sha256 hex of a full plaintext API token."""
+    return hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+
+
+def mint_api_token(name: str = "") -> tuple[str, ApiTokenRecord]:
+    """Return ``(plaintext, record)`` for a fresh ``nbl_<id>_<secret>`` token."""
+    token_id = secrets.token_hex(4)
+    plaintext = f"{API_TOKEN_PREFIX}{token_id}_{secrets.token_urlsafe(32)}"
+    created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return plaintext, ApiTokenRecord(
+        id=token_id,
+        name=str(name or ""),
+        hash=hash_api_token(plaintext),
+        created=created,
+    )
+
+
+def _api_token_id(token: str) -> str | None:
+    raw = str(token or "").strip()
+    if not raw.startswith(API_TOKEN_PREFIX):
+        return None
+    rest = raw[len(API_TOKEN_PREFIX):]
+    token_id, sep, secret = rest.partition("_")
+    if not sep or not token_id or not secret:
+        return None
+    return token_id
+
+
+def user_for_api_token(token: str, users: dict[str, User]) -> User | None:
+    """User owning the plaintext API *token*, or ``None`` (disabled → None)."""
+    token_id = _api_token_id(token)
+    if token_id is None:
+        return None
+    digest = hash_api_token(str(token).strip())
+    for user in users.values():
+        for record in user.api_tokens:
+            if record.id != token_id:
+                continue
+            if hmac.compare_digest(record.hash, digest):
+                return None if user.disabled else user
+    return None

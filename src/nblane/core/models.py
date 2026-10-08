@@ -411,17 +411,34 @@ class Schema:
     domain: str = ""
     description: str = ""
     nodes: list[SchemaNode] = field(default_factory=list)
+    # category id -> display name (zh), from the schema's ``categories:`` map.
+    categories: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> Schema:
         """Build from a YAML-loaded dict."""
         raw_nodes = d.get("nodes") or []
+        raw_cats = d.get("categories")
+        categories = (
+            {
+                str(k): str(v)
+                for k, v in raw_cats.items()
+                if k is not None and v is not None and str(v).strip()
+            }
+            if isinstance(raw_cats, dict)
+            else {}
+        )
         return cls(
             schema_version=d.get("schema_version", ""),
             domain=d.get("domain", ""),
             description=d.get("description", ""),
             nodes=[SchemaNode.from_dict(n) for n in raw_nodes],
+            categories=categories,
         )
+
+    def category_name(self, category: str, fallback: dict[str, str]) -> str:
+        """Display name for *category*: schema map, then *fallback*, then id."""
+        return self.categories.get(category) or fallback.get(category, category)
 
     def node_index(self) -> dict[str, SchemaNode]:
         """Build id -> SchemaNode lookup."""

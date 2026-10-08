@@ -131,32 +131,24 @@ def load_skill_md(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def init_profile(name: str) -> Path:
+def init_profile(name: str, schema: str | None = None) -> Path:
     """Create a new profile from the template directory."""
-    return profile_io.init_profile(name)
+    return profile_io.init_profile(name, schema=schema)
 
 
 def load_schema(schema_name: str) -> Schema | None:
-    """Load schemas/{schema_name}.yaml as a Schema object."""
-    path = SCHEMAS_DIR / f"{schema_name}.yaml"
-    raw = _load_yaml_file(path)
-    if raw is None:
-        return None
-    return Schema.from_dict(raw)
+    """Load a schema by name (data dir first, then built-in)."""
+    return schema_io.load_schema(schema_name, SCHEMAS_DIR)
 
 
 def load_schema_raw(schema_name: str) -> dict | None:
-    """Load schemas/{schema_name}.yaml as a raw dict."""
-    path = SCHEMAS_DIR / f"{schema_name}.yaml"
-    raw = _load_yaml_file(path)
-    if raw is None:
-        return None
-    return raw
+    """Load a schema by name as a raw dict (data dir first, then built-in)."""
+    return schema_io.load_schema_raw(schema_name, SCHEMAS_DIR)
 
 
 def list_schemas() -> list[str]:
-    """Return available schema names (without .yaml extension)."""
-    return sorted(p.stem for p in SCHEMAS_DIR.glob("*.yaml"))
+    """Return available schema names (data dir ∪ built-in)."""
+    return schema_io.list_schemas(SCHEMAS_DIR)
 
 
 def schema_node_index(schema_data: dict) -> dict[str, dict]:

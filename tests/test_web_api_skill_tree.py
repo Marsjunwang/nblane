@@ -185,6 +185,51 @@ class TestSkillTreeRead(unittest.TestCase):
         self.assertEqual(len(flat), len(set(flat)))
         self.assertEqual(len(flat), payload["status_counts"]["total"])
 
+    def test_category_names_come_from_schema_categories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root, tree=SKILL_TREE)
+            schemas = _write_schemas(base)
+            raw = yaml.safe_load((schemas / "test-domain.yaml").read_text(encoding="utf-8"))
+            raw["categories"] = {"foundations": "根基"}
+            (schemas / "test-domain.yaml").write_text(
+                yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8"
+            )
+            client = self._client(root, schemas)
+            payload = client.get("/api/v1/profiles/alice/skill-tree").json()
+        names = {c["id"]: c["name"] for c in payload["categories"]}
+        self.assertEqual(names["foundations"], "根基")
+
+    def test_autonomous_driving_profile_has_13_zh_categories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            ad = yaml.safe_load(
+                (Path(__file__).resolve().parents[1] / "schemas" / "autonomous-driving.yaml")
+                .read_text(encoding="utf-8")
+            )
+            tree = {
+                "schema": "autonomous-driving",
+                "updated": "2026-10-08",
+                "nodes": [{"id": n["id"], "status": "locked"} for n in ad["nodes"]],
+            }
+            _write_profile(root, tree=tree)
+            empty = base / "empty-schemas"
+            empty.mkdir()
+            client = self._client(root, empty)  # built-in lookup
+            response = client.get("/api/v1/profiles/alice/skill-tree")
+            starmap = client.get("/api/v1/profiles/alice/starmap")
+        self.assertEqual(response.status_code, 200, response.text)
+        names = [c["name"] for c in response.json()["categories"]]
+        self.assertEqual(len(names), 13)
+        self.assertIn("规划", names)
+        self.assertIn("安全", names)
+        self.assertEqual(set(names), set(ad["categories"].values()))
+        self.assertEqual(starmap.status_code, 200, starmap.text)
+        star_names = {c["name"] for c in starmap.json()["categories"]}
+        self.assertEqual(star_names, set(ad["categories"].values()))
+
     def test_empty_tree_returns_empty_nodes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

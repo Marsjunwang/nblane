@@ -448,6 +448,55 @@ describe('sector asterism figures (星官真形)', () => {
   });
 });
 
+describe('non-robotics domain (autonomous-driving schema)', () => {
+  // 13 categories, no 操作/运动/中间件; counts as in schemas/autonomous-driving.yaml
+  const AD: [string, string, number][] = [
+    ['foundations', '基础', 9], ['perception', '感知', 11], ['navigation', '导航', 6],
+    ['planning', '规划', 6], ['control', '控制', 5], ['learning', '学习力', 6],
+    ['simulation', '仿真', 5], ['systems', '系统', 8], ['safety', '安全', 7],
+    ['research', '研究', 5], ['influence', '影响力', 5], ['leadership', '领导力', 4],
+    ['strategy', '战略', 5],
+  ];
+  const snap = snapshotFixture({
+    categories: AD.map(([id, name, count]) => ({ id, name, count, lit_count: 1, learning_count: 1 })),
+    skills: AD.flatMap(([id, , count]) =>
+      Array.from({ length: count }, (_, i) => ({
+        id: `${id}_${i}`,
+        label: `${id} ${i}`,
+        category: id,
+        status: i === 0 ? 'solid' : i === 1 ? 'learning' : 'locked',
+        lit: i === 0,
+      })),
+    ),
+    evidence: [],
+  });
+  const L = buildLayout(snap);
+
+  it('lays out 13 sectors covering the full circle', () => {
+    expect(L.sectors).toHaveLength(13);
+    const total = L.sectors.reduce((a, s) => a + s.width, 0);
+    expect(total).toBeCloseTo(360, 6);
+    expect(L.sectors.every((s) => s.width > 0)).toBe(true);
+  });
+
+  it('maps the new 规划/安全 sectors to real 星官 figures', () => {
+    const byName = new Map(L.sectors.map((s) => [s.name, s.asterism]));
+    expect(byName.get('规划')).toBe('北斗');
+    expect(byName.get('安全')).toBe('紫微右垣');
+    expect(asterismById('beidou')).toBeDefined();
+    expect(asterismById('ziwei_youyuan')).toBeDefined();
+    // every AD category has a 星官 (no fallback to the raw name)
+    expect(L.sectors.every((s) => s.asterism !== s.name)).toBe(true);
+  });
+
+  it('places every lit/learning member and finite coordinates', () => {
+    // 13 lit + 13 learning members
+    expect(L.lit.plan.length / 3).toBe(26);
+    expect(L.lit.plan.every((v) => Number.isFinite(v))).toBe(true);
+    expect(L.etched.plan.every((v) => Number.isFinite(v))).toBe(true);
+  });
+});
+
 describe('orbit position math (round-6 drift fix)', () => {
   const plan = [40, 30, 0];
   const deep = [120, -60, 14];

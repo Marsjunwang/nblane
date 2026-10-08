@@ -22,6 +22,23 @@ description: >
   manipulation, navigation, perception, control, embodied AI,
   research expression, public influence, leadership, and strategic judgment.
 
+# Display names per category (zh). The SPA maps these names to 星官.
+categories:
+  foundations: 基础
+  control: 控制
+  middleware: 中间件
+  simulation: 仿真
+  perception: 感知
+  manipulation: 操作
+  learning: 学习力
+  locomotion: 运动
+  navigation: 导航
+  research: 研究
+  systems: 系统
+  influence: 影响力
+  leadership: 领导力
+  strategy: 战略
+
 nodes:
 
   # ── FOUNDATIONS / 基础能力 ───────────────────────────────────────────────────

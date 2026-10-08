@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
@@ -347,17 +348,95 @@ def load_skill_md(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def init_profile(name: str) -> Path:
+def fill_template_placeholders(dest: Path, profile_name: str) -> None:
+    """Replace ``{Name}`` and ``{YYYY-MM-DD}`` in a freshly copied template."""
+    from datetime import date
+
+    today = date.today().isoformat()
+    for filepath in dest.rglob("*"):
+        if filepath.is_file():
+            text = filepath.read_text(encoding="utf-8")
+            text = text.replace("{Name}", profile_name).replace("{YYYY-MM-DD}", today)
+            filepath.write_text(text, encoding="utf-8")
+
+
+_SCHEMA_LINE_RE = re.compile(
+    r'^(schema:[ \t]*)("[^"\n]*"|\'[^\'\n]*\'|[^#\n]*?)([ \t]*(?:#.*)?)$',
+    re.MULTILINE,
+)
+_DOMAIN_LINE_RE = re.compile(
+    r"^(- \*\*Domain\*\*:[ \t]*).*$", re.MULTILINE
+)
+
+
+def apply_profile_schema(dest: Path, schema_name: str, domain: str) -> None:
+    """Point a freshly copied profile at *schema_name*.
+
+    Rewrites only the ``schema:`` line of skill-tree.yaml (comments and the
+    rest of the file kept) and the ``- **Domain**:`` line of SKILL.md.
+    """
+    tree_path = dest / SKILL_TREE_FILENAME
+    if tree_path.is_file():
+        text = tree_path.read_text(encoding="utf-8")
+        text = _SCHEMA_LINE_RE.sub(
+            lambda m: f'{m.group(1)}"{schema_name}"{m.group(3)}', text, count=1
+        )
+        tree_path.write_text(text, encoding="utf-8")
+    skill_path = dest / "SKILL.md"
+    if skill_path.is_file() and domain:
+        text = skill_path.read_text(encoding="utf-8")
+        text = _DOMAIN_LINE_RE.sub(
+            lambda m: f"{m.group(1)}{domain}", text, count=1
+        )
+        skill_path.write_text(text, encoding="utf-8")
+
+
+def seed_skill_tree_nodes(dest: Path, profile_name: str) -> int:
+    """List every node of the profile's schema as ``locked`` in skill-tree.yaml.
+
+    A fresh profile otherwise has an empty tree: the skill-tree page shows
+    nothing and node status writes 404 until ids are added by hand. Only
+    runs on an empty ``nodes`` list; returns the number of nodes written.
+    """
+    from nblane.core import schema_io
+
+    tree_path = dest / SKILL_TREE_FILENAME
+    raw = _load_yaml_file(tree_path) or {}
+    if raw.get("nodes"):
+        return 0
+    schema_obj = schema_io.load_schema(str(raw.get("schema") or ""))
+    if schema_obj is None:
+        return 0
+    raw["nodes"] = [
+        {"id": node.id, "status": "locked"} for node in schema_obj.nodes if node.id
+    ]
+    atomic_write_text(tree_path, _skill_tree_text(profile_name, raw))
+    return len(raw["nodes"])
+
+
+def init_profile(name: str, schema: str | None = None) -> Path:
     """Create a new profile from the template directory.
 
-    Returns the path to the new profile directory.
-    Raises FileExistsError if it already exists.
+    *schema* picks the domain skill tree (a name from
+    ``schema_io.list_schemas()``); None keeps the template default
+    (robotics-engineer). Returns the path to the new profile directory.
+    Raises FileExistsError if it already exists, ValueError for an
+    invalid profile name or unknown schema.
     """
     import shutil
 
+    from nblane.core import schema_io
     from nblane.core.paths import TEMPLATE_DIR
 
     profile_name = validate_profile_name(name)
+    schema_obj = None
+    if schema is not None:
+        schema_obj = schema_io.load_schema(schema)
+        if schema_obj is None:
+            available = ", ".join(schema_io.list_schemas()) or "(none)"
+            raise ValueError(
+                f"Unknown schema '{schema}'. Available: {available}"
+            )
     dest = safe_profile_dir(profile_name)
     if dest.exists():
         raise FileExistsError(
@@ -365,12 +444,10 @@ def init_profile(name: str) -> Path:
         )
 
     shutil.copytree(TEMPLATE_DIR, dest)
-
-    for filepath in dest.rglob("*"):
-        if filepath.is_file():
-            text = filepath.read_text(encoding="utf-8")
-            text = text.replace("{Name}", profile_name)
-            filepath.write_text(text, encoding="utf-8")
+    fill_template_placeholders(dest, profile_name)
+    if schema is not None and schema_obj is not None:
+        apply_profile_schema(dest, schema, schema_obj.domain)
+    seed_skill_tree_nodes(dest, profile_name)
 
     git_backup.record_change(
         list(dest.rglob("*")),

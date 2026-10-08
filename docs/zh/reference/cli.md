@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-07
+last_verified: 2026-10-08
 source_of_truth: true
 ---
 
@@ -12,13 +12,15 @@ source_of_truth: true
 ## 档案
 
 ```bash
-nblane init <profile>
+nblane init <profile> [--schema NAME]   # 选领域技能树，默认 robotics-engineer
 nblane context <profile> [--chat|--review|--write|--plan] [--no-kanban]
 nblane status [profile]
 nblane log <profile> "finished first manipulation demo"
 nblane health [profile]                 # 档案体检（SPA 证据页「待补强」的同一份报告）
 nblane sync-cursor <profile>            # 写 .cursor/rules/nblane-context.mdc
 ```
+
+`init --schema` 可选内置的 `robotics-engineer`、`autonomous-driving`，或数据目录 `schemas/` 里管理员加的领域；名字不存在时报错并列出可选项，见 [技能树 Schema](skill-tree-schema.md#选择与更换领域)。
 
 `context` 输出 Agent system prompt，格式见 [SKILL.md 格式](skill-md-format.md)。
 
@@ -123,7 +125,7 @@ nblane notify <text> [--dry-run]
 ```bash
 nblane backup status
 nblane backup run [--target <id>]        # 任一目标失败退出码 1
-nblane auth hash-password [password]     # 省略时交互输入
+nblane auth hash-password [password]     # 省略时交互输入；日常加人改密在设置页做
 ```
 
 备份目标在「设置 → 助手与备份」配置，见 [助手 · 数据备份](../guides/assistant.md#数据备份)。

@@ -45,6 +45,8 @@ DEFAULT_PROFILE = "王军"
 BASE_URL_ENV = "NBLANE_API_BASE"
 USERNAME_ENV = "NBLANE_OPENCLAW_API_USERNAME"
 PASSWORD_ENV = "NBLANE_OPENCLAW_API_PASSWORD"
+# API token (nbl_…) minted in 设置 → 账号管理; preferred over the password.
+TOKEN_ENV = "NBLANE_OPENCLAW_API_TOKEN"
 PROFILE_ENV = "NBLANE_API_PROFILE"
 COOKIE_JAR_ENV = "NBLANE_API_COOKIE_JAR"
 
@@ -87,30 +89,39 @@ def cookie_jar_path() -> Path:
     return root / "nblane" / "api-cookies.json"
 
 
-def _read_password() -> str:
-    """Service-account password: env first, then ~/.config/nblane/api.env.
+def _read_secret(key: str) -> str:
+    """A credential by *key*: env first, then ~/.config/nblane/api.env.
 
     The file fallback exists because automation sandboxes do not always
     inherit the gateway process environment (2026-09-26 incident: the
     morning-report cron saw an expired cookie and no password env).
     Format: KEY=VALUE lines, ``#`` comments; file should be chmod 0600.
     """
-    env_value = os.environ.get(PASSWORD_ENV, "").strip()
+    env_value = os.environ.get(key, "").strip()
     if env_value:
         return env_value
     config_home = os.environ.get("XDG_CONFIG_HOME", "").strip()
     root = Path(config_home).expanduser() if config_home else Path.home() / ".config"
     try:
+        wanted = key
         for line in (root / "nblane" / "api.env").read_text().splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, _, value = line.partition("=")
-            if key.strip() == PASSWORD_ENV:
+            if key.strip() == wanted:
                 return value.strip().strip('"').strip("'")
     except OSError:
         pass
     return ""
+
+
+def _read_password() -> str:
+    return _read_secret(PASSWORD_ENV)
+
+
+def _read_token() -> str:
+    return _read_secret(TOKEN_ENV)
 
 
 def load_cookies(path: Path, base_url: str) -> dict[str, str]:
@@ -192,7 +203,12 @@ def normalize_path(path: str) -> str:
 
 
 class Session:
-    """httpx wrapper: cookie persistence, one 401 re-login, ETag mutation retry."""
+    """httpx wrapper: Bearer token or cookie login, ETag mutation retry.
+
+    With an API token (``NBLANE_OPENCLAW_API_TOKEN``) every request carries
+    ``Authorization: Bearer``; there is no login and no cookie jar. Without
+    one, the password login is used and a 401 triggers one re-login.
+    """
 
     def __init__(
         self,
@@ -200,6 +216,7 @@ class Session:
         *,
         username: str | None = None,
         password: str | None = None,
+        token: str | None = None,
         jar_path: Path | None = None,
         transport: httpx.BaseTransport | None = None,
         confirm: str = "",
@@ -216,11 +233,14 @@ class Session:
         # never logged, never echoed, and never written to the cookie jar.
         self._password = password
         self.jar_path = jar_path or cookie_jar_path()
+        self._token = (token if token is not None else _read_token()).strip()
+        headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
         self.client = httpx.Client(
-            base_url=self.base_url, timeout=30.0, transport=transport
+            base_url=self.base_url, timeout=30.0, transport=transport, headers=headers
         )
-        for name, value in load_cookies(self.jar_path, self.base_url).items():
-            self.client.cookies.set(name, value)
+        if not self._token:
+            for name, value in load_cookies(self.jar_path, self.base_url).items():
+                self.client.cookies.set(name, value)
 
     def login(self) -> dict:
         """POST /auth/login, persist the session cookie, return the user JSON."""
@@ -261,6 +281,11 @@ class Session:
         if headers:
             kwargs["headers"] = headers
         response = self.client.request(method, f"{API_PREFIX}{path}", **kwargs)
+        if response.status_code == 401 and self._token:
+            raise ApiFailure(
+                f"API token rejected (HTTP 401): {TOKEN_ENV} is revoked or "
+                "invalid; mint a new one in 设置 → 账号管理"
+            )
         if response.status_code == 401 and _reauth:
             # Expired/absent cookie (TTL 12h): re-login once and retry once.
             self.login()

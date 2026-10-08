@@ -14,6 +14,17 @@ type Schemas = components['schemas'];
 
 /** CurrentUser from web_api/auth.py. */
 export type CurrentUser = Schemas['CurrentUser'];
+export type ChangePasswordRequest = Schemas['ChangePasswordRequest'];
+
+/** Settings → 账号管理 (web_api/accounts.py). */
+export type AccountInfo = Schemas['AccountInfo'];
+export type AccountCreate = Schemas['AccountCreateRequest'];
+export type AccountPatch = Schemas['AccountPatchRequest'];
+export type ApiTokenInfo = Schemas['ApiTokenInfo'];
+export type TokenCreateResult = Schemas['TokenCreateResponse'];
+export type AccountsOk = Schemas['AccountsOk'];
+/** Domain skill-tree schema choice for 新建用户 (GET /schemas). */
+export type SchemaInfo = Schemas['SchemaInfo'];
 
 /** Deployment-wide LLM connection; the API key is represented only by a flag. */
 export type LlmConnection = Schemas['LlmConnectionResponse'];

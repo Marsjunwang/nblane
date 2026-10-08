@@ -68,6 +68,10 @@ const ASTERISMS = new Map(
 // Shape culling (王军 round-2 review, 2026-09-23): figures that read as a
 // near-straight line at sector scale are substituted — 基础 角宿(2星一线)→
 // 华盖(覆于帝座,庇荫之基), 研究 心宿(三星近共线)→文昌(司禄主文,掌文运).
+// 2026-10-08 additions for the autonomous-driving schema (王军 confirmed):
+// 规划→北斗 (指向定行，主方位), 安全→紫微右垣 (护卫帝座之垣); both real
+// shapes pass the linearity guard. A schema may use any subset of these keys;
+// categories without an entry keep their own name and template shapes.
 // Guard: the vitest linearity check keeps every real-shape entry honest.
 const SECTOR_ASTERISM: Record<string, { id: string; name: string }> = {
   系统: { id: 'dou', name: '斗宿' },
@@ -84,6 +88,8 @@ const SECTOR_ASTERISM: Record<string, { id: string; name: string }> = {
   控制: { id: 'zhen', name: '轸宿' },
   领导力: { id: 'xuanyuan', name: '轩辕' },
   仿真: { id: 'xu', name: '虚宿' },
+  规划: { id: 'beidou', name: '北斗' },
+  安全: { id: 'ziwei_youyuan', name: '紫微右垣' },
 };
 
 /** Exported for the shape-quality guard test (and future mapping UI). */

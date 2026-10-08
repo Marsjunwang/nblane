@@ -48,7 +48,8 @@ def validate_one(
     if schema_data is None:
         errors.append(
             f"[{name}] schema file not found: "
-            f"schemas/{schema_name}.yaml"
+            f"schemas/{schema_name}.yaml (looked in the data dir "
+            "<NBLANE_ROOT>/schemas and the built-in schemas)"
         )
         return errors, warnings
 

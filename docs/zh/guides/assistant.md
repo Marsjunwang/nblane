@@ -85,4 +85,4 @@ source_of_truth: false
 
 ## 账号
 
-`users.yaml` 里给服务账号写 `agent: true`，它的写入就按上面的规则处理。历史账号 `openclaw` 不写也会被识别。服务账号密码只放在服务器环境变量里，见 [OpenClaw 运维](openclaw-ops.md#服务账号密码)。
+`users.yaml` 里给服务账号写 `agent: true`，它的写入就按上面的规则处理。历史账号 `openclaw` 不写也会被识别。服务账号用「设置 → 账号管理」生成的 API token 访问 nblane，凭据只放在服务器上，见 [OpenClaw 运维](openclaw-ops.md#服务账号凭据)。

@@ -1,7 +1,7 @@
 ---
 status: active
 owner: product
-last_verified: 2026-10-07
+last_verified: 2026-10-08
 source_of_truth: true
 ---
 
@@ -69,6 +69,7 @@ source_of_truth: true
 - 挂载 / 取消证据：在证据页详情卡的「技能关联」里操作。
 - 节点备注和内联证据：页面不显示也不编辑，需要时用 CLI（见 [CLI 参考](../reference/cli.md)）或直接改 `skill-tree.yaml`。
 - 新增节点：改 `skill-tree.yaml` 或所用 schema，见 [技能树 schema](../reference/skill-tree-schema.md)。
+- 领域：内置机器人和自动驾驶两套，类目与星官随所用 schema 变化（自动驾驶有 13 个类目，规划对应北斗、安全对应紫微右垣）。换领域见 [选择与更换领域](../reference/skill-tree-schema.md#选择与更换领域)。
 
 ## 注意
 

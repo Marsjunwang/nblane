@@ -5,6 +5,8 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useMe } from '../api/hooks';
 
+export const FORCED_PASSWORD_PATH = '/settings/account';
+
 // Auth guard for protected routes: redirects to /login when the API rejects
 // the session cookie with 401. When auth is off (NBLANE_AUTH_FILE unset) the
 // backend answers /auth/me with a synthetic admin, so the guard passes
@@ -31,6 +33,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
         </Alert>
       </Center>
     );
+  }
+  // A new or reset account must pick its own password before anything else.
+  if (me.data.auth_enabled && me.data.must_change_password && location.pathname !== FORCED_PASSWORD_PATH) {
+    return <Navigate to={FORCED_PASSWORD_PATH} replace />;
   }
   return <>{children}</>;
 }

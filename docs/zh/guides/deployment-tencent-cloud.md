@@ -57,7 +57,9 @@ sudo chown -R nblane:nblane /srv/nblane-assets
 
 ### 账号
 
-`auth/users.yaml` 参考 `auth/users.example.yaml`，密码哈希用 `nblane auth hash-password`。
+第一个管理员手写 `auth/users.yaml`（参考 `auth/users.example.yaml`，密码哈希用 `nblane auth hash-password`），之后的加人、改密码、停用都在「设置 → 账号管理 / 我的账号」里做。
+
+`auth/` 不进数据仓库 git：在 `/srv/nblane-data/.gitignore` 里写 `auth/`，文件保持 0600，靠整机备份保存。网页写账号时也不会触发自动提交。
 
 - `role: admin`：管理员，可访问所有档案和系统设置。
 - `role: member` + `profile: <name>`：本人，只能访问自己的档案。
@@ -294,7 +296,7 @@ PyMuPDF 是默认本地 PDF 后端，采用 AGPL / 商业双许可。闭源或�
 ## 车间终端与助手（可选）
 
 - 车间终端：「设置 → 系统 → 车间终端」一键安装 ttyd，用独立 tmux socket，unit `nblane-workshop`。说明见 [车间](workshop.md)。
-- 助手：OpenClaw 网关、微信通道、服务账号密码见 [OpenClaw 运维](openclaw-ops.md)。
+- 助手：OpenClaw 网关、微信通道、服务账号凭据见 [OpenClaw 运维](openclaw-ops.md)。
 
 ## 腾讯云安全组与备案
 

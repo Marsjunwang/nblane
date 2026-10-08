@@ -30,4 +30,20 @@ def _detect_repo_root() -> Path:
 REPO_ROOT: Path = _detect_repo_root()
 PROFILES_DIR: Path = REPO_ROOT / "profiles"
 SCHEMAS_DIR: Path = REPO_ROOT / "schemas"
-TEMPLATE_DIR: Path = PROFILES_DIR / "template"
+
+
+def _detect_template_dir() -> Path:
+    """Profile template used by ``nblane init`` / account creation.
+
+    Prefer the code checkout's ``profiles/template`` so new profiles follow
+    the code version even when ``NBLANE_ROOT`` points at a separate data dir
+    (whose template copy may be a stale snapshot). Installs without the
+    checkout (wheels do not ship ``profiles/``) fall back to the data dir.
+    """
+    code_template = Path(__file__).resolve().parents[3] / "profiles" / "template"
+    if code_template.is_dir():
+        return code_template
+    return PROFILES_DIR / "template"
+
+
+TEMPLATE_DIR: Path = _detect_template_dir()

@@ -101,7 +101,7 @@ from nblane.core.models import (
     KanbanTask,
     KanbanTodo,
 )
-from nblane.core.paths import REPO_ROOT, SCHEMAS_DIR
+from nblane.core.paths import REPO_ROOT
 from nblane.core.public_site import (
     BLOG_DIRNAME,
     BLOG_TAXONOMY_FILENAME,
@@ -333,6 +333,7 @@ from nblane.web_api.schemas import (
     SkillNodePatchRequest,
     SkillNodePatchResponse,
     SkillNodeProgressModel,
+    SchemaInfo,
     SkillTreeCategoryModel,
     SkillTreeNodeModel,
     SkillTreeResponse,
@@ -469,6 +470,15 @@ def require_admin(user: CurrentUser = Depends(require_user)) -> CurrentUser:
 
 
 AGENT_ACCOUNT_ID = "openclaw"
+
+
+def _session_version(user_id: str) -> int:
+    """Current session version of *user_id* (0 when unknown / auth off)."""
+    try:
+        record = auth_core.load_users().get(user_id)
+    except auth_core.AuthConfigError:
+        return 0
+    return record.session_version if record is not None else 0
 
 
 def _record_agent_writeback(
@@ -683,6 +693,12 @@ def patch_profile_codex_settings(
     )
 
 
+@router.get("/schemas", response_model=list[SchemaInfo])
+def get_schemas(_user: CurrentUser = Depends(require_user)) -> list[SchemaInfo]:
+    """Available domain schemas (data dir ∪ built-in), for 新建用户 / init."""
+    return [SchemaInfo(**info) for info in schema_io.list_schema_infos()]
+
+
 @router.get("/profiles", response_model=list[ProfileSummary])
 def list_profiles(user: CurrentUser = Depends(require_user)) -> list[ProfileSummary]:
     """List known profiles with a few cheap summary fields.
@@ -876,7 +892,7 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
         categories.append(
             SkillTreeCategoryModel(
                 id=cat,
-                name=starmap_snapshot_core.CATEGORY_ZH.get(cat, cat),
+                name=starmap_snapshot_core.category_display_name(schema, cat),
                 count=len(members),
                 lit_count=sum(1 for s in statuses if s in starmap_snapshot_core.LIT_STATUSES),
                 learning_count=sum(1 for s in statuses if s == "learning"),
@@ -5155,7 +5171,7 @@ def _starmap_etag(pdir: Path) -> str:
     ]
     raw_tree = profile_io.load_skill_tree_raw(pdir) or {}
     schema_name = str(raw_tree.get("schema") or "")
-    schema_path = SCHEMAS_DIR / f"{schema_name}.yaml" if schema_name else None
+    schema_path = schema_io.schema_path(schema_name) if schema_name else None
     for relative in relatives:
         snapshot = file_state.snapshot_file(pdir / relative)
         fingerprints.append(f"{relative}:{snapshot.sha256 or 'empty'}")
@@ -8045,7 +8061,9 @@ def _sidecar_info(name: str, user: CurrentUser) -> SidecarInfoModel:
     handoff = ""
     if auth_on:
         try:
-            handoff = auth_core.mint_auth_handoff_token(user.id)
+            handoff = auth_core.mint_auth_handoff_token(
+                user.id, session_version=_session_version(user.id)
+            )
         except auth_core.AuthConfigError:
             handoff = ""
     query_params = {"profile": name}

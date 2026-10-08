@@ -1,7 +1,7 @@
 """nblane -- CLI entry point.
 
 Commands:
-    nblane init <name>              Create a new profile
+    nblane init <name> [--schema S] Create a new profile
     nblane context <name> [--mode | --chat | --review | ...]
                                     Print agent system prompt
     nblane status [name]            Show skill tree summary
@@ -145,6 +145,15 @@ def main() -> None:
     p_init.add_argument(
         "name",
         help="Profile name (e.g. your GitHub handle)",
+    )
+    p_init.add_argument(
+        "--schema",
+        default=None,
+        metavar="NAME",
+        help=(
+            "Domain skill-tree schema (e.g. robotics-engineer, "
+            "autonomous-driving; default: the template's robotics-engineer)"
+        ),
     )
 
     p_ctx = sub.add_parser(
@@ -1012,7 +1021,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "init":
-        cmd_init(args.name)
+        cmd_init(args.name, schema=args.schema)
     elif args.command == "context":
         ctx_mode = (
             args.context_mode

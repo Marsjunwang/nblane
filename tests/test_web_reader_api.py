@@ -17,6 +17,7 @@ from nblane.core.auth import (
     AUTH_SESSION_COOKIE_NAME,
     hash_password,
     mint_auth_handoff_token,
+    mint_auth_session_token,
     mint_reader_token,
 )
 from nblane.core.paper_library_workspace import PaperLibraryEventResult
@@ -856,6 +857,46 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertIn(AUTH_SESSION_COOKIE_NAME, first.headers.get("set-cookie", ""))
         self.assertEqual(second.status_code, 200)
         self.assertEqual(second.json()["payload"]["metrics"]["papers"], 1)
+
+    def _run_with_auth_extra(self, extra: str, *, sv: int, cookie: bool = False) -> int:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            auth_file = self._auth_file(root)
+            auth_file.write_text(auth_file.read_text(encoding="utf-8") + extra, encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {
+                    "NBLANE_AUTH_FILE": str(auth_file),
+                    "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                    "NBLANE_AUTH_SESSION_SECRET": "",
+                    "NBLANE_RESEARCH_ASSET_ROOT": str(root / "assets"),
+                },
+                clear=False,
+            ):
+                profile = self._profile(root)
+                client = self._client(profile)
+                if cookie:
+                    client.cookies.set(
+                        AUTH_SESSION_COOKIE_NAME,
+                        mint_auth_session_token("alice", session_version=sv),
+                    )
+                    return client.get("/api/research/alice/paper-library").status_code
+                handoff = mint_auth_handoff_token("alice", session_version=sv)
+                return client.get(
+                    f"/api/research/alice/paper-library?auth_handoff={quote(handoff, safe='')}"
+                ).status_code
+
+    def test_session_version_must_match(self) -> None:
+        extra = "    session_version: 2\n"
+        self.assertEqual(self._run_with_auth_extra(extra, sv=2), 200)
+        self.assertEqual(self._run_with_auth_extra(extra, sv=1), 401)
+        self.assertEqual(self._run_with_auth_extra(extra, sv=1, cookie=True), 401)
+        self.assertEqual(self._run_with_auth_extra(extra, sv=2, cookie=True), 200)
+
+    def test_disabled_user_rejected(self) -> None:
+        extra = "    disabled: true\n"
+        self.assertEqual(self._run_with_auth_extra(extra, sv=0), 401)
+        self.assertEqual(self._run_with_auth_extra(extra, sv=0, cookie=True), 401)
 
     def test_paper_library_search_and_import_require_pdf_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(

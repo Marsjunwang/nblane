@@ -10,7 +10,7 @@ source_of_truth: true
 本文讲「把整套 nblane（代码 + 数据 + 助手）从旧服务器迁到新服务器」，按执行顺序列出每一步和验证方法。模板不在这里重复：
 
 - systemd、Caddy、端口与服务表：[腾讯云部署](deployment-tencent-cloud.md)
-- OpenClaw 网关、微信、服务账号密码：[OpenClaw 运维](openclaw-ops.md)
+- OpenClaw 网关、微信、服务账号凭据：[OpenClaw 运维](openclaw-ops.md)
 - 代理：[Mihomo 代理部署](mihomo-deployment.md)
 
 密钥、域名、Owner ID 一律用占位符，真实值只放新机的私有文件里。
@@ -128,7 +128,7 @@ curl -sI https://<域名>/openclaw/     # 200 text/html（用助手时）
 
 2. 工作区：从私有远端 clone 到 `/srv/agent-data/openclaw/workspace`，并让 `~/.openclaw/workspace` 软链到它；或从旧机 rsync。确认 `openclaw.json` 里的 `agents.defaults.workspace` 指向新路径。
 3. 安装同版本 OpenClaw 并装网关用户服务（`openclaw onboard --install-daemon` 或 `openclaw gateway install`）。
-4. 服务账号密码：网关 drop-in 和 `~/.config/nblane/api.env`，写法见 [OpenClaw 运维 · 服务账号密码](openclaw-ops.md#服务账号密码)。
+4. 服务账号凭据：`~/.config/nblane/api.env`（或网关 drop-in），写法见 [OpenClaw 运维 · 服务账号凭据](openclaw-ops.md#服务账号凭据)。
 5. 接入：在设置页「助手与备份」点「接入 nblane」，或 `nblane openclaw install --profile <name> --apply`。它同步技能、生成 `nblane_api`、渲染语料、装 weixin-task-bridge；不注册 MCP，发现旧的 MCP 注册会移除。
 6. 定时任务：归 OpenClaw 管，随 `~/.openclaw` 一起走。这里只核对，不做同步：
 
@@ -158,8 +158,8 @@ nblane openclaw doctor --profile <name>
 | `NBLANE_READER_TOKEN_SECRET` | 同上 | 沿用旧值或重新生成；8502 和 8504 读同一个文件 |
 | `NBLANE_AUTH_COOKIE_SECURE=1` | 同上 | HTTPS 环境必须 |
 | `NBLANE_OPENCLAW_HOOK_TOKEN` | 同上 | 须与网关 `cron.webhookToken` 一致 |
-| `auth/users.yaml`（含 openclaw 服务账号哈希） | 数据仓 | 随 clone 到位 |
-| `NBLANE_OPENCLAW_API_PASSWORD` | 网关 drop-in + `~/.config/nblane/api.env` | 明文不在任何仓库，重新录入 |
+| `auth/users.yaml`（账号、密码哈希、助手 token 哈希） | `/srv/nblane-data/auth/`，不进 git | 从整机备份拷贝，保持 0600 |
+| `NBLANE_OPENCLAW_API_TOKEN`（或旧的 `_PASSWORD`） | `~/.config/nblane/api.env` 或网关 drop-in | 明文不在任何仓库；拷贝该文件，或在账号管理里重新生成 token |
 | 网关 token、模型 key | `~/.openclaw/openclaw.json` | 随状态目录迁移 |
 | 微信登录态 | `~/.openclaw` 内 | 随状态目录；失效则 `openclaw channels login --channel openclaw-weixin` 重新扫码 |
 | 备份部署密钥 | `~/.ssh/nblane_backup_<目标>_ed25519` | 拷贝，或在设置页重新生成并更新仓库 Deploy keys |

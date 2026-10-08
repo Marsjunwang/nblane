@@ -112,6 +112,15 @@ WEB_ONLY_PREFIXES = (
     f"{P}/research/ai-config",
 )
 
+# Auth routes are skipped by the guard (login/logout must work for
+# everyone) except credential changes: an agent may not change its own
+# password or sign its owner out. ``/api/v1/accounts*`` is outside the
+# profile prefix and therefore T3 via ``action_for`` already.
+AGENT_FORBIDDEN_AUTH_ROUTES = frozenset({
+    "/api/v1/auth/password",
+    "/api/v1/auth/logout-all",
+})
+
 _KANBAN = ("kanban_card", "project_case")
 _PROJECT = ("project_case", "kanban_card", "evidence", "research_source")
 ACTION_KINDS: dict[str, tuple[str, ...]] = {
@@ -247,7 +256,9 @@ async def agent_write_guard(connection: HTTPConnection) -> AsyncIterator[None]:
     request = connection
     route = request.scope.get("route")
     template = str(getattr(route, "path", "") or "")
-    if not template.startswith("/api/v1/") or template.startswith("/api/v1/auth/"):
+    if not template.startswith("/api/v1/") or (
+        template.startswith("/api/v1/auth/") and template not in AGENT_FORBIDDEN_AUTH_ROUTES
+    ):
         yield
         return
     # Local import: auth imports routes_v1 helpers indirectly.

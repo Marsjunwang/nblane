@@ -2,30 +2,38 @@
 
 from __future__ import annotations
 
-import shutil
 import sys
 from datetime import date
 
 from nblane.commands.common import _profile_dir, _require_profile
-from nblane.core.paths import TEMPLATE_DIR
 
 
-def cmd_init(name: str) -> None:
+def cmd_init(name: str, schema: str | None = None) -> None:
     """Create a new profile directory from the template."""
+    from nblane.core import schema_io
+    from nblane.core.profile_io import init_profile
+
     dest = _profile_dir(name)
     if dest.exists():
         print(f"Profile '{name}' already exists at {dest}")
         sys.exit(0)
+    if schema is not None and schema_io.schema_path(schema) is None:
+        available = ", ".join(schema_io.list_schemas()) or "(none)"
+        print(
+            f"ERROR: unknown schema '{schema}'. Available: {available}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-    shutil.copytree(TEMPLATE_DIR, dest)
-
-    for filepath in dest.rglob("*"):
-        if filepath.is_file():
-            text = filepath.read_text(encoding="utf-8")
-            text = text.replace("{Name}", name)
-            filepath.write_text(text, encoding="utf-8")
+    try:
+        dest = init_profile(name, schema=schema)
+    except (ValueError, FileExistsError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"Profile created: {dest}")
+    if schema is not None:
+        print(f"Domain schema: {schema}")
     print("\nNext steps:")
     print(
         f"  1. Edit {dest}/SKILL.md"

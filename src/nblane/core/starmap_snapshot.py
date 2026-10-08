@@ -24,9 +24,9 @@ from nblane.core.profile_context import parse_identity_fields
 GUEST_WINDOW_DAYS = 30
 GUEST_MIN = 4  # display density floor: newest dated entries fly even if older
 
-# Category display names (zh) for the sector band. The domain schemas do not
-# carry per-category labels, so this table is the single server-side source
-# (moved from the playground exporter / SPA snapshot.ts).
+# Fallback category display names (zh) for the sector band. A schema's own
+# ``categories:`` map wins (see category_display_name); this table covers
+# schemas without one. Names must match the SPA's SECTOR_ASTERISM keys.
 CATEGORY_ZH = {
     "foundations": "基础",
     "control": "控制",
@@ -38,13 +38,21 @@ CATEGORY_ZH = {
     "middleware": "中间件",
     "navigation": "导航",
     "perception": "感知",
+    "planning": "规划",
     "research": "研究",
+    "safety": "安全",
     "simulation": "仿真",
     "strategy": "战略",
     "systems": "系统",
 }
 
 LIT_STATUSES = {"solid", "expert"}
+
+
+def category_display_name(schema: object, category: str) -> str:
+    """Display name: the schema's ``categories:`` map, then CATEGORY_ZH."""
+    cats = getattr(schema, "categories", None) or {}
+    return str(cats.get(category) or CATEGORY_ZH.get(category, category))
 DONE_MILESTONE = {"done", "completed", "complete", "achieved", "shipped"}
 
 _DATE_RE = re.compile(r"^(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?")
@@ -161,7 +169,7 @@ def build_starmap_snapshot(pdir: Path, today: date | None = None) -> dict:
         categories.append(
             {
                 "id": cat,
-                "name": CATEGORY_ZH.get(cat, cat),
+                "name": category_display_name(schema, cat),
                 "count": len(members),
                 "lit_count": sum(1 for s in members if s["lit"]),
                 "learning_count": sum(1 for s in members if s["status"] == "learning"),

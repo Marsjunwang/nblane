@@ -86,29 +86,34 @@ nblane openclaw sync [--profile <name>] --check   # 只对账，有漂移退出�
 - 改了 `scripts/openclaw/skills/nblane/SKILL.md` 后跑一次 `sync`，或在设置页点「接入 nblane」。助手页「接入方式」会显示是否最新。
 - 更新技能不需要重启网关；新建会话即可生效。
 
-## 服务账号密码
+## 服务账号凭据
 
-`nblane_api` 以 `openclaw` 账号登录 8504。密码读取顺序：
+`nblane_api` 以 `openclaw` 服务账号访问 8504，优先用 API token：
 
-1. 环境变量 `NBLANE_OPENCLAW_API_PASSWORD`。
-2. `~/.config/nblane/api.env`（0600）。定时任务的沙箱不继承网关进程环境时靠它。
+1. `NBLANE_OPENCLAW_API_TOKEN`（推荐）：在「设置 → 账号管理」助手账号那一行生成，形如 `nbl_…`，明文只显示一次。每个请求带 `Authorization: Bearer`，不登录、不缓存 cookie；被撤销后请求直接失败，不会退回密码。
+2. `NBLANE_OPENCLAW_API_PASSWORD`：没有 token 时用密码登录，会话 cookie 缓存在 `~/.cache/nblane/api-cookies.json`，过期后自动重登一次。
 
-给网关进程注入环境变量用用户级 drop-in：
+两者都按同样顺序读取：先环境变量，再 `~/.config/nblane/api.env`（0600）。定时任务的沙箱不继承网关进程环境时靠这个文件。
+
+```bash
+install -d -m 700 ~/.config/nblane
+printf 'NBLANE_OPENCLAW_API_TOKEN=<nbl_…>\n' > ~/.config/nblane/api.env
+chmod 600 ~/.config/nblane/api.env
+```
+
+也可以给网关进程用用户级 drop-in 注入：
 
 ```ini
 # ~/.config/systemd/user/openclaw-gateway.service.d/nblane-api.conf
 [Service]
-Environment=NBLANE_OPENCLAW_API_PASSWORD=<openclaw 服务账号密码>
+Environment=NBLANE_OPENCLAW_API_TOKEN=<nbl_…>
 ```
 
-```bash
-install -d -m 700 ~/.config/nblane
-printf 'NBLANE_OPENCLAW_API_PASSWORD=<密码>\n' > ~/.config/nblane/api.env
-chmod 600 ~/.config/nblane/api.env
-systemctl --user daemon-reload && systemctl --user restart openclaw-gateway
-```
+改 drop-in 后 `systemctl --user daemon-reload && systemctl --user restart openclaw-gateway`；只改 `api.env` 不用重启。
 
-`users.yaml` 里该账号是 `member`、只授权本人档案，写 `agent: true`。会话 cookie 缓存在 `~/.cache/nblane/api-cookies.json`。`NBLANE_API_BASE` 可改 API 地址。
+换 token：先生成新的、写进 `api.env`、用 `nblane_api summary` 验证，再撤销旧的。
+
+`users.yaml` 里该账号是 `member`、只授权本人档案，写 `agent: true`。`NBLANE_API_BASE` 可改 API 地址。
 
 ## 网关与 systemd
 
@@ -209,7 +214,7 @@ nblane openclaw doctor [--profile <name>]
 | 症状 | 先查 |
 |------|------|
 | 助手页「本机未安装 OpenClaw」 | `nblane-web-api.service` 的 `PATH` 是否含 `openclaw` |
-| 助手说「nblane 服务账号密码未配置」 | 网关 drop-in 和 `~/.config/nblane/api.env` |
+| 助手说「nblane 服务账号凭据未配置」或 token 被拒 | `~/.config/nblane/api.env` 和网关 drop-in；token 被撤销就在账号管理里重新生成 |
 | 助手说「nblane 暂不可达」 | `curl -fsS http://127.0.0.1:8504/api/v1/health`；`nblane-web-api` 状态 |
 | 每条微信消息立即失败，日志有 `prepared model catalog owner config was replaced during the read` | 热更新后模型目录绑着旧配置；确认 `openclaw config validate --json` 正常、无运行中任务后完整 `openclaw gateway restart` |
 | `gateway status` 报 protocol / token mismatch 或 exit 78 | 是否有 root 下的旧实例占着 18789（`ps aux \| grep -i openclaw`；root 用户服务要用 `XDG_RUNTIME_DIR=/run/user/0` 才看得到） |

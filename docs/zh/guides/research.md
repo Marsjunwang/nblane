@@ -73,7 +73,7 @@ source_of_truth: true
 
 两档都是腾讯混元 Hy-MT2（Apache-2.0）。内存不够的档位会显示原因并禁止安装。模型服务不常驻：
 第一次翻译时自动启动，空闲 5 分钟后释放内存，再次使用约 3 秒唤醒。部署细节见
-[腾讯云部署 · 本地翻译模型](deployment-tencent-cloud.md#本地翻译模型)。
+[腾讯云部署 · 本地翻译模型](deployment-tencent-cloud.md#本地翻译模型可选)。
 
 ### GROBID 与 PDF 结构后端
 
@@ -89,7 +89,7 @@ GROBID 由 nblane 以无 root 的 Podman 托管；如果检测到不是 nblane �
 
 已抽取的论文不受影响，重新抽取时才用新后端。论文概览会标出当前结构是「GROBID 结构化」还是
 「PyMuPDF 降级结构」。部署细节见
-[腾讯云部署 · Paper Reading PDF 后端](deployment-tencent-cloud.md#paper-reading-pdf-后端)。
+[腾讯云部署 · GROBID](deployment-tencent-cloud.md#grobid可选)。
 
 有些 PDF 经 GROBID 返回结构化文本但没有段落级坐标。此时阅读器优先用版面结构锚点定位，
 没有可用锚点才退回页级定位。这通常不是部署失败。

@@ -170,11 +170,25 @@ class SkillTreeNodeModel(BaseModel):
     children: list[SkillTreeNodeModel] = Field(default_factory=list)
 
 
+class SchemaInfo(BaseModel):
+    """One available domain skill-tree schema (``GET /api/v1/schemas``).
+
+    ``source`` is ``data`` for ``<NBLANE_ROOT>/schemas/*.yaml`` (admin-added
+    or overriding) and ``builtin`` for the schemas shipped with the code.
+    """
+
+    name: str
+    domain: str
+    description: str = ""
+    node_count: int = 0
+    source: str = "builtin"
+
+
 class SkillTreeCategoryModel(BaseModel):
     """Per-category rollup for the category banner headers.
 
-    ``name`` is the zh display name (``core.starmap_snapshot.CATEGORY_ZH``,
-    id as fallback) — the same source the home starmap sector band uses, so
+    ``name`` is the zh display name (the schema's ``categories:`` map, then
+    ``core.starmap_snapshot.CATEGORY_ZH``, id as fallback) — the same source the home starmap sector band uses, so
     the skill-tree banners and the starmap agree on 官名 lookup keys.
     ``lit_count`` folds solid+expert (the 点亮 tier); locked = count − lit −
     learning.

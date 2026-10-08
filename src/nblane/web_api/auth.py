@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from nblane.core import auth as auth_core
+from nblane.core import auth_store
 from nblane.core import git_backup
 
 SESSION_TTL_SECONDS = 12 * 3600
@@ -33,6 +34,13 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    """Self-service password change."""
+
+    current_password: str
+    new_password: str
+
+
 class CurrentUser(BaseModel):
     """The authenticated principal for one request."""
 
@@ -42,6 +50,7 @@ class CurrentUser(BaseModel):
     auth_enabled: bool = False
     profiles: list[str] = Field(default_factory=list)
     agent: bool = False
+    must_change_password: bool = False
 
     @classmethod
     def from_user(cls, user: auth_core.User, *, auth_enabled: bool) -> "CurrentUser":
@@ -53,6 +62,7 @@ class CurrentUser(BaseModel):
             auth_enabled=auth_enabled,
             profiles=list(user.profiles),
             agent=user.agent,
+            must_change_password=user.must_change_password,
         )
 
 
@@ -129,9 +139,12 @@ def _set_session_cookie(
     response: Response,
     user_id: str,
     *,
+    session_version: int = 0,
     ttl_seconds: int = SESSION_TTL_SECONDS,
 ) -> None:
-    token = auth_core.mint_auth_session_token(user_id, ttl_seconds=ttl_seconds)
+    token = auth_core.mint_auth_session_token(
+        user_id, ttl_seconds=ttl_seconds, session_version=session_version
+    )
     claims = auth_core.verify_auth_session_token(token)
     max_age = max(0, claims.exp - int(time.time())) if claims else ttl_seconds
     response.set_cookie(
@@ -234,14 +247,29 @@ def _resolve_request_user(request: Request) -> CurrentUser | None:
     """
     if not auth_core.auth_configured():
         return CurrentUser.from_user(_local_user(), auth_enabled=False)
+    bearer = _bearer_token(request)
+    if bearer:
+        # An explicit API token never falls back to the cookie.
+        user = auth_core.user_for_api_token(bearer, _load_users_or_500())
+        return CurrentUser.from_user(user, auth_enabled=True) if user else None
     cookie = request.cookies.get(auth_core.AUTH_SESSION_COOKIE_NAME, "")
     if cookie:
         claims = _verify_token(cookie)
         if claims is not None:
-            user = _load_users_or_500().get(claims.user_id)
+            user = auth_core.resolve_session_user(claims, _load_users_or_500())
             if user is not None:
                 return CurrentUser.from_user(user, auth_enabled=True)
     return None
+
+
+def _bearer_token(request: Request) -> str:
+    """``nbl_…`` token from ``Authorization: Bearer``, else empty."""
+    header = request.headers.get("authorization", "")
+    scheme, _, value = header.partition(" ")
+    if scheme.lower() != "bearer":
+        return ""
+    value = value.strip()
+    return value if value.startswith(auth_core.API_TOKEN_PREFIX) else ""
 
 
 def require_user(request: Request) -> CurrentUser:
@@ -295,11 +323,12 @@ def login(
         )
     user = _load_users_or_500().get(payload.username.strip())
     stored_hash = user.password_hash if user is not None else _dummy_hash_value()
-    if user is None or not auth_core.verify_password(payload.password, stored_hash):
+    password_ok = auth_core.verify_password(payload.password, stored_hash)
+    if user is None or not password_ok or user.disabled:
         limiter.record_failure(key)
         raise HTTPException(status_code=401, detail=GENERIC_LOGIN_ERROR)
     limiter.record_success(key)
-    _set_session_cookie(response, user.id)
+    _set_session_cookie(response, user.id, session_version=user.session_version)
     return CurrentUser.from_user(user, auth_enabled=True)
 
 
@@ -314,3 +343,61 @@ def logout(response: Response) -> OkResponse:
 def me(user: CurrentUser = Depends(require_user)) -> CurrentUser:
     """Return the current user (or the synthetic local admin when auth is off)."""
     return user
+
+
+def _account_error(exc: auth_store.AccountError) -> Exception:
+    from nblane.web_api.routes_v1 import ApiError
+
+    status = 400 if exc.code == "auth_not_configured" else 422
+    return ApiError(status, exc.code, exc.message)
+
+
+@router.post("/password", response_model=CurrentUser)
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    response: Response,
+    user: CurrentUser = Depends(require_user),
+) -> CurrentUser:
+    """Change your own password; every other session is signed out."""
+    from nblane.web_api.routes_v1 import ApiError
+
+    if not auth_core.auth_configured():
+        raise ApiError(400, "auth_not_configured", "Auth is not configured.")
+    limiter = _rate_limiter(request)
+    key = _client_key(request, user.id)
+    if limiter.blocked(key):
+        raise ApiError(429, "rate_limited", "Too many failed attempts; try again later.")
+    record = _load_users_or_500().get(user.id)
+    stored_hash = record.password_hash if record is not None else _dummy_hash_value()
+    if record is None or not auth_core.verify_password(payload.current_password, stored_hash):
+        limiter.record_failure(key)
+        raise ApiError(401, "invalid_current_password", "Current password is incorrect.")
+    limiter.record_success(key)
+    try:
+        auth_store.set_password(user.id, payload.new_password, must_change=False)
+    except auth_store.AccountError as exc:
+        raise _account_error(exc) from exc
+    updated = _load_users_or_500().get(user.id)
+    if updated is None:
+        raise ApiError(401, "user_not_found", "Authentication required")
+    _set_session_cookie(response, updated.id, session_version=updated.session_version)
+    return CurrentUser.from_user(updated, auth_enabled=True)
+
+
+@router.post("/logout-all", response_model=OkResponse)
+def logout_all(
+    response: Response,
+    user: CurrentUser = Depends(require_user),
+) -> OkResponse:
+    """Sign out every session of the current user (this one included)."""
+    from nblane.web_api.routes_v1 import ApiError
+
+    if not auth_core.auth_configured():
+        raise ApiError(400, "auth_not_configured", "Auth is not configured.")
+    try:
+        auth_store.bump_session_version(user.id)
+    except auth_store.AccountError as exc:
+        raise _account_error(exc) from exc
+    _delete_session_cookie(response)
+    return OkResponse()

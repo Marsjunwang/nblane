@@ -66,7 +66,10 @@ SPA (TanStack Query, fetch credentials: include)
 ## 鉴权与身份
 
 - 未设置 `NBLANE_AUTH_FILE`：关闭登录，所有请求以合成本地管理员运行（单机自用）。
-- 设置后读取 `auth/users.yaml`，浏览器登录拿 httpOnly cookie `nblane_auth_session`（HMAC 签名，登录限流）。
+- 设置后读取 `auth/users.yaml`（按文件 mtime 缓存），浏览器登录拿 httpOnly cookie `nblane_auth_session`（HMAC 签名，登录限流）。
+- 会话令牌带用户的 `session_version`。改密码、重置密码、停用、「登出所有设备」都会把版本号加一，旧会话随即失效；停用账号的任何会话和 token 都被拒绝。
+- 机器访问用 API token `nbl_<id>_<secret>`，`Authorization: Bearer` 传递，`users.yaml` 只存 sha256，可单独撤销。
+- `users.yaml` 只经 `core/auth_store.py` 写（加锁、原子写、保持 0600），不进数据仓库 git。
 - 身份只有三类：
 
 | 身份 | users.yaml | 能力 |
