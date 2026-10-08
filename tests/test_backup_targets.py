@@ -183,6 +183,23 @@ class TestRemoteFlow(BackupTargetsTestBase):
         self.assertIn("远端", result["error"])
         self.assertIn("loose.txt", _git(self.workspace, "status", "--porcelain"))
 
+    def test_push_only_target_commits_only_snapshot_paths(self) -> None:
+        """Accounts (written without git_backup) are committed; nothing else is swept."""
+        data = bt.BackupTarget(
+            id=bt.TARGET_NBLANE_DATA, label="d", description="", path=self.workspace,
+            commit_mode=bt.COMMIT_PUSH_ONLY, gitignore=bt.DATA_GITIGNORE,
+            snapshot_paths=(bt.DATA_AUTH_FILE,),
+        )
+        (self.workspace / "auth").mkdir()
+        (self.workspace / "auth" / "users.yaml").write_text("users: {}\n", encoding="utf-8")
+        (self.workspace / "loose.txt").write_text("x", encoding="utf-8")
+        result = bt.backup_target(data)
+        self.assertTrue(result["committed"])
+        self.assertIn("auth/users.yaml", _git(self.workspace, "ls-files"))
+        self.assertIn("?? loose.txt", _git(self.workspace, "status", "--porcelain"))
+        # Unchanged accounts: no empty commit on the next run.
+        self.assertFalse(bt.backup_target(data)["committed"])
+
 
 class TestTimer(BackupTargetsTestBase):
     def test_units_written_and_enabled(self) -> None:

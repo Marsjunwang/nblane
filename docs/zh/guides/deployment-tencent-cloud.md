@@ -59,7 +59,7 @@ sudo chown -R nblane:nblane /srv/nblane-assets
 
 第一个管理员手写 `auth/users.yaml`（参考 `auth/users.example.yaml`，密码哈希用 `nblane auth hash-password`），之后的加人、改密码、停用都在「设置 → 账号管理 / 我的账号」里做。
 
-`auth/` 不进数据仓库 git：在 `/srv/nblane-data/.gitignore` 里写 `auth/`，文件保持 0600，靠整机备份保存。网页写账号时也不会触发自动提交。
+`auth/users.yaml` 留在私有数据仓库里，文件保持 0600。网页改账号时不会立即提交，每天 03:30 的备份会把它单独提交并推送（只提交这一个文件，不会顺带扫进其他未提交的改动）。数据仓库必须是私有的，里面有密码哈希和助手 token 的哈希。
 
 - `role: admin`：管理员，可访问所有档案和系统设置。
 - `role: member` + `profile: <name>`：本人，只能访问自己的档案。

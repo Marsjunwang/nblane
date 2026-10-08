@@ -2,8 +2,10 @@
 
 Every mutation takes the sidecar lock, re-reads the raw YAML, changes one
 user's mapping in place (unknown keys and other users stay untouched),
-and installs the result atomically. The auth file is deliberately kept
-out of git: nothing here calls ``git_backup.record_change``.
+and installs the result atomically. Nothing here calls
+``git_backup.record_change`` (no per-click commit); the daily backup
+commits ``auth/users.yaml`` to the private data repo
+(``core/backup_targets.DATA_AUTH_FILE``).
 """
 
 from __future__ import annotations

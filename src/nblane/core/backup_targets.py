@@ -42,6 +42,9 @@ TARGET_NBLANE_DATA = "nblane-data"
 TARGET_OPENCLAW_WORKSPACE = "openclaw-workspace"
 COMMIT_ALL = "all"
 COMMIT_PUSH_ONLY = "push_only"
+# Accounts live in the private data repo; the web writes them without a
+# commit (core/auth_store), so the daily run snapshots them.
+DATA_AUTH_FILE = "auth/users.yaml"
 DEFAULT_UNIT = "nblane-backup"
 ON_CALENDAR = "*-*-* 03:30:00"
 _GIT_TIMEOUT = 30.0
@@ -95,6 +98,9 @@ class BackupTarget:
     commit_mode: str
     gitignore: str
     untrack: tuple[str, ...] = ()
+    # Paths the daily run commits even on a push_only target: files written
+    # outside core/git_backup (auth/users.yaml via core/auth_store).
+    snapshot_paths: tuple[str, ...] = ()
 
 
 # --------------------------------------------------------------- locations
@@ -157,6 +163,7 @@ def list_targets() -> list[BackupTarget]:
             path=Path(paths.REPO_ROOT),
             commit_mode=COMMIT_PUSH_ONLY,
             gitignore=DATA_GITIGNORE,
+            snapshot_paths=(DATA_AUTH_FILE,),
         )
     ]
     from nblane.core import openclaw_setup
@@ -566,6 +573,24 @@ def _commit_all(repo: Path, message: str) -> bool:
     return True
 
 
+def _commit_paths(repo: Path, rels: tuple[str, ...], message: str) -> bool:
+    """Commit only *rels* (when they exist and changed); never sweeps the tree."""
+    present = [rel for rel in rels if (repo / rel).is_file()]
+    if not present:
+        return False
+    add = _git(repo, "add", "--", *present)
+    if add.returncode != 0:
+        raise BackupError("git add 失败：" + _last_line(add))
+    if _git(repo, "diff", "--cached", "--quiet", "--", *present).returncode == 0:
+        return False
+    commit = _run(
+        ["git", "-C", str(repo), *_identity_args(repo), "commit", "-q", "-m", message, "--", *present]
+    )
+    if commit.returncode != 0:
+        raise BackupError("git commit 失败：" + _last_line(commit))
+    return True
+
+
 def backup_target(target: BackupTarget) -> dict[str, Any]:
     """Snapshot (for ``all`` targets) and push one target; never raises."""
 
@@ -573,9 +598,13 @@ def backup_target(target: BackupTarget) -> dict[str, Any]:
     try:
         if not is_repo(target.path):
             raise BackupError("不是 git 仓库。")
+        stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
         if target.commit_mode == COMMIT_ALL:
-            stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
             outcome["committed"] = _commit_all(target.path, f"backup: snapshot {stamp}")
+        elif target.snapshot_paths:
+            outcome["committed"] = _commit_paths(
+                target.path, target.snapshot_paths, f"backup: accounts {stamp}"
+            )
         if not _out(_git(target.path, "remote", "get-url", "origin")):
             raise BackupError("还没有配置远端，只在本机提交。")
         key = key_path(target)

@@ -224,9 +224,10 @@ See [`docs/zh/product/design-language.md`](docs/zh/product/design-language.md)
   path helpers rather than string-joining paths.
 - Web auth is optional and off by default for single-user local runs; setting
   `NBLANE_AUTH_FILE` turns on login. `auth/users.yaml` is written only through
-  `core/auth_store.py` (lock + atomic write, 0600) and never committed to the
-  data repo's git; sessions carry a `session_version` so password changes,
-  disabling and "logout all" revoke them; machine clients use revocable
+  `core/auth_store.py` (lock + atomic write, 0600, no per-write commit); the
+  daily backup commits it to the private data repo; sessions carry a
+  `session_version` so password changes, disabling and "logout all" revoke
+  them; machine clients use revocable
   `nbl_…` Bearer tokens. Roles are `admin` and `member` (member
   sees only its own profiles); an account with `agent: true` is an agent
   service account whose writes go through `web_api/agent_guard.py`

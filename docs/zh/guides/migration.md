@@ -158,7 +158,7 @@ nblane openclaw doctor --profile <name>
 | `NBLANE_READER_TOKEN_SECRET` | 同上 | 沿用旧值或重新生成；8502 和 8504 读同一个文件 |
 | `NBLANE_AUTH_COOKIE_SECURE=1` | 同上 | HTTPS 环境必须 |
 | `NBLANE_OPENCLAW_HOOK_TOKEN` | 同上 | 须与网关 `cron.webhookToken` 一致 |
-| `auth/users.yaml`（账号、密码哈希、助手 token 哈希） | `/srv/nblane-data/auth/`，不进 git | 从整机备份拷贝，保持 0600 |
+| `auth/users.yaml`（账号、密码哈希、助手 token 哈希） | 私有数据仓（每日备份提交） | 随 clone 到位；迁移前先跑一次备份，保持 0600 |
 | `NBLANE_OPENCLAW_API_TOKEN`（或旧的 `_PASSWORD`） | `~/.config/nblane/api.env` 或网关 drop-in | 明文不在任何仓库；拷贝该文件，或在账号管理里重新生成 token |
 | 网关 token、模型 key | `~/.openclaw/openclaw.json` | 随状态目录迁移 |
 | 微信登录态 | `~/.openclaw` 内 | 随状态目录；失效则 `openclaw channels login --channel openclaw-weixin` 重新扫码 |
