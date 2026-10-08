@@ -132,12 +132,19 @@ def run_ai_action(
     ):
         failed_backend = result.backend
         failed_error = result.error
+        # Keep the failed run's diagnostics (e.g. Codex reconnects / last
+        # output before a timeout) so the job shows why it failed.
+        failed_notes = [
+            str(item)
+            for item in result.warnings or []
+            if str(item) and str(item) != failed_error
+        ]
         fallback = registry[spec.fallback_backend]
         result = fallback.run(request, spec)
-        result.warnings.insert(
-            0,
+        result.warnings[0:0] = [
             f"{failed_backend} failed ({failed_error}); used {result.backend}.",
-        )
+            *failed_notes,
+        ]
     _record_if_profile(request, spec, result)
     return result
 

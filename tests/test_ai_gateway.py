@@ -905,6 +905,33 @@ class TestAIGateway(unittest.TestCase):
         self.assertIn("local_codex_readonly failed", result.warnings[0])
         self.assertIn("codex_json_error", result.warnings[0])
 
+    def test_codex_timeout_diagnostics_survive_fallback(self) -> None:
+        """Reconnect / last-output notes from a timed-out Codex run reach the job warnings."""
+
+        readonly = SimpleNamespace(
+            ok=False,
+            output="",
+            warnings=["Codex stream reconnected 3 time(s); the provider connection was unstable."],
+            error="command_timeout: exceeded 960s",
+            stdout="",
+            stderr="",
+            command="codex exec --sandbox read-only -",
+        )
+        with patch(
+            "nblane.core.codex_adapter.run_readonly_codex_prompt",
+            return_value=readonly,
+        ):
+            result = run_ai_action(
+                "research.paper_search_codex",
+                {"query": "VLA memory"},
+                profile="",
+                require_review=False,
+            )
+
+        self.assertEqual(result.backend, "rule_fallback")
+        self.assertIn("command_timeout", result.warnings[0])
+        self.assertIn("reconnected 3 time(s)", result.warnings[1])
+
     def test_rule_fallback_returns_deterministic_result(self) -> None:
         """Rule fallback can provide a usable empty/candidate state."""
 

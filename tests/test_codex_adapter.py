@@ -453,6 +453,63 @@ class TestCodexAdapter(unittest.TestCase):
         self.assertNotIn("worktree", " ".join(map(str, args)))
         self.assertEqual(captured["env"].get("CODEX_HOME"), tmp)
 
+    def test_readonly_codex_timeout_reports_reconnects_and_last_output(self) -> None:
+        """A timed-out run says how often the stream reconnected and where it stopped."""
+
+        stderr = (
+            "model: gpt-6.1-sol\n"
+            "ERROR: Reconnecting... 1/5\n"
+            "[features].foo is ignored.\n"
+            "ERROR: Reconnecting... 2/5\n"
+            "thinking about Table 3\n"
+        )
+
+        def fake_run(args, *, timeout, cwd=None, stdin=None, env=None):
+            return CodexCommandResult(
+                False,
+                "codex exec",
+                124,
+                stderr=stderr,
+                error=f"command_timeout: exceeded {timeout:g}s",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch("nblane.core.codex_adapter.shutil.which", return_value="/bin/codex"),
+                patch("nblane.core.codex_adapter._run", side_effect=fake_run),
+            ):
+                result = run_readonly_codex_prompt(
+                    "alice",
+                    "Deep read.",
+                    config=CodexConfig(timeout_seconds=9, codex_home=tmp),
+                )
+
+        self.assertFalse(result.ok)
+        joined = "\n".join(result.warnings)
+        self.assertIn("reconnected 2 time(s)", joined)
+        self.assertIn("thinking about Table 3", joined)
+        self.assertNotIn("is ignored.", joined)
+
+    def test_readonly_codex_timeout_without_output_says_still_thinking(self) -> None:
+        def fake_run(args, *, timeout, cwd=None, stdin=None, env=None):
+            return CodexCommandResult(False, "codex exec", 124, error="command_timeout: exceeded 9s")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch("nblane.core.codex_adapter.shutil.which", return_value="/bin/codex"),
+                patch("nblane.core.codex_adapter._run", side_effect=fake_run),
+            ):
+                result = run_readonly_codex_prompt(
+                    "alice",
+                    "Deep read.",
+                    config=CodexConfig(timeout_seconds=9, codex_home=tmp),
+                )
+
+        self.assertEqual(
+            result.warnings,
+            ["Codex produced no output before timeout (model still thinking)."],
+        )
+
     def test_readonly_codex_prompt_can_enable_search_and_xhigh_reasoning(self) -> None:
         """Paper search can opt into native Codex web search and deeper reasoning."""
 

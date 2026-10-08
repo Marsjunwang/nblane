@@ -1175,6 +1175,8 @@ def run_readonly_codex_prompt(
         )
         if last_truncated:
             warnings.append("Codex read-only output was truncated.")
+        if not result.ok:
+            warnings.extend(_codex_failure_diagnostics(result))
         return CodexReadonlyResult(
             ok=result.ok,
             profile=profile,
@@ -2037,6 +2039,40 @@ def _sanitize(value: object) -> str:
         text,
     )
     return text
+
+
+_DIAGNOSTIC_TAIL_LINES = 3
+_DIAGNOSTIC_LINE_CHARS = 200
+
+
+def _codex_failure_diagnostics(result: CodexCommandResult) -> list[str]:
+    """Explain a failed/timed-out run: stream reconnects and the last log lines.
+
+    Codex prints nothing while the model is thinking, so a bare
+    ``command_timeout`` does not say whether the provider stream kept
+    dropping or the model was simply slow; these lines make that visible.
+    """
+
+    text = "\n".join(part for part in (result.stderr, result.stdout) if part)
+    notes: list[str] = []
+    reconnects = len(re.findall(r"Reconnecting\.\.\.", text))
+    if reconnects:
+        notes.append(
+            f"Codex stream reconnected {reconnects} time(s); the provider connection was unstable."
+        )
+    if not str(result.error or "").startswith(("command_timeout", "command_idle_timeout")):
+        return notes
+    lines = [
+        line.strip()
+        for line in str(result.stderr or result.stdout or "").splitlines()
+        if line.strip() and " is ignored." not in line
+    ]
+    tail = [line[:_DIAGNOSTIC_LINE_CHARS] for line in lines[-_DIAGNOSTIC_TAIL_LINES:]]
+    if tail:
+        notes.append("Codex last output before timeout: " + " | ".join(tail))
+    else:
+        notes.append("Codex produced no output before timeout (model still thinking).")
+    return notes
 
 
 def _summarize_error(stdout: str, stderr: str) -> str:
