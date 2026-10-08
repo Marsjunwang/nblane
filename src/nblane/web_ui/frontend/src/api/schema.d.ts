@@ -8076,10 +8076,22 @@ export interface components {
          */
         PaperAnalysisItemModel: {
             /**
+             * Badge
+             * @description Short tag such as evidence support (deep read).
+             * @default
+             */
+            badge: string;
+            /**
              * Label
              * @default
              */
             label: string;
+            /**
+             * Latex
+             * @description LaTeX source for an equation item (deep read).
+             * @default
+             */
+            latex: string;
             /** Refs */
             refs?: components["schemas"]["PaperRefModel"][];
             /** Text */
@@ -8120,6 +8132,11 @@ export interface components {
          */
         PaperDeepReadModel: {
             /**
+             * Audience
+             * @default
+             */
+            audience: string;
+            /**
              * Batch Count
              * @default 0
              */
@@ -8142,6 +8159,8 @@ export interface components {
              * @default
              */
             takeaway: string;
+            /** Takeaway Refs */
+            takeaway_refs?: components["schemas"]["PaperRefModel"][];
             /**
              * Updated
              * @default
@@ -8149,6 +8168,12 @@ export interface components {
             updated: string;
             /** Warnings */
             warnings?: string[];
+            /**
+             * Worth Reading
+             * @description 必读 / 值得细读 / 略读即可 / 可以跳过 (v2 notes).
+             * @default
+             */
+            worth_reading: string;
         };
         /**
          * PaperJobRefModel

@@ -6508,9 +6508,21 @@
    "PaperAnalysisItemModel": {
     "description": "One analysis bullet: optional label (term/metric/section) + refs.",
     "properties": {
+     "badge": {
+      "default": "",
+      "description": "Short tag such as evidence support (deep read).",
+      "title": "Badge",
+      "type": "string"
+     },
      "label": {
       "default": "",
       "title": "Label",
+      "type": "string"
+     },
+     "latex": {
+      "default": "",
+      "description": "LaTeX source for an equation item (deep read).",
+      "title": "Latex",
       "type": "string"
      },
      "refs": {
@@ -6590,6 +6602,11 @@
    "PaperDeepReadModel": {
     "description": "Deep study (深度研读) report saved under ``codex_deep_read``.",
     "properties": {
+     "audience": {
+      "default": "",
+      "title": "Audience",
+      "type": "string"
+     },
      "batch_count": {
       "default": 0,
       "title": "Batch Count",
@@ -6620,6 +6637,13 @@
       "title": "Takeaway",
       "type": "string"
      },
+     "takeaway_refs": {
+      "items": {
+       "$ref": "#/components/schemas/PaperRefModel"
+      },
+      "title": "Takeaway Refs",
+      "type": "array"
+     },
      "updated": {
       "default": "",
       "title": "Updated",
@@ -6631,6 +6655,12 @@
       },
       "title": "Warnings",
       "type": "array"
+     },
+     "worth_reading": {
+      "default": "",
+      "description": "必读 / 值得细读 / 略读即可 / 可以跳过 (v2 notes).",
+      "title": "Worth Reading",
+      "type": "string"
      }
     },
     "title": "PaperDeepReadModel",
