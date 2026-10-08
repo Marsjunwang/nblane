@@ -9658,6 +9658,12 @@
       "title": "Backend",
       "type": "string"
      },
+     "codex_effort": {
+      "default": "",
+      "description": "low | medium | high | xhigh; empty = default.",
+      "title": "Codex Effort",
+      "type": "string"
+     },
      "codex_model": {
       "default": "",
       "title": "Codex Model",
@@ -9681,7 +9687,7 @@
     "type": "object"
    },
    "ResearchAIActionUpdate": {
-    "description": "Backend/model choice for one action; empty strings mean app default.",
+    "description": "Backend/model/effort choice for one action; empty strings mean app default.",
     "properties": {
      "backend": {
       "default": "",
@@ -9691,6 +9697,18 @@
        "codex"
       ],
       "title": "Backend",
+      "type": "string"
+     },
+     "codex_effort": {
+      "default": "",
+      "enum": [
+       "",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ],
+      "title": "Codex Effort",
       "type": "string"
      },
      "codex_model": {
@@ -9718,6 +9736,12 @@
       },
       "title": "Actions",
       "type": "array"
+     },
+     "codex_default_effort": {
+      "default": "",
+      "description": "model_reasoning_effort from the Codex CLI config.",
+      "title": "Codex Default Effort",
+      "type": "string"
      },
      "codex_default_model": {
       "default": "",

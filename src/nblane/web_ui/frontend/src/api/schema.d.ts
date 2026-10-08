@@ -10070,6 +10070,12 @@ export interface components {
              */
             backend: string;
             /**
+             * Codex Effort
+             * @description low | medium | high | xhigh; empty = default.
+             * @default
+             */
+            codex_effort: string;
+            /**
              * Codex Model
              * @default
              */
@@ -10087,7 +10093,7 @@ export interface components {
         };
         /**
          * ResearchAIActionUpdate
-         * @description Backend/model choice for one action; empty strings mean app default.
+         * @description Backend/model/effort choice for one action; empty strings mean app default.
          */
         ResearchAIActionUpdate: {
             /**
@@ -10096,6 +10102,12 @@ export interface components {
              * @enum {string}
              */
             backend: "" | "llm" | "codex";
+            /**
+             * Codex Effort
+             * @default
+             * @enum {string}
+             */
+            codex_effort: "" | "low" | "medium" | "high" | "xhigh";
             /**
              * Codex Model
              * @default
@@ -10114,6 +10126,12 @@ export interface components {
         ResearchAIConfigResponse: {
             /** Actions */
             actions?: components["schemas"]["ResearchAIActionModel"][];
+            /**
+             * Codex Default Effort
+             * @description model_reasoning_effort from the Codex CLI config.
+             * @default
+             */
+            codex_default_effort: string;
             /**
              * Codex Default Model
              * @default
