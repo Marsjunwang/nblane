@@ -41,6 +41,7 @@ export type BackupRemoteTest = Schemas['BackupRemoteTestResponse'];
 export type BackupKey = Schemas['BackupKeyResponse'];
 export type BackupRun = Schemas['BackupRunResponse'];
 export type OpenClawSetupStatus = Schemas['OpenClawStatusResponse'];
+export type AgentTokenStatus = Schemas['AgentTokenStatus'];
 
 /** Profile-scoped non-secret preferences and Codex readiness/configuration. */
 export type ProfileSettings = Schemas['ProfileSettingsResponse'];

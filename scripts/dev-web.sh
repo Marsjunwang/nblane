@@ -189,6 +189,9 @@ if [[ "$mode" == "isolated" ]]; then
   # gateway unit and port), agent data root, deploy keys, state and timer so
   # dev never touches the production gateway, keys or nblane-backup.timer.
   local_models_env="${local_models_env} NBLANE_OPENCLAW_PROFILE=nblane-dev NBLANE_OPENCLAW_GATEWAY_PORT=19789 NBLANE_AGENT_DATA_ROOT='$dev_root/agent-data' NBLANE_BACKUP_KEY_DIR='$dev_root/backup/keys' NBLANE_BACKUP_STATE_DIR='$dev_root/backup/state' NBLANE_BACKUP_DIR='$dev_root/backup/archives' NBLANE_BACKUP_UNIT=nblane-backup-dev"
+  # 「生成并配置 token」 writes the assistant's api.env; keep dev away from the
+  # production ~/.config/nblane/api.env.
+  local_models_env="${local_models_env} NBLANE_OPENCLAW_API_ENV_FILE='$dev_root/agent-config/nblane/api.env'"
   # Workshop terminal managed from dev Settings: own unit, ttyd port, tmux
   # socket and settings, so dev never restarts or reconfigures the real one.
   local_models_env="${local_models_env} NBLANE_WORKSHOP_SERVICE_DIR='$dev_root/workshop' NBLANE_WORKSHOP_UNIT=nblane-workshop-dev NBLANE_WORKSHOP_PORT=17668 NBLANE_WORKSHOP_TMUX_SOCKET=nblane-workshop-dev NBLANE_WORKSHOP_AUTOSTART=0"

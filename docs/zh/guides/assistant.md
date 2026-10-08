@@ -1,7 +1,7 @@
 ---
 status: active
 owner: 王军
-last_verified: 2026-10-07
+last_verified: 2026-10-08
 source_of_truth: false
 ---
 
@@ -85,4 +85,4 @@ source_of_truth: false
 
 ## 账号
 
-`users.yaml` 里给服务账号写 `agent: true`，它的写入就按上面的规则处理。历史账号 `openclaw` 不写也会被识别。服务账号用「设置 → 账号管理」生成的 API token 访问 nblane，凭据只放在服务器上，见 [OpenClaw 运维](openclaw-ops.md#服务账号凭据)。
+`users.yaml` 里给服务账号写 `agent: true`，它的写入就按上面的规则处理。历史账号 `openclaw` 不写也会被识别。服务账号用 API token 访问 nblane，在「设置 → 助手与备份」点「生成并配置 token」即可一键生成并写入服务器，明文不经过浏览器，见 [OpenClaw 运维](openclaw-ops.md#服务账号凭据)。

@@ -3081,6 +3081,21 @@ class AgentJobModel(BaseModel):
     finished_at: float = 0
 
 
+class AgentTokenStatus(BaseModel):
+    """Assistant service-account credential state (never any plaintext)."""
+
+    account: str
+    account_exists: bool = False
+    account_is_agent: bool = False
+    env_path: str = ""
+    configured: bool = False
+    token_id: str = ""
+    token_valid: bool = False
+    created: str = ""
+    password_fallback: bool = False
+    rotated: bool = False
+
+
 class OpenClawStatusResponse(BaseModel):
     """Admin view of the local OpenClaw install and its nblane wiring."""
 

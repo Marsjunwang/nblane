@@ -107,6 +107,7 @@ class FakeServer:
 def _no_ambient_token(monkeypatch, tmp_path):
     """Keep a real NBLANE_OPENCLAW_API_TOKEN (env or api.env) out of tests."""
     monkeypatch.delenv(nblane_api.TOKEN_ENV, raising=False)
+    monkeypatch.delenv("NBLANE_OPENCLAW_API_ENV_FILE", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "isolated-config"))
 
 
@@ -472,3 +473,17 @@ def test_token_falls_back_to_config_file(tmp_path, monkeypatch):
     )
     session.request("GET", "/profiles/x/summary")
     assert seen[0].headers["authorization"] == f"Bearer {TOKEN}"
+
+
+def test_env_file_override_wins_over_xdg(tmp_path, monkeypatch):
+    xdg = tmp_path / "config" / "nblane"
+    xdg.mkdir(parents=True)
+    (xdg / "api.env").write_text(f"{nblane_api.TOKEN_ENV}=nbl_xdg_wrong\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    override = tmp_path / "dev" / "api.env"
+    override.parent.mkdir(parents=True)
+    override.write_text(f"# dev\n{nblane_api.TOKEN_ENV}=\"{TOKEN}\"\n")
+    monkeypatch.setenv("NBLANE_OPENCLAW_API_ENV_FILE", str(override))
+    assert nblane_api._read_secret(nblane_api.TOKEN_ENV) == TOKEN
+    override.unlink()
+    assert nblane_api._read_secret(nblane_api.TOKEN_ENV) == ""

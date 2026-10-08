@@ -591,6 +591,65 @@
     "title": "AgentTaskModel",
     "type": "object"
    },
+   "AgentTokenStatus": {
+    "description": "Assistant service-account credential state (never any plaintext).",
+    "properties": {
+     "account": {
+      "title": "Account",
+      "type": "string"
+     },
+     "account_exists": {
+      "default": false,
+      "title": "Account Exists",
+      "type": "boolean"
+     },
+     "account_is_agent": {
+      "default": false,
+      "title": "Account Is Agent",
+      "type": "boolean"
+     },
+     "configured": {
+      "default": false,
+      "title": "Configured",
+      "type": "boolean"
+     },
+     "created": {
+      "default": "",
+      "title": "Created",
+      "type": "string"
+     },
+     "env_path": {
+      "default": "",
+      "title": "Env Path",
+      "type": "string"
+     },
+     "password_fallback": {
+      "default": false,
+      "title": "Password Fallback",
+      "type": "boolean"
+     },
+     "rotated": {
+      "default": false,
+      "title": "Rotated",
+      "type": "boolean"
+     },
+     "token_id": {
+      "default": "",
+      "title": "Token Id",
+      "type": "string"
+     },
+     "token_valid": {
+      "default": false,
+      "title": "Token Valid",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "account"
+    ],
+    "title": "AgentTokenStatus",
+    "type": "object"
+   },
    "ApiTokenInfo": {
     "description": "One API token without its hash.",
     "properties": {
@@ -24567,6 +24626,142 @@
      }
     },
     "summary": "Start Openclaw Job"
+   }
+  },
+  "/api/v1/settings/agents/token": {
+   "get": {
+    "description": "Whether the assistant's api.env holds a valid token (no plaintext).",
+    "operationId": "get_agent_token_api_v1_settings_agents_token_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AgentTokenStatus"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Conflict"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Internal Server Error"
+     }
+    },
+    "summary": "Get Agent Token"
+   },
+   "post": {
+    "description": "Mint a token for the agent account and write it into api.env server-side.",
+    "operationId": "configure_agent_token_api_v1_settings_agents_token_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AgentTokenStatus"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Bad Request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Not Found"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Conflict"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Internal Server Error"
+     }
+    },
+    "summary": "Configure Agent Token"
    }
   },
   "/api/v1/settings/backup": {

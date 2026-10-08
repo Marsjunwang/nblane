@@ -2892,6 +2892,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/agents/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Token
+         * @description Whether the assistant's api.env holds a valid token (no plaintext).
+         */
+        get: operations["get_agent_token_api_v1_settings_agents_token_get"];
+        put?: never;
+        /**
+         * Configure Agent Token
+         * @description Mint a token for the agent account and write it into api.env server-side.
+         */
+        post: operations["configure_agent_token_api_v1_settings_agents_token_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/backup": {
         parameters: {
             query?: never;
@@ -3883,6 +3907,59 @@ export interface components {
             warnings?: string[];
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * AgentTokenStatus
+         * @description Assistant service-account credential state (never any plaintext).
+         */
+        AgentTokenStatus: {
+            /** Account */
+            account: string;
+            /**
+             * Account Exists
+             * @default false
+             */
+            account_exists: boolean;
+            /**
+             * Account Is Agent
+             * @default false
+             */
+            account_is_agent: boolean;
+            /**
+             * Configured
+             * @default false
+             */
+            configured: boolean;
+            /**
+             * Created
+             * @default
+             */
+            created: string;
+            /**
+             * Env Path
+             * @default
+             */
+            env_path: string;
+            /**
+             * Password Fallback
+             * @default false
+             */
+            password_fallback: boolean;
+            /**
+             * Rotated
+             * @default false
+             */
+            rotated: boolean;
+            /**
+             * Token Id
+             * @default
+             */
+            token_id: string;
+            /**
+             * Token Valid
+             * @default false
+             */
+            token_valid: boolean;
         };
         /**
          * ApiTokenInfo
@@ -20541,6 +20618,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_token_api_v1_settings_agents_token_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTokenStatus"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    configure_agent_token_api_v1_settings_agents_token_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTokenStatus"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

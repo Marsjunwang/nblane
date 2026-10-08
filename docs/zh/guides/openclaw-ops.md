@@ -1,7 +1,7 @@
 ---
 status: active
 owner: 王军
-last_verified: 2026-10-07
+last_verified: 2026-10-08
 source_of_truth: false
 ---
 
@@ -90,10 +90,26 @@ nblane openclaw sync [--profile <name>] --check   # 只对账，有漂移退出�
 
 `nblane_api` 以 `openclaw` 服务账号访问 8504，优先用 API token：
 
-1. `NBLANE_OPENCLAW_API_TOKEN`（推荐）：在「设置 → 账号管理」助手账号那一行生成，形如 `nbl_…`，明文只显示一次。每个请求带 `Authorization: Bearer`，不登录、不缓存 cookie；被撤销后请求直接失败，不会退回密码。
+1. `NBLANE_OPENCLAW_API_TOKEN`（推荐）：形如 `nbl_…`。每个请求带 `Authorization: Bearer`，不登录、不缓存 cookie；被撤销后请求直接失败，不会退回密码。
 2. `NBLANE_OPENCLAW_API_PASSWORD`：没有 token 时用密码登录，会话 cookie 缓存在 `~/.cache/nblane/api-cookies.json`，过期后自动重登一次。
 
-两者都按同样顺序读取：先环境变量，再 `~/.config/nblane/api.env`（0600）。定时任务的沙箱不继承网关进程环境时靠这个文件。
+两者都按同样顺序读取：先环境变量，再 `api.env`（0600）。文件路径依次取 `NBLANE_OPENCLAW_API_ENV_FILE`、`$XDG_CONFIG_HOME/nblane/api.env`、`~/.config/nblane/api.env`。定时任务的沙箱不继承网关进程环境时靠这个文件。
+
+### 一键配置（推荐）
+
+「设置 → 助手与备份」的「服务账号凭据」卡片显示账号、token 状态（已配置 / 未配置 / 已失效 / 账号未标记为助手）和文件路径。点「生成并配置 token」，服务端会：
+
+1. 给服务账号（`NBLANE_OPENCLAW_API_USERNAME`，默认 `openclaw`）生成名为 `assistant (auto)` 的 token；
+2. 写进 `api.env`：只替换或追加 `NBLANE_OPENCLAW_API_TOKEN=` 这一行，密码行和注释原样保留；目录 0700、文件 0600、原子写入；
+3. 重新读文件并校验 token 能认证到该账号。校验失败就恢复原文件、作废新 token，旧 token 继续可用。
+
+nblane 服务和 OpenClaw 以同一个系统用户运行，所以明文只在服务端落盘，不经过浏览器。已配置时按钮变成「轮换 token」：新 token 校验通过后，自动撤销文件里原来那个 token（只撤销它，手动生成的其它 token 不动）。助手下一次调用就用新 token，不用重启网关。
+
+前提：已开启登录（`NBLANE_AUTH_FILE`），账号存在且是助手账号。只能用管理员网页会话操作，助手账号自己调用会被 403 拒绝。
+
+### 手动配置
+
+在「设置 → 账号管理」助手账号那一行生成 token（明文只显示一次），再写入文件：
 
 ```bash
 install -d -m 700 ~/.config/nblane
@@ -111,7 +127,7 @@ Environment=NBLANE_OPENCLAW_API_TOKEN=<nbl_…>
 
 改 drop-in 后 `systemctl --user daemon-reload && systemctl --user restart openclaw-gateway`；只改 `api.env` 不用重启。
 
-换 token：先生成新的、写进 `api.env`、用 `nblane_api summary` 验证，再撤销旧的。
+手动换 token：先生成新的、写进 `api.env`、用 `nblane_api summary` 验证，再撤销旧的。注意：环境变量（如上面的 drop-in）优先于文件，用了 drop-in 时一键配置写的文件不会生效。
 
 `users.yaml` 里该账号是 `member`、只授权本人档案，写 `agent: true`。`NBLANE_API_BASE` 可改 API 地址。
 
@@ -214,7 +230,7 @@ nblane openclaw doctor [--profile <name>]
 | 症状 | 先查 |
 |------|------|
 | 助手页「本机未安装 OpenClaw」 | `nblane-web-api.service` 的 `PATH` 是否含 `openclaw` |
-| 助手说「nblane 服务账号凭据未配置」或 token 被拒 | `~/.config/nblane/api.env` 和网关 drop-in；token 被撤销就在账号管理里重新生成 |
+| 助手说「nblane 服务账号凭据未配置」或 token 被拒 | `~/.config/nblane/api.env` 和网关 drop-in；token 被撤销就在「助手与备份」点「生成并配置 token」 |
 | 助手说「nblane 暂不可达」 | `curl -fsS http://127.0.0.1:8504/api/v1/health`；`nblane-web-api` 状态 |
 | 每条微信消息立即失败，日志有 `prepared model catalog owner config was replaced during the read` | 热更新后模型目录绑着旧配置；确认 `openclaw config validate --json` 正常、无运行中任务后完整 `openclaw gateway restart` |
 | `gateway status` 报 protocol / token mismatch 或 exit 78 | 是否有 root 下的旧实例占着 18789（`ps aux \| grep -i openclaw`；root 用户服务要用 `XDG_RUNTIME_DIR=/run/user/0` 才看得到） |
@@ -226,4 +242,4 @@ nblane openclaw doctor [--profile <name>]
 
 ## 隔离开发
 
-`scripts/dev-web.sh --isolated` 设置独立 OpenClaw profile：`NBLANE_OPENCLAW_PROFILE=nblane-dev`（状态在 `~/.openclaw-nblane-dev`）、网关 19789、unit `openclaw-gateway-nblane-dev.service`、数据在 `.dev-data/agent-data` 和 `.dev-data/backup`、定时器 `nblane-backup-dev`。不会碰生产网关、密钥和定时器。
+`scripts/dev-web.sh --isolated` 设置独立 OpenClaw profile：`NBLANE_OPENCLAW_PROFILE=nblane-dev`（状态在 `~/.openclaw-nblane-dev`）、网关 19789、unit `openclaw-gateway-nblane-dev.service`、数据在 `.dev-data/agent-data` 和 `.dev-data/backup`、定时器 `nblane-backup-dev`，助手凭据文件 `NBLANE_OPENCLAW_API_ENV_FILE=.dev-data/agent-config/nblane/api.env`。不会碰生产网关、密钥和定时器。

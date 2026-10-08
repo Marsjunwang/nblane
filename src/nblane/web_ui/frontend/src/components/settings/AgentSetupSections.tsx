@@ -9,6 +9,7 @@ import {
   CopyButton,
   Group,
   List,
+  Modal,
   Select,
   Stack,
   Stepper,
@@ -35,6 +36,9 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import {
+  useAgentToken,
+  useConfigureAgentToken,
+  useMe,
   useProfiles,
   useBackupStatus,
   useGenerateBackupKey,
@@ -47,7 +51,8 @@ import {
   useStartOpenClawJob,
   useTestBackupRemote,
 } from '../../api/hooks';
-import type { BackupRemoteTest, BackupTarget, OpenClawSetupStatus } from '../../api/types';
+import { ApiError } from '../../api/client';
+import type { AgentTokenStatus, BackupRemoteTest, BackupTarget, OpenClawSetupStatus } from '../../api/types';
 import { ErrorAlert, SettingsCard } from '../../pages/settings/shared';
 
 function errorToast(title: string) {
@@ -224,6 +229,83 @@ function StatusLine({ ok, label, detail }: { ok: boolean; label: string; detail?
   );
 }
 
+export const AGENT_TOKEN_ERRORS: Record<string, string> = {
+  agent_account_missing: '服务账号不存在：先在 设置 → 账号管理 新建一个助手账号。',
+  not_agent_account: '这个账号没有标记为助手，不能给它自动配置 token。',
+  auth_not_configured: '还没开启登录（NBLANE_AUTH_FILE），助手不需要 token。',
+  token_verify_failed: '写入后校验失败，已恢复原文件并作废新 token，旧 token 仍可用。',
+  agent_forbidden: '助手账号不能操作自己的凭据，请用管理员账号。',
+};
+
+export function agentTokenError(error: unknown): string {
+  if (error instanceof ApiError && AGENT_TOKEN_ERRORS[error.code]) return AGENT_TOKEN_ERRORS[error.code];
+  return error instanceof Error ? error.message : String(error);
+}
+
+function tokenBadge(data: AgentTokenStatus): { color: string; label: string } {
+  if (!data.account_exists) return { color: 'red', label: '账号不存在' };
+  if (!data.account_is_agent) return { color: 'orange', label: '账号未标记为助手' };
+  if (!data.configured) return { color: 'gray', label: '未配置' };
+  if (!data.token_valid) return { color: 'red', label: 'token 已失效' };
+  return { color: 'green', label: data.created ? `已配置 token（创建于 ${formatWhen(data.created)}）` : '已配置 token' };
+}
+
+/** 服务账号凭据: mint the assistant token and write api.env server-side. */
+export function AgentTokenCard() {
+  const me = useMe();
+  const authEnabled = Boolean(me.data?.auth_enabled);
+  const status = useAgentToken(authEnabled);
+  const configure = useConfigureAgentToken();
+  const [confirming, setConfirming] = useState(false);
+  // Without login the assistant needs no token: nothing to configure.
+  if (!authEnabled || status.isPending) return null;
+  if (status.isError) return <ErrorAlert error={status.error} />;
+  const data = status.data;
+  const badge = tokenBadge(data);
+  const rotate = data.configured && data.token_valid;
+  const blocked = !data.account_exists || !data.account_is_agent;
+  const close = () => { setConfirming(false); configure.reset(); };
+  const submit = () => configure.mutate(undefined, {
+    onSuccess: () => {
+      setConfirming(false);
+      notifications.show({ title: '已配置', message: '已配置，助手下次调用即用新 token', color: 'green' });
+    },
+  });
+  return (
+    <Card withBorder radius="sm" padding="md" component="section" aria-label="服务账号凭据">
+      <Stack gap="xs">
+        <Group gap="xs">
+          <IconKey size={16} />
+          <Text fw={600} size="sm">服务账号凭据</Text>
+        </Group>
+        <Group gap="xs">
+          <Text size="sm">账号 <Code>{data.account}</Code></Text>
+          <Badge color={badge.color} variant="light">{badge.label}</Badge>
+          {data.password_fallback && <Badge color="gray" variant="outline">保留密码备用</Badge>}
+        </Group>
+        <Text size="xs" c="dimmed">凭据写入服务器 <Code>{data.env_path}</Code>，明文不经过浏览器。</Text>
+        <Button w="fit-content" size="xs" variant={rotate ? 'light' : 'filled'} leftSection={<IconKey size={14} />} disabled={blocked} onClick={() => setConfirming(true)}>
+          {rotate ? '轮换 token' : '生成并配置 token'}
+        </Button>
+      </Stack>
+      <Modal opened={confirming} onClose={close} title={rotate ? '轮换助手 token？' : '生成并配置 token？'} centered>
+        <Stack gap="md">
+          <Text size="sm">
+            {rotate
+              ? `为 ${data.account} 生成新 token 并写入 ${data.env_path}；校验通过后作废旧 token。`
+              : `为 ${data.account} 生成 token 并写入 ${data.env_path}，文件里的其它内容保持不变。`}
+          </Text>
+          {configure.isError && <Alert color="red" variant="light">{agentTokenError(configure.error)}</Alert>}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={close}>取消</Button>
+            <Button loading={configure.isPending} onClick={submit}>{rotate ? '轮换' : '生成并配置'}</Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </Card>
+  );
+}
+
 export function AgentSection() {
   const status = useOpenClawSetup();
   const profileList = useProfiles();
@@ -286,6 +368,8 @@ export function AgentSection() {
             )}
           </Stack>
         )}
+
+        <AgentTokenCard />
 
         <details>
           <summary><Text span size="xs" c="dimmed">其它 agent（Claude Code、Cursor、nanobot 等）的 MCP 配置片段</Text></summary>

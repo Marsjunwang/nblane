@@ -5,6 +5,7 @@
 
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Card,
@@ -26,7 +27,7 @@ import {
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconCopy, IconDice5, IconKey, IconLock, IconLogout, IconUserCircle, IconUserPlus, IconUsers } from '@tabler/icons-react';
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { ApiError } from '../../api/client';
 import {
@@ -450,6 +451,9 @@ function AccountCard({ account, isSelf, onOpen }: { account: AccountInfo; isSelf
               <Text size="xs" fw={600}>API token</Text>
               <Button size="compact-xs" variant="light" leftSection={<IconKey size={12} />} onClick={() => onOpen({ kind: 'token', account })}>生成 token</Button>
             </Group>
+            <Text size="xs" c="dimmed">
+              助手用的 token 可以在 <Anchor component={Link} to="/settings/agents" size="xs">助手与备份</Anchor> 一键生成并写入服务器，不用手动复制。
+            </Text>
             {tokens.length === 0 && <Text size="xs" c="dimmed">还没有 token。</Text>}
             {tokens.map((token) => (
               <Group key={token.id} justify="space-between" gap="xs" wrap="nowrap">

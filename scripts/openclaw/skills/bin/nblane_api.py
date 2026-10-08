@@ -90,7 +90,11 @@ def cookie_jar_path() -> Path:
 
 
 def _read_secret(key: str) -> str:
-    """A credential by *key*: env first, then ~/.config/nblane/api.env.
+    """A credential by *key*: env first, then the api.env file.
+
+    The file is ``$NBLANE_OPENCLAW_API_ENV_FILE`` when set, else
+    ``$XDG_CONFIG_HOME/nblane/api.env`` / ``~/.config/nblane/api.env``
+    (the same path nblane's 「生成并配置 token」 writes to).
 
     The file fallback exists because automation sandboxes do not always
     inherit the gateway process environment (2026-09-26 incident: the
@@ -100,11 +104,16 @@ def _read_secret(key: str) -> str:
     env_value = os.environ.get(key, "").strip()
     if env_value:
         return env_value
-    config_home = os.environ.get("XDG_CONFIG_HOME", "").strip()
-    root = Path(config_home).expanduser() if config_home else Path.home() / ".config"
+    override = os.environ.get("NBLANE_OPENCLAW_API_ENV_FILE", "").strip()
+    if override:
+        env_file = Path(override).expanduser()
+    else:
+        config_home = os.environ.get("XDG_CONFIG_HOME", "").strip()
+        root = Path(config_home).expanduser() if config_home else Path.home() / ".config"
+        env_file = root / "nblane" / "api.env"
     try:
         wanted = key
-        for line in (root / "nblane" / "api.env").read_text().splitlines():
+        for line in env_file.read_text().splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue

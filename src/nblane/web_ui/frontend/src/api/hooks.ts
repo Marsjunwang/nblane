@@ -129,6 +129,7 @@ import type {
   BackupRun,
   BackupStatus,
   OpenClawSetupStatus,
+  AgentTokenStatus,
   LocalModels,
   LocalModelTestResult,
   ProfileSettings,
@@ -458,6 +459,29 @@ export function useOpenClawGateway() {
   return useMutation({
     mutationFn: (action: 'start' | 'stop' | 'restart') => apiPost<OpenClawSetupStatus>('/settings/agents/openclaw-gateway', { action }),
     onSuccess: (value) => queryClient.setQueryData(OPENCLAW_SETUP_KEY, value),
+  });
+}
+
+const AGENT_TOKEN_KEY = ['settings', 'agents', 'token'] as const;
+
+/** Admin-only: does the assistant's server-side api.env hold a valid token. */
+export function useAgentToken(enabled = true) {
+  return useQuery({
+    queryKey: AGENT_TOKEN_KEY,
+    queryFn: () => apiGet<AgentTokenStatus>('/settings/agents/token'),
+    enabled,
+  });
+}
+
+/** Mint + write the assistant token server-side (plaintext never reaches the browser). */
+export function useConfigureAgentToken() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<AgentTokenStatus>('/settings/agents/token', {}),
+    onSuccess: (value) => {
+      queryClient.setQueryData(AGENT_TOKEN_KEY, value);
+      void queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY });
+    },
   });
 }
 

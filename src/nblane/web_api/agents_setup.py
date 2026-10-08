@@ -13,10 +13,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from nblane.core import backup_targets, openclaw_setup
+from nblane.core import agent_credentials, backup_targets, openclaw_setup
 from nblane.web_api.auth import CurrentUser
 from nblane.web_api.routes_v1 import ApiError, require_admin
 from nblane.web_api.schemas import (
+    AgentTokenStatus,
     BackupKeyResponse,
     BackupRemoteRequest,
     BackupRemoteTestResponse,
@@ -148,3 +149,27 @@ def openclaw_gateway_action(
     except openclaw_setup.OpenClawSetupError as exc:
         raise ApiError(400, "agent_gateway_failed", str(exc)) from exc
     return _openclaw_status()
+
+
+_TOKEN_ERROR_STATUS = {
+    "auth_not_configured": 400,
+    "agent_account_missing": 409,
+    "not_agent_account": 409,
+    "token_verify_failed": 500,
+}
+_TOKEN_RESPONSES = {**_RESPONSES, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+
+
+@router.get("/settings/agents/token", response_model=AgentTokenStatus, responses=_TOKEN_RESPONSES)
+def get_agent_token(_user: CurrentUser = Depends(require_admin)) -> AgentTokenStatus:
+    """Whether the assistant's api.env holds a valid token (no plaintext)."""
+    return AgentTokenStatus(**agent_credentials.status())
+
+
+@router.post("/settings/agents/token", response_model=AgentTokenStatus, responses=_TOKEN_RESPONSES)
+def configure_agent_token(_user: CurrentUser = Depends(require_admin)) -> AgentTokenStatus:
+    """Mint a token for the agent account and write it into api.env server-side."""
+    try:
+        return AgentTokenStatus(**agent_credentials.configure_token())
+    except agent_credentials.AgentCredentialsError as exc:
+        raise ApiError(_TOKEN_ERROR_STATUS.get(exc.code, 400), exc.code, exc.message) from exc
