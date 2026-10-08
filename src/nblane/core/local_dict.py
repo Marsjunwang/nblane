@@ -46,12 +46,71 @@ def is_lookupable(text: str) -> bool:
     return bool(_WORDISH.match(clean))
 
 
+def _base_forms(word: str) -> list[str]:
+    """Return likely dictionary headwords for an inflected English word.
+
+    A small rule set (plural, -ed, -ing, comparative, -ly) covers most misses
+    in papers ("capabilities", "embodied", "grounded"). Candidates are only
+    used when they exist in the dictionary, so over-generation is harmless.
+    """
+
+    out: list[str] = []
+
+    def add(candidate: str) -> None:
+        if len(candidate) >= 2 and candidate != word and candidate not in out:
+            out.append(candidate)
+
+    if word.endswith("ies") and len(word) > 4:
+        add(word[:-3] + "y")
+    if word.endswith("ied") and len(word) > 4:
+        add(word[:-3] + "y")
+    if word.endswith("es"):
+        add(word[:-2])
+    if word.endswith("s") and not word.endswith("ss"):
+        add(word[:-1])
+    for suffix in ("ed", "ing", "er", "est"):
+        if word.endswith(suffix) and len(word) > len(suffix) + 2:
+            stem = word[: -len(suffix)]
+            add(stem)
+            add(stem + "e")
+            # Doubled consonant: "stopped" -> "stop".
+            if len(stem) > 2 and stem[-1] == stem[-2]:
+                add(stem[:-1])
+    if word.endswith("ly") and len(word) > 4:
+        add(word[:-2])
+        if word.endswith("ily"):
+            add(word[:-3] + "y")
+    return out
+
+
+def headword_candidates(text: str) -> list[str]:
+    """Return ``text`` lowercased plus its likely base forms, most specific first."""
+
+    word = (text or "").strip().lower()
+    if not word:
+        return []
+    return [word, *_base_forms(word)]
+
+
 def lookup(text: str) -> str | None:
-    """Return an offline Chinese gloss for a single English word, or None."""
+    """Return an offline Chinese gloss for a single English word, or None.
+
+    Falls back to the base form of an inflected word; the gloss then names
+    the headword it came from, e.g. ``(capability) [..] n. 能力``.
+    """
 
     if not is_lookupable(text):
         return None
-    return _dictionary().get(text.strip().lower())
+    word = text.strip().lower()
+    table = _dictionary()
+    gloss = table.get(word)
+    if gloss:
+        return gloss
+    for candidate in _base_forms(word):
+        gloss = table.get(candidate)
+        if gloss:
+            return f"({candidate}) {gloss}"
+    return None
 
 
 def available() -> bool:

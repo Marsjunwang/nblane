@@ -17,6 +17,7 @@ from nblane.core.research_papers import (
     load_paper_annotations,
     load_paper_analysis,
     load_paper_translations,
+    save_paper_analysis,
     save_paper_pages,
     save_paper_segments,
     save_paper_structure_units,
@@ -234,6 +235,52 @@ class TestReaderActions(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.data["translation_source"], "local_dict")
         self.assertEqual(result.data["translation_text"], "n. 模型, 模范")
+
+    def test_translate_word_prefers_paper_glossary_over_dictionary(self) -> None:
+        """A deep-read term ("grounding" -> 定位) beats the general dictionary,
+        including a dictionary gloss saved by an earlier lookup."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch(
+                    "nblane.core.reader_actions.translate_paper_segments",
+                    side_effect=AssertionError("LLM must not be called for glossary hits"),
+                ),
+            ):
+                before = handle_reader_action(
+                    ctx,
+                    "translate_selection",
+                    {"selected_text": "grounding", "page": 1, "target_lang": "zh"},
+                )
+                save_paper_analysis(
+                    profile,
+                    ctx.source_id,
+                    {
+                        "codex_deep_read": {
+                            "terms": [
+                                {"term": "Grounding", "translation": "定位", "definition": "把语言对应到图像区域。"},
+                            ],
+                        },
+                    },
+                )
+                after = handle_reader_action(
+                    ctx,
+                    "translate_selection",
+                    {"selected_text": "grounding", "page": 1, "target_lang": "zh"},
+                )
+                plural = handle_reader_action(
+                    ctx,
+                    "translate_selection",
+                    {"selected_text": "groundings", "page": 1, "target_lang": "zh"},
+                )
+
+        self.assertEqual(before.data["translation_source"], "local_dict")
+        self.assertEqual(after.data["translation_source"], "paper_terms")
+        self.assertEqual(after.data["translation_text"], "[本文术语] 定位：把语言对应到图像区域。")
+        self.assertEqual(plural.data["translation_source"], "paper_terms")
 
     def test_translate_single_word_uses_local_dict_even_with_segment_refs(self) -> None:
         # A real in-text word selection always carries the segment ref it falls
@@ -1053,16 +1100,19 @@ class TestReaderActions(unittest.TestCase):
                 handle_reader_action(ctx, "analyze_paper", {"page": 1})
 
         kwargs = card.call_args.kwargs
-        rows = kwargs["segments"]
-        self.assertLessEqual(len(rows), 60)
-        self.assertLessEqual(sum(len(row["text"]) for row in rows), 36_000)
-        self.assertTrue(any(row["text"].startswith("Passage 218 ") for row in rows))
-        self.assertNotIn("rects", rows[0])
-        self.assertNotIn("text_hash", rows[0])
+        markdown = kwargs["paper_markdown"]
+        # The whole paper goes in, not a sample: first and last passages.
+        self.assertIn("Passage 1 ", markdown)
+        self.assertIn("Passage 218 ", markdown)
+        self.assertNotIn("segments", kwargs)
+        self.assertNotIn("rects", markdown)
         self.assertEqual(kwargs["paper_context"]["source_segments"], 218)
-        # The model sees short aliases instead of 35-char segment ids.
-        self.assertEqual(rows[0]["segment_id"], "s1")
-        self.assertTrue(all(len(row["segment_id"]) <= 4 for row in rows))
+        self.assertEqual(kwargs["paper_context"]["mode"], "full_text")
+        self.assertFalse(kwargs["paper_context"]["truncated"])
+        # The model sees short anchors instead of 35-char segment ids.
+        self.assertIn("〔s1〕", markdown)
+        self.assertIn("〔s218〕", markdown)
+        self.assertNotIn("seg:1", markdown)
 
     def test_analyze_paper_expands_short_refs_before_saving(self) -> None:
         ai_result = SimpleNamespace(
@@ -1086,8 +1136,7 @@ class TestReaderActions(unittest.TestCase):
                 handle_reader_action(ctx, "analyze_paper", {"page": 1})
             analysis = load_paper_analysis(profile, ctx.source_id)
 
-        real_id = card.call_args.kwargs["segments"][0]
-        self.assertEqual(real_id["segment_id"], "s1")
+        self.assertIn("〔s1〕", card.call_args.kwargs["paper_markdown"])
         self.assertNotIn("s1", analysis["cited_segment_refs"])
         self.assertTrue(analysis["cited_segment_refs"][0].startswith("seg:"))
 
@@ -1144,164 +1193,49 @@ class TestReaderActions(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(analysis["tldr"], "Introduction")
 
-    def test_codex_deep_read_saves_rich_schema_and_context_coverage(self) -> None:
-        ai_result = SimpleNamespace(
-            ok=True,
-            structured={
-                "takeaway": "这篇论文提出一个可检查的核心机制。",
-                "problem": [{"text": "问题定义清楚。", "refs": ["seg:2"]}],
-                "method": [{"text": "方法分三步。", "refs": ["seg:45"]}],
-                "experiments": [{"text": "实验覆盖主要设置。", "refs": ["seg:72"]}],
-                "limitations": [{"text": "仍有边界条件。", "refs": ["seg:94"]}],
-                "findings": [{"text": "关键发现保留兼容字段。", "refs": ["seg:45"]}],
-                "reading_plan": [{"text": "复读 Method 和 Experiments。", "refs": ["seg:45", "seg:72"]}],
-                "cited_segment_refs": ["seg:2", "seg:45", "seg:72", "seg:94"],
-                "cited_chunk_refs": [],
-                "cited_annotation_refs": [],
-                "warnings": [],
-                "ref": "source:paper:grounded",
-            },
-            warnings=[],
-            error="",
-        )
-        captured_payload: dict[str, object] = {}
-
-        def fake_deep_read(profile_arg, source_id_arg, *, payload, require_review=True, **kwargs):
-            captured_payload.update(payload)
-            return ai_result
-
-        with tempfile.TemporaryDirectory() as tmp:
-            profile, ctx = self._profile(Path(tmp))
-            sections = (
-                ["Abstract"] * 5
-                + ["Introduction"] * 20
-                + ["Method"] * 35
-                + ["Experiments"] * 25
-                + ["Conclusion"] * 10
+    def _deep_read_segments(self, source_id: str) -> list[PaperSegment]:
+        rows = [
+            ("heading", ["Abstract"], "Abstract"),
+            ("paragraph", ["Abstract"], "We study embodied reasoning."),
+            ("heading", ["Method"], "Method"),
+            ("paragraph", ["Method"], "The policy predicts actions from a cache."),
+            ("formula", ["Method"], "L = sum d (1)"),
+            ("caption", ["Experiments"], "Table 1 :"),
+            ("caption", ["Experiments"], "Comparison on the benchmark."),
+            ("paragraph", ["Experiments"], "Our model reaches 96.2 on Spatial."),
+            ("heading", ["References"], "References"),
+            ("paragraph", ["References"], "[1] A. Author. Prior work. 2020."),
+        ]
+        return [
+            PaperSegment(
+                segment_id=f"seg:{index}",
+                source_id=source_id,
+                page=1 if index < 6 else 2,
+                order=index,
+                kind=kind,
+                section_path=path,
+                text=text,
+                text_hash=text_hash(text),
             )
-            segments = [
-                PaperSegment(
-                    segment_id=f"seg:{index}",
-                    source_id=ctx.source_id,
-                    page=max(1, (index + 2) // 3),
-                    order=index,
-                    text=f"{sections[index - 1]} passage {index}",
-                    section_path=[sections[index - 1]],
-                    text_hash=text_hash(f"{sections[index - 1]} passage {index}"),
-                    locator=f"p. {max(1, (index + 2) // 3)} § {sections[index - 1]}",
-                )
-                for index in range(1, 96)
-            ]
-            with patch("nblane.core.research_papers.git_backup.record_change"):
-                save_paper_segments(profile, ctx.source_id, segments)
-            with (
-                patch("nblane.core.git_backup.record_change"),
-                patch("nblane.core.research_papers.git_backup.record_change"),
-                patch("nblane.core.reader_actions.ensure_paper_reading_artifacts", return_value={"warnings": []}),
-                patch("nblane.core.reader_actions.deep_read_paper_codex", side_effect=fake_deep_read),
-            ):
-                result = handle_reader_action(
-                    ctx,
-                    "codex_deep_read",
-                    {
-                        "page": 1,
-                        "scope": "paper",
-                        "full_paper": True,
-                        "codex_timeout_seconds": 2,
-                        "codex_idle_timeout_seconds": 1,
-                    },
-                )
-            analysis = load_paper_analysis(profile, ctx.source_id)
+            for index, (kind, path, text) in enumerate(rows, start=1)
+        ]
 
-        self.assertTrue(result.ok)
-        self.assertEqual(analysis["codex_deep_read"]["takeaway"], "这篇论文提出一个可检查的核心机制。")
-        self.assertEqual(analysis["codex_deep_read"]["problem"][0]["refs"], ["seg:2"])
-        payload_segments = captured_payload["segments"]
-        self.assertIsInstance(payload_segments, list)
-        segment_refs = [row["segment_id"] for row in payload_segments]  # type: ignore[index]
-        self.assertIn("seg:94", segment_refs)
-        paper_context = captured_payload["paper_context"]
-        self.assertIsInstance(paper_context, dict)
-        self.assertEqual(paper_context["source_segments"], 95)
-        self.assertEqual(paper_context["supplied_segments"], len(payload_segments))
-        self.assertTrue(paper_context["truncated"])
-        self.assertEqual(paper_context["segment_budget"], {"segments": 80, "chars": 60000})
-        self.assertIn("Method", paper_context["sections_covered"])
-        self.assertIn("Conclusion", paper_context["sections_covered"])
-        self.assertEqual(captured_payload["codex_timeout_seconds"], 2)
-        self.assertEqual(captured_payload["codex_idle_timeout_seconds"], 1)
-        self.assertEqual(captured_payload["codex_reasoning_effort"], "high")
-
-    def test_codex_deep_read_keeps_legacy_findings_schema(self) -> None:
-        ai_result = SimpleNamespace(
-            ok=True,
-            structured={
-                "findings": [{"text": "Legacy finding", "refs": ["seg:1"]}],
-                "reading_plan": [{"text": "Legacy plan", "refs": ["seg:1"]}],
-                "cited_segment_refs": ["seg:1"],
-                "cited_chunk_refs": [],
-                "cited_annotation_refs": [],
-                "warnings": [],
-                "ref": "source:paper:grounded",
-            },
-            warnings=[],
-            error="",
-        )
-
-        with tempfile.TemporaryDirectory() as tmp:
-            profile, ctx = self._profile(Path(tmp))
-            with (
-                patch("nblane.core.git_backup.record_change"),
-                patch("nblane.core.research_papers.git_backup.record_change"),
-                patch("nblane.core.reader_actions.ensure_paper_reading_artifacts", return_value={"warnings": []}),
-                patch("nblane.core.reader_actions.deep_read_paper_codex", return_value=ai_result),
-            ):
-                result = handle_reader_action(ctx, "codex_deep_read", {"page": 1})
-            analysis = load_paper_analysis(profile, ctx.source_id)
-
-        self.assertTrue(result.ok)
-        self.assertEqual(analysis["codex_deep_read"]["findings"][0]["text"], "Legacy finding")
-        self.assertEqual(result.data["structured"]["reading_plan"][0]["text"], "Legacy plan")
-
-    def test_codex_deep_read_batches_large_paper_then_synthesizes(self) -> None:
-        calls: list[dict[str, object]] = []
+    def test_codex_deep_read_sends_full_markdown_and_saves_v2_notes(self) -> None:
+        captured: dict[str, object] = {}
 
         def fake_deep_read(profile_arg, source_id_arg, *, payload, require_review=True, **kwargs):
-            calls.append(payload)
-            context = payload.get("paper_context") if isinstance(payload.get("paper_context"), dict) else {}
-            mode = str(context.get("mode") or "")
-            if mode == "synthesis":
-                return SimpleNamespace(
-                    ok=True,
-                    structured={
-                        "takeaway": "综合后的 Moonlight 风格结论。",
-                        "problem": [{"text": "综合问题。", "refs": ["seg:1"]}],
-                        "method": [{"text": "综合方法。", "refs": ["seg:40"]}],
-                        "experiments": [{"text": "综合实验。", "refs": ["seg:100"]}],
-                        "findings": [{"text": "综合发现。", "refs": ["seg:40"]}],
-                        "reading_plan": [{"text": "复查关键章节。", "refs": ["seg:1"]}],
-                        "cited_segment_refs": ["seg:1", "seg:40", "seg:100"],
-                        "cited_chunk_refs": [],
-                        "cited_annotation_refs": [],
-                        "warnings": [],
-                        "ref": source_id_arg,
-                    },
-                    warnings=[],
-                    error="",
-                )
-            batch_segments = payload.get("segments") if isinstance(payload.get("segments"), list) else []
-            first_ref = str(batch_segments[0].get("segment_id") if batch_segments else "seg:missing")
+            captured.update(payload)
             return SimpleNamespace(
                 ok=True,
+                backend="local_codex_readonly",
                 structured={
-                    "takeaway": f"批次 {context.get('batch_label')} 读完。",
-                    "findings": [{"text": "批次发现。", "refs": [first_ref]}],
-                    "reading_plan": [{"text": "继续综合。", "refs": [first_ref]}],
-                    "cited_segment_refs": [first_ref],
-                    "cited_chunk_refs": [],
-                    "cited_annotation_refs": [],
+                    "verdict": {"summary": "值得细读。", "worth_reading": "worth_reading", "refs": ["s1"]},
+                    "method": {"components": [{"name": "缓存", "what": "预测动作", "refs": ["s2"]}]},
+                    "experiments": {"tables": [{"label": "Table 1", "key_numbers": "96.2", "refs": ["s4"]}]},
+                    "claims": [{"claim": "更强", "support": "partial", "refs": ["s4"]}],
+                    "sections": [{"section": "Method", "summary": "方法", "refs": ["s2"]}],
+                    "cited_segment_refs": ["s1", "s2", "s4"],
                     "warnings": [],
-                    "ref": source_id_arg,
                 },
                 warnings=[],
                 error="",
@@ -1309,29 +1243,8 @@ class TestReaderActions(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             profile, ctx = self._profile(Path(tmp))
-            section_cycle = (
-                ["Abstract"] * 8
-                + ["Introduction"] * 22
-                + ["Related Work"] * 18
-                + ["Method"] * 35
-                + ["Experiments"] * 32
-                + ["Conclusion"] * 15
-            )
-            segments = [
-                PaperSegment(
-                    segment_id=f"seg:{index}",
-                    source_id=ctx.source_id,
-                    page=max(1, index // 5),
-                    order=index,
-                    text=f"{section_cycle[index - 1]} evidence passage {index}",
-                    section_path=[section_cycle[index - 1]],
-                    text_hash=text_hash(f"{section_cycle[index - 1]} evidence passage {index}"),
-                    locator=f"p. {max(1, index // 5)} § {section_cycle[index - 1]}",
-                )
-                for index in range(1, 131)
-            ]
             with patch("nblane.core.research_papers.git_backup.record_change"):
-                save_paper_segments(profile, ctx.source_id, segments)
+                save_paper_segments(profile, ctx.source_id, self._deep_read_segments(ctx.source_id))
             with (
                 patch("nblane.core.git_backup.record_change"),
                 patch("nblane.core.research_papers.git_backup.record_change"),
@@ -1341,36 +1254,62 @@ class TestReaderActions(unittest.TestCase):
                 result = handle_reader_action(
                     ctx,
                     "codex_deep_read",
-                    {"page": 1, "scope": "paper", "full_paper": True, "batch_deep_read": True},
+                    {"page": 1, "codex_timeout_seconds": 2, "codex_idle_timeout_seconds": 1},
                 )
             analysis = load_paper_analysis(profile, ctx.source_id)
 
         self.assertTrue(result.ok)
-        self.assertEqual(analysis["codex_deep_read"]["takeaway"], "综合后的 Moonlight 风格结论。")
-        batch_calls = [
-            call
-            for call in calls
-            if isinstance(call.get("paper_context"), dict)
-            and call["paper_context"].get("mode") == "section_batch"  # type: ignore[index, union-attr]
-        ]
-        synthesis_calls = [
-            call
-            for call in calls
-            if isinstance(call.get("paper_context"), dict)
-            and call["paper_context"].get("mode") == "synthesis"  # type: ignore[index, union-attr]
-        ]
-        self.assertGreaterEqual(len(batch_calls), 4)
-        self.assertEqual(len(synthesis_calls), 1)
-        self.assertGreaterEqual(int(batch_calls[0]["codex_timeout_seconds"]), 420)
-        self.assertGreaterEqual(int(synthesis_calls[0]["codex_timeout_seconds"]), 900)
-        self.assertEqual(batch_calls[0]["codex_reasoning_effort"], "high")
-        self.assertEqual(synthesis_calls[0]["codex_reasoning_effort"], "high")
-        synthesis_context = synthesis_calls[0]["paper_context"]
-        self.assertIsInstance(synthesis_context, dict)
-        self.assertTrue(synthesis_context["batch_reading"])
-        self.assertEqual(synthesis_context["batch_count"], len(batch_calls))
-        self.assertIn("batch_reports", synthesis_calls[0])
-        self.assertEqual(analysis["codex_deep_read"]["batch_reading"]["batch_count"], len(batch_calls))
+        markdown = str(captured["paper_markdown"])
+        # Whole paper, in order, with short anchors; references are kept apart.
+        self.assertIn("## Method", markdown)
+        self.assertIn("The policy predicts actions from a cache. 〔s2〕", markdown)
+        self.assertIn("> **Table 1.** Comparison on the benchmark.", markdown)
+        self.assertIn("## References", markdown)
+        self.assertNotIn("Table 1 :", markdown)
+        self.assertEqual(captured["paper_context"]["mode"], "full_text")
+        self.assertNotIn("segments", captured)
+        self.assertEqual(captured["codex_timeout_seconds"], 2)
+        self.assertEqual(captured["codex_idle_timeout_seconds"], 1)
+        self.assertEqual(captured["codex_reasoning_effort"], "high")
+        self.assertTrue(str(captured["codex_workdir"]))
+        saved = analysis["codex_deep_read"]
+        self.assertEqual(saved["schema_version"], "2")
+        # Short anchors are expanded back to real segment ids before saving.
+        self.assertEqual(saved["verdict"]["refs"], ["seg:2"])
+        self.assertEqual(saved["method"]["components"][0]["refs"], ["seg:4"])
+        self.assertEqual(saved["cited_segment_refs"], ["seg:2", "seg:4", "seg:7"])
+
+    def test_codex_deep_read_fallback_never_replaces_saved_report(self) -> None:
+        real = SimpleNamespace(
+            ok=True,
+            backend="local_codex_readonly",
+            structured={"verdict": {"summary": "真实研读。"}, "method": {}, "experiments": {}, "claims": [], "sections": [], "warnings": []},
+            warnings=[],
+            error="",
+        )
+        placeholder = SimpleNamespace(
+            ok=True,
+            backend="rule_fallback",
+            structured={"verdict": {"summary": "未完成。"}, "method": {}, "experiments": {}, "claims": [], "sections": [], "warnings": []},
+            warnings=["local_codex_readonly failed (command_timeout); used rule_fallback."],
+            error="",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile, ctx = self._profile(Path(tmp))
+            with (
+                patch("nblane.core.git_backup.record_change"),
+                patch("nblane.core.research_papers.git_backup.record_change"),
+                patch("nblane.core.reader_actions.ensure_paper_reading_artifacts", return_value={"warnings": []}),
+                patch("nblane.core.reader_actions.deep_read_paper_codex", side_effect=[real, placeholder]),
+            ):
+                first = handle_reader_action(ctx, "codex_deep_read", {"page": 1})
+                second = handle_reader_action(ctx, "codex_deep_read", {"page": 1})
+            analysis = load_paper_analysis(profile, ctx.source_id)
+
+        self.assertTrue(first.ok)
+        self.assertFalse(second.ok)
+        self.assertIn("command_timeout", second.message)
+        self.assertEqual(analysis["codex_deep_read"]["verdict"]["summary"], "真实研读。")
 
 
 if __name__ == "__main__":

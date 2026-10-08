@@ -20,7 +20,11 @@ class PromptBundle:
     prompt_version: str
 
 
-_COMPACT_PAYLOAD_ACTIONS = {"research.paper_review_card", "research.paper_source_guide"}
+_COMPACT_PAYLOAD_ACTIONS = {
+    "research.paper_review_card",
+    "research.paper_source_guide",
+    "research.paper_deep_read_codex",
+}
 
 _ACTION_INSTRUCTIONS: dict[str, str] = {
     "research.reading_draft": (
@@ -67,7 +71,14 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
     ),
     "research.paper_review_card": (
         "Generate a fixed paper review scorecard using only the supplied "
-        "source metadata, segments, chunks, and annotations. Cover key points, "
+        "source metadata, paper text, chunks, and annotations. When "
+        "payload.paper_markdown is present it is the FULL paper; every "
+        "paragraph, caption, and equation ends with an anchor like 〔s12〕, and "
+        "the anchor id without brackets (s12) is the ref to cite. Otherwise "
+        "cite the supplied segment ids. tldr is one or two sentences stating "
+        "what the paper does and its headline result (with the key number "
+        "when there is one); never describe the card or the input itself. "
+        "Cover key points, "
         "innovations, method, experiments, limitations, usefulness, and 0-5 "
         "scores. Every substantive claim and score rationale must cite "
         "segment, chunk, or annotation refs from the input. Do not invent "
@@ -95,28 +106,47 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "candidate should remain review-first and carry cited refs."
     ),
     "research.paper_deep_read_codex": (
-        "Prepare a Moonlight-style deep-reading report from supplied paper "
-        "material. Write natural-language field values in Chinese while "
-        "keeping JSON keys, ids, enum values, and refs unchanged. When payload "
-        "scope is paper/full_paper, treat the supplied segments as a compact "
-        "whole-paper context with coverage metadata, not only the current "
-        "page. Explain the problem first, then why it matters, the method or "
-        "mechanism, metrics/formulas when present, experiments/results, "
-        "limitations, project relevance, open questions, and a next reading "
-        "plan. Separate what the paper claims, how the method works, how the "
-        "experiments support it, and what remains uncertain. Every substantive "
-        "claim must cite segment, chunk, or annotation refs from the input. Do "
-        "not invent claims, results, datasets, citations, formulas, or refs; "
-        "add warnings when evidence is insufficient. If paper_context.mode is "
-        "section_batch, produce focused section notes in the same schema for "
-        "later synthesis. If paper_context.mode is synthesis or batch_reports "
-        "are provided, merge the batch notes into one coherent final report; "
-        "do not concatenate, deduplicate repeated claims, preserve cited refs, "
-        "and keep Moonlight's narrative order: problem, benchmark/setting, "
-        "method mechanism, metrics/formulas, experiments, real validation or "
-        "ablation when present, limitations, and follow-up reading. Keep full "
-        "text out of metadata and return a reader-facing report, not a review "
-        "scorecard."
+        "Write close-reading study notes for one paper. payload.paper_markdown "
+        "is the FULL paper (also saved as paper.md in the working directory); "
+        "every paragraph, caption, and equation ends with an anchor like "
+        "〔s12〕. The attached images (names in payload.attached_images, files "
+        "under images/) are crops of its tables and figures plus whole-page "
+        "renders for equations and for tables without a crop. Read the "
+        "images: table text in the Markdown loses multi-level headers and "
+        "equation text is lossy, so take numbers and formulas from the images. "
+        "A quick review card already exists; do not repeat a generic summary. "
+        "Go deep: how each component works and why it is designed that way, "
+        "what every key equation means, what each main and ablation table "
+        "actually shows, and how well the evidence supports each claim. "
+        "Write all prose in Chinese; keep JSON keys, enum values, and refs "
+        "unchanged. Put refs only in refs arrays, never inline in text; refs "
+        "are the anchor ids without brackets (s12) or annotation ids (a1). "
+        "Use only what the paper and payload support; when something is "
+        "missing or unreadable say so in warnings instead of guessing. "
+        "Return one JSON object with exactly these fields: "
+        "verdict {summary: 2-3 sentences on what the paper really achieves, "
+        "worth_reading: one of must_read|worth_reading|skim|skip, audience: "
+        "who should read it, refs}; "
+        "setting [{text, refs}] - problem formulation, inputs/outputs, "
+        "assumptions, how it differs from prior settings; "
+        "method {components [{name, what, why, how, refs}], equations "
+        "[{label e.g. (3), latex, meaning, intuition, refs}], training "
+        "[{text, refs}] - data, hyperparameters, compute, schedule}; "
+        "experiments {tables [{label e.g. Table 3, setup, baselines, "
+        "key_numbers, takeaway, refs}]} - one entry per main or ablation "
+        "table, key_numbers quotes the decisive numbers exactly; "
+        "claims [{claim, evidence, support: strong|partial|weak, caveat, "
+        "refs}]; reproduction [{text, refs}] - code/data/checkpoint "
+        "availability, missing details, difficulty; "
+        "sections [{section: the paper's real section title, summary, refs}] "
+        "covering every main section in order; "
+        "terms [{term, definition, translation: the Chinese rendering of the "
+        "term as used in this paper, refs}]; "
+        "relevance [{target: a payload.projects title or a "
+        "payload.library_papers title, text, refs}] - leave empty when "
+        "nothing relates; "
+        "next [{kind: question|reading, text, refs}]; "
+        "cited_segment_refs; warnings; ref (the source id)."
     ),
     "research.paper_compare_codex": (
         "Compare supplied papers or paper contexts as a candidate analysis. "

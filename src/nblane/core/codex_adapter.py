@@ -58,6 +58,9 @@ _CODEX_HOME_POLICY_DEFAULT = "default"
 _CODEX_HOME_POLICY_PROFILE = "profile"
 _READONLY_SANDBOX = "read-only"
 _MAX_LOCAL_OUTPUT_CHARS = 50_000
+# The read-only final message is the structured result itself; a full-paper
+# deep read is ~40k characters of JSON, so leave generous headroom.
+_MAX_READONLY_RESULT_CHARS = 400_000
 _MAX_LOCAL_DIFF_CHARS = 200_000
 _INSTALL_PACKAGE = "@openai/codex"
 _INSTALL_PACKAGE_LATEST = "@openai/codex@latest"
@@ -1099,12 +1102,14 @@ def run_readonly_codex_prompt(
     progress_callback: Callable[[dict[str, object]], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
     idle_timeout_seconds: float | None = None,
+    images: list[Path] | None = None,
 ) -> CodexReadonlyResult:
     """Run ``codex exec`` as a read-only planning helper.
 
     This helper is for richer reasoning/search drafts, not patch generation.
     It does not create an agent task, does not collect diffs, and asks Codex to
-    run with the CLI's read-only sandbox.
+    run with the CLI's read-only sandbox. ``images`` are attached to the
+    initial prompt (``codex exec --image``); missing files are skipped.
     """
 
     cfg = config or current_config(profile=profile)
@@ -1128,6 +1133,9 @@ def run_readonly_codex_prompt(
             *_codex_reasoning_args(reasoning_effort),
             "--cd",
             str(cwd or REPO_ROOT),
+            # Paper artifact dirs live outside any git repo; Codex refuses
+            # those ("workdir: ...") unless the check is skipped.
+            *(["--skip-git-repo-check"] if cwd is not None else []),
             "--sandbox",
             _READONLY_SANDBOX,
             "--ephemeral",
@@ -1135,6 +1143,7 @@ def run_readonly_codex_prompt(
             "never",
             "--output-last-message",
             str(last_message_path),
+            *[f"--image={path}" for path in (images or []) if Path(path).is_file()],
             "-",
         ]
         runner_timeout = timeout_seconds or cfg.timeout_seconds
@@ -1156,19 +1165,15 @@ def run_readonly_codex_prompt(
                 env=_codex_command_env(cfg),
             )
         warnings: list[str] = []
-        stdout, stdout_truncated = _truncate_text(
-            result.stdout,
-            _MAX_LOCAL_OUTPUT_CHARS,
-        )
-        stderr, stderr_truncated = _truncate_text(
-            result.stderr,
-            _MAX_LOCAL_OUTPUT_CHARS,
-        )
+        # stdout/stderr are the event log (it echoes the prompt, which can be
+        # a whole paper); only a cut final message affects the result.
+        stdout, _ = _truncate_text(result.stdout, _MAX_LOCAL_OUTPUT_CHARS)
+        stderr, _ = _truncate_text(result.stderr, _MAX_LOCAL_OUTPUT_CHARS)
         last_message, last_truncated = _truncate_text(
             _read_optional_text(last_message_path),
-            _MAX_LOCAL_OUTPUT_CHARS,
+            _MAX_READONLY_RESULT_CHARS,
         )
-        if stdout_truncated or stderr_truncated or last_truncated:
+        if last_truncated:
             warnings.append("Codex read-only output was truncated.")
         return CodexReadonlyResult(
             ok=result.ok,

@@ -24,3 +24,6 @@ os.environ["XDG_CONFIG_HOME"] = str(_STATE_DIR / "config")
 os.environ["NBLANE_GROBID_UNIT"] = "nblane-grobid-pytest"
 os.environ["NBLANE_WORKSHOP_SERVICE_DIR"] = str(_STATE_DIR / "workshop")
 os.environ["NBLANE_WORKSHOP_TMUX_SOCKET"] = "nblane-workshop-pytest"
+# Derived paper exports (Markdown + crops) are written under the research
+# asset root; keep them out of the real ~/.nblane/research-assets.
+os.environ["NBLANE_RESEARCH_ASSET_ROOT"] = str(_STATE_DIR / "research-assets")

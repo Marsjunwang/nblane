@@ -39,7 +39,9 @@ import {
   IconSparkles,
 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
-import { useState } from 'react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
+import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 
@@ -148,16 +150,42 @@ function RefChips({ refs, profile, sourceId }: { refs: PaperRef[]; profile: stri
   );
 }
 
+/** Display-mode KaTeX for deep-read equations; falls back to the source on error. */
+function LatexBlock({ latex }: { latex: string }) {
+  const html = useMemo(() => {
+    try {
+      return katex.renderToString(latex, { displayMode: true, throwOnError: false, strict: false, trust: false });
+    } catch {
+      return '';
+    }
+  }, [latex]);
+  if (!html) {
+    return (
+      <Text component="pre" size="xs" style={{ whiteSpace: 'pre-wrap', color: inscription.dimColor, margin: '4px 0' }}>
+        {latex}
+      </Text>
+    );
+  }
+  return <Box my={4} style={{ overflowX: 'auto' }} dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 function ItemList({ items, profile, sourceId }: { items: PaperAnalysisItem[]; profile: string; sourceId: string }) {
   return (
     <Stack gap={6} component="ul" style={{ margin: 0, paddingInlineStart: 18 }}>
       {items.map((item, index) => (
-        <li key={`${index}-${item.text.slice(0, 24)}`} style={{ lineHeight: 1.65 }}>
+        <li key={`${index}-${(item.label || item.text).slice(0, 24)}`} style={{ lineHeight: 1.65 }}>
+          {item.badge && (
+            <Badge size="xs" variant="light" color="yellow" mr={6} style={{ verticalAlign: 'baseline' }}>
+              {item.badge}
+            </Badge>
+          )}
           {item.label && (
             <Text component="span" fw={600} style={{ color: inscription.titleColor }}>
-              {item.label}：
+              {item.label}
+              {item.text ? '：' : ''}
             </Text>
           )}
+          {item.latex && <LatexBlock latex={item.latex} />}
           {item.text}
           <RefChips refs={item.refs ?? []} profile={profile} sourceId={sourceId} />
         </li>
@@ -450,7 +478,7 @@ function DeepReadCard({
     return (
       <InscriptionPanel title="深度研读" icon={icon} aside={control} testId="paper-deep-read">
         <Text size="sm" style={{ color: inscription.dimColor }}>
-          尚未生成。深度研读由 Codex 通读全文，产出问题、贡献、机制、实验与阅读计划；耗时较长，可在快速分析后再决定是否启动。
+          尚未生成。深度研读由 Codex 读完整篇论文和图表截图，逐项拆解方法组件、关键公式、实验表格，并核对每个论点的支撑；耗时约十几分钟，可在快速分析后再决定是否启动。
         </Text>
         <JobFeedback job={job} label="深度研读" />
       </InscriptionPanel>
@@ -476,12 +504,25 @@ function DeepReadCard({
     >
       {deepRead.fallback && (
         <Text size="sm" mb="sm" style={{ color: inscription.dimColor }}>
-          Codex 未返回完整研读，以下是可追溯的阅读骨架，不替代人工核对。
+          Codex 未返回完整研读，以下内容不完整，请重新研读或对照原文核对。
         </Text>
       )}
       {deepRead.takeaway && (
-        <InscriptionSection label="一句话结论">
-          <Text style={{ fontFamily: 'inherit', color: inscription.titleColor, lineHeight: 1.75 }}>{deepRead.takeaway}</Text>
+        <InscriptionSection label="研读结论">
+          {(deepRead.worth_reading || deepRead.audience) && (
+            <Group gap="xs" mb={6}>
+              {deepRead.worth_reading && (
+                <Badge size="sm" variant="light" color="yellow">{deepRead.worth_reading}</Badge>
+              )}
+              {deepRead.audience && (
+                <Text size="xs" style={{ color: inscription.dimColor }}>适合：{deepRead.audience}</Text>
+              )}
+            </Group>
+          )}
+          <Text style={{ fontFamily: 'inherit', color: inscription.titleColor, lineHeight: 1.75 }}>
+            {deepRead.takeaway}
+            <RefChips refs={deepRead.takeaway_refs ?? []} profile={profile} sourceId={sourceId} />
+          </Text>
         </InscriptionSection>
       )}
       {deepRead.sections.length > 0 && (

@@ -1,7 +1,7 @@
 ---
 status: draft
 owner: product
-last_verified: 2026-10-07
+last_verified: 2026-10-08
 source_of_truth: true
 ---
 
@@ -116,6 +116,15 @@ segment 覆盖带 PDF 坐标的新结构；无页码 segment 又被临时放入�
 `paper-quick-analysis` / `paper-deep-read` 启动，刷新页面可重新接上进行中的任务。Reader 顶栏的
 AI 动作收进「AI 研读」菜单，Review 面板可启动并显示生成时间与覆盖范围。模型失败退回 `rule_fallback`
 时不再覆盖已有快速分析（`core/reader_actions.py` 统一守护，Reader 与概览页两条入口一致）。
+
+实施状态（2026-10-08，全文阅读）：快速分析和深度研读都改为读整篇论文，不再按章节抽样或分批综合。
+`core/paper_markdown.py` 把已抽取段落按阅读顺序拼成 Markdown，段尾带〔sN〕短锚点并保存锚点到段落 ID 的映射；
+GROBID 单独输出的「Table N :」标签并回表题，参考文献集中放在文末。导出同时裁出表格/图，并整页渲染公式页和
+没有裁图的表格页，按 PDF 指纹 + 段落摘要缓存在研究资产目录 `paper-markdown/`。快速分析只发文本；深度研读一次
+Codex 调用，带上 Markdown、最多 24 张图（`codex exec --image`）、活跃项目和论文库里已分析论文的摘要。深度研读
+产出 v2 精读笔记（verdict / setting / method{components, equations, training} / experiments{tables} / claims /
+reproduction / sections / terms / relevance / next），保存时 `schema_version: "2"` 并直接覆盖旧结果；Codex 失败时
+不写入。旧的 v1 结果仍按原字段展示。深度研读的术语表同时用于阅读器查词，优先于本地词典。
 
 ### 1.1.3 第二待办：修复 PDF 清晰度与降级渲染可见性
 

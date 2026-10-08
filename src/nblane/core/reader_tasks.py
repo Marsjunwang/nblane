@@ -547,19 +547,6 @@ def _positive_float(value: object) -> float | None:
     return clean if clean > 0 else None
 
 
-def _payload_bool(payload: dict[str, Any], key: str, default: bool = False) -> bool:
-    if key not in payload:
-        return default
-    value = payload.get(key)
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-    return default
-
-
 def _task_timeout_seconds(action: str, payload: dict[str, Any]) -> float:
     explicit = _positive_float(
         payload.get("reader_task_timeout_seconds")
@@ -573,16 +560,12 @@ def _task_timeout_seconds(action: str, payload: dict[str, Any]) -> float:
             or payload.get("timeout_seconds")
         )
         if codex_timeout is not None:
-            batched = _payload_bool(
-                payload,
-                "batch_deep_read",
-                default=_payload_bool(payload, "batched_deep_read", True),
-            )
-            call_count_budget = 7.0 if batched else 1.0
+            # One Codex call over the full-paper export; the margin covers
+            # building the export (PDF crops) before the call starts.
             return max(
                 float(_TIMEOUT_SECONDS),
                 float(_DEEP_READ_TASK_TIMEOUT_SECONDS),
-                codex_timeout * call_count_budget + 600.0,
+                codex_timeout + 600.0,
             )
         return float(_DEEP_READ_TASK_TIMEOUT_SECONDS)
     return float(_TIMEOUT_SECONDS)

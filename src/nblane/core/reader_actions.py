@@ -67,6 +67,18 @@ from nblane.core.reader_events import (
     TRANSLATE_VISIBLE_PAGES,
     clean_page_list,
 )
+from nblane.core.paper_markdown import build_paper_markdown
+from nblane.core.project_board import load_project_board
+
+# Deep read hands Codex the whole paper as Markdown plus cropped table/figure
+# images and page renders, in one call. The paper job is pruned 20 minutes
+# after it starts, so the Codex call gets 16 of them.
+DEEP_READ_SCHEMA_VERSION = "2"
+DEEP_READ_MAX_IMAGES = 24
+DEEP_READ_CODEX_TIMEOUT_SECONDS = 960
+# Quick analysis sends the paper text to a plain LLM; ~40k tokens is a
+# safe ceiling for the providers in use. Typical papers are far below it.
+QUICK_ANALYSIS_MAX_CHARS = 160_000
 
 
 @dataclass(frozen=True)
@@ -410,33 +422,25 @@ def _compact_picked_segments(
 
 
 def _compact_paper_for_analysis(
-    segment_rows,
+    profile: Path,
+    source_id: str,
     chunk_rows,
     annotation_rows,
-    *,
-    segment_limit: int = 60,
-    char_limit: int = 36_000,
 ) -> dict[str, Any]:
-    """Return a bounded whole-paper context for quick analysis / review card.
+    """Return the whole-paper context for quick analysis / review card.
 
-    Sending every segment (with rects and hashes) made long papers exceed
-    the provider timeout, so sample across sections and keep only the
-    fields the model needs to cite refs.
+    The model reads the full paper as Markdown (text only, no images); every
+    paragraph ends with a short anchor such as 〔s12〕. Short ids keep the
+    output budget for content; expand_analysis_refs maps them back so saved
+    refs (and Reader jump links) are unchanged.
     """
 
-    picked = _section_aware_paper_segments(segment_rows, limit=segment_limit)
-    segments = _compact_picked_segments(picked, limit=segment_limit, char_limit=char_limit)
-    # Full ids like "seg:source-research-20261004-001:00003" are ~35 chars and
-    # a review card cites hundreds of them, which alone ate a third of the
-    # output budget. The model sees short aliases; expand_analysis_refs maps
-    # them back so saved refs (and Reader jump links) are unchanged.
-    aliases: dict[str, str] = {}
-    for index, row in enumerate(segments, start=1):
-        aliases[f"s{index}"] = str(row["segment_id"])
-        row["segment_id"] = f"s{index}"
-        row.pop("source_id", None)
-        row.pop("text_hash", None)
-        row.pop("locator", None)
+    paper_md = build_paper_markdown(profile, source_id, include_images=False)
+    markdown = paper_md.markdown
+    truncated = len(markdown) > QUICK_ANALYSIS_MAX_CHARS
+    if truncated:
+        markdown = markdown[:QUICK_ANALYSIS_MAX_CHARS] + "\n\n[... paper text truncated ...]\n"
+    aliases: dict[str, str] = dict(paper_md.aliases)
     chunks = []
     for index, row in enumerate(list(chunk_rows)[:20], start=1):
         aliases[f"c{index}"] = str(row.id)
@@ -461,17 +465,16 @@ def _compact_paper_for_analysis(
                 "note": str(row.note or "").strip()[:600],
             }
         )
-    pages = sorted({int(row.get("page") or 0) for row in segments if int(row.get("page") or 0) > 0})
     return {
         "aliases": aliases,
-        "segments": segments,
+        "paper_markdown": markdown,
         "chunks": chunks,
         "annotations": annotations,
         "paper_context": {
-            "source_segments": len(list(segment_rows)),
-            "supplied_segments": len(segments),
-            "pages_covered": pages,
-            "sections_covered": _deep_read_sections_covered(segments),
+            "mode": "full_text",
+            "source_segments": int(paper_md.stats.get("segments") or 0),
+            "anchored_segments": len(paper_md.aliases),
+            "truncated": truncated,
         },
     }
 
@@ -525,80 +528,6 @@ def _compact_segments_for_deep_read(
     return _compact_picked_segments(picked, limit=limit, char_limit=char_limit)
 
 
-def _deep_read_batch_group(segment: Any) -> str:
-    label = _segment_section_label(segment)
-    priority = _deep_read_section_priority(label)
-    if priority <= 1:
-        return "问题与动机"
-    if priority == 2:
-        return "相关工作与缺口"
-    if priority == 3:
-        return "方法与机制"
-    if priority in {4, 5}:
-        return "实验与结果"
-    if priority in {6, 7}:
-        return "局限与结论"
-    return "其它证据"
-
-
-def _deep_read_section_batches(
-    segment_rows,
-    *,
-    max_batches: int = 6,
-    segment_limit: int = 24,
-    char_limit: int = 18_000,
-) -> list[dict[str, Any]]:
-    grouped: dict[str, list[Any]] = {}
-    order = ["问题与动机", "相关工作与缺口", "方法与机制", "实验与结果", "局限与结论", "其它证据"]
-    for segment in segment_rows:
-        grouped.setdefault(_deep_read_batch_group(segment), []).append(segment)
-
-    batches: list[dict[str, Any]] = []
-    for label in order:
-        rows = grouped.get(label) or []
-        if not rows:
-            continue
-        picked = _section_aware_paper_segments(rows, limit=min(segment_limit, len(rows)))
-        compact = _compact_picked_segments(picked, limit=segment_limit, char_limit=char_limit)
-        if not compact:
-            continue
-        batches.append(
-            {
-                "label": label,
-                "segments": compact,
-                "source_segments": len(rows),
-                "sections_covered": _deep_read_sections_covered(compact),
-                "pages_covered": sorted(
-                    {
-                        int(row.get("page") or 0)
-                        for row in compact
-                        if int(row.get("page") or 0) > 0
-                    }
-                ),
-            }
-        )
-    return batches[:max_batches]
-
-
-def _explicit_codex_timeout(payload: dict[str, Any]) -> float:
-    return _payload_float(payload, "codex_timeout_seconds") or _payload_float(payload, "timeout_seconds")
-
-
-def _adaptive_deep_read_timeout_seconds(
-    *,
-    source_segments: int,
-    supplied_segments: int,
-    pages: int,
-    mode: str = "single",
-    batch_count: int = 0,
-) -> int:
-    if mode == "batch":
-        return int(max(420, min(900, 180 + supplied_segments * 10 + pages * 8)))
-    if mode == "synthesis":
-        return int(max(900, min(1800, 480 + batch_count * 120 + supplied_segments * 5)))
-    return int(max(900, min(1800, 300 + supplied_segments * 6 + pages * 10 + source_segments * 2)))
-
-
 def _copy_deep_read_runtime_options(source: dict[str, Any], target: dict[str, Any]) -> None:
     for key in (
         "codex_timeout_seconds",
@@ -622,102 +551,50 @@ def _ensure_deep_read_reasoning_effort(payload: dict[str, Any]) -> None:
             payload["codex_reasoning_effort"] = "high"
 
 
-def _deep_read_payload_pages(rows: list[dict[str, Any]]) -> list[int]:
-    return sorted(
-        {
-            int(row.get("page") or 0)
-            for row in rows
-            if int(row.get("page") or 0) > 0
-        }
-    )
+def _deep_read_project_context(profile: Path, *, limit: int = 12) -> list[dict[str, str]]:
+    """Active project cases, so the report can say which of them the paper helps."""
 
-
-def _deep_read_report_text(report: dict[str, Any], *, limit: int = 4000) -> str:
-    picked: dict[str, Any] = {}
-    for key in (
-        "takeaway",
-        "problem",
-        "motivation",
-        "context",
-        "contributions",
-        "method",
-        "mechanism",
-        "metrics",
-        "experiments",
-        "results",
-        "limitations",
-        "project_relevance",
-        "open_questions",
-        "section_summaries",
-        "terms",
-        "findings",
-        "reading_plan",
-        "warnings",
-        "cited_segment_refs",
-    ):
-        if key in report:
-            picked[key] = report.get(key)
-    text = json.dumps(picked, ensure_ascii=False, sort_keys=True)
-    return text[:limit]
-
-
-def _deep_read_batch_chunks(batch_reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    chunks: list[dict[str, Any]] = []
-    for index, report in enumerate(batch_reports, start=1):
-        label = _payload_text(report, "batch_label") or f"batch {index}"
-        chunks.append(
-            {
-                "chunk_id": f"deep-read-batch:{index}",
-                "title": label,
-                "kind": "deep_read_batch",
-                "text": _deep_read_report_text(report),
-                "locator": label,
-                "metadata": {
-                    "batch_index": index,
-                    "batch_label": label,
-                    "cited_segment_refs": _payload_list(report, "cited_segment_refs", "segment_refs"),
-                },
-            }
-        )
-    return chunks
-
-
-def _compact_chunks_for_deep_read(chunk_rows, *, limit: int = 20) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for chunk in chunk_rows[:limit]:
-        metadata = chunk.metadata if isinstance(chunk.metadata, dict) else {}
+    try:
+        board = load_project_board(profile)
+    except Exception:
+        return []
+    rows: list[dict[str, str]] = []
+    for case in board.project_cases:
+        if str(case.status or "") in {"archived", "done", "dropped"}:
+            continue
         rows.append(
             {
-                "chunk_id": chunk.id,
-                "title": chunk.title,
-                "kind": chunk.kind,
-                "text": str(chunk.text or "")[:900],
-                "locator": chunk.locator,
-                "metadata": {
-                    key: metadata.get(key)
-                    for key in ("page", "segment_id", "selected_text_hash", "annotation_id")
-                    if metadata.get(key) not in (None, "", [])
-                },
+                "title": str(case.title or "").strip(),
+                "summary": str(case.summary or "").strip()[:300],
             }
         )
-    return rows
+        if len(rows) >= limit:
+            break
+    return [row for row in rows if row["title"]]
 
 
-def _compact_annotations_for_deep_read(annotation_rows, *, limit: int = 24) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for row in annotation_rows[:limit]:
-        rows.append(
-            {
-                "annotation_id": row.id,
-                "kind": row.kind,
-                "page": row.page,
-                "locator": row.locator,
-                "selected_text": str(row.selected_text or "")[:600],
-                "note": str(row.note or "")[:400],
-                "tags": list(row.tags),
-                "segment_refs": list(row.segment_refs),
-            }
-        )
+def _deep_read_library_context(profile: Path, source_id: str, *, limit: int = 12) -> list[dict[str, str]]:
+    """Other analysed papers in the library (title + one-line takeaway)."""
+
+    try:
+        sources = load_research_sources(profile).sources
+    except Exception:
+        return []
+    rows: list[dict[str, str]] = []
+    for source in sources:
+        if source.id == source_id:
+            continue
+        try:
+            analysis = load_paper_analysis(profile, source.id)
+        except Exception:
+            continue
+        deep = analysis.get("codex_deep_read") if isinstance(analysis.get("codex_deep_read"), dict) else {}
+        summary = str(analysis.get("tldr") or deep.get("verdict") or deep.get("takeaway") or "").strip()
+        if not summary:
+            continue
+        rows.append({"title": str(source.title or source.id).strip(), "summary": summary[:300]})
+        if len(rows) >= limit:
+            break
     return rows
 
 
@@ -964,6 +841,34 @@ def _layout_translation_payload(unit: dict[str, Any], source_id: str) -> dict[st
     }
 
 
+def _paper_term_gloss(profile: str | Path, source_id: str, selected_text: str) -> str:
+    """Return this paper's own rendering of a term from its deep-read glossary."""
+
+    clean = " ".join((selected_text or "").split())
+    if not clean or len(clean) > 64 or len(clean.split()) > 6:
+        return ""
+    try:
+        analysis = load_paper_analysis(profile, source_id)
+    except Exception:
+        return ""
+    deep = analysis.get("codex_deep_read") if isinstance(analysis.get("codex_deep_read"), dict) else {}
+    terms = [row for row in deep.get("terms") or [] if isinstance(row, dict)]
+    if not terms:
+        return ""
+    wanted = set(local_dict.headword_candidates(clean))
+    for row in terms:
+        term = " ".join(str(row.get("term") or "").split()).lower()
+        if not term or not (wanted & set(local_dict.headword_candidates(term))):
+            continue
+        translation = str(row.get("translation") or "").strip()
+        definition = str(row.get("definition") or "").strip()
+        if not translation and not definition:
+            continue
+        head = f"[本文术语] {translation}" if translation else "[本文术语]"
+        return f"{head}：{definition}" if definition else head
+    return ""
+
+
 def _fast_translation_result(
     profile: str,
     source_id: str,
@@ -986,10 +891,17 @@ def _fast_translation_result(
         or text_hash(clean)
     )
 
-    cached_text = _cached_selection_translation(
-        profile, source_id, selected_hash, target_lang
-    )
-    source = "cache"
+    chinese_target = target_lang in {"zh", "zh-cn", "zh-hans", "zh-hant", "zh-tw"}
+    # The paper's own glossary (deep-read terms) knows what a word means in
+    # this paper ("grounding" -> 定位), which a general dictionary does not.
+    # It goes first so an older saved dictionary gloss cannot shadow it.
+    cached_text = _paper_term_gloss(profile, source_id, clean) if chinese_target else ""
+    source = "paper_terms"
+    if not cached_text:
+        cached_text = _cached_selection_translation(
+            profile, source_id, selected_hash, target_lang
+        )
+        source = "cache"
     # A PDF selection normally carries the id of its containing paragraph.
     # Reuse a durable paragraph/layout translation before asking the model to
     # translate the same text again. This keeps selection reading immediate
@@ -1003,11 +915,7 @@ def _fast_translation_result(
         )
         if cached_text:
             source = "segment_cache"
-    if (
-        not cached_text
-        and local_dict.is_lookupable(clean)
-        and target_lang in {"zh", "zh-cn", "zh-hans", "zh-hant", "zh-tw"}
-    ):
+    if not cached_text and local_dict.is_lookupable(clean) and chinese_target:
         gloss = local_dict.lookup(clean)
         if gloss:
             cached_text = gloss
@@ -2065,12 +1973,12 @@ def _handle_reader_action_inner(
             current=2,
             total=5,
         )
-        analysis_context = _compact_paper_for_analysis(segment_rows, chunk_rows, annotation_rows)
+        analysis_context = _compact_paper_for_analysis(profile, source_id, chunk_rows, annotation_rows)
         ai_result = generate_paper_review_card(
             ctx.profile_name,
             source_id,
             source=_compact_source_for_deep_read(source, source_id),
-            segments=analysis_context["segments"],
+            paper_markdown=analysis_context["paper_markdown"],
             chunks=analysis_context["chunks"],
             annotations=analysis_context["annotations"],
             paper_context=analysis_context["paper_context"],
@@ -2108,7 +2016,7 @@ def _handle_reader_action_inner(
         )
 
     if action == "codex_deep_read":
-        def emit_deepread_progress(phase: str, label: str, *, current: int = 0, total: int = 5) -> None:
+        def emit_deepread_progress(phase: str, label: str, *, current: int = 0, total: int = 4) -> None:
             if progress_callback is None:
                 return
             try:
@@ -2116,7 +2024,7 @@ def _handle_reader_action_inner(
             except Exception:
                 pass
 
-        emit_deepread_progress("preparing", "Preparing reader artifacts...", current=0, total=5)
+        emit_deepread_progress("preparing", "Preparing reader artifacts...", current=0)
         artifact_summary = ensure_paper_reading_artifacts(
             profile,
             source_id,
@@ -2124,203 +2032,73 @@ def _handle_reader_action_inner(
             target_lang=_payload_text(payload, "target_lang", "language") or "zh",
             progress_callback=progress_callback,
         )
-        segment_rows = load_paper_segments(profile, source_id)
         artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
+        emit_deepread_progress("exporting", "Exporting full paper with tables and figures…", current=1)
+        paper_md = build_paper_markdown(profile, source_id, include_images=True)
         source = load_research_sources(profile).by_id().get(source_id)
-        compact_segments = _compact_segments_for_deep_read(payload, segment_rows)
-        full_paper_scope = _payload_bool(payload, "full_paper", True) or (_payload_text(payload, "scope") or "paper") == "paper"
-        emit_deepread_progress(
-            "compacting",
-            f"Compacting {len(compact_segments)} segments for deep read…",
-            current=1,
-            total=5,
-        )
-        emit_deepread_progress(
-            "reading",
-            "Codex is reading the paper end-to-end…",
-            current=2,
-            total=5,
-        )
-        total_pages = max([int(getattr(row, "page", 0) or 0) for row in segment_rows] + [0])
+        aliases = dict(paper_md.aliases)
+        annotations = []
+        for index, row in enumerate(
+            [row for row in annotation_rows if str(row.status or "active") == "active"][:30],
+            start=1,
+        ):
+            aliases[f"a{index}"] = str(row.id)
+            annotations.append(
+                {
+                    "id": f"a{index}",
+                    "kind": row.kind,
+                    "page": row.page,
+                    "selected_text": str(row.selected_text or "").strip()[:600],
+                    "note": str(row.note or "").strip()[:600],
+                }
+            )
+        images = paper_md.image_paths(limit=DEEP_READ_MAX_IMAGES)
         deep_read_payload = {
             "source": _compact_source_for_deep_read(source, source_id),
-            "segments": compact_segments,
-            "chunks": _compact_chunks_for_deep_read(chunk_rows),
-            "annotations": _compact_annotations_for_deep_read(annotation_rows),
+            "paper_markdown": paper_md.markdown,
+            "attached_images": [path.name for path in images],
+            "annotations": annotations,
+            "projects": _deep_read_project_context(profile),
+            "library_papers": _deep_read_library_context(profile, source_id),
             "question": _payload_text(payload, "question", "prompt", "text"),
             "reading_goal": _payload_text(payload, "reading_goal", "goal"),
-            "scope": _payload_text(payload, "scope") or "paper",
-            "full_paper": _payload_bool(payload, "full_paper", True),
             "paper_context": {
-                "source_segments": len(segment_rows),
-                "supplied_segments": len(compact_segments),
-                "segment_budget": {"segments": 80, "chars": 60_000}
-                if full_paper_scope
-                else {"segments": 40, "chars": 24_000},
-                "truncated": bool(full_paper_scope and len(compact_segments) < len(segment_rows)),
-                "sections_covered": _deep_read_sections_covered(compact_segments),
-                "pages_covered": _deep_read_payload_pages(compact_segments),
+                "mode": "full_text",
+                "source_segments": int(paper_md.stats.get("segments") or 0),
+                "anchored_segments": len(paper_md.aliases),
+                "images": len(images),
             },
-            "page": _payload_int(payload, "page"),
-            "visible_pages": payload.get("visible_pages")
-            if isinstance(payload.get("visible_pages"), list)
-            else [],
-            "locator": _payload_text(payload, "locator"),
+            "codex_images": [str(path) for path in images],
+            "codex_workdir": str(paper_md.directory) if paper_md.directory else "",
         }
         _copy_deep_read_runtime_options(payload, deep_read_payload)
         _ensure_deep_read_reasoning_effort(deep_read_payload)
-        explicit_codex_timeout = _explicit_codex_timeout(payload)
-        if not explicit_codex_timeout:
-            deep_read_payload["codex_timeout_seconds"] = _adaptive_deep_read_timeout_seconds(
-                source_segments=len(segment_rows),
-                supplied_segments=len(compact_segments),
-                pages=total_pages,
-            )
+        if not _payload_float(deep_read_payload, "codex_timeout_seconds"):
+            deep_read_payload["codex_timeout_seconds"] = DEEP_READ_CODEX_TIMEOUT_SECONDS
 
-        if "batch_deep_read" in payload:
-            use_batched_deep_read = _payload_bool(payload, "batch_deep_read", False)
-        elif "batched_deep_read" in payload:
-            use_batched_deep_read = _payload_bool(payload, "batched_deep_read", False)
-        else:
-            use_batched_deep_read = bool(full_paper_scope and len(segment_rows) > 110)
-        use_batched_deep_read = use_batched_deep_read and full_paper_scope
-
-        ai_result = None
-        batch_reports: list[dict[str, Any]] = []
-        deepread_warnings: list[str] = []
-        if use_batched_deep_read:
-            section_batches = _deep_read_section_batches(segment_rows)
-            if len(section_batches) >= 2:
-                batch_total = len(section_batches)
-                for batch_index, batch in enumerate(section_batches, start=1):
-                    batch_segments = batch.get("segments") if isinstance(batch.get("segments"), list) else []
-                    batch_label = _payload_text(batch, "label") or f"batch {batch_index}"
-                    emit_deepread_progress(
-                        "reading_batch",
-                        f"Deep reading section batch {batch_index}/{batch_total}: {batch_label}",
-                        current=batch_index,
-                        total=batch_total + 2,
-                    )
-                    batch_payload = {
-                        "source": _compact_source_for_deep_read(source, source_id),
-                        "segments": batch_segments,
-                        "chunks": [],
-                        "annotations": _compact_annotations_for_deep_read(annotation_rows, limit=8),
-                        "question": _payload_text(payload, "question", "prompt", "text"),
-                        "reading_goal": (
-                            _payload_text(payload, "reading_goal", "goal")
-                            or "先生成本章节/批次的可引用深读笔记，稍后统一综合。"
-                        ),
-                        "scope": "section_batch",
-                        "full_paper": False,
-                        "paper_context": {
-                            "mode": "section_batch",
-                            "batch_label": batch_label,
-                            "batch_index": batch_index,
-                            "batch_count": batch_total,
-                            "source_segments": len(segment_rows),
-                            "batch_source_segments": int(batch.get("source_segments") or len(batch_segments)),
-                            "supplied_segments": len(batch_segments),
-                            "segment_budget": {"segments": 24, "chars": 18_000},
-                            "truncated": int(batch.get("source_segments") or 0) > len(batch_segments),
-                            "sections_covered": list(batch.get("sections_covered") or []),
-                            "pages_covered": list(batch.get("pages_covered") or []),
-                        },
-                    }
-                    _copy_deep_read_runtime_options(payload, batch_payload)
-                    _ensure_deep_read_reasoning_effort(batch_payload)
-                    if not explicit_codex_timeout:
-                        batch_payload["codex_timeout_seconds"] = _adaptive_deep_read_timeout_seconds(
-                            source_segments=int(batch.get("source_segments") or len(batch_segments)),
-                            supplied_segments=len(batch_segments),
-                            pages=len(batch.get("pages_covered") or []),
-                            mode="batch",
-                        )
-                    batch_result = deep_read_paper_codex(
-                        ctx.profile_name,
-                        source_id,
-                        payload=batch_payload,
-                        require_review=True,
-                        cancel_callback=cancel_callback,
-                    )
-                    batch_structured = batch_result.structured if isinstance(batch_result.structured, dict) else {}
-                    deepread_warnings.extend(str(item) for item in getattr(batch_result, "warnings", []) or [])
-                    deepread_warnings.extend(str(item) for item in batch_structured.get("warnings") or [])
-                    if batch_result.ok and batch_structured:
-                        batch_structured = dict(batch_structured)
-                        batch_structured["batch_label"] = batch_label
-                        batch_structured["batch_index"] = batch_index
-                        batch_structured["batch_count"] = batch_total
-                        batch_reports.append(batch_structured)
-                    else:
-                        error = getattr(batch_result, "error", "") or "section batch returned no structured output"
-                        deepread_warnings.append(f"Deep-read batch {batch_index}/{batch_total} failed: {error}")
-
-            if cancel_callback is not None and cancel_callback():
-                return ReaderActionResult(ok=False, message="Cancelled")
-            if batch_reports:
-                emit_deepread_progress(
-                    "synthesizing",
-                    f"Synthesizing {len(batch_reports)} section deep reads…",
-                    current=len(batch_reports) + 1,
-                    total=len(batch_reports) + 2,
-                )
-                synthesis_payload = dict(deep_read_payload)
-                synthesis_payload["chunks"] = _compact_chunks_for_deep_read(chunk_rows) + _deep_read_batch_chunks(batch_reports)
-                synthesis_payload["batch_reports"] = batch_reports
-                synthesis_payload["reading_goal"] = (
-                    _payload_text(payload, "reading_goal", "goal")
-                    or "把分章节/分批深读笔记综合成一份 Moonlight-style 完整阅读报告。"
-                )
-                synthesis_payload["paper_context"] = {
-                    **dict(deep_read_payload.get("paper_context") or {}),
-                    "mode": "synthesis",
-                    "batch_count": len(batch_reports),
-                    "batch_labels": [_payload_text(row, "batch_label") for row in batch_reports],
-                    "batch_reading": True,
-                }
-                if not explicit_codex_timeout:
-                    synthesis_payload["codex_timeout_seconds"] = _adaptive_deep_read_timeout_seconds(
-                        source_segments=len(segment_rows),
-                        supplied_segments=len(compact_segments),
-                        pages=total_pages,
-                        mode="synthesis",
-                        batch_count=len(batch_reports),
-                    )
-                ai_result = deep_read_paper_codex(
-                    ctx.profile_name,
-                    source_id,
-                    payload=synthesis_payload,
-                    require_review=True,
-                    cancel_callback=cancel_callback,
-                )
-
-        if ai_result is None:
-            if cancel_callback is not None and cancel_callback():
-                return ReaderActionResult(ok=False, message="Cancelled")
-            ai_result = deep_read_paper_codex(
-                ctx.profile_name,
-                source_id,
-                payload=deep_read_payload,
-                require_review=True,
-                cancel_callback=cancel_callback,
-            )
-        emit_deepread_progress("structuring", "Structuring findings + reading plan…", current=3, total=5)
+        if cancel_callback is not None and cancel_callback():
+            return ReaderActionResult(ok=False, message="Cancelled")
+        emit_deepread_progress(
+            "reading",
+            f"Codex is reading the full paper and {len(images)} figure/table images…",
+            current=2,
+        )
+        ai_result = deep_read_paper_codex(
+            ctx.profile_name,
+            source_id,
+            payload=deep_read_payload,
+            require_review=True,
+            cancel_callback=cancel_callback,
+        )
+        emit_deepread_progress("structuring", "Structuring the study notes…", current=3)
         structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
-        if structured and batch_reports:
-            structured = dict(structured)
-            structured["batch_reading"] = {
-                "enabled": True,
-                "batch_count": len(batch_reports),
-                "batch_labels": [_payload_text(row, "batch_label") for row in batch_reports],
-            }
-            existing_warnings = [str(item) for item in structured.get("warnings") or []]
-            for warning in deepread_warnings:
-                if warning and warning not in existing_warnings:
-                    existing_warnings.append(warning)
-            structured["warnings"] = existing_warnings
-        if ai_result.ok and structured:
-            emit_deepread_progress("saving", "Saving deep-read result…", current=4, total=5)
+        # A rule-based skeleton must never replace a real study report.
+        usable = bool(ai_result.ok and structured) and str(getattr(ai_result, "backend", "") or "") != "rule_fallback"
+        if usable:
+            structured = expand_analysis_refs(structured, aliases)
+            structured["schema_version"] = DEEP_READ_SCHEMA_VERSION
+            structured["paper_context"] = deep_read_payload["paper_context"]
+            emit_deepread_progress("saving", "Saving deep-read result…", current=4)
             analysis = load_paper_analysis(profile, source_id)
             analysis["codex_deep_read"] = structured
             analysis["codex_deep_read_updated"] = datetime.now().astimezone().isoformat(
@@ -2329,23 +2107,25 @@ def _handle_reader_action_inner(
             save_paper_analysis(profile, source_id, analysis)
         emit_deepread_progress(
             "done",
-            "Deep read candidate ready" if (ai_result.ok and structured) else "Deep read incomplete",
-            current=5,
-            total=5,
+            "Deep read candidate ready" if usable else "Deep read incomplete",
+            current=4,
         )
-        message = (
-            "Deep read candidate ready."
-            if ai_result.ok and structured
-            else ai_result.error or "Deep read did not return a candidate."
-        )
+        if usable:
+            message = "Deep read candidate ready."
+        else:
+            message = (
+                getattr(ai_result, "error", "")
+                or "; ".join(str(item) for item in getattr(ai_result, "warnings", []) or [])
+                or "Deep read did not return a usable report."
+            )
         return ReaderActionResult(
-            ok=bool(ai_result.ok and structured),
+            ok=usable,
             data={
-                "structured": structured,
+                "structured": structured if usable else {},
                 "analysis": load_paper_analysis(profile, source_id),
                 "artifact_summary": artifact_summary,
             },
-            warnings=artifact_warnings + deepread_warnings + list(ai_result.warnings),
+            warnings=artifact_warnings + list(ai_result.warnings),
             message=message,
         )
 
@@ -2360,12 +2140,12 @@ def _handle_reader_action_inner(
         segment_rows = load_paper_segments(profile, source_id)
         artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
         source = load_research_sources(profile).by_id().get(source_id)
-        analysis_context = _compact_paper_for_analysis(segment_rows, chunk_rows, annotation_rows)
+        analysis_context = _compact_paper_for_analysis(profile, source_id, chunk_rows, annotation_rows)
         ai_result = generate_paper_review_card(
             ctx.profile_name,
             source_id,
             source=_compact_source_for_deep_read(source, source_id),
-            segments=analysis_context["segments"],
+            paper_markdown=analysis_context["paper_markdown"],
             chunks=analysis_context["chunks"],
             annotations=analysis_context["annotations"],
             paper_context=analysis_context["paper_context"],

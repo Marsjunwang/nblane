@@ -482,6 +482,40 @@ class TestCodexAdapter(unittest.TestCase):
         self.assertEqual(args[:3], ["/bin/codex", "--search", "exec"])
         self.assertIn("model_reasoning_effort=\"xhigh\"", args)
 
+    def test_readonly_codex_prompt_attaches_existing_images_and_workdir(self) -> None:
+        """Images go in as --image flags before the stdin marker; missing ones are skipped."""
+
+        captured: dict[str, object] = {}
+
+        def fake_run(args, *, timeout, cwd=None, stdin=None, env=None):
+            captured["args"] = list(args)
+            output_path = Path(args[args.index("--output-last-message") + 1])
+            output_path.write_text('{"ok": true}', encoding="utf-8")
+            return CodexCommandResult(True, " ".join(map(str, args)), 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "table-1.png"
+            image.write_bytes(b"\x89PNG\r\n")
+            with (
+                patch("nblane.core.codex_adapter.shutil.which", return_value="/bin/codex"),
+                patch("nblane.core.codex_adapter._run", side_effect=fake_run),
+            ):
+                result = run_readonly_codex_prompt(
+                    "alice",
+                    "Read the paper.",
+                    config=CodexConfig(),
+                    cwd=Path(tmp),
+                    images=[image, Path(tmp) / "missing.png"],
+                )
+
+        args = captured["args"]
+        self.assertTrue(result.ok)
+        self.assertEqual(args[args.index("--cd") + 1], tmp)
+        self.assertIn("--skip-git-repo-check", args)
+        self.assertIn(f"--image={image}", args)
+        self.assertNotIn(f"--image={Path(tmp) / 'missing.png'}", args)
+        self.assertEqual(args[-1], "-")
+
     def test_streaming_run_reports_output_progress(self) -> None:
         """Long Codex helpers can surface process output before completion."""
 

@@ -26,6 +26,7 @@ from nblane.core.research_papers import (
     PaperSegment,
     PaperStructureUnit,
     PaperTranslation,
+    load_paper_analysis,
     save_paper_analysis,
     save_paper_annotations,
     save_paper_segments,
@@ -317,6 +318,54 @@ class TestPaperOverview(_PaperApiBase):
         self.assertIn("问题与动机", labels)
         self.assertIn("关键术语", labels)
         self.assertEqual(deep["coverage"]["sections"], ["Model"])
+
+    def test_deep_read_v2_notes_map_to_sections(self) -> None:
+        profile = _write_profile(self.root, self.asset_root)
+        _seed_reading_files(profile)
+        analysis = load_paper_analysis(profile, SOURCE_ID)
+        analysis["codex_deep_read"] = {
+            "schema_version": "2",
+            "verdict": {
+                "summary": "注意力替代循环。",
+                "worth_reading": "must_read",
+                "audience": "做序列建模的人",
+                "refs": ["seg:demo:00001"],
+            },
+            "method": {
+                "components": [{"name": "多头注意力", "what": "并行检索", "why": "去掉循环", "refs": ["ann:demo:0001"]}],
+                "equations": [{"label": "(1)", "latex": "\\\\mathrm{softmax}(QK^T)V", "meaning": "加权求和", "refs": []}],
+            },
+            "experiments": {"tables": [{"label": "Table 2", "key_numbers": "BLEU 28.4", "takeaway": "超过基线", "refs": []}]},
+            "claims": [{"claim": "训练更快", "support": "partial", "caveat": "只测了翻译", "refs": []}],
+            "sections": [{"section": "Model Architecture", "summary": "编码器解码器", "refs": []}],
+            "terms": [{"term": "attention", "translation": "注意力", "definition": "加权查找"}],
+            "next": [{"kind": "reading", "text": "读后续 BERT"}],
+            "cited_segment_refs": ["seg:demo:00001"],
+            "warnings": [],
+        }
+        save_paper_analysis(profile, SOURCE_ID, analysis)
+
+        deep = self.client.get(self.URL).json()["deep_read"]
+
+        self.assertEqual(deep["takeaway"], "注意力替代循环。")
+        self.assertEqual(deep["worth_reading"], "必读")
+        self.assertEqual(deep["audience"], "做序列建模的人")
+        self.assertEqual(deep["takeaway_refs"], [{"ref": "seg:demo:00001", "page": 2}])
+        self.assertFalse(deep["fallback"])
+        by_key = {section["key"]: section for section in deep["sections"]}
+        self.assertEqual(
+            list(by_key),
+            ["components", "equations", "tables", "claims", "sections", "terms", "next"],
+        )
+        component = by_key["components"]["items"][0]
+        self.assertEqual(component["label"], "多头注意力")
+        self.assertEqual(component["text"], "做什么：并行检索；为什么：去掉循环")
+        self.assertEqual(component["refs"], [{"ref": "ann:demo:0001", "page": 3}])
+        self.assertEqual(by_key["equations"]["items"][0]["latex"], "\\\\mathrm{softmax}(QK^T)V")
+        self.assertEqual(by_key["claims"]["items"][0]["badge"], "部分支撑")
+        self.assertEqual(by_key["terms"]["items"][0]["label"], "attention · 注意力")
+        self.assertEqual(by_key["next"]["items"][0]["badge"], "延伸阅读")
+        self.assertEqual(deep["coverage"]["sections"], ["Model Architecture"])
 
     def test_paper_without_analysis_or_pdf(self) -> None:
         _write_profile(self.root, self.asset_root, with_pdf=False)

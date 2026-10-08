@@ -1879,6 +1879,28 @@
       deep_section_section_summaries: "Section summaries",
       deep_section_terms: "Key terms",
       deep_section_reading_plan: "Reading plan",
+      deep_section_verdict: "Verdict",
+      deep_section_setting: "Problem setting",
+      deep_section_components: "Method components",
+      deep_section_equations: "Key equations",
+      deep_section_training: "Training details",
+      deep_section_tables: "Experiment tables",
+      deep_section_claims: "Claims and support",
+      deep_section_reproduction: "Reproduction",
+      deep_section_sections: "Section notes",
+      deep_section_relevance: "Relevance to me",
+      deep_section_next: "Questions and next steps",
+      deep_support_strong: "well supported",
+      deep_support_partial: "partly supported",
+      deep_support_weak: "weakly supported",
+      deep_field_audience: "For",
+      deep_field_what: "What",
+      deep_field_why: "Why",
+      deep_field_how: "How",
+      deep_field_meaning: "Meaning",
+      deep_field_key_numbers: "Key numbers",
+      deep_field_takeaway: "Shows",
+      deep_field_caveat: "Caveat",
       warnings: "Warnings",
       searching: "Searching...",
       no_match: "No match",
@@ -1895,6 +1917,7 @@
       zoom_out: "Zoom out",
       zoom_in: "Zoom in",
       pdf_loading: "Loading PDF...",
+      pdf_loading_progress: "Loading PDF",
       pdf_ready: "PDF ready",
       pdf_missing: "No PDF page preview is available.",
       pdf_preview_mode: "Using page preview",
@@ -5036,9 +5059,50 @@
       if (!body) return "";
       return `<section class="pr-review-section"><div class="pr-panel-head">${esc(title)}</div>${body}</section>`;
     }
+    // Study notes (schema v2): verdict / method{components,equations,training} /
+    // experiments{tables} / claims / sections / terms / relevance / next.
+    function deepReadV2SectionHtml(obj) {
+      const join = (parts) => parts
+        .map(([name, value]) => [name, reviewCleanText(value)])
+        .filter(([, value]) => value)
+        .map(([name, value]) => (name ? `${name}: ${value}` : value))
+        .join("; ");
+      const rows = (value, build) => asArr(value)
+        .map((row) => asObj(row))
+        .map((row) => ({ text: build(row), refs: asArr(row.refs) }))
+        .filter((row) => row.text);
+      const method = asObj(obj.method);
+      const experiments = asObj(obj.experiments);
+      const verdict = asObj(obj.verdict);
+      const support = { strong: label("deep_support_strong"), partial: label("deep_support_partial"), weak: label("deep_support_weak") };
+      const sections = [
+        ["deep_section_verdict", [{ text: join([["", verdict.summary], [label("deep_field_audience"), verdict.audience]]), refs: asArr(verdict.refs) }].filter((row) => row.text)],
+        ["deep_section_setting", rows(obj.setting, (row) => reviewCleanText(row.text))],
+        ["deep_section_components", rows(method.components, (row) => join([["", row.name], [label("deep_field_what"), row.what], [label("deep_field_why"), row.why], [label("deep_field_how"), row.how]]))],
+        ["deep_section_equations", rows(method.equations, (row) => join([["", row.label], ["", row.latex], [label("deep_field_meaning"), row.meaning]]))],
+        ["deep_section_training", rows(method.training, (row) => reviewCleanText(row.text))],
+        ["deep_section_tables", rows(experiments.tables, (row) => join([["", row.label], [label("deep_field_key_numbers"), row.key_numbers], [label("deep_field_takeaway"), row.takeaway]]))],
+        ["deep_section_claims", rows(obj.claims, (row) => join([["", support[text(row.support)] ? `[${support[text(row.support)]}]` : ""], ["", row.claim], [label("deep_field_caveat"), row.caveat]]))],
+        ["deep_section_reproduction", rows(obj.reproduction, (row) => reviewCleanText(row.text))],
+        ["deep_section_sections", rows(obj.sections, (row) => join([["", row.section], ["", row.summary]]))],
+        ["deep_section_terms", rows(obj.terms, (row) => join([["", row.term], ["", row.translation], ["", row.definition]]))],
+        ["deep_section_relevance", rows(obj.relevance, (row) => join([["", row.target], ["", row.text]]))],
+        ["deep_section_next", rows(obj.next, (row) => reviewCleanText(row.text))],
+      ];
+      const chunks = sections
+        .map(([labelKey, values]) => reviewSectionHtml(label(labelKey), values))
+        .filter(Boolean);
+      const warnings = reviewSectionHtml(label("warnings"), obj.warnings, "pr-warning-item");
+      if (warnings) chunks.push(warnings);
+      return chunks.join("");
+    }
     function deepReadSectionHtml(deepRead) {
       const obj = asObj(deepRead);
       if (!Object.keys(obj).length) return "";
+      if (text(obj.schema_version) === "2" || (obj.verdict && typeof obj.verdict === "object")) {
+        const html = deepReadV2SectionHtml(obj);
+        if (html) return html;
+      }
       const hasValue = (value) => {
         if (Array.isArray(value)) return value.some((row) => reviewItemText(row));
         if (value && typeof value === "object") return Boolean(reviewItemText(value));
@@ -7286,6 +7350,30 @@
         if (timer !== null) window.clearInterval(timer);
       });
     }
+    // Fail a PDF.js document load only when it stops making progress for
+    // `ms`; a large PDF on a slow link keeps loading instead of falling back.
+    function withStallTimeout(loadingTask, ms, message, onProgress) {
+      let timer = null;
+      let rejectStall = null;
+      const arm = () => {
+        if (timer !== null) window.clearTimeout(timer);
+        timer = window.setTimeout(() => rejectStall && rejectStall(new Error(message)), ms);
+      };
+      const stall = new Promise((_, reject) => {
+        rejectStall = reject;
+        arm();
+      });
+      loadingTask.onProgress = (progress) => {
+        arm();
+        if (onProgress) {
+          try { onProgress(Number(progress && progress.loaded) || 0, Number(progress && progress.total) || 0); } catch {}
+        }
+      };
+      return Promise.race([loadingTask.promise, stall]).finally(() => {
+        if (timer !== null) window.clearTimeout(timer);
+        loadingTask.onProgress = null;
+      });
+    }
     function withTimeout(promise, ms, message) {
       let timer = null;
       const timeout = new Promise((_, reject) => {
@@ -8698,9 +8786,23 @@
           for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
           source = { data: bytes };
         }
+        if (!pdfBase64) {
+          // Default 64KB range chunks turn a 25MB paper into hundreds of
+          // round trips; 1MB chunks keep range loading but cut the count.
+          source.rangeChunkSize = 1024 * 1024;
+        }
         pdfLoadError = "";
         loadingTask = window.pdfjsLib.getDocument(source);
-        const loadedDoc = await withTimeout(loadingTask.promise, pdfLoadTimeoutMs(), "PDF.js document load timed out; using page preview fallback.");
+        const loadedDoc = await withStallTimeout(
+          loadingTask,
+          pdfLoadTimeoutMs(),
+          "PDF.js document load stalled; using page preview fallback.",
+          (loaded, total) => {
+            if (seq !== loadSeq || !total) return;
+            const percent = Math.min(99, Math.round((loaded / total) * 100));
+            status(`${label("pdf_loading_progress")} ${percent}%`);
+          },
+        );
         if (seq !== loadSeq) return;
         pdfDocumentLoading = false;
         pdfDoc = loadedDoc;

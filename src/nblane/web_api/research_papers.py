@@ -136,6 +136,8 @@ class PaperAnalysisItemModel(BaseModel):
 
     text: str
     label: str = ""
+    latex: str = Field(default="", description="LaTeX source for an equation item (deep read).")
+    badge: str = Field(default="", description="Short tag such as evidence support (deep read).")
     refs: list[PaperRefModel] = Field(default_factory=list)
 
 
@@ -183,6 +185,9 @@ class PaperDeepReadModel(BaseModel):
     status: str = "ready"
     fallback: bool = False
     takeaway: str = ""
+    takeaway_refs: list[PaperRefModel] = Field(default_factory=list)
+    worth_reading: str = Field(default="", description="必读 / 值得细读 / 略读即可 / 可以跳过 (v2 notes).")
+    audience: str = ""
     sections: list[PaperAnalysisSectionModel] = Field(default_factory=list)
     batch_count: int = 0
     warnings: list[str] = Field(default_factory=list)
@@ -588,10 +593,216 @@ def _quick_analysis(analysis: dict[str, Any], resolver: _RefResolver) -> PaperQu
     )
 
 
+_WORTH_READING_LABELS = {
+    "must_read": "必读",
+    "worth_reading": "值得细读",
+    "skim": "略读即可",
+    "skip": "可以跳过",
+}
+_SUPPORT_LABELS = {"strong": "支撑充分", "partial": "部分支撑", "weak": "支撑不足"}
+_NEXT_KIND_LABELS = {"question": "疑问", "reading": "延伸阅读"}
+
+
+def _join_parts(*parts: tuple[str, object]) -> str:
+    """Join labelled fragments like ``做什么：…；为什么：…`` skipping blanks."""
+
+    out = []
+    for label, value in parts:
+        # Model prose usually ends with "。"; drop it so joins read "…；直觉：…".
+        clean = _text(value).rstrip("。；;，, ")
+        if clean:
+            out.append(f"{label}：{clean}" if label else clean)
+    return "；".join(out)
+
+
+def _v2_item(
+    raw: Any,
+    resolver: _RefResolver,
+    *,
+    text: str,
+    label: str = "",
+    latex: str = "",
+    badge: str = "",
+) -> PaperAnalysisItemModel | None:
+    if not text and not latex:
+        return None
+    refs = resolver.refs(_item_refs(raw)) if isinstance(raw, dict) else []
+    return PaperAnalysisItemModel(text=text, label=label, latex=latex, badge=badge, refs=refs)
+
+
+def _v2_rows(value: Any) -> list[dict[str, Any]]:
+    return [row for row in _as_items(value) if isinstance(row, dict)]
+
+
+def _deep_read_v2_sections(raw: dict[str, Any], resolver: _RefResolver) -> list[PaperAnalysisSectionModel]:
+    """Map study notes (schema v2) onto labelled overview sections."""
+
+    method = raw.get("method") if isinstance(raw.get("method"), dict) else {}
+    experiments = raw.get("experiments") if isinstance(raw.get("experiments"), dict) else {}
+    plan: list[tuple[str, str, list[PaperAnalysisItemModel | None]]] = [
+        (
+            "setting",
+            "问题设定",
+            [_v2_item(row, resolver, text=_text(row.get("text"))) for row in _v2_rows(raw.get("setting"))],
+        ),
+        (
+            "components",
+            "方法组件",
+            [
+                _v2_item(
+                    row,
+                    resolver,
+                    label=_text(row.get("name")),
+                    text=_join_parts(("做什么", row.get("what")), ("为什么", row.get("why")), ("怎么做", row.get("how"))),
+                )
+                for row in _v2_rows(method.get("components"))
+            ],
+        ),
+        (
+            "equations",
+            "关键公式",
+            [
+                _v2_item(
+                    row,
+                    resolver,
+                    label=_text(row.get("label")),
+                    latex=_text(row.get("latex")),
+                    text=_join_parts(("含义", row.get("meaning")), ("直觉", row.get("intuition"))),
+                )
+                for row in _v2_rows(method.get("equations"))
+            ],
+        ),
+        (
+            "training",
+            "训练细节",
+            [_v2_item(row, resolver, text=_text(row.get("text"))) for row in _v2_rows(method.get("training"))],
+        ),
+        (
+            "tables",
+            "实验表格",
+            [
+                _v2_item(
+                    row,
+                    resolver,
+                    label=_text(row.get("label")),
+                    text=_join_parts(
+                        ("设置", row.get("setup")),
+                        ("对比", row.get("baselines")),
+                        ("关键数字", row.get("key_numbers")),
+                        ("说明", row.get("takeaway")),
+                    ),
+                )
+                for row in _v2_rows(experiments.get("tables"))
+            ],
+        ),
+        (
+            "claims",
+            "论点与支撑",
+            [
+                _v2_item(
+                    row,
+                    resolver,
+                    text=_join_parts(("", row.get("claim")), ("依据", row.get("evidence")), ("保留", row.get("caveat"))),
+                    badge=_SUPPORT_LABELS.get(_text(row.get("support")), ""),
+                )
+                for row in _v2_rows(raw.get("claims"))
+            ],
+        ),
+        (
+            "reproduction",
+            "复现要点",
+            [_v2_item(row, resolver, text=_text(row.get("text"))) for row in _v2_rows(raw.get("reproduction"))],
+        ),
+        (
+            "sections",
+            "逐节笔记",
+            [
+                _v2_item(row, resolver, label=_text(row.get("section")), text=_text(row.get("summary")))
+                for row in _v2_rows(raw.get("sections"))
+            ],
+        ),
+        (
+            "terms",
+            "术语",
+            [
+                _v2_item(
+                    row,
+                    resolver,
+                    label=_join_parts(("", row.get("term")), ("", row.get("translation"))).replace("；", " · "),
+                    text=_text(row.get("definition")),
+                )
+                for row in _v2_rows(raw.get("terms"))
+            ],
+        ),
+        (
+            "relevance",
+            "与我的关联",
+            [
+                _v2_item(row, resolver, label=_text(row.get("target")), text=_text(row.get("text")))
+                for row in _v2_rows(raw.get("relevance"))
+            ],
+        ),
+        (
+            "next",
+            "疑问与下一步",
+            [
+                _v2_item(
+                    row,
+                    resolver,
+                    text=_text(row.get("text")),
+                    badge=_NEXT_KIND_LABELS.get(_text(row.get("kind")), ""),
+                )
+                for row in _v2_rows(raw.get("next"))
+            ],
+        ),
+    ]
+    sections: list[PaperAnalysisSectionModel] = []
+    for key, label, items in plan:
+        clean = [item for item in items if item is not None]
+        if clean:
+            sections.append(PaperAnalysisSectionModel(key=key, label=label, items=clean))
+    return sections
+
+
+def _deep_read_v2(analysis: dict[str, Any], raw: dict[str, Any], resolver: _RefResolver) -> PaperDeepReadModel | None:
+    verdict = raw.get("verdict") if isinstance(raw.get("verdict"), dict) else {}
+    sections = _deep_read_v2_sections(raw, resolver)
+    takeaway = _text(verdict.get("summary"))
+    if not takeaway and not sections:
+        return None
+    warnings = _string_list(raw.get("warnings"))
+    fallback = _is_fallback(warnings) or not sections
+    section_names = [
+        _text(row.get("section"))
+        for row in _v2_rows(raw.get("sections"))
+        if _text(row.get("section"))
+    ]
+    all_items = [item for section in sections for item in section.items]
+    return PaperDeepReadModel(
+        updated=_text(analysis.get("codex_deep_read_updated")),
+        status="needs_review" if fallback else "ready",
+        fallback=fallback,
+        takeaway=takeaway,
+        takeaway_refs=resolver.refs(_item_refs(verdict)),
+        worth_reading=_WORTH_READING_LABELS.get(_text(verdict.get("worth_reading")), ""),
+        audience=_text(verdict.get("audience")),
+        sections=sections,
+        warnings=warnings,
+        coverage=_coverage(
+            all_items,
+            _string_list(raw.get("cited_segment_refs")),
+            resolver,
+            sections=section_names,
+        ),
+    )
+
+
 def _deep_read(analysis: dict[str, Any], resolver: _RefResolver) -> PaperDeepReadModel | None:
     raw = analysis.get("codex_deep_read")
     if not isinstance(raw, dict) or not raw:
         return None
+    if _text(raw.get("schema_version")) == "2" or isinstance(raw.get("verdict"), dict):
+        return _deep_read_v2(analysis, raw, resolver)
     sections: list[PaperAnalysisSectionModel] = []
     for key, label, sources in _DEEP_READ_SECTIONS:
         items: list[PaperAnalysisItemModel] = []

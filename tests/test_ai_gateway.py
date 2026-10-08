@@ -940,8 +940,8 @@ class TestAIGateway(unittest.TestCase):
         self.assertEqual(row["source_hash"], "sha256:known")
         self.assertEqual(row["target_lang"], "zh")
 
-    def test_deep_read_fallback_returns_structured_reader_report(self) -> None:
-        """Codex fallback should still produce a readable, cited deep-read skeleton."""
+    def test_deep_read_fallback_returns_empty_v2_shell(self) -> None:
+        """Without Codex, deep read returns a valid empty shell, not a keyword skeleton."""
 
         spec = get_action_spec("research.paper_deep_read_codex")
         self.assertIsNotNone(spec)
@@ -951,33 +951,7 @@ class TestAIGateway(unittest.TestCase):
             payload={
                 "source_id": "source:paper:1",
                 "source": {"id": "source:paper:1", "title": "Tiny Transformer"},
-                "segments": [
-                    {
-                        "segment_id": "seg:paper:1:0001",
-                        "section_path": ["Abstract"],
-                        "text": "We introduce a model that replaces recurrence with attention for sequence transduction.",
-                    },
-                    {
-                        "segment_id": "seg:paper:1:0002",
-                        "section_path": ["Introduction"],
-                        "text": "The central problem is slow sequential computation in recurrent encoder-decoder models.",
-                    },
-                    {
-                        "segment_id": "seg:paper:1:0003",
-                        "section_path": ["Model Architecture"],
-                        "text": "The method uses scaled dot-product attention and multi-head attention.",
-                    },
-                    {
-                        "segment_id": "seg:paper:1:0004",
-                        "section_path": ["Experiments"],
-                        "text": "Experiments report BLEU results against strong sequence-to-sequence baselines.",
-                    },
-                    {
-                        "segment_id": "seg:paper:1:0005",
-                        "section_path": ["Conclusion"],
-                        "text": "Future work should test attention-only architectures on more tasks.",
-                    },
-                ],
+                "paper_markdown": "# Tiny Transformer\n\nAttention only. 〔s1〕\n",
             },
             context_refs=["source:paper:1"],
         )
@@ -987,14 +961,10 @@ class TestAIGateway(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertEqual(validate_schema(structured, spec.schema), "")  # type: ignore[arg-type, union-attr]
-        self.assertIn("Tiny Transformer", structured["takeaway"])  # type: ignore[index]
-        self.assertTrue(structured["problem"])  # type: ignore[index]
-        self.assertTrue(structured["method"])  # type: ignore[index]
-        self.assertTrue(structured["experiments"])  # type: ignore[index]
-        self.assertTrue(structured["findings"])  # type: ignore[index]
-        self.assertGreaterEqual(len(structured["reading_plan"]), 3)  # type: ignore[index]
-        self.assertIn("seg:paper:1:0004", structured["cited_segment_refs"])  # type: ignore[index]
-        self.assertIn("deterministic fallback", " ".join(structured["warnings"]))  # type: ignore[index]
+        self.assertIn("Tiny Transformer", structured["verdict"]["summary"])  # type: ignore[index]
+        self.assertEqual(structured["claims"], [])  # type: ignore[index]
+        self.assertEqual(structured["method"]["components"], [])  # type: ignore[index]
+        self.assertIn("没有生成替代内容", " ".join(structured["warnings"]))  # type: ignore[index]
 
     def test_paper_translation_schema_accepts_scope_ref_only_layout_rows(self) -> None:
         """Layout providers may key rows by scope_ref instead of segment_id."""

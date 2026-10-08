@@ -375,6 +375,7 @@ def generate_paper_review_card(
     source_id: str,
     *,
     source: dict[str, Any] | None = None,
+    paper_markdown: str = "",
     segments: list[dict[str, Any]] | None = None,
     chunks: list[dict[str, Any]] | None = None,
     annotations: list[dict[str, Any]] | None = None,
@@ -383,12 +384,15 @@ def generate_paper_review_card(
     context_refs: list[str] | None = None,
     require_review: bool = True,
 ) -> AIActionResult:
-    """Typed helper for ``research.paper_review_card``."""
+    """Typed helper for ``research.paper_review_card``.
+
+    Reader callers pass the full paper as ``paper_markdown``; ``segments``
+    stays for callers that only have a few passages.
+    """
 
     body_in: dict[str, Any] = {
         "source_id": source_id,
         "source": source or {},
-        "segments": segments or [],
         "chunks": chunks or [],
         "annotations": annotations or [],
         "model_timeout_seconds": _paper_analysis_model_timeout_seconds(),
@@ -396,6 +400,10 @@ def generate_paper_review_card(
         "llm_max_retries": 1,
         "llm_max_tokens": llm.analysis_max_tokens_default(),
     }
+    if paper_markdown:
+        body_in["paper_markdown"] = paper_markdown
+    else:
+        body_in["segments"] = segments or []
     if paper_context:
         body_in["paper_context"] = paper_context
     body, preferred_backend = _with_action_ai_preferences(

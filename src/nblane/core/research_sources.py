@@ -23,7 +23,7 @@ from nblane.core.profile_io import (
     load_evidence_pool_raw,
     save_evidence_pool,
 )
-from nblane.core.yaml_io import _load_yaml_dict
+from nblane.core.yaml_io import _load_yaml_dict, load_yaml_dict_cached
 
 RESEARCH_DIRNAME = "research"
 RESEARCH_SOURCES_FILENAME = "sources.yaml"
@@ -414,7 +414,7 @@ class ResearchSourceInbox:
 def load_research_sources(name_or_dir: str | Path) -> ResearchSourceInbox:
     """Load ``research/sources.yaml`` into a typed document."""
     path = _profile_file_path(name_or_dir)
-    raw = _load_yaml_dict(path)
+    raw = load_yaml_dict_cached(path)
     if raw is None:
         return ResearchSourceInbox(profile=_profile_name(name_or_dir))
     inbox = ResearchSourceInbox.from_dict(raw)
@@ -425,7 +425,7 @@ def load_research_sources(name_or_dir: str | Path) -> ResearchSourceInbox:
 
 def load_research_sources_raw(name_or_dir: str | Path) -> dict | None:
     """Load ``research/sources.yaml`` as a raw mapping."""
-    return _load_yaml_dict(_profile_file_path(name_or_dir))
+    return load_yaml_dict_cached(_profile_file_path(name_or_dir))
 
 
 def _metadata_epoch(value: object) -> float | None:
