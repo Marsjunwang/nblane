@@ -1270,7 +1270,8 @@ class TestReaderActions(unittest.TestCase):
         self.assertNotIn("segments", captured)
         self.assertEqual(captured["codex_timeout_seconds"], 2)
         self.assertEqual(captured["codex_idle_timeout_seconds"], 1)
-        self.assertEqual(captured["codex_reasoning_effort"], "high")
+        # Effort is left to settings / the backend default ("high").
+        self.assertNotIn("codex_reasoning_effort", captured)
         self.assertTrue(str(captured["codex_workdir"]))
         saved = analysis["codex_deep_read"]
         self.assertEqual(saved["schema_version"], "2")

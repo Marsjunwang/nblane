@@ -67,6 +67,7 @@ from nblane.core.research_sources import (
 )
 from nblane.core.web_preferences import (
     AI_ACTION_DEFAULT_BACKENDS,
+    codex_effort_value,
     load_web_preferences,
     update_web_preferences,
 )
@@ -117,9 +118,9 @@ KIND_CONNECTOR_IMPORT = "research-connector-import"
 RESEARCH_AI_ACTIONS: tuple[str, ...] = tuple(
     action for action in AI_ACTION_DEFAULT_BACKENDS if action.startswith("research.")
 )
-# Mirrors web_shared._ACTION_CODEX_MODEL_SUGGESTIONS (that module imports
-# Streamlit, so it cannot be imported from the API process).
-CODEX_MODEL_SUGGESTIONS: tuple[str, ...] = ("gpt-5.5", "gpt-5.1-codex", "gpt-5-codex")
+# Models the configured Codex provider serves (rightcode /v1/models,
+# 2026-10-09). Suggestions only; any model name can be typed.
+CODEX_MODEL_SUGGESTIONS: tuple[str, ...] = ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.5")
 
 SOURCE_MUTATION_RESPONSES = {
     **ERROR_RESPONSES,
@@ -800,6 +801,16 @@ jobs.register_kind(
 # --- research AI config ------------------------------------------------------------
 
 
+def _codex_cli_default_effort(profile: str) -> str:
+    """Return ``model_reasoning_effort`` from the Codex CLI config, if set."""
+    try:
+        text = codex_adapter.load_codex_cli_config_text(profile)
+        parsed = codex_adapter.validate_codex_cli_config_text(text)
+    except Exception:  # noqa: BLE001 - a broken config must not break the panel
+        return ""
+    return codex_effort_value(parsed.get("model_reasoning_effort"))
+
+
 def _ai_config_response(pdir) -> ResearchAIConfigResponse:
     prefs = load_web_preferences(pdir)
     ai = prefs.get("ai") if isinstance(prefs.get("ai"), dict) else {}
@@ -808,6 +819,7 @@ def _ai_config_response(pdir) -> ResearchAIConfigResponse:
         codex_default = str(codex_adapter.current_config(profile=pdir.name).model or "")
     except Exception:  # noqa: BLE001 - Codex readiness must not break the panel
         codex_default = ""
+    codex_default_effort = _codex_cli_default_effort(pdir.name)
     actions = []
     for action in RESEARCH_AI_ACTIONS:
         row = stored.get(action) if isinstance(stored.get(action), dict) else {}
@@ -818,6 +830,7 @@ def _ai_config_response(pdir) -> ResearchAIConfigResponse:
                 backend=str(row.get("backend") or ""),
                 llm_model=str(row.get("llm_model") or ""),
                 codex_model=str(row.get("codex_model") or ""),
+                codex_effort=str(row.get("codex_effort") or ""),
             )
         )
     return ResearchAIConfigResponse(
@@ -825,6 +838,7 @@ def _ai_config_response(pdir) -> ResearchAIConfigResponse:
         actions=actions,
         llm_default_model=str(llm_client.current_config(mask_key=True).get("model") or ""),
         codex_default_model=codex_default,
+        codex_default_effort=codex_default_effort,
         codex_model_suggestions=list(CODEX_MODEL_SUGGESTIONS),
     )
 
@@ -857,6 +871,7 @@ def put_research_ai_config(name: str, body: ResearchAIConfigUpdateRequest) -> Re
             "backend": config.backend,
             "llm_model": config.llm_model.strip(),
             "codex_model": config.codex_model.strip(),
+            "codex_effort": config.codex_effort,
         }
         for action, config in body.actions.items()
     }

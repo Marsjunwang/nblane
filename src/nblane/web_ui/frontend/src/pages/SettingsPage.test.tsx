@@ -154,9 +154,9 @@ describe('SettingsPage', () => {
     expect(await screen.findByDisplayValue('paper-model')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: '未保存的修改' })).not.toBeInTheDocument();
     // Only customized actions are listed until 「显示全部」.
-    expect(screen.queryByLabelText('深度研读模型')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '深度研读模型' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /显示全部 9 项/ }));
-    expect(screen.getByLabelText('深度研读模型')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '深度研读模型' })).toBeInTheDocument();
 
     fireEvent.click(within(screen.getByRole('radiogroup', { name: '选区翻译翻译方式' })).getByRole('radio', { name: 'AI' }));
     fireEvent.change(screen.getByLabelText('论文翻译模型'), { target: { value: 'qwen-max' } });
@@ -167,6 +167,26 @@ describe('SettingsPage', () => {
     expect(body.ai.actions).toMatchObject({ 'research.paper_translate': { backend: 'llm', llm_model: 'qwen-max' } });
     expect(body.ai.local_translation).toEqual({ selection: 'ai', visible: 'local', full: 'ai' });
     expect(body.research.reader.default_mode).toBe('compare');
+  });
+
+  it('sets Codex reasoning effort per action and saves it with the model', async () => {
+    const calls = mockApi();
+    renderAt('/settings/research?profile=alice');
+    await screen.findByDisplayValue('paper-model');
+    fireEvent.click(screen.getByRole('button', { name: /显示全部 9 项/ }));
+    // Effort only applies to Codex actions; API-backed rows say so.
+    expect(screen.queryByLabelText('论文翻译推理强度')).not.toBeInTheDocument();
+    const effort = screen.getByRole('textbox', { name: '深度研读推理强度' });
+    expect(effort).toHaveValue('默认（高）');
+    fireEvent.change(screen.getByRole('textbox', { name: '深度研读模型' }), { target: { value: 'gpt-6.1-sol' } });
+    fireEvent.click(effort);
+    const listbox = await screen.findByRole('listbox', { name: '深度研读推理强度', hidden: true });
+    fireEvent.click(within(listbox).getByRole('option', { name: '中', hidden: true }));
+    const bar = await screen.findByRole('region', { name: '未保存的修改' });
+    fireEvent.click(bar.querySelector('button:last-of-type') as HTMLButtonElement);
+    await waitFor(() => expect(calls.some((call) => call.method === 'PATCH')).toBe(true));
+    const body = calls.find((call) => call.method === 'PATCH')?.body as { ai: { actions: Record<string, unknown> } };
+    expect(body.ai.actions['research.paper_deep_read_codex']).toMatchObject({ codex_model: 'gpt-6.1-sol', codex_effort: 'medium' });
   });
 
   it('discards edits from the save bar', async () => {
@@ -183,7 +203,7 @@ describe('SettingsPage', () => {
     const calls = mockApi();
     renderAt('/settings/ai-routing?profile=alice');
     expect(await screen.findByDisplayValue('codex-crystal')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('证据结晶模型'), { target: { value: 'codex-crystal-v2' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '证据结晶模型' }), { target: { value: 'codex-crystal-v2' } });
     fireEvent.change(screen.getByLabelText('超时（秒）'), { target: { value: '90' } });
     fireEvent.click(within(await screen.findByRole('region', { name: '未保存的修改' })).getByRole('button', { name: '保存' }));
     await waitFor(() => expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(2));

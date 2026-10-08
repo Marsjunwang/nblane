@@ -13,6 +13,7 @@ import yaml
 from nblane.core.ai import (
     create_remote_dev_task,
     crystallize_done_tasks,
+    deep_read_paper_codex,
     draft_kanban_subtasks,
     draft_resume_for_job,
     generate_paper_review_card,
@@ -140,6 +141,63 @@ class TestAIGateway(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], "evidence.crystallize")
         self.assertEqual(run.call_args.kwargs["preferred_backend"], "local_codex_readonly")
         self.assertEqual(run.call_args.args[1]["codex_model"], "gpt-5.1-codex")
+
+    def test_deep_read_settings_effort_reaches_codex(self) -> None:
+        """A settings-page effort beats the deep-read default but not the caller."""
+
+        readonly = SimpleNamespace(
+            ok=True,
+            output='{"verdict": {}, "method": {}, "experiments": {}, "claims": [], "sections": [], "warnings": []}',
+            warnings=[],
+            error="",
+            stdout="",
+            stderr="",
+            command="codex exec --sandbox read-only -",
+        )
+        prefs = {
+            "ai": {
+                "actions": {
+                    "research.paper_deep_read_codex": {
+                        "backend": "",
+                        "codex_model": "gpt-6.1-sol",
+                        "codex_effort": "medium",
+                    }
+                }
+            }
+        }
+        with (
+            patch("nblane.core.ai.gateway.load_web_preferences", return_value=prefs),
+            patch("nblane.core.codex_adapter.run_readonly_codex_prompt", return_value=readonly) as run,
+        ):
+            from_settings = deep_read_paper_codex("alice", "source:paper:1", payload={})
+            from_caller = deep_read_paper_codex(
+                "alice", "source:paper:1", payload={"codex_reasoning_effort": "xhigh"}
+            )
+
+        self.assertTrue(from_settings.ok)
+        first, second = run.call_args_list
+        self.assertEqual(first.kwargs["reasoning_effort"], "medium")
+        self.assertEqual(first.kwargs["config"].model, "gpt-6.1-sol")
+        self.assertEqual(second.kwargs["reasoning_effort"], "xhigh")
+        self.assertTrue(from_caller.ok)
+
+    def test_deep_read_effort_defaults_to_high_without_settings(self) -> None:
+        readonly = SimpleNamespace(
+            ok=True,
+            output='{"verdict": {}, "method": {}, "experiments": {}, "claims": [], "sections": [], "warnings": []}',
+            warnings=[],
+            error="",
+            stdout="",
+            stderr="",
+            command="codex exec --sandbox read-only -",
+        )
+        with (
+            patch("nblane.core.ai.gateway.load_web_preferences", return_value={}),
+            patch("nblane.core.codex_adapter.run_readonly_codex_prompt", return_value=readonly) as run,
+        ):
+            deep_read_paper_codex("alice", "source:paper:1", payload={})
+
+        self.assertEqual(run.call_args.kwargs["reasoning_effort"], "high")
 
     def test_direct_backend_passes_per_action_model_override(self) -> None:
         """Paper action model preferences are handed to the LLM client."""

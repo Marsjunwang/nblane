@@ -205,12 +205,30 @@ class TestWebPreferences(unittest.TestCase):
         self.assertEqual(normalized["ai"]["kanban_backend"], "codex")
         self.assertEqual(normalized["ai"]["actions"]["research.paper_translate"]["llm_model"], "qwen-plus")
         self.assertEqual(normalized["ai"]["actions"]["research.paper_search_codex"]["codex_model"], "gpt-5.1-codex")
+        # Unset effort normalizes to "" (follow the default).
+        self.assertEqual(normalized["ai"]["actions"]["research.paper_search_codex"]["codex_effort"], "")
         self.assertNotIn("unknown.action", normalized["ai"]["actions"])
         self.assertNotIn("sk-should-not-save", dumped)
         self.assertNotIn("authorization", dumped)
         self.assertNotIn("password", dumped)
         self.assertNotIn("config_toml", dumped)
         self.assertNotIn("auth_json", dumped)
+
+    def test_codex_effort_is_whitelisted(self) -> None:
+        normalized = normalize_web_preferences(
+            {
+                "ai": {
+                    "actions": {
+                        "research.paper_deep_read_codex": {"codex_effort": "Medium"},
+                        "research.paper_search_codex": {"codex_effort": "max"},
+                    }
+                }
+            },
+            profile="alice",
+        )
+        actions = normalized["ai"]["actions"]
+        self.assertEqual(actions["research.paper_deep_read_codex"]["codex_effort"], "medium")
+        self.assertEqual(actions["research.paper_search_codex"]["codex_effort"], "")
 
     def test_evidence_review_ignored_output_candidates_are_whitelisted(self) -> None:
         """Evidence Review skip state survives normalization without secrets."""

@@ -2792,6 +2792,7 @@ class ResearchAIActionModel(BaseModel):
     backend: str = ""
     llm_model: str = ""
     codex_model: str = ""
+    codex_effort: str = Field(default="", description="low | medium | high | xhigh; empty = default.")
 
 
 class ResearchAIConfigResponse(BaseModel):
@@ -2801,15 +2802,17 @@ class ResearchAIConfigResponse(BaseModel):
     actions: list[ResearchAIActionModel] = Field(default_factory=list)
     llm_default_model: str = ""
     codex_default_model: str = ""
+    codex_default_effort: str = Field(default="", description="model_reasoning_effort from the Codex CLI config.")
     codex_model_suggestions: list[str] = Field(default_factory=list)
 
 
 class ResearchAIActionUpdate(BaseModel):
-    """Backend/model choice for one action; empty strings mean app default."""
+    """Backend/model/effort choice for one action; empty strings mean app default."""
 
     backend: Literal["", "llm", "codex"] = ""
     llm_model: str = Field(default="", max_length=200)
     codex_model: str = Field(default="", max_length=200)
+    codex_effort: Literal["", "low", "medium", "high", "xhigh"] = ""
 
 
 class ResearchAIConfigUpdateRequest(BaseModel):

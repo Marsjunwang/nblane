@@ -1,7 +1,7 @@
 // 档案 sections: settings that only affect the selected profile. Each section
 // edits a local draft and saves once through the sticky SaveBar.
 
-import { Badge, Button, Center, Checkbox, Group, Loader, SegmentedControl, Select, SimpleGrid, Stack, Table, Text, TextInput } from '@mantine/core';
+import { Autocomplete, Badge, Button, Center, Checkbox, Group, Loader, SegmentedControl, Select, SimpleGrid, Stack, Table, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconBook2, IconLanguage, IconRoute, IconSettings, IconTerminal2 } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
@@ -12,7 +12,7 @@ import type { CodexSettingsPatch, ProfileSettingsPatch } from '../../api/types';
 import { ErrorAlert, SaveBar, SettingsCard, preferenceString, settingString, useDraft, useReportDirty } from './shared';
 
 type Preferences = Record<string, unknown> | undefined;
-type ActionDraft = { backend: string; llm_model: string; codex_model: string };
+type ActionDraft = { backend: string; llm_model: string; codex_model: string; codex_effort: string };
 type ActionMeta = { key: string; label: string; description: string };
 
 /** Mirrors core/web_preferences.py AI_ACTION_DEFAULT_BACKENDS. */
@@ -22,6 +22,15 @@ const DEFAULT_BACKEND: Record<string, 'llm' | 'codex'> = {
   'research.paper_deep_read_codex': 'codex',
   'research.paper_compare_codex': 'codex',
 };
+
+/** Mirrors core/ai/backends.py _codex_reasoning_effort_for_action defaults. */
+const DEFAULT_EFFORT: Record<string, string> = {
+  'research.paper_deep_read_codex': 'high',
+  'research.paper_search_codex': 'medium',
+};
+
+const EFFORT_LABELS: Record<string, string> = { low: '低', medium: '中', high: '高', xhigh: '极高' };
+const EMPTY_DRAFT: ActionDraft = { backend: '', llm_model: '', codex_model: '', codex_effort: '' };
 
 export const RESEARCH_ACTIONS: ActionMeta[] = [
   { key: 'research.paper_translate', label: '论文翻译', description: '段落、当前页和全文翻译中交给 AI 的部分。' },
@@ -49,11 +58,12 @@ function actionDrafts(preferences: Preferences, actions: ActionMeta[]): Record<s
     backend: preferenceString(preferences, 'ai', 'actions', key, 'backend'),
     llm_model: preferenceString(preferences, 'ai', 'actions', key, 'llm_model'),
     codex_model: preferenceString(preferences, 'ai', 'actions', key, 'codex_model'),
+    codex_effort: preferenceString(preferences, 'ai', 'actions', key, 'codex_effort'),
   }]));
 }
 
 function isCustomized(value: ActionDraft | undefined): boolean {
-  return Boolean(value && (value.backend || value.llm_model || value.codex_model));
+  return Boolean(value && (value.backend || value.llm_model || value.codex_model || value.codex_effort));
 }
 
 const backendLabel = (value: string) => (value === 'codex' ? 'Codex' : '兼容 API');
@@ -69,20 +79,26 @@ function ActionTable({ profile, actions, saved, value, onChange }: { profile: st
   const rows = showAll ? actions : customized;
   const defaultModel = (backend: string) =>
     backend === 'codex' ? defaults.data?.codex_default_model || 'Codex CLI 默认' : defaults.data?.llm_default_model || 'AI 连接的默认模型';
+  const defaultEffort = (key: string) => {
+    const effort = DEFAULT_EFFORT[key] || defaults.data?.codex_default_effort || '';
+    return effort ? `默认（${EFFORT_LABELS[effort] ?? effort}）` : '默认（Codex CLI）';
+  };
+  const suggestions = defaults.data?.codex_model_suggestions ?? [];
   return (
     <Stack gap="xs">
       {rows.length > 0 && (
         <Table verticalSpacing="xs" layout="fixed">
           <Table.Thead>
             <Table.Tr>
-              <Table.Th w="34%">动作</Table.Th>
-              <Table.Th w="30%">执行方式</Table.Th>
+              <Table.Th w="30%">动作</Table.Th>
+              <Table.Th w="22%">执行方式</Table.Th>
               <Table.Th>模型</Table.Th>
+              <Table.Th w="18%">推理强度</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
             {rows.map((action) => {
-              const draft = value[action.key] ?? { backend: '', llm_model: '', codex_model: '' };
+              const draft = { ...EMPTY_DRAFT, ...value[action.key] };
               const fallback = DEFAULT_BACKEND[action.key] ?? 'llm';
               const effective = draft.backend || fallback;
               const modelKey = effective === 'codex' ? 'codex_model' : 'llm_model';
@@ -100,13 +116,41 @@ function ActionTable({ profile, actions, saved, value, onChange }: { profile: st
                     />
                   </Table.Td>
                   <Table.Td>
-                    <TextInput
-                      aria-label={`${action.label}模型`}
-                      size="xs"
-                      placeholder={`默认：${defaultModel(effective)}`}
-                      value={draft[modelKey]}
-                      onChange={(event) => onChange(action.key, { ...draft, [modelKey]: event.currentTarget.value })}
-                    />
+                    {effective === 'codex' ? (
+                      <Autocomplete
+                        aria-label={`${action.label}模型`}
+                        size="xs"
+                        placeholder={`默认：${defaultModel(effective)}`}
+                        value={draft.codex_model}
+                        data={suggestions}
+                        onChange={(next) => onChange(action.key, { ...draft, codex_model: next })}
+                      />
+                    ) : (
+                      <TextInput
+                        aria-label={`${action.label}模型`}
+                        size="xs"
+                        placeholder={`默认：${defaultModel(effective)}`}
+                        value={draft[modelKey]}
+                        onChange={(event) => onChange(action.key, { ...draft, [modelKey]: event.currentTarget.value })}
+                      />
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    {effective === 'codex' ? (
+                      <Select
+                        aria-label={`${action.label}推理强度`}
+                        size="xs"
+                        value={draft.codex_effort}
+                        allowDeselect={false}
+                        onChange={(next) => onChange(action.key, { ...draft, codex_effort: next ?? '' })}
+                        data={[
+                          { value: '', label: defaultEffort(action.key) },
+                          ...['low', 'medium', 'high', 'xhigh'].map((effort) => ({ value: effort, label: EFFORT_LABELS[effort] })),
+                        ]}
+                      />
+                    ) : (
+                      <Text size="xs" c="dimmed">仅 Codex</Text>
+                    )}
                   </Table.Td>
                 </Table.Tr>
               );

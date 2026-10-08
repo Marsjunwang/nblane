@@ -429,6 +429,32 @@ class TestResearchAIConfig(ResearchApiBase):
         )
         self.assertEqual(bad_backend.status_code, 422)
 
+    def test_codex_effort_roundtrip_and_validation(self) -> None:
+        client = self.client()
+        saved = client.put(
+            "/api/v1/profiles/alice/research/ai-config",
+            json={
+                "actions": {
+                    "research.paper_deep_read_codex": {
+                        "codex_model": "gpt-6.1-sol",
+                        "codex_effort": "medium",
+                    }
+                }
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        row = next(r for r in saved.json()["actions"] if r["action"] == "research.paper_deep_read_codex")
+        self.assertEqual((row["codex_model"], row["codex_effort"]), ("gpt-6.1-sol", "medium"))
+        prefs = yaml.safe_load((self.pdir / "web-preferences.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(prefs["ai"]["actions"]["research.paper_deep_read_codex"]["codex_effort"], "medium")
+        self.assertIn("gpt-6.1-sol", saved.json()["codex_model_suggestions"])
+
+        bad_effort = client.put(
+            "/api/v1/profiles/alice/research/ai-config",
+            json={"actions": {"research.paper_deep_read_codex": {"codex_effort": "max"}}},
+        )
+        self.assertEqual(bad_effort.status_code, 422)
+
 
 class TestResearchAuth(ResearchApiBase):
     def test_unauthenticated_401_and_foreign_profile_403(self) -> None:

@@ -22,6 +22,8 @@ _SECRET_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _AI_BACKENDS = {"llm", "codex"}
+# Codex CLI ``model_reasoning_effort`` values a per-action preference may set.
+CODEX_REASONING_EFFORTS = ("low", "medium", "high", "xhigh")
 _LANGUAGES = {"en", "zh"}
 _REPLY_LANGUAGES = {"en", "zh", "auto"}
 _GRANULARITIES = {"milestone", "checklist", "implementation"}
@@ -234,6 +236,13 @@ def _normalize_ai_actions(
     return actions
 
 
+def codex_effort_value(value: object) -> str:
+    """Return a supported Codex reasoning effort, or "" for the default."""
+
+    clean = _clean_text(value).lower()
+    return clean if clean in CODEX_REASONING_EFFORTS else ""
+
+
 def _normalize_ai_action(action_name: str, raw: dict[str, Any]) -> dict[str, str]:
     """Normalize one non-secret action routing preference."""
 
@@ -241,6 +250,7 @@ def _normalize_ai_action(action_name: str, raw: dict[str, Any]) -> dict[str, str
     model = _clean_text(raw.get("model") or raw.get("ai_model"))
     llm_model = _clean_text(raw.get("llm_model"))
     codex_model = _clean_text(raw.get("codex_model"))
+    codex_effort = codex_effort_value(raw.get("codex_effort"))
     if model:
         if backend == "codex" and not codex_model:
             codex_model = model
@@ -256,6 +266,7 @@ def _normalize_ai_action(action_name: str, raw: dict[str, Any]) -> dict[str, str
         "backend": backend,
         "llm_model": llm_model,
         "codex_model": codex_model,
+        "codex_effort": codex_effort,
     }
 
 
@@ -449,6 +460,7 @@ def _normalize_ignored_output_candidates(raw: object) -> list[dict[str, str]]:
 
 __all__ = [
     "AI_ACTION_DEFAULT_BACKENDS",
+    "CODEX_REASONING_EFFORTS",
     "WEB_PREFERENCES_FILENAME",
     "WEB_PREFERENCES_SCHEMA_VERSION",
     "load_web_preferences",

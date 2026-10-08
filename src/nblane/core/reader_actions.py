@@ -545,12 +545,6 @@ def _copy_deep_read_runtime_options(source: dict[str, Any], target: dict[str, An
             target[key] = value
 
 
-def _ensure_deep_read_reasoning_effort(payload: dict[str, Any]) -> None:
-    if payload.get("codex_reasoning_effort") in (None, "", []):
-        if payload.get("reasoning_effort") in (None, "", []):
-            payload["codex_reasoning_effort"] = "high"
-
-
 def _deep_read_project_context(profile: Path, *, limit: int = 12) -> list[dict[str, str]]:
     """Active project cases, so the report can say which of them the paper helps."""
 
@@ -2071,8 +2065,9 @@ def _handle_reader_action_inner(
             "codex_images": [str(path) for path in images],
             "codex_workdir": str(paper_md.directory) if paper_md.directory else "",
         }
+        # No effort here: settings (gateway) or the deep-read default
+        # (backends, "high") decide, unless the caller passed one.
         _copy_deep_read_runtime_options(payload, deep_read_payload)
-        _ensure_deep_read_reasoning_effort(deep_read_payload)
         if not _payload_float(deep_read_payload, "codex_timeout_seconds"):
             deep_read_payload["codex_timeout_seconds"] = DEEP_READ_CODEX_TIMEOUT_SECONDS
 

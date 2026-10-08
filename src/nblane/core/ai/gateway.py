@@ -18,6 +18,7 @@ from nblane.core.ai.runs import (
 from nblane.core.web_preferences import (
     AI_ACTION_DEFAULT_BACKENDS,
     LOCAL_TRANSLATION_SCOPE_DEFAULTS,
+    codex_effort_value,
     load_web_preferences,
 )
 from nblane.core.ai.local_translation import LOCAL_TRANSLATION_BACKEND, is_available as local_translation_available
@@ -695,6 +696,16 @@ def _with_action_ai_preferences(
             body["codex_model"] = model_override
         else:
             body["ai_model"] = model_override
+    # Settings effort beats the per-action default (backends) but not an
+    # effort the caller put in the payload explicitly.
+    effort = str(config.get("codex_effort") or "").strip()
+    if (
+        effort
+        and user_backend == "codex"
+        and not body.get("codex_reasoning_effort")
+        and not body.get("reasoning_effort")
+    ):
+        body["codex_reasoning_effort"] = effort
     return body, preferred_backend
 
 
@@ -736,7 +747,7 @@ def _action_ai_config(profile: str, action_name: str) -> dict[str, str]:
     model = _clean_model(action.get(model_key))
     if not model and not action:
         model = _legacy_action_model(ai, action_name, effective_backend)
-    return {"backend": backend, "model": model}
+    return {"backend": backend, "model": model, "codex_effort": codex_effort_value(action.get("codex_effort"))}
 
 
 def _legacy_action_backend(ai: dict[str, Any], action_name: str) -> str:
