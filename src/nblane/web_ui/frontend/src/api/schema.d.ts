@@ -1103,8 +1103,10 @@ export interface paths {
          * @description Five-stage pipeline counters for the single Evidence page.
          *
          *     待结晶 = uncrystallized Done tasks; 待评审 = active rows not yet
-         *     reviewed; 已入座 = reviewed rows linked to at least one skill node;
-         *     待补强 = solid/expert skills with missing/weak evidence
+         *     reviewed; 待关联 = reviewed rows not linked to any skill node;
+         *     已入座 = reviewed rows linked to at least one skill node;
+         *     待补强 = solid/expert skills whose scored evidence misses the rung's
+         *     progress threshold
          *     (``core.evidence_review.evidence_status_risks``); 已废弃 = deprecated
          *     rows. Counts are queue-wide (unfiltered).
          */
@@ -5872,7 +5874,9 @@ export interface components {
         };
         /**
          * EvidenceStageRiskModel
-         * @description One 待补强 row: a solid/expert skill whose evidence is missing/weak.
+         * @description One 待补强 row: a solid/expert skill whose scored evidence falls
+         *     short of that rung's progress threshold (profile skill_progression
+         *     rules). ``score`` / ``threshold`` / ``points_needed`` carry the gap.
          */
         EvidenceStageRiskModel: {
             /** Evidence Refs */
@@ -5888,6 +5892,11 @@ export interface components {
              */
             label: string;
             /**
+             * Points Needed
+             * @default 0
+             */
+            points_needed: number;
+            /**
              * Required Strength
              * @default
              */
@@ -5902,6 +5911,11 @@ export interface components {
              * @default
              */
             risk_reason: string;
+            /**
+             * Score
+             * @default 0
+             */
+            score: number;
             /** Skill Id */
             skill_id: string;
             /**
@@ -5909,14 +5923,18 @@ export interface components {
              * @default
              */
             status: string;
+            /** Threshold */
+            threshold?: number | null;
         };
         /**
          * EvidenceStagesResponse
          * @description Five-stage pipeline counters for the single Evidence page.
          *
-         *     Stages: 待结晶 (uncrystallized Done tasks) -> 待评审 -> 已入座 (reviewed
-         *     and linked to at least one skill) -> 已废弃; 待补强 (risks) hangs off
-         *     已入座. Counts are queue-wide (unfiltered).
+         *     Stages: 待结晶 (uncrystallized Done tasks) -> 待评审 -> 待关联 (reviewed,
+         *     no skill yet) -> 已入座 (reviewed and linked to at least one skill) ->
+         *     已废弃; 待补强 (risks) hangs off 已入座. Counts are queue-wide
+         *     (unfiltered); every active row lands in exactly one of 待评审 / 待关联 /
+         *     已入座.
          */
         EvidenceStagesResponse: {
             /**
@@ -5948,6 +5966,11 @@ export interface components {
              * @default 0
              */
             strengthen_count: number;
+            /**
+             * Unlinked Count
+             * @default 0
+             */
+            unlinked_count: number;
         };
         /**
          * EvidenceSummary

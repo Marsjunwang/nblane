@@ -3397,7 +3397,7 @@
     "type": "object"
    },
    "EvidenceStageRiskModel": {
-    "description": "One 待补强 row: a solid/expert skill whose evidence is missing/weak.",
+    "description": "One 待补强 row: a solid/expert skill whose scored evidence falls\nshort of that rung's progress threshold (profile skill_progression\nrules). ``score`` / ``threshold`` / ``points_needed`` carry the gap.",
     "properties": {
      "evidence_refs": {
       "items": {
@@ -3416,6 +3416,11 @@
       "title": "Label",
       "type": "string"
      },
+     "points_needed": {
+      "default": 0,
+      "title": "Points Needed",
+      "type": "integer"
+     },
      "required_strength": {
       "default": "",
       "title": "Required Strength",
@@ -3431,6 +3436,11 @@
       "title": "Risk Reason",
       "type": "string"
      },
+     "score": {
+      "default": 0,
+      "title": "Score",
+      "type": "integer"
+     },
      "skill_id": {
       "title": "Skill Id",
       "type": "string"
@@ -3439,6 +3449,17 @@
       "default": "",
       "title": "Status",
       "type": "string"
+     },
+     "threshold": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Threshold"
      }
     },
     "required": [
@@ -3448,7 +3469,7 @@
     "type": "object"
    },
    "EvidenceStagesResponse": {
-    "description": "Five-stage pipeline counters for the single Evidence page.\n\nStages: 待结晶 (uncrystallized Done tasks) -> 待评审 -> 已入座 (reviewed\nand linked to at least one skill) -> 已废弃; 待补强 (risks) hangs off\n已入座. Counts are queue-wide (unfiltered).",
+    "description": "Five-stage pipeline counters for the single Evidence page.\n\nStages: 待结晶 (uncrystallized Done tasks) -> 待评审 -> 待关联 (reviewed,\nno skill yet) -> 已入座 (reviewed and linked to at least one skill) ->\n已废弃; 待补强 (risks) hangs off 已入座. Counts are queue-wide\n(unfiltered); every active row lands in exactly one of 待评审 / 待关联 /\n已入座.",
     "properties": {
      "deprecated_count": {
       "default": 0,
@@ -3484,6 +3505,11 @@
      "strengthen_count": {
       "default": 0,
       "title": "Strengthen Count",
+      "type": "integer"
+     },
+     "unlinked_count": {
+      "default": 0,
+      "title": "Unlinked Count",
       "type": "integer"
      }
     },
@@ -17343,7 +17369,7 @@
   },
   "/api/v1/profiles/{name}/evidence-stages": {
    "get": {
-    "description": "Five-stage pipeline counters for the single Evidence page.\n\n待结晶 = uncrystallized Done tasks; 待评审 = active rows not yet\nreviewed; 已入座 = reviewed rows linked to at least one skill node;\n待补强 = solid/expert skills with missing/weak evidence\n(``core.evidence_review.evidence_status_risks``); 已废弃 = deprecated\nrows. Counts are queue-wide (unfiltered).",
+    "description": "Five-stage pipeline counters for the single Evidence page.\n\n待结晶 = uncrystallized Done tasks; 待评审 = active rows not yet\nreviewed; 待关联 = reviewed rows not linked to any skill node;\n已入座 = reviewed rows linked to at least one skill node;\n待补强 = solid/expert skills whose scored evidence misses the rung's\nprogress threshold\n(``core.evidence_review.evidence_status_risks``); 已废弃 = deprecated\nrows. Counts are queue-wide (unfiltered).",
     "operationId": "get_profile_evidence_stages_api_v1_profiles__name__evidence_stages_get",
     "parameters": [
      {
