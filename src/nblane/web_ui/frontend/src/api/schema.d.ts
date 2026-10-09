@@ -2729,8 +2729,8 @@ export interface paths {
          * Patch Profile Skill Node
          * @description Set one skill node's 三态 status in skill-tree.yaml (G3 write).
          *
-         *     Body vocabulary is the UI 三态 (``locked`` / ``learning`` / ``lit``);
-         *     ``lit`` lands as the YAML status ``solid`` (see
+         *     Body vocabulary is the UI 三态 (``locked`` / ``learning`` / ``lit``)
+         *     plus ``expert``; ``lit`` lands as the YAML status ``solid`` (see
          *     ``SKILL_NODE_EDIT_STATUSES``). ``If-Match`` carries the skill-tree.yaml
          *     ETag from the tree read (412 on mismatch); the write goes through
          *     ``profile_io.update_skill_tree`` with an in-lock snapshot re-check, and
@@ -10949,8 +10949,8 @@ export interface components {
          * @description Body for the skill-node status mutation (G3, 三态 write).
          *
          *     The UI vocabulary is the starmap 三态 — ``locked`` / ``learning`` /
-         *     ``lit``; the endpoint maps ``lit`` onto the YAML status ``solid`` (the
-         *     精通 rung ``expert`` is review-earned and not settable here).
+         *     ``lit`` — plus the 精通 rung ``expert``; the endpoint maps ``lit`` onto
+         *     the YAML status ``solid``.
          */
         SkillNodePatchRequest: {
             /** Status */
@@ -10988,7 +10988,7 @@ export interface components {
          * SkillNodeProgressModel
          * @description Progression readout for one skill node (core.skill_progression).
          *
-         *     ``score`` sums the node's non-deprecated evidence_refs (weak/medium/
+         *     ``score`` sums the node's reviewed, non-deprecated evidence_refs (weak/medium/
          *     strong = 1/10/100, plus 1000 per breakthrough row); ``next_rung`` /
          *     ``threshold_next`` describe the rung above the current YAML status
          *     (both null at expert); ``eligible`` means the node qualifies for a
@@ -20280,7 +20280,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Status outside the 三态 vocabulary (locked/learning/lit). */
+            /** @description Status outside locked/learning/lit/expert. */
             422: {
                 headers: {
                     [name: string]: unknown;

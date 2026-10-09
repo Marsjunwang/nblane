@@ -10966,7 +10966,7 @@
     "type": "object"
    },
    "SkillNodePatchRequest": {
-    "description": "Body for the skill-node status mutation (G3, 三态 write).\n\nThe UI vocabulary is the starmap 三态 — ``locked`` / ``learning`` /\n``lit``; the endpoint maps ``lit`` onto the YAML status ``solid`` (the\n精通 rung ``expert`` is review-earned and not settable here).",
+    "description": "Body for the skill-node status mutation (G3, 三态 write).\n\nThe UI vocabulary is the starmap 三态 — ``locked`` / ``learning`` /\n``lit`` — plus the 精通 rung ``expert``; the endpoint maps ``lit`` onto\nthe YAML status ``solid``.",
     "properties": {
      "status": {
       "title": "Status",
@@ -11014,7 +11014,7 @@
     "type": "object"
    },
    "SkillNodeProgressModel": {
-    "description": "Progression readout for one skill node (core.skill_progression).\n\n``score`` sums the node's non-deprecated evidence_refs (weak/medium/\nstrong = 1/10/100, plus 1000 per breakthrough row); ``next_rung`` /\n``threshold_next`` describe the rung above the current YAML status\n(both null at expert); ``eligible`` means the node qualifies for a\nrung-up prompt (score threshold met, or at least one breakthrough).",
+    "description": "Progression readout for one skill node (core.skill_progression).\n\n``score`` sums the node's reviewed, non-deprecated evidence_refs (weak/medium/\nstrong = 1/10/100, plus 1000 per breakthrough row); ``next_rung`` /\n``threshold_next`` describe the rung above the current YAML status\n(both null at expert); ``eligible`` means the node qualifies for a\nrung-up prompt (score threshold met, or at least one breakthrough).",
     "properties": {
      "breakthrough_count": {
       "default": 0,
@@ -24112,7 +24112,7 @@
   },
   "/api/v1/profiles/{name}/skill-tree/nodes/{node_id}": {
    "patch": {
-    "description": "Set one skill node's 三态 status in skill-tree.yaml (G3 write).\n\nBody vocabulary is the UI 三态 (``locked`` / ``learning`` / ``lit``);\n``lit`` lands as the YAML status ``solid`` (see\n``SKILL_NODE_EDIT_STATUSES``). ``If-Match`` carries the skill-tree.yaml\nETag from the tree read (412 on mismatch); the write goes through\n``profile_io.update_skill_tree`` with an in-lock snapshot re-check, and\nthe SKILL.md generated block is re-synced after a real change. A no-op\npatch writes nothing (``changed=false``).",
+    "description": "Set one skill node's 三态 status in skill-tree.yaml (G3 write).\n\nBody vocabulary is the UI 三态 (``locked`` / ``learning`` / ``lit``)\nplus ``expert``; ``lit`` lands as the YAML status ``solid`` (see\n``SKILL_NODE_EDIT_STATUSES``). ``If-Match`` carries the skill-tree.yaml\nETag from the tree read (412 on mismatch); the write goes through\n``profile_io.update_skill_tree`` with an in-lock snapshot re-check, and\nthe SKILL.md generated block is re-synced after a real change. A no-op\npatch writes nothing (``changed=false``).",
     "operationId": "patch_profile_skill_node_api_v1_profiles__name__skill_tree_nodes__node_id__patch",
     "parameters": [
      {
@@ -24219,7 +24219,7 @@
         }
        }
       },
-      "description": "Status outside the 三态 vocabulary (locked/learning/lit)."
+      "description": "Status outside locked/learning/lit/expert."
      }
     },
     "summary": "Patch Profile Skill Node"
