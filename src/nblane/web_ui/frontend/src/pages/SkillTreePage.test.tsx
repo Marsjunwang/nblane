@@ -102,7 +102,7 @@ describe('SkillTreePage', () => {
     renderPage();
 
     expect(await screen.findByText('alice · 技能树')).toBeInTheDocument();
-    expect(screen.getByTestId('status-chip-learning')).toHaveTextContent('学习中 2');
+    expect(screen.getByTestId('status-chip-learning')).toHaveTextContent('在学 2');
     expect(screen.getByTestId('status-chip-solid')).toHaveTextContent('扎实 1');
     expect(screen.getByTestId('status-chip-expert')).toHaveTextContent('精通 1');
     expect(screen.getByTestId('status-chip-locked')).toHaveTextContent('锁定 1');
@@ -311,7 +311,7 @@ describe('SkillTreePage 进阶进度', () => {
     fireEvent.click(await screen.findByText('Point Cloud Processing'));
     const card = await screen.findByTestId('skill-inscription');
     const block = within(card).getByTestId('skill-progress');
-    expect(block).toHaveTextContent('学习中 → 扎实');
+    expect(block).toHaveTextContent('在学 → 扎实');
     expect(block).toHaveTextContent('12 / 30');
     // 12/30 → 40% 泥金 fill.
     expect(within(card).getByTestId('skill-progress-fill').style.width).toBe('40%');
@@ -363,7 +363,7 @@ describe('SkillTreePage category banners (星官化)', () => {
     expect(within(banner).getByText(lore)).toBeInTheDocument();
     // 三态统计: locked = count − lit − learning = 0, 在学 1, 点亮 1.
     expect(within(banner).getByTitle('在学 1')).toBeInTheDocument();
-    expect(within(banner).getByTitle('点亮 1')).toBeInTheDocument();
+    expect(within(banner).getByTitle('点亮（扎实 + 精通） 1')).toBeInTheDocument();
     expect(within(banner).getByTitle('锁定 0')).toBeInTheDocument();
     // Nodes still render under their banner.
     expect(screen.getByText('Python (numpy, scipy)')).toBeInTheDocument();
@@ -389,7 +389,9 @@ describe('SkillTreePage node inscription card', () => {
     fireEvent.click(await screen.findByText('Python (numpy, scipy)'));
     const card = await screen.findByTestId('skill-inscription');
     expect(within(card).getByText('Python (numpy, scipy)')).toBeInTheDocument();
-    expect(within(card).getByText('扎实')).toBeInTheDocument();
+    // The stepper names rungs like the status labels: 扎实 is the active one.
+    expect(within(card).getByTestId('stepper-lit')).toHaveTextContent('扎实');
+    expect(within(card).getByTestId('stepper-lit')).toHaveAttribute('aria-pressed', 'true');
     // 关联证据 from GET /evidence?skill_id=python_core, deep-linked to the
     // seated stage with the focus param.
     const link = await within(card).findByTestId('skill-evidence-link-ev_9');
@@ -411,7 +413,7 @@ describe('SkillTreePage node inscription card', () => {
 
     fireEvent.click(await screen.findByText('NumPy internals'));
     const card = await screen.findByTestId('skill-inscription');
-    // 在学 is the current step (disabled); 点亮 and 锁定 are actionable.
+    // 在学 is the current step (disabled); 扎实 and 锁定 are actionable.
     expect(within(card).getByTestId('stepper-learning')).toBeDisabled();
     fireEvent.click(within(card).getByTestId('stepper-lit'));
 
@@ -423,8 +425,10 @@ describe('SkillTreePage node inscription card', () => {
       expect(JSON.parse(String(patch!.init?.body))).toEqual({ status: 'lit' });
       expect(new Headers(patch!.init?.headers).get('If-Match')).toBe('W/"tree-etag-1"');
     });
-    // Optimistic update: the row flips to 扎实 before the refetch lands.
-    expect(await within(card).findByText('扎实')).toBeInTheDocument();
+    // Optimistic update: the 扎实 step turns active before the refetch lands.
+    await waitFor(() =>
+      expect(within(card).getByTestId('stepper-lit')).toHaveAttribute('aria-pressed', 'true'),
+    );
   });
 
   it('asks before promoting to 精通 and before stepping down', async () => {
@@ -509,5 +513,79 @@ describe('SkillTreePage 分数来源', () => {
     expect(within(card).getByTestId('skill-unmet-requires')).toHaveTextContent('前置未点亮：Linear Algebra');
     expect(await within(card).findByTestId('skill-evidence-points-ev_9')).toHaveTextContent('中 +10');
     expect(within(card).getByTestId('skill-evidence-points-ev_10')).toHaveTextContent('强 待评审·未计分');
+  });
+});
+
+describe('SkillTreePage 列表筛选', () => {
+  const TREE_FOR_FILTERS = {
+    ...TREE,
+    nodes: [
+      {
+        ...TREE.nodes[0],
+        progress: { score: 0, next_rung: 'expert', threshold_next: 100, breakthrough_count: 0, eligible: false },
+        children: [
+          { ...TREE.nodes[0].children[0], progress: { score: 0, next_rung: null, threshold_next: null, breakthrough_count: 0, eligible: false } },
+          { ...TREE.nodes[0].children[1], progress: { score: 40, next_rung: 'solid', threshold_next: 30, breakthrough_count: 0, eligible: true } },
+        ],
+      },
+      { ...TREE.nodes[1], progress: { score: 0, next_rung: 'solid', threshold_next: 30, breakthrough_count: 0, eligible: false } },
+    ],
+  };
+
+  it('filters by status chip, 可进阶 and 有证据, keeping ancestors, and clears', async () => {
+    stubFetch(TREE_FOR_FILTERS);
+    renderPage();
+
+    const eligible = await screen.findByTestId('status-chip-eligible');
+    expect(eligible).toHaveTextContent('可进阶 1');
+
+    // Status chip: only 在学 rows (plus the ancestor of point_cloud).
+    fireEvent.click(screen.getByTestId('status-chip-learning'));
+    expect(screen.getByTestId('status-chip-learning')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Point Cloud Processing')).toBeInTheDocument();
+    expect(screen.getByText('Git / GitHub workflow')).toBeInTheDocument();
+    expect(screen.getByText('Python (numpy, scipy)')).toBeInTheDocument();
+    expect(screen.queryByText('2D Object Detection (YOLO)')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('status-chip-learning'));
+
+    // 可进阶: only point_cloud and its ancestor.
+    fireEvent.click(eligible);
+    expect(screen.getByText('Point Cloud Processing')).toBeInTheDocument();
+    expect(screen.queryByText('Git / GitHub workflow')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '清除筛选' }));
+    expect(screen.getByText('Git / GitHub workflow')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '清除筛选' })).not.toBeInTheDocument();
+
+    // 只看有证据: git_workflow and pose_estimation (0 evidence) drop out.
+    fireEvent.click(screen.getByRole('checkbox', { name: '只看有证据' }));
+    expect(screen.queryByText('Git / GitHub workflow')).not.toBeInTheDocument();
+    expect(screen.queryByText('6-DoF Pose Estimation')).not.toBeInTheDocument();
+    expect(screen.getByText('2D Object Detection (YOLO)')).toBeInTheDocument();
+  });
+
+  it.each([
+    [true, 'side'],
+    [false, 'stacked'],
+  ])('wide=%s puts the inscription card %s', async (wide, layout) => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: wide,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as typeof window.matchMedia;
+    try {
+      stubFetch(TREE_FOR_FILTERS);
+      renderPage();
+      fireEvent.click(await screen.findByText('Git / GitHub workflow'));
+      const card = await screen.findByTestId('skill-inscription');
+      await waitFor(() => expect(card).toHaveAttribute('data-layout', layout));
+    } finally {
+      window.matchMedia = original;
+    }
   });
 });

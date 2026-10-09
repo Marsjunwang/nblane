@@ -2,7 +2,9 @@ import {
   ActionIcon,
   Alert,
   Box,
+  Button,
   Center,
+  Checkbox,
   Group,
   Loader,
   Stack,
@@ -11,6 +13,7 @@ import {
   Title,
 } from '@mantine/core';
 import { IconChevronDown, IconChevronRight, IconSearch, IconX } from '@tabler/icons-react';
+import { useMediaQuery } from '@mantine/hooks';
 import { useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -35,7 +38,7 @@ type StateShape = 'ring' | 'dot' | 'dot-ring';
 const GOLD = '#dcae55';
 
 const STATUS_META: Record<string, { label: string; shape: StateShape; color: string }> = {
-  learning: { label: '学习中', shape: 'dot', color: 'rgba(245, 234, 210, 0.55)' },
+  learning: { label: '在学', shape: 'dot', color: 'rgba(245, 234, 210, 0.55)' },
   solid: { label: '扎实', shape: 'dot-ring', color: '#f5ead2' },
   expert: { label: '精通', shape: 'dot-ring', color: GOLD },
   locked: { label: '锁定', shape: 'ring', color: 'rgba(232, 226, 210, 0.35)' },
@@ -215,7 +218,7 @@ function CategoryBanner({ category }: { category: SkillTreeCategory }) {
                 {category.learning_count ?? 0}
               </Text>
             </Group>
-            <Group gap={5} wrap="nowrap" title={`点亮 ${category.lit_count ?? 0}`}>
+            <Group gap={5} wrap="nowrap" title={`点亮（扎实 + 精通） ${category.lit_count ?? 0}`}>
               <StateGlyph shape="dot-ring" color={STATUS_META.solid.color} />
               <Text size="xs" style={{ color: chrome.dim, fontVariantNumeric: 'tabular-nums' }}>
                 {category.lit_count ?? 0}
@@ -233,17 +236,42 @@ function CategoryBanner({ category }: { category: SkillTreeCategory }) {
   );
 }
 
-/** Keep nodes whose title matches, plus the ancestors of matching nodes. */
-function filterTree(nodes: SkillTreeNode[], query: string): SkillTreeNode[] {
-  const q = query.trim().toLowerCase();
-  if (!q) {
+interface TreeFilter {
+  query: string;
+  /** Empty = every status. */
+  statuses: ReadonlySet<string>;
+  eligibleOnly: boolean;
+  withEvidenceOnly: boolean;
+}
+
+function filterActive(filter: TreeFilter): boolean {
+  return (
+    filter.query.trim().length > 0 ||
+    filter.statuses.size > 0 ||
+    filter.eligibleOnly ||
+    filter.withEvidenceOnly
+  );
+}
+
+function nodeMatches(node: SkillTreeNode, filter: TreeFilter): boolean {
+  const q = filter.query.trim().toLowerCase();
+  if (q && !(node.title ?? '').toLowerCase().includes(q)) return false;
+  if (filter.statuses.size > 0 && !filter.statuses.has(node.status ?? 'locked')) return false;
+  if (filter.eligibleOnly && !node.progress?.eligible) return false;
+  if (filter.withEvidenceOnly && (node.evidence_count ?? 0) === 0) return false;
+  return true;
+}
+
+/** Keep matching nodes plus the ancestors of matching nodes. */
+function filterTree(nodes: SkillTreeNode[], filter: TreeFilter): SkillTreeNode[] {
+  if (!filterActive(filter)) {
     return nodes;
   }
   const walk = (node: SkillTreeNode): SkillTreeNode | null => {
     const children = (node.children ?? [])
       .map(walk)
       .filter((child): child is SkillTreeNode => child !== null);
-    if ((node.title ?? '').toLowerCase().includes(q) || children.length > 0) {
+    if (nodeMatches(node, filter) || children.length > 0) {
       return { ...node, children };
     }
     return null;
@@ -357,27 +385,52 @@ function NodeRow({ node, depth, collapsed, onToggle, forceExpanded, selectedId, 
   );
 }
 
-/** Summary chip: state glyph + label + count, hairline gold frame. */
-function StatusChip({ status, count, testId }: { status: string; count: number; testId: string }) {
+/** Summary chip: state glyph + label + count, hairline gold frame. A click
+ * toggles it as a list filter. */
+function StatusChip({
+  status,
+  count,
+  testId,
+  active,
+  onToggle,
+  label,
+  shape,
+  color,
+}: {
+  status: string;
+  count: number;
+  testId: string;
+  active: boolean;
+  onToggle: () => void;
+  label?: string;
+  shape?: StateShape;
+  color?: string;
+}) {
   const meta = statusMeta(status);
   return (
-    <Group
-      gap={6}
-      wrap="nowrap"
-      px={10}
-      py={4}
+    <button
+      type="button"
       data-testid={testId}
+      aria-pressed={active}
+      onClick={onToggle}
       style={{
-        border: '1px solid rgba(220, 174, 85, 0.22)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '4px 10px',
+        border: `1px solid ${active ? GOLD : 'rgba(220, 174, 85, 0.22)'}`,
+        background: active ? 'rgba(220, 174, 85, 0.14)' : 'transparent',
         borderRadius: 999,
         fontSize: 12,
-        color: status === 'locked' ? chrome.dim : chrome.text,
+        fontFamily: 'inherit',
+        cursor: 'pointer',
+        color: active ? '#f0cd7f' : status === 'locked' ? chrome.dim : chrome.text,
         fontVariantNumeric: 'tabular-nums',
       }}
     >
-      <StateGlyph shape={meta.shape} color={meta.color} />
-      <span>{`${meta.label} ${count}`}</span>
-    </Group>
+      <StateGlyph shape={shape ?? meta.shape} color={color ?? meta.color} />
+      <span>{`${label ?? meta.label} ${count}`}</span>
+    </button>
   );
 }
 
@@ -402,12 +455,13 @@ const STUB_SNAPSHOT: StarmapSnapshot = {
   },
 };
 
-/** Stepper rungs (锁定 → 在学 → 点亮 → 精通); the PATCH endpoint maps 点亮
- * onto the YAML status solid. 精通 and every step down ask first. */
+/** Stepper rungs (锁定 → 在学 → 扎实 → 精通), the same names as the status
+ * labels; the PATCH vocabulary keeps ``lit`` for 扎实 (YAML solid). 精通 and
+ * every step down ask first. */
 const STATUS_STEPS: { key: string; label: string; shape: StateShape }[] = [
   { key: 'locked', label: '锁定', shape: 'ring' },
   { key: 'learning', label: '在学', shape: 'dot' },
-  { key: 'lit', label: '点亮', shape: 'dot-ring' },
+  { key: 'lit', label: '扎实', shape: 'dot-ring' },
   { key: 'expert', label: '精通', shape: 'dot-ring' },
 ];
 
@@ -524,12 +578,15 @@ function SkillInscriptionCard({
   category,
   etag,
   onClose,
+  stacked,
 }: {
   profile: string;
   node: SkillTreeNode;
   category: SkillTreeCategory | null;
   etag: string;
   onClose: () => void;
+  /** Narrow screens: full width under the list instead of a sticky side card. */
+  stacked: boolean;
 }) {
   const evidence = useSkillEvidence(profile, node.id);
   const patchStatus = usePatchSkillNodeStatus(profile);
@@ -569,9 +626,10 @@ function SkillInscriptionCard({
   return (
     <Box
       component="aside"
-      w={320}
+      w={stacked ? '100%' : 320}
       data-testid="skill-inscription"
-      style={{ flexShrink: 0, position: 'sticky', top: 72 }}
+      data-layout={stacked ? 'stacked' : 'side'}
+      style={stacked ? undefined : { flexShrink: 0, position: 'sticky', top: 72 }}
     >
       <div
         className="starmap-detail open"
@@ -742,17 +800,36 @@ export function SkillTreePage() {
   const { name = '' } = useParams();
   const tree = useSkillTree(name);
   const [query, setQuery] = useState('');
+  const [statuses, setStatuses] = useState<ReadonlySet<string>>(new Set());
+  const [eligibleOnly, setEligibleOnly] = useState(false);
+  const [withEvidenceOnly, setWithEvidenceOnly] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [selectedId, setSelectedId] = useState('');
+  // Below ~990px the list and the card no longer fit side by side.
+  const wide = useMediaQuery('(min-width: 62em)') ?? true;
 
   const data = tree.data?.tree;
   const etag = tree.data?.etag ?? '';
 
+  const filter: TreeFilter = { query, statuses, eligibleOnly, withEvidenceOnly };
   const visibleNodes = useMemo(
-    () => filterTree(data?.nodes ?? [], query),
-    [data, query],
+    () => filterTree(data?.nodes ?? [], { query, statuses, eligibleOnly, withEvidenceOnly }),
+    [data, query, statuses, eligibleOnly, withEvidenceOnly],
   );
-  const filtering = query.trim().length > 0;
+  const filtering = filterActive(filter);
+  const toggleStatus = (status: string) =>
+    setStatuses((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  const clearFilters = () => {
+    setQuery('');
+    setStatuses(new Set());
+    setEligibleOnly(false);
+    setWithEvidenceOnly(false);
+  };
 
   const nodeById = useMemo(() => {
     const map = new Map<string, SkillTreeNode>();
@@ -797,6 +874,10 @@ export function SkillTreePage() {
     return out;
   }, [data, visibleNodes]);
 
+  const eligibleCount = useMemo(
+    () => [...nodeById.values()].filter((node) => node.progress?.eligible).length,
+    [nodeById],
+  );
   const selectedNode = selectedId ? nodeById.get(selectedId) : undefined;
   const selectedCategory = selectedNode
     ? (data?.categories ?? []).find((cat) => (cat.id ?? '') === (selectedNode.category ?? '')) ?? null
@@ -846,8 +927,20 @@ export function SkillTreePage() {
               status={status}
               count={counts[status] ?? 0}
               testId={`status-chip-${status}`}
+              active={statuses.has(status)}
+              onToggle={() => toggleStatus(status)}
             />
           ))}
+          <StatusChip
+            status="eligible"
+            label="可进阶"
+            shape="dot-ring"
+            color={GOLD}
+            count={eligibleCount}
+            testId="status-chip-eligible"
+            active={eligibleOnly}
+            onToggle={() => setEligibleOnly((prev) => !prev)}
+          />
           <Group
             gap={6}
             wrap="nowrap"
@@ -866,14 +959,33 @@ export function SkillTreePage() {
           </Group>
         </Group>
       </Group>
-      <TextInput
-        placeholder="按标题筛选…"
-        leftSection={<IconSearch size={14} />}
-        value={query}
-        onChange={(event) => setQuery(event.currentTarget.value)}
-        aria-label="筛选技能节点"
-      />
-      <Group align="flex-start" wrap="nowrap" gap="md">
+      <Group gap="sm" wrap="wrap">
+        <TextInput
+          placeholder="按标题筛选…"
+          leftSection={<IconSearch size={14} />}
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+          aria-label="筛选技能节点"
+          style={{ flex: 1, minWidth: 200 }}
+        />
+        <Checkbox
+          label="只看有证据"
+          checked={withEvidenceOnly}
+          onChange={(event) => setWithEvidenceOnly(event.currentTarget.checked)}
+        />
+        {filtering && (
+          <Button size="xs" variant="subtle" onClick={clearFilters}>
+            清除筛选
+          </Button>
+        )}
+      </Group>
+      <Box
+        style={
+          wide
+            ? { display: 'flex', alignItems: 'flex-start', gap: 16 }
+            : { display: 'flex', flexDirection: 'column', gap: 16 }
+        }
+      >
         <Box
           px="md"
           py="sm"
@@ -891,7 +1003,7 @@ export function SkillTreePage() {
           </Text>
           {visibleNodes.length === 0 ? (
             <Text c="dimmed" py="sm">
-              {filtering ? '没有匹配的技能节点。' : '技能树为空,先在 skill-tree.yaml 中添加节点。'}
+              {filtering ? '没有符合筛选的技能节点。' : '技能树为空,先在 skill-tree.yaml 中添加节点。'}
             </Text>
           ) : (
             <Stack gap="sm">
@@ -928,9 +1040,10 @@ export function SkillTreePage() {
             category={selectedCategory}
             etag={etag}
             onClose={() => setSelectedId('')}
+            stacked={!wide}
           />
         )}
-      </Group>
+      </Box>
     </Stack>
   );
 }
