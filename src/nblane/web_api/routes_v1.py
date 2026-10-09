@@ -628,9 +628,19 @@ def get_profile_settings(name: str) -> ProfileSettingsResponse:
 def patch_profile_settings(
     name: str, body: ProfileSettingsPatch
 ) -> ProfileSettingsResponse:
-    """Merge a safe profile preferences patch using the existing normalizer."""
+    """Merge a safe profile preferences patch using the existing normalizer.
+
+    A ``skill_progression`` patch replaces the whole rule set and must keep
+    the thresholds climbing (422 ``invalid_skill_progression`` otherwise).
+    """
     pdir = _resolve_profile(name)
     patch = body.model_dump(exclude_none=True)
+    if "skill_progression" in patch:
+        rules = skill_progression_core.normalize_rules(patch["skill_progression"])
+        problem = skill_progression_core.rules_error(rules)
+        if problem:
+            raise ApiError(422, "invalid_skill_progression", problem)
+        patch["skill_progression"] = rules
     update_web_preferences(pdir.name, patch)
     return ProfileSettingsResponse(
         profile=pdir.name, preferences=load_web_preferences(pdir)
@@ -813,6 +823,7 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
     schema_name = str(raw.get("schema") or "")
     schema = schema_io.load_schema(schema_name) if schema_name else None
     pool = profile_io.load_evidence_pool(pdir)
+    rules = skill_progression_core.rules_from_preferences(load_web_preferences(pdir))
 
     overlay: dict[str, dict] = {}
     for node in raw.get("nodes") or []:
@@ -852,7 +863,7 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
             category=str(meta.category if meta else ""),
             evidence_count=len(resolve_node_evidence_dict(node, pool)),
             progress=SkillNodeProgressModel(
-                **skill_progression_core.node_progress(node, pool).to_dict()
+                **skill_progression_core.node_progress(node, pool, rules).to_dict()
             ),
             children=[
                 build(kid, ancestors | {kid})

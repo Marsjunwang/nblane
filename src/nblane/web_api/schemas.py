@@ -68,6 +68,7 @@ class ProfileSettingsPatch(BaseModel):
     evidence_review: dict[str, Any] | None = None
     project_board: dict[str, Any] | None = None
     research: dict[str, Any] | None = None
+    skill_progression: dict[str, Any] | None = None
 
 
 class ProfileSettingsResponse(BaseModel):

@@ -114,7 +114,9 @@ skill-links 一致：`If-Match` 携带 skill-tree.yaml 弱 ETag（412 重试）�
 
 技能进阶进度（同日落地,只读）:`GET /skill-tree` 每个节点带 `progress`
 对象 `{score, next_rung, threshold_next, breakthrough_count, eligible}`,规则全部
-集中在 `core/skill_progression.py`(唯一调参处,常量 + docstring):
+集中在 `core/skill_progression.py`(常量是默认值;2026-10-09 起档案可在
+`web-preferences.yaml` 的 `skill_progression` 覆盖,经 `rules_from_preferences` 读成
+`ProgressionRules`,PATCH settings 校验门槛 >0 且递增,否则 422 `invalid_skill_progression`):
 节点非废弃且已审阅（`review_status: reviewed`，`COUNT_REVIEWED_ONLY`，2026-10-09 起）的 `evidence_refs` 逐条计分,分量 弱/中/强 = 1/10/100(`high_trust`
 按强计,未评级按 1),`breakthrough: true` 的证据行额外 +1000;升阶阈值
 locked→learning 10、learning→solid 30、solid→expert 100,expert 无下一阶

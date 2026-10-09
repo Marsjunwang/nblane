@@ -85,6 +85,7 @@ nodes:
 
 - 节点下每条未弃用、已审阅的证据按强度计分（待审阅的 AI 预填不计）：弱 1、中 10、强 100；带 `breakthrough: true` 的再加 1000。
 - 升到下一级的门槛：locked→learning 10，learning→solid 30，solid→expert 100。
+- 以上是默认值。档案可在 `web-preferences.yaml` 的 `skill_progression`（`weights`、`breakthrough_bonus`、`thresholds`、`breakthrough_unlocks`、`reviewed_only`）覆盖，界面在「设置 → 技能进阶」；门槛必须大于 0 且逐级递增。
 - 分数达标或有一条 breakthrough 即提示。只是建议，状态仍由人改；改技能点对助手是需要聊天确认的重要操作。
 
 ## 新增领域 Schema

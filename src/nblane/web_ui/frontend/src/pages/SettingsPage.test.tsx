@@ -189,6 +189,36 @@ describe('SettingsPage', () => {
     expect(body.ai.actions['research.paper_deep_read_codex']).toMatchObject({ codex_model: 'gpt-6.1-sol', codex_effort: 'medium' });
   });
 
+  it('edits 技能进阶 rules, blocks a non-climbing ladder and saves the whole rule set', async () => {
+    const calls = mockApi();
+    renderAt('/settings/skill-progression?profile=alice');
+    const solid = await screen.findByLabelText('在学 → 扎实');
+    // Missing rules read as the defaults.
+    expect(solid).toHaveValue('30');
+    expect(screen.getByRole('switch', { name: /只计已审阅的证据/ })).toBeChecked();
+    expect(screen.getByRole('button', { name: '恢复默认' })).toBeDisabled();
+
+    fireEvent.change(solid, { target: { value: '5' } });
+    expect(await screen.findByTestId('progression-error')).toHaveTextContent('逐级递增');
+    const bar = await screen.findByRole('region', { name: '未保存的修改' });
+    fireEvent.click(bar.querySelector('button:last-of-type') as HTMLButtonElement);
+    expect(calls.some((call) => call.method === 'PATCH')).toBe(false);
+
+    fireEvent.change(solid, { target: { value: '50' } });
+    fireEvent.click(screen.getByRole('switch', { name: /只计已审阅的证据/ }));
+    fireEvent.click(bar.querySelector('button:last-of-type') as HTMLButtonElement);
+    await waitFor(() => expect(calls.some((call) => call.method === 'PATCH')).toBe(true));
+    expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({
+      skill_progression: {
+        weights: { weak: 1, medium: 10, strong: 100 },
+        breakthrough_bonus: 1000,
+        thresholds: { learning: 10, solid: 50, expert: 100 },
+        breakthrough_unlocks: true,
+        reviewed_only: false,
+      },
+    });
+  });
+
   it('discards edits from the save bar', async () => {
     mockApi();
     renderAt('/settings/research?profile=alice');

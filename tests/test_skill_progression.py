@@ -83,7 +83,9 @@ class TestWeights(unittest.TestCase):
         self.assertEqual(progress.score, 10)
         self.assertEqual(progress.breakthrough_count, 0)
         # The switch restores the old count-everything behavior.
-        loose = sp.node_progress(node, pool, reviewed_only=False)
+        loose = sp.node_progress(
+            node, pool, sp.ProgressionRules(reviewed_only=False)
+        )
         self.assertEqual(loose.score, 10 + 100 + sp.BREAKTHROUGH_WEIGHT + 100)
         self.assertEqual(loose.breakthrough_count, 1)
 
@@ -167,12 +169,14 @@ class TestEligible(unittest.TestCase):
              "strength": "weak", "breakthrough": True},
         )
         node = {"id": "n", "status": "locked", "evidence_refs": ["ev_b"]}
-        original = dict(sp.RUNG_THRESHOLDS)
-        self.addCleanup(sp.RUNG_THRESHOLDS.update, original)
-        sp.RUNG_THRESHOLDS[("locked", "learning")] = 5000
-        progress = sp.node_progress(node, pool)
+        rules = sp.ProgressionRules()
+        rules.thresholds["learning"] = 5000
+        progress = sp.node_progress(node, pool, rules)
         self.assertLess(progress.score, progress.threshold_next)
         self.assertTrue(progress.eligible)
+        # The switch turns the landmark shortcut off.
+        rules.breakthrough_unlocks = False
+        self.assertFalse(sp.node_progress(node, pool, rules).eligible)
 
     def test_to_dict_shape(self) -> None:
         node = {"id": "n", "status": "learning"}
@@ -187,6 +191,65 @@ class TestEligible(unittest.TestCase):
                 "eligible": False,
             },
         )
+
+
+class TestConfigurableRules(unittest.TestCase):
+    """Per-profile rules from web-preferences.yaml (skill_progression)."""
+
+    def test_defaults_match_constants(self) -> None:
+        rules = sp.normalize_rules(None)
+        self.assertEqual(rules["weights"], {"weak": 1, "medium": 10, "strong": 100})
+        self.assertEqual(rules["breakthrough_bonus"], sp.BREAKTHROUGH_WEIGHT)
+        self.assertEqual(
+            rules["thresholds"], {"learning": 10, "solid": 30, "expert": 100}
+        )
+        self.assertTrue(rules["breakthrough_unlocks"])
+        self.assertTrue(rules["reviewed_only"])
+        self.assertIsNone(sp.rules_error(rules))
+
+    def test_normalize_clamps_and_ignores_junk(self) -> None:
+        rules = sp.normalize_rules(
+            {
+                "weights": {"weak": "3", "medium": -5, "strong": "x", "bogus": 9},
+                "breakthrough_bonus": 10**9,
+                "thresholds": {"solid": 50},
+                "reviewed_only": "false",
+                "extra": 1,
+            }
+        )
+        self.assertEqual(rules["weights"], {"weak": 3, "medium": 0, "strong": 100})
+        self.assertEqual(rules["breakthrough_bonus"], sp.MAX_RULE_VALUE)
+        self.assertEqual(rules["thresholds"]["solid"], 50)
+        self.assertFalse(rules["reviewed_only"])
+        self.assertNotIn("extra", rules)
+
+    def test_rules_error_requires_climbing_positive_thresholds(self) -> None:
+        bad_order = sp.normalize_rules(
+            {"thresholds": {"learning": 10, "solid": 10, "expert": 100}}
+        )
+        self.assertIn("逐级递增", sp.rules_error(bad_order) or "")
+        zero = sp.normalize_rules({"thresholds": {"learning": 0}})
+        self.assertIn("大于 0", sp.rules_error(zero) or "")
+
+    def test_custom_rules_change_score_and_threshold(self) -> None:
+        pool = _pool(
+            {"id": "ev_u", "type": "practice", "title": "U"},
+            {"id": "ev_h", "type": "paper", "title": "H", "strength": "high_trust"},
+        )
+        rules = sp.rules_from_preferences(
+            {
+                "skill_progression": {
+                    "weights": {"weak": 2, "medium": 20, "strong": 50},
+                    "thresholds": {"learning": 5, "solid": 60, "expert": 200},
+                }
+            }
+        )
+        node = {"id": "n", "status": "learning", "evidence_refs": ["ev_u", "ev_h"]}
+        progress = sp.node_progress(node, pool, rules)
+        # Unrated scores as weak, high_trust as strong.
+        self.assertEqual(progress.score, 2 + 50)
+        self.assertEqual(progress.threshold_next, 60)
+        self.assertFalse(progress.eligible)
 
 
 if __name__ == "__main__":

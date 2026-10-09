@@ -509,8 +509,12 @@ export function usePatchProfileSettings(profile: string) {
         `/profiles/${encodeURIComponent(profile)}/settings`,
         body,
       ),
-    onSuccess: (value) => {
+    onSuccess: (value, body) => {
       queryClient.setQueryData(['profiles', profile, 'settings'], value);
+      // Progression rules change every node's progress readout.
+      if (body.skill_progression) {
+        void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'skill-tree'] });
+      }
     },
   });
 }

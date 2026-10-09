@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-10-08
+last_verified: 2026-10-09
 source_of_truth: true
 ---
 
@@ -82,10 +82,10 @@ nblane 的 Web 界面是一个单页应用（SPA），由 `nblane.web_api` 在�
 设置分三组：
 
 - 系统（仅管理员，整个部署共用，修改立即生效）：AI 服务、本地服务、车间终端、助手与备份、账号管理。
-- 档案（只影响所选档案，改完点保存）：通用、研究与阅读、AI 路由。
+- 档案（只影响所选档案，改完点保存）：通用、研究与阅读、AI 路由、技能进阶。
 - 账号（每个人都有）：我的账号。
 
-有未保存修改时离开分区会弹出确认。各分区的具体选项写在对应功能文档里：AI 服务与 AI 路由见 [AI 架构](../architecture/ai-architecture.md)，本地服务、研究与阅读见 [研究](research.md)，车间终端见 [车间](workshop.md)，助手与备份见 [助手](assistant.md)。
+有未保存修改时离开分区会弹出确认。各分区的具体选项写在对应功能文档里：AI 服务与 AI 路由见 [AI 架构](../architecture/ai-architecture.md)，本地服务、研究与阅读见 [研究](research.md)，车间终端见 [车间](workshop.md)，技能进阶见 [技能树](skill-tree.md#技能进阶)，助手与备份见 [助手](assistant.md)。
 
 ### 我的账号
 

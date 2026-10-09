@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from nblane.core import git_backup
+from nblane.core import skill_progression
 from nblane.core.file_write import atomic_write_text
 from nblane.core.profile_io import profile_dir
 from nblane.core.yaml_io import _load_yaml_dict
@@ -196,6 +197,9 @@ def normalize_web_preferences(
         "research": {
             "reader": _normalize_reader_preferences(reader),
         },
+        "skill_progression": skill_progression.normalize_rules(
+            source.get("skill_progression")
+        ),
     }
 
 

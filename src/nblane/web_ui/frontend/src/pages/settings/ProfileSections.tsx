@@ -1,9 +1,9 @@
 // 档案 sections: settings that only affect the selected profile. Each section
 // edits a local draft and saves once through the sticky SaveBar.
 
-import { Autocomplete, Badge, Button, Center, Checkbox, Group, Loader, SegmentedControl, Select, SimpleGrid, Stack, Table, Text, TextInput } from '@mantine/core';
+import { Autocomplete, Badge, Button, Center, Checkbox, Group, Loader, NumberInput, SegmentedControl, Select, SimpleGrid, Stack, Switch, Table, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBook2, IconLanguage, IconRoute, IconSettings, IconTerminal2 } from '@tabler/icons-react';
+import { IconBook2, IconLanguage, IconRoute, IconSettings, IconStairsUp, IconTerminal2 } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
 import { usePatchProfileCodexSettings, usePatchProfileSettings, useProfileCodexSettings, useProfileSettings } from '../../api/hooks';
@@ -356,6 +356,122 @@ export function ProfileAIRoutingSection({ profile }: { profile: string }) {
         error={saveActions.error ?? saveCodex.error}
         onDiscard={() => { actions.reset(); codexDraft.reset(); }}
         onSave={() => void save()}
+      />
+    </Stack>
+  );
+}
+
+// --- 技能进阶 ----------------------------------------------------------------------
+
+/** Mirrors core/skill_progression.py ProgressionRules defaults. */
+export const PROGRESSION_DEFAULTS = {
+  weights: { weak: 1, medium: 10, strong: 100 },
+  breakthrough_bonus: 1000,
+  thresholds: { learning: 10, solid: 30, expert: 100 },
+  breakthrough_unlocks: true,
+  reviewed_only: true,
+};
+type ProgressionRules = typeof PROGRESSION_DEFAULTS;
+
+const WEIGHT_FIELDS: { key: keyof ProgressionRules['weights']; label: string; description: string }[] = [
+  { key: 'weak', label: '弱', description: '未评级的证据也按弱计' },
+  { key: 'medium', label: '中', description: '' },
+  { key: 'strong', label: '强', description: '高可信按强计' },
+];
+const THRESHOLD_FIELDS: { key: keyof ProgressionRules['thresholds']; label: string }[] = [
+  { key: 'learning', label: '锁定 → 在学' },
+  { key: 'solid', label: '在学 → 扎实' },
+  { key: 'expert', label: '扎实 → 精通' },
+];
+
+/** Same check as core/skill_progression.py rules_error. */
+function progressionError(rules: ProgressionRules): string | null {
+  const { learning, solid, expert } = rules.thresholds;
+  if (learning <= 0) return '晋升门槛必须大于 0。';
+  if (!(learning < solid && solid < expert)) return '晋升门槛必须逐级递增：在学 < 扎实 < 精通。';
+  return null;
+}
+
+export function ProfileSkillProgressionSection({ profile }: { profile: string }) {
+  const preferences = useProfileSettings(profile);
+  const value = preferences.data?.preferences;
+  const source = useMemo(() => {
+    const stored = (value?.skill_progression ?? {}) as Partial<ProgressionRules>;
+    return {
+      ...PROGRESSION_DEFAULTS,
+      ...stored,
+      weights: { ...PROGRESSION_DEFAULTS.weights, ...stored.weights },
+      thresholds: { ...PROGRESSION_DEFAULTS.thresholds, ...stored.thresholds },
+    } as ProgressionRules;
+  }, [value]);
+  const { draft, setDraft, dirty, reset } = useDraft(source);
+  const { save, run } = useProfileSave(profile, '技能进阶规则已保存');
+  useReportDirty(dirty);
+  if (!preferences.data) return <Loading query={preferences} />;
+  const invalid = progressionError(draft);
+  const isDefault = JSON.stringify(draft) === JSON.stringify(PROGRESSION_DEFAULTS);
+  const num = (next: string | number) => Math.max(0, Math.floor(Number(next) || 0));
+  return (
+    <Stack gap="lg">
+      <SettingsCard icon={<IconStairsUp size={22} />} title="证据分值" description="每条挂在技能上的证据按分量计分，累计成进阶分。">
+        <SimpleGrid cols={{ base: 1, sm: 4 }}>
+          {WEIGHT_FIELDS.map((field) => (
+            <NumberInput
+              key={field.key}
+              label={field.label}
+              description={field.description || undefined}
+              min={0}
+              allowDecimal={false}
+              value={draft.weights[field.key]}
+              onChange={(next) => setDraft({ ...draft, weights: { ...draft.weights, [field.key]: num(next) } })}
+            />
+          ))}
+          <NumberInput
+            label="突破加成"
+            description="突破证据另加"
+            min={0}
+            allowDecimal={false}
+            value={draft.breakthrough_bonus}
+            onChange={(next) => setDraft({ ...draft, breakthrough_bonus: num(next) })}
+          />
+        </SimpleGrid>
+        <Switch
+          label="只计已审阅的证据"
+          description="还在「待评审」的证据（多是 AI 预填）不计分。"
+          checked={draft.reviewed_only}
+          onChange={(event) => setDraft({ ...draft, reviewed_only: event.currentTarget.checked })}
+        />
+      </SettingsCard>
+      <SettingsCard icon={<IconStairsUp size={22} />} title="晋升门槛" description="进阶分达到门槛时，技能树提示「可进阶」。只是提示，晋升仍由你确认。">
+        <SimpleGrid cols={{ base: 1, sm: 3 }}>
+          {THRESHOLD_FIELDS.map((field) => (
+            <NumberInput
+              key={field.key}
+              label={field.label}
+              min={0}
+              allowDecimal={false}
+              value={draft.thresholds[field.key]}
+              onChange={(next) => setDraft({ ...draft, thresholds: { ...draft.thresholds, [field.key]: num(next) } })}
+            />
+          ))}
+        </SimpleGrid>
+        {invalid && <Text size="sm" c="red" role="alert" data-testid="progression-error">{invalid}</Text>}
+        <Switch
+          label="有一条突破证据就算可进阶"
+          description="关掉后突破证据只加分，仍要分数达到门槛。"
+          checked={draft.breakthrough_unlocks}
+          onChange={(event) => setDraft({ ...draft, breakthrough_unlocks: event.currentTarget.checked })}
+        />
+        <Group>
+          <Button size="xs" variant="default" disabled={isDefault} onClick={() => setDraft(PROGRESSION_DEFAULTS)}>恢复默认</Button>
+        </Group>
+      </SettingsCard>
+      <SaveBar
+        dirty={dirty}
+        saving={save.isPending}
+        error={save.error}
+        onDiscard={reset}
+        onSave={() => { if (!invalid) run({ skill_progression: draft }); }}
       />
     </Stack>
   );

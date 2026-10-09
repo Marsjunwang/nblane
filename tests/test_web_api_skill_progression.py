@@ -166,6 +166,41 @@ class TestSkillTreeProgress(SkillProgressionApiTestBase):
         self.assertFalse(child_a2["eligible"])
         self.assertEqual(child_a2["score"], 1010)
 
+    def test_profile_rules_drive_progress_and_reject_bad_ladder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client, _pdir = self._setup(Path(tmp))
+            bad = client.patch(
+                "/api/v1/profiles/alice/settings",
+                json={"skill_progression": {"thresholds": {"learning": 50, "solid": 30}}},
+            )
+            saved = client.patch(
+                "/api/v1/profiles/alice/settings",
+                json={
+                    "skill_progression": {
+                        "weights": {"weak": 5, "medium": 10, "strong": 100},
+                        "thresholds": {"learning": 5, "solid": 2000, "expert": 3000},
+                        "breakthrough_unlocks": False,
+                        "reviewed_only": False,
+                    }
+                },
+            )
+            nodes = _flatten(
+                client.get("/api/v1/profiles/alice/skill-tree").json()["nodes"]
+            )
+        self.assertEqual(bad.status_code, 422)
+        self.assertEqual(bad.json()["code"], "invalid_skill_progression")
+        self.assertEqual(saved.status_code, 200)
+        rules = saved.json()["preferences"]["skill_progression"]
+        self.assertFalse(rules["reviewed_only"])
+        # child_a1: weak (5) + the unreviewed strong row (100) now counts.
+        child_a1 = nodes["child_a1"]["progress"]
+        self.assertEqual(child_a1["score"], 105)
+        self.assertEqual(child_a1["threshold_next"], 5)
+        # root_a has a breakthrough but 1110 < 2000 and the shortcut is off.
+        root_a = nodes["root_a"]["progress"]
+        self.assertEqual(root_a["threshold_next"], 2000)
+        self.assertFalse(root_a["eligible"])
+
 
 class TestSkillLitChronicle(SkillProgressionApiTestBase):
     """PATCH node status: skill.lit fires on rung-up only."""

@@ -36,6 +36,28 @@ class TestWebPreferences(unittest.TestCase):
         self.assertFalse(prefs["kanban"]["focus_mode"])
         self.assertTrue(prefs["kanban"]["auto_dates"])
 
+    def test_skill_progression_defaults_and_round_trip(self) -> None:
+        """skill_progression reads as defaults and persists overrides."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "alice").mkdir()
+            with patch("nblane.core.web_preferences.profile_dir", lambda name: root / name), patch(
+                "nblane.core.git_backup.record_change"
+            ):
+                defaults = load_web_preferences("alice")["skill_progression"]
+                update_web_preferences(
+                    "alice",
+                    {"skill_progression": {"thresholds": {"solid": 40}, "reviewed_only": False}},
+                )
+                saved = load_web_preferences("alice")["skill_progression"]
+
+        self.assertEqual(defaults["thresholds"], {"learning": 10, "solid": 30, "expert": 100})
+        self.assertTrue(defaults["reviewed_only"])
+        self.assertEqual(saved["thresholds"]["solid"], 40)
+        self.assertEqual(saved["thresholds"]["learning"], 10)
+        self.assertFalse(saved["reviewed_only"])
+
     def test_kanban_view_toggles_round_trip(self) -> None:
         """focus_mode/auto_dates persist as bools through normalization."""
 

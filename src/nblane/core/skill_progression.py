@@ -4,8 +4,9 @@ One node's ``progress`` answers "how close is this skill to its next rung":
 ``GET /api/v1/profiles/{name}/skill-tree`` attaches it to every node so the
 SPA can render rung-up affordances without reimplementing the math.
 
-Model (all constants below are the tuning surface — adjust here, not in
-callers):
+Model (the constants below are the defaults; a profile can override them
+in ``web-preferences.yaml`` under ``skill_progression``, read through
+``rules_from_preferences`` into a ``ProgressionRules``):
 
 - Rungs follow the skill-tree.yaml status ladder ``RUNG_ORDER``
   (locked -> learning -> solid -> expert). ``next_rung`` is the rung above
@@ -34,7 +35,8 @@ appends the
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from nblane.core.models import EvidencePool, EvidenceRecord
 
@@ -64,6 +66,116 @@ RUNG_THRESHOLDS: dict[tuple[str, str], int] = {
     ("learning", "solid"): 30,
     ("solid", "expert"): 100,
 }
+
+
+# Upper bound for any configurable weight / threshold.
+MAX_RULE_VALUE = 100_000
+
+
+@dataclass
+class ProgressionRules:
+    """One profile's progression tuning; defaults mirror the constants."""
+
+    weights: dict[str, int] = field(
+        default_factory=lambda: {
+            key: STRENGTH_WEIGHTS[key] for key in ("weak", "medium", "strong")
+        }
+    )
+    breakthrough_bonus: int = BREAKTHROUGH_WEIGHT
+    # Keyed by the target rung: learning / solid / expert.
+    thresholds: dict[str, int] = field(
+        default_factory=lambda: {
+            to: value for (_from, to), value in RUNG_THRESHOLDS.items()
+        }
+    )
+    breakthrough_unlocks: bool = True
+    reviewed_only: bool = COUNT_REVIEWED_ONLY
+
+    def strength_weight(self, strength: object) -> int:
+        """Weight for one 分量; high_trust = strong, unrated/unknown = weak."""
+        clean = str(strength or "").strip()
+        if clean == "high_trust":
+            clean = "strong"
+        return self.weights.get(clean, self.weights.get("weak", DEFAULT_STRENGTH_WEIGHT))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize in the web-preferences.yaml shape."""
+        return {
+            "weights": dict(self.weights),
+            "breakthrough_bonus": self.breakthrough_bonus,
+            "thresholds": dict(self.thresholds),
+            "breakthrough_unlocks": self.breakthrough_unlocks,
+            "reviewed_only": self.reviewed_only,
+        }
+
+
+def _rule_int(value: object, default: int) -> int:
+    try:
+        parsed = int(value) if value is not None and str(value).strip() else default
+    except (TypeError, ValueError):
+        parsed = default
+    return max(0, min(MAX_RULE_VALUE, parsed))
+
+
+def _rule_bool(value: object, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if text in {"true", "1", "yes", "on"}:
+        return True
+    if text in {"false", "0", "no", "off"}:
+        return False
+    return default
+
+
+def normalize_rules(raw: object) -> dict[str, Any]:
+    """Clamp a stored ``skill_progression`` mapping onto the defaults."""
+    source = raw if isinstance(raw, dict) else {}
+    base = ProgressionRules()
+    weights = source.get("weights") if isinstance(source.get("weights"), dict) else {}
+    thresholds = (
+        source.get("thresholds") if isinstance(source.get("thresholds"), dict) else {}
+    )
+    return ProgressionRules(
+        weights={k: _rule_int(weights.get(k), v) for k, v in base.weights.items()},
+        breakthrough_bonus=_rule_int(
+            source.get("breakthrough_bonus"), base.breakthrough_bonus
+        ),
+        thresholds={
+            k: _rule_int(thresholds.get(k), v) for k, v in base.thresholds.items()
+        },
+        breakthrough_unlocks=_rule_bool(
+            source.get("breakthrough_unlocks"), base.breakthrough_unlocks
+        ),
+        reviewed_only=_rule_bool(source.get("reviewed_only"), base.reviewed_only),
+    ).to_dict()
+
+
+def rules_error(rules: dict[str, Any]) -> str | None:
+    """Human-readable problem with normalized rules, or None when valid.
+
+    Thresholds must climb strictly (learning < solid < expert) and be
+    positive, or a rung would be "reached" with no evidence at all.
+    """
+    thresholds = rules.get("thresholds") or {}
+    ladder = [thresholds.get(rung, 0) for rung in RUNG_ORDER[1:]]
+    if ladder[0] <= 0:
+        return "晋升门槛必须大于 0。"
+    if any(lo >= hi for lo, hi in zip(ladder, ladder[1:])):
+        return "晋升门槛必须逐级递增：在学 < 扎实 < 精通。"
+    return None
+
+
+def rules_from_preferences(preferences: dict[str, Any] | None) -> ProgressionRules:
+    """Build the rules for one profile from its normalized web preferences."""
+    data = normalize_rules((preferences or {}).get("skill_progression"))
+    return ProgressionRules(
+        weights=data["weights"],
+        breakthrough_bonus=data["breakthrough_bonus"],
+        thresholds=data["thresholds"],
+        breakthrough_unlocks=data["breakthrough_unlocks"],
+        reviewed_only=data["reviewed_only"],
+    )
 
 
 @dataclass
@@ -104,38 +216,37 @@ def next_rung(status: object) -> str | None:
     return RUNG_ORDER[index + 1]
 
 
-def threshold_for_next(status: object) -> int | None:
+def threshold_for_next(
+    status: object, rules: ProgressionRules | None = None
+) -> int | None:
     """Score needed to reach the next rung; None when at the top."""
     nxt = next_rung(status)
     if nxt is None:
         return None
-    current = RUNG_ORDER[rung_index(status)]
-    return RUNG_THRESHOLDS.get((current, nxt))
+    return (rules or ProgressionRules()).thresholds.get(nxt)
 
 
-def _evidence_weight(record: EvidenceRecord) -> int:
+def _evidence_weight(record: EvidenceRecord, rules: ProgressionRules) -> int:
     """Score contribution of one resolved (non-deprecated) pool row."""
-    weight = STRENGTH_WEIGHTS.get(
-        str(record.strength or "").strip(), DEFAULT_STRENGTH_WEIGHT
-    )
+    weight = rules.strength_weight(record.strength)
     if record.breakthrough:
-        weight += BREAKTHROUGH_WEIGHT
+        weight += rules.breakthrough_bonus
     return weight
 
 
 def node_progress(
     node: dict,
     pool: EvidencePool | None,
-    *,
-    reviewed_only: bool = COUNT_REVIEWED_ONLY,
+    rules: ProgressionRules | None = None,
 ) -> NodeProgress:
     """Compute the progression readout for one raw skill-tree node dict.
 
     Only ``evidence_refs`` resolving to non-deprecated pool rows score (and,
-    with *reviewed_only*, only reviewed ones) — inline ``evidence`` rows are
-    ungraded by definition and missing ids are skipped (validate catches
-    dangling refs).
+    with ``rules.reviewed_only``, only reviewed ones) — inline ``evidence``
+    rows are ungraded by definition and missing ids are skipped (validate
+    catches dangling refs). *rules* defaults to the module constants.
     """
+    rules = rules or ProgressionRules()
     index: dict[str, EvidenceRecord] = pool.by_id() if pool is not None else {}
     score = 0
     breakthrough_count = 0
@@ -152,18 +263,21 @@ def node_progress(
             record = index.get(key)
             if record is None or record.deprecated:
                 continue
-            if reviewed_only and record.review_status.strip() != "reviewed":
+            if rules.reviewed_only and record.review_status.strip() != "reviewed":
                 continue
-            score += _evidence_weight(record)
+            score += _evidence_weight(record, rules)
             if record.breakthrough:
                 breakthrough_count += 1
     status = node.get("status")
     nxt = next_rung(status)
-    threshold = threshold_for_next(status)
+    threshold = threshold_for_next(status, rules)
     eligible = bool(
         nxt is not None
         and threshold is not None
-        and (score >= threshold or breakthrough_count >= 1)
+        and (
+            score >= threshold
+            or (rules.breakthrough_unlocks and breakthrough_count >= 1)
+        )
     )
     return NodeProgress(
         score=score,
