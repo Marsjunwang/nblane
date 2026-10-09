@@ -298,8 +298,13 @@ class TestHomeDashboard(unittest.TestCase):
         self.assertTrue(summary["has_tree"])
         self.assertGreater(summary["total"], 0)
         self.assertGreaterEqual(summary["counts"]["learning"], 1)
-        self.assertEqual(summary["evidence_risk_count"], 1)
-        self.assertEqual(summary["evidence_risk_nodes"][0]["id"], "pose_estimation")
+        # pose_estimation has no evidence; experiment_design's single medium
+        # row scores 10 of the 30 扎实 needs (progress rules, not max strength).
+        self.assertEqual(summary["evidence_risk_count"], 2)
+        self.assertEqual(
+            {node["id"] for node in summary["evidence_risk_nodes"]},
+            {"pose_estimation", "experiment_design"},
+        )
         self.assertEqual(
             summary["target_learning_locked"][0]["id"],
             "ros2_basics",
@@ -317,7 +322,7 @@ class TestHomeDashboard(unittest.TestCase):
         self.assertEqual(summary["done_uncrystallized_count"], 1)
         self.assertEqual(summary["unlinked_count"], 1)
         self.assertEqual(summary["needs_review_count"], 1)
-        self.assertEqual(summary["status_risk_count"], 1)
+        self.assertEqual(summary["status_risk_count"], 2)
         self.assertEqual(summary["unlinked"][0]["id"], "ev_unused")
 
     def test_source_summary_counts_active_inbox_without_raw_text(self) -> None:
@@ -457,7 +462,7 @@ class TestHomeDashboard(unittest.TestCase):
             nodes["evidence_candidate:pending"]["owner_path"],
             "pages/2_Evidence_Review.py",
         )
-        self.assertEqual(nodes["atomic_evidence:pool"]["metric"], "3")
+        self.assertEqual(nodes["atomic_evidence:pool"]["metric"], "4")
         self.assertEqual(
             nodes["atomic_evidence:pool"]["owner_path"],
             "pages/2_Evidence_Review.py",

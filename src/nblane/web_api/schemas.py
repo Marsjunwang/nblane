@@ -994,7 +994,9 @@ class EvidenceSkillSuggestionsResponse(BaseModel):
 
 
 class EvidenceStageRiskModel(BaseModel):
-    """One 待补强 row: a solid/expert skill whose evidence is missing/weak."""
+    """One 待补强 row: a solid/expert skill whose scored evidence falls
+    short of that rung's progress threshold (profile skill_progression
+    rules). ``score`` / ``threshold`` / ``points_needed`` carry the gap."""
 
     skill_id: str
     label: str = ""
@@ -1004,19 +1006,25 @@ class EvidenceStageRiskModel(BaseModel):
     required_strength: str = ""
     highest_strength: str = ""
     evidence_refs: list[str] = Field(default_factory=list)
+    score: int = 0
+    threshold: int | None = None
+    points_needed: int = 0
 
 
 class EvidenceStagesResponse(BaseModel):
     """Five-stage pipeline counters for the single Evidence page.
 
-    Stages: 待结晶 (uncrystallized Done tasks) -> 待评审 -> 已入座 (reviewed
-    and linked to at least one skill) -> 已废弃; 待补强 (risks) hangs off
-    已入座. Counts are queue-wide (unfiltered).
+    Stages: 待结晶 (uncrystallized Done tasks) -> 待评审 -> 待关联 (reviewed,
+    no skill yet) -> 已入座 (reviewed and linked to at least one skill) ->
+    已废弃; 待补强 (risks) hangs off 已入座. Counts are queue-wide
+    (unfiltered); every active row lands in exactly one of 待评审 / 待关联 /
+    已入座.
     """
 
     profile: str
     pending_crystallize_count: int = 0
     needs_review_count: int = 0
+    unlinked_count: int = 0
     seated_count: int = 0
     strengthen_count: int = 0
     deprecated_count: int = 0

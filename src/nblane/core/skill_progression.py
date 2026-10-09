@@ -282,6 +282,88 @@ def node_progress(
     catches dangling refs). *rules* defaults to the module constants.
     """
     rules = rules or ProgressionRules()
+    score, breakthrough_count, contributions = _score_node(node, pool, rules)
+    status = node.get("status")
+    nxt = next_rung(status)
+    threshold = threshold_for_next(status, rules)
+    eligible = bool(
+        nxt is not None
+        and threshold is not None
+        and (
+            score >= threshold
+            or (rules.breakthrough_unlocks and breakthrough_count >= 1)
+        )
+    )
+    points_to_next = max(0, threshold - score) if threshold is not None else None
+    medium = rules.weights.get("medium", 0)
+    medium_needed = (
+        math.ceil(points_to_next / medium)
+        if points_to_next and medium > 0 and not eligible
+        else None
+    )
+    return NodeProgress(
+        score=score,
+        next_rung=nxt,
+        threshold_next=threshold,
+        breakthrough_count=breakthrough_count,
+        eligible=eligible,
+        points_to_next=points_to_next,
+        medium_needed=medium_needed,
+        contributions=contributions,
+    )
+
+
+@dataclass
+class RungSupport:
+    """Does the evidence hold up the node's *current* rung?
+
+    ``threshold`` is the score that rung requires (None for locked /
+    learning, which need nothing). ``met`` follows the same rules as a
+    rung-up: score reaches the threshold, or a breakthrough when
+    ``breakthrough_unlocks``. ``counted`` is how many linked rows scored.
+    """
+
+    score: int = 0
+    threshold: int | None = None
+    met: bool = True
+    counted: int = 0
+
+    @property
+    def points_needed(self) -> int:
+        if self.threshold is None or self.met:
+            return 0
+        return max(0, self.threshold - self.score)
+
+
+# Rungs whose standing has to be backed by evidence.
+SUPPORTED_RUNGS: tuple[str, ...] = ("solid", "expert")
+
+
+def rung_support(
+    node: dict,
+    pool: EvidencePool | None,
+    rules: ProgressionRules | None = None,
+) -> RungSupport:
+    """Check that a solid/expert node's evidence reaches its own threshold."""
+    rules = rules or ProgressionRules()
+    status = str(node.get("status") or "").strip()
+    score, breakthrough_count, contributions = _score_node(node, pool, rules)
+    counted = sum(1 for item in contributions if item.counted)
+    if status not in SUPPORTED_RUNGS:
+        return RungSupport(score=score, threshold=None, met=True, counted=counted)
+    threshold = rules.thresholds.get(status)
+    met = threshold is None or score >= threshold or (
+        rules.breakthrough_unlocks and breakthrough_count >= 1
+    )
+    return RungSupport(score=score, threshold=threshold, met=met, counted=counted)
+
+
+def _score_node(
+    node: dict,
+    pool: EvidencePool | None,
+    rules: ProgressionRules,
+) -> tuple[int, int, list[EvidenceContribution]]:
+    """Score, breakthrough count and per-row contributions for one node."""
     index: dict[str, EvidenceRecord] = pool.by_id() if pool is not None else {}
     score = 0
     breakthrough_count = 0
@@ -317,31 +399,4 @@ def node_progress(
             score += points
             if record.breakthrough:
                 breakthrough_count += 1
-    status = node.get("status")
-    nxt = next_rung(status)
-    threshold = threshold_for_next(status, rules)
-    eligible = bool(
-        nxt is not None
-        and threshold is not None
-        and (
-            score >= threshold
-            or (rules.breakthrough_unlocks and breakthrough_count >= 1)
-        )
-    )
-    points_to_next = max(0, threshold - score) if threshold is not None else None
-    medium = rules.weights.get("medium", 0)
-    medium_needed = (
-        math.ceil(points_to_next / medium)
-        if points_to_next and medium > 0 and not eligible
-        else None
-    )
-    return NodeProgress(
-        score=score,
-        next_rung=nxt,
-        threshold_next=threshold,
-        breakthrough_count=breakthrough_count,
-        eligible=eligible,
-        points_to_next=points_to_next,
-        medium_needed=medium_needed,
-        contributions=contributions,
-    )
+    return score, breakthrough_count, contributions

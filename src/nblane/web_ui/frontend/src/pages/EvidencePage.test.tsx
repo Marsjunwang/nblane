@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
 import { jsonResponse, renderWithProviders } from '../test/render';
@@ -9,6 +9,7 @@ const STAGES = {
   profile: 'alice',
   pending_crystallize_count: 2,
   needs_review_count: 1,
+  unlinked_count: 1,
   seated_count: 1,
   strengthen_count: 1,
   deprecated_count: 1,
@@ -22,6 +23,9 @@ const STAGES = {
       required_strength: 'strong',
       highest_strength: 'unrated',
       evidence_refs: [],
+      score: 0,
+      threshold: 100,
+      points_needed: 100,
     },
   ],
 };
@@ -227,11 +231,17 @@ function renderPage(route = '/p/alice/evidence') {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe('EvidencePage', () => {
-  it('renders the five stages with persistent counts', async () => {
+  // Fixture evidence is unrated, so accepting asks first; default to yes.
+  beforeEach(() => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  });
+
+  it('renders the six stages with persistent counts', async () => {
     stubFetch();
     renderPage();
 
@@ -241,6 +251,7 @@ describe('EvidencePage', () => {
       for (const [key, count] of [
         ['crystallize', '2'],
         ['review', '1'],
+        ['unlinked', '1'],
         ['seated', '1'],
         ['strengthen', '1'],
         ['deprecated', '1'],
@@ -315,6 +326,45 @@ describe('EvidencePage', () => {
     fireEvent.click(await screen.findByTestId('risk-navigation'));
     const detail = await screen.findByTestId('risk-detail');
     expect(within(detail).getByText(/expert requires evidence/)).toBeInTheDocument();
+    expect(within(detail).getByTestId('risk-score')).toHaveTextContent('0 / 100，还差 100 分');
+    expect(within(detail).getByText('精通')).toBeInTheDocument();
+    // 去挂证据 jumps to the 待关联 stage.
+    fireEvent.click(within(detail).getByTestId('risk-goto-unlinked'));
+    await waitFor(() =>
+      expect(screen.getByTestId('stage-unlinked')).toHaveStyle({ background: 'rgba(220, 174, 85, 0.10)' }),
+    );
+  });
+
+  it('待关联 lists only reviewed rows without skill links', async () => {
+    const reviewed = {
+      ...REVIEW_QUEUE,
+      status: 'reviewed',
+      items: [
+        { ...REVIEW_QUEUE.items[0], id: 'ev_free', title: 'Unlinked note', review_status: 'reviewed', usage_count: 0 },
+        { ...REVIEW_QUEUE.items[0], id: 'ev_seat', title: 'Seated note', review_status: 'reviewed', usage_count: 2 },
+      ],
+    };
+    stubFetch((url) =>
+      url.includes('/evidence-review') && url.includes('status=reviewed') ? jsonResponse(200, reviewed) : null,
+    );
+    renderPage('/p/alice/evidence?stage=unlinked');
+
+    expect(await screen.findByTestId('evidence-row-ev_free')).toBeInTheDocument();
+    expect(screen.queryByTestId('evidence-row-ev_seat')).not.toBeInTheDocument();
+  });
+
+  it('asks before accepting unrated evidence and does nothing when declined', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const fetchMock = stubFetch();
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('evidence-row-ev_2'));
+    fireEvent.click(await screen.findByTestId('evidence-accept'));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('还没评分量'));
+    const posts = fetchMock.mock.calls.filter(
+      (call) => String(call[0]).includes('/evidence/ev_2/review') && call[1]?.method === 'POST',
+    );
+    expect(posts).toHaveLength(0);
   });
 
   it('runs the rule crystallize wizard end-to-end', async () => {

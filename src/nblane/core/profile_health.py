@@ -137,7 +137,7 @@ def _sync_issues(profile_name: str) -> tuple[list[HealthIssue], bool]:
 
 
 def _evidence_issues(profile_path, tree_raw: dict | None) -> list[HealthIssue]:
-    """Warn when solid/expert nodes lack evidence or enough strength."""
+    """Warn when solid/expert nodes lack enough scored evidence."""
     if not isinstance(tree_raw, dict):
         return []
     issues: list[HealthIssue] = []
@@ -146,14 +146,14 @@ def _evidence_issues(profile_path, tree_raw: dict | None) -> list[HealthIssue]:
         label = str(risk.get("label", "") or nid)
         status = str(risk.get("status", "") or "")
         risk_level = str(risk.get("risk_level", "") or "")
-        required = str(risk.get("required_strength", "") or "")
         highest = str(risk.get("highest_strength", "") or "unrated")
         if risk_level == "missing_evidence":
-            detail = f"{nid} ({label}) is {status} with no resolved evidence."
+            detail = f"{nid} ({label}) is {status} with no scored evidence."
         else:
             detail = (
-                f"{nid} ({label}) is {status}; highest evidence strength "
-                f"is {highest}, expected {required}+."
+                f"{nid} ({label}) is {status}; evidence scores "
+                f"{risk.get('score', 0)} of the {risk.get('threshold')} "
+                f"this rung needs (highest strength {highest})."
             )
         issues.append(
             _issue(

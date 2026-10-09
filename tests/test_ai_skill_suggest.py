@@ -70,6 +70,34 @@ class TestRuleTier(SkillSuggestTestBase):
             self.assertEqual(out["suggestions"], [])
 
 
+class TestEvidenceText(SkillSuggestTestBase):
+    def test_project_ref_lines_are_not_skill_signal(self) -> None:
+        """formatted_content metadata lines (Projects: ...) are dropped."""
+        row = {
+            "id": "ev_pose",
+            "title": "IUP-Pose relative pose regression",
+            "formatted_content": (
+                "Origin: paper\nTitle: IUP-Pose\n\nProjects: project:分层感知vla算法构建"
+                "\nKanban: kanban:abc\n\nOriginal content:\n6D pose estimation"
+            ),
+        }
+        seen: list[str] = []
+
+        def fake_text(profile, text, **_kw):
+            seen.append(text)
+            return {"backend": "none", "suggestions": [], "error": None}
+
+        with patch.object(skill_suggest, "suggest_skills_for_text", fake_text), patch(
+            "nblane.core.evidence_review.evidence_usage_index", lambda _p: {}
+        ):
+            skill_suggest.suggest_skills_for_evidence("dev", row)
+        self.assertEqual(len(seen), 1)
+        self.assertNotIn("vla", seen[0])
+        self.assertNotIn("kanban:abc", seen[0])
+        self.assertIn("6D pose estimation", seen[0])
+        self.assertIn("IUP-Pose relative pose regression", seen[0])
+
+
 class TestLlmTier(SkillSuggestTestBase):
     def test_llm_ranking_used_when_embedding_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

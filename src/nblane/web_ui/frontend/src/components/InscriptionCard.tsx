@@ -48,7 +48,12 @@ export function InscriptionCard({
         </Text>
         {aside && <Box style={{ flexShrink: 0 }}>{aside}</Box>}
       </Group>
-      <ScrollArea.Autosize mah="70vh">{children}</ScrollArea.Autosize>
+      {/* Vertical scroll only: autosize content defaults to min-width:
+          min-content, so one long unwrapped label would widen the body past
+          the card and get clipped. */}
+      <ScrollArea.Autosize mah="70vh" scrollbars="y" styles={{ content: { minWidth: 0 } }}>
+        {children}
+      </ScrollArea.Autosize>
     </Box>
   );
 }

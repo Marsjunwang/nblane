@@ -454,7 +454,11 @@ class TestEvidenceReview(unittest.TestCase):
         self.assertEqual(pose["evidence_count"], 1)
         self.assertEqual(pose["highest_strength"], "weak")
         self.assertEqual(pose["review_status"], "reviewed")
-        self.assertEqual(pose["risk_level"], "insufficient_strength")
+        # 扎实 needs the progress threshold (30 by default); one weak row = 1.
+        self.assertEqual(pose["risk_level"], "insufficient_score")
+        self.assertEqual(pose["score"], 1)
+        self.assertEqual(pose["threshold"], 30)
+        self.assertEqual(pose["points_needed"], 29)
         self.assertEqual(summaries["ros2_basics"]["risk_level"], "missing_evidence")
 
     def test_status_risks_apply_v1_strength_thresholds(self) -> None:

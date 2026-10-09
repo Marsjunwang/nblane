@@ -37,7 +37,7 @@ Streamlit 已退役（ad87958，2026-10-06）。React SPA 是唯一 Web 界面�
 | 首页 | `/p/:name/home` | 全屏星图、星表（含目标管理）、占卜、习惯印、铭文卡 |
 | 项目 | `/p/:name/projects` | 看板 + 项目板合并；`view=kanban\|timeline\|story`，`group=goal\|activity`；习惯阶段计划、Someday |
 | 技能树 | `/p/:name/skill-tree` | 已完成 |
-| 证据 | `/p/:name/evidence` | 五阶段（含审阅队列、待补强）、结晶 |
+| 证据 | `/p/:name/evidence` | 六阶段（含审阅队列、待关联、待补强）、结晶 |
 | 研究台 | `/p/:name/research/*` | 概览、`library` 论文库（iframe）、`papers/:id` 概览、`papers/:id/read` 阅读器（iframe）、`sources` |
 | 内容工作台 | `/p/:name/content/*` | BlockNote 编辑器 |
 | 求职工作台 | `/p/:name/career/*` | 简历、目标岗位、导入简历、JD 定制 |

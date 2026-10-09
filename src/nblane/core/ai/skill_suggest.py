@@ -306,6 +306,20 @@ def suggest_skills_for_text(
     }
 
 
+# formatted_content drafts (core.evidence_migrate) carry metadata lines such
+# as "Projects: project:分层感知vla算法构建"; project names are not evidence of
+# a skill and skew keyword matching, so they are dropped from the signal.
+_REF_LINE_PREFIXES = ("origin:", "title:", "projects:", "kanban:", "sources:")
+
+
+def _strip_ref_lines(text: str) -> str:
+    return "\n".join(
+        line
+        for line in text.splitlines()
+        if not line.strip().lower().startswith(_REF_LINE_PREFIXES)
+    )
+
+
 def suggest_skills_for_evidence(
     profile: str | Path,
     row: dict[str, Any],
@@ -323,7 +337,7 @@ def suggest_skills_for_evidence(
         _clean(row.get("title")),
         _clean(row.get("summary")),
         _clean(row.get("original_content")),
-        _clean(row.get("formatted_content")),
+        _strip_ref_lines(_clean(row.get("formatted_content"))),
         _clean(row.get("source_excerpt")),
     ]
     text = "\n".join(part for part in parts if part)

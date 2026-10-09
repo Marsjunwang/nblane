@@ -29,7 +29,7 @@ nblane 的 Web 界面是一个单页应用（SPA），由 `nblane.web_api` 在�
 | 首页 | `home` | 全屏星图、星表与目标、习惯印、占卜 | [首页](home.md) |
 | 项目 | `projects` | 看板 / 时间轴 / 编年史，任务与项目 | [项目](projects.md) |
 | 技能树 | `skill-tree` | 技能状态、铭文卡、技能进阶 | [技能树](skill-tree.md) |
-| 证据 | `evidence` | 证据五阶段、审阅、待补强、结晶 | [证据](evidence.md) |
+| 证据 | `evidence` | 证据六阶段、审阅、待补强、结晶 | [证据](evidence.md) |
 | 研究台 | `research` | 论文库、论文概览、阅读器、来源 | [研究](research.md) |
 | 内容工作台 | `content` | 文章写作与发布（BlockNote 编辑器） | [内容工作台](content.md) |
 | 求职工作台 | `career` | 简历、目标岗位、导入简历、JD 定制 | [求职工作台](career.md) |

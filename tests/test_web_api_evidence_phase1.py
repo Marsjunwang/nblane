@@ -394,6 +394,31 @@ class TestEvidenceStages(Phase1TestBase):
             risk_ids = [r["skill_id"] for r in payload["risks"]]
             self.assertIn("slam_basics", risk_ids)
             self.assertEqual(payload["strengthen_count"], len(payload["risks"]))
+            # The base pool has no reviewed-but-unlinked row.
+            self.assertEqual(payload["unlinked_count"], 0)
+
+    def test_unlinked_stage_counts_reviewed_rows_without_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _write_profile(root)
+            pool_path = profile / "evidence-pool.yaml"
+            pool = yaml.safe_load(pool_path.read_text(encoding="utf-8"))
+            pool["evidence_entries"].append(
+                {"id": "ev_delta", "type": "practice", "title": "Delta",
+                 "strength": "medium", "review_status": "reviewed"}
+            )
+            pool_path.write_text(yaml.safe_dump(pool, allow_unicode=True), encoding="utf-8")
+            payload = self._client(root).get(
+                "/api/v1/profiles/alice/evidence-stages"
+            ).json()
+        # Every active row lands in exactly one of 待评审 / 待关联 / 已入座.
+        self.assertEqual(payload["unlinked_count"], 1)
+        self.assertEqual(payload["needs_review_count"], 1)
+        self.assertEqual(payload["seated_count"], 1)
+        risk = next(r for r in payload["risks"] if r["skill_id"] == "slam_basics")
+        self.assertEqual(risk["risk_level"], "missing_evidence")
+        self.assertEqual(risk["threshold"], 100)
+        self.assertEqual(risk["points_needed"], 100)
 
 
 class TestCrystallizeFlow(Phase1TestBase):

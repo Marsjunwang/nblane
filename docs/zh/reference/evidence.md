@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-07
+last_verified: 2026-10-09
 source_of_truth: true
 ---
 
@@ -33,7 +33,7 @@ system prompt 展示「能力是否有据可查」。
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `type` | 是 | `project` \| `paper` \| `course` \| `practice` |
+| `type` | 是 | `project` \| `paper` \| `course` \| `practice` \| `learning` \| `engineering_fact` \| `experiment` \| `reproduction` \| `industry_exchange` |
 | `title` | 是 | 短标题（非空） |
 | `date` | 否 | 如 `2026-02` |
 | `url` | 否 | 链接 |
@@ -57,8 +57,7 @@ system prompt 展示「能力是否有据可查」。
 | `public_readiness` | `private` \| `draftable` \| `public_ready` \| `published` | 是否适合整理为公开输出；不等于 Public Site 发布状态 |
 | `source_refs` | 字符串列表 | 关联的 commit、test、kanban、source、artifact 等来源引用 |
 
-v1 强度规则：`learning` 可由 weak / unrated evidence 支撑；`solid` 至少需要
-`medium`；`expert` 至少需要 `strong`。低于门槛会出现在证据页「待补强」，但不会阻止保存，因为 skill status 仍由用户人工确认。
+待补强规则（2026-10-09 起与技能进阶分一致）：`solid` / `expert` 节点的已审阅证据计分要达到该境界的门槛（默认 30 / 100，跟档案「设置 → 技能进阶」走），否则出现在证据页「待补强」。不会阻止保存，skill status 仍由用户人工确认。
 
 ### 关联与 v2 字段
 

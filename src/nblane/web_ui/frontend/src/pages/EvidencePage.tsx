@@ -61,11 +61,12 @@ import type {
   JobCreateResponse,
 } from '../api/types';
 
-type Stage = 'crystallize' | 'review' | 'seated' | 'strengthen' | 'deprecated';
+type Stage = 'crystallize' | 'review' | 'unlinked' | 'seated' | 'strengthen' | 'deprecated';
 
 const STAGES: { key: Stage; label: string }[] = [
   { key: 'crystallize', label: '待结晶' },
   { key: 'review', label: '待评审' },
+  { key: 'unlinked', label: '待关联' },
   { key: 'seated', label: '已入座' },
   { key: 'strengthen', label: '待补强' },
   { key: 'deprecated', label: '已废弃' },
@@ -74,6 +75,7 @@ const STAGES: { key: Stage; label: string }[] = [
 const STAGE_TO_LIST_STATUS: Record<Stage, string> = {
   crystallize: 'all',
   review: 'needs_review',
+  unlinked: 'reviewed',
   seated: 'reviewed',
   strengthen: 'all',
   deprecated: 'deprecated',
@@ -87,7 +89,15 @@ const TYPE_LABELS: Record<string, string> = {
   project: '项目',
   output: '输出',
   learning: '学习',
+  engineering_fact: '工程事实',
+  experiment: '实验',
+  reproduction: '复现',
+  industry_exchange: '行业交流',
 };
+
+// Skill chips/buttons carry long schema labels; let them wrap inside the
+// card instead of forcing a single line.
+const WRAP_LABEL = { maxWidth: '100%', height: 'auto', whiteSpace: 'normal' as const, textAlign: 'left' as const, lineHeight: 1.35, paddingBlock: 2 };
 
 function typeLabel(value: string): string {
   return TYPE_LABELS[value] ?? value;
@@ -128,6 +138,13 @@ function reviewBody(action: 'accept' | 'reject' | 'restore') {
   return { action, strength: '', confidence: '', public_readiness: '' };
 }
 
+/** Accepting unrated evidence is allowed but it only scores as 弱 in skill
+ * progress; ask once so it is a choice, not an oversight. */
+function confirmAcceptUnrated(strength: string | null | undefined): boolean {
+  if (strength && strength !== 'unrated') return true;
+  return window.confirm('这条证据还没评分量，接受后在技能进阶里只按「弱」计分。仍然接受？');
+}
+
 function stageCount(
   stages: ReturnType<typeof useEvidenceStages>['data'],
   stage: Stage,
@@ -138,6 +155,8 @@ function stageCount(
       return stages.pending_crystallize_count ?? 0;
     case 'review':
       return stages.needs_review_count ?? 0;
+    case 'unlinked':
+      return stages.unlinked_count ?? 0;
     case 'seated':
       return stages.seated_count ?? 0;
     case 'strengthen':
@@ -444,6 +463,7 @@ function SkillLinkEditor({
             size="xs"
             variant="outline"
             data-testid={`linked-skill-${id}`}
+            styles={{ root: { maxWidth: '100%' }, label: WRAP_LABEL }}
           >
             {labels[id] ?? id} ✕
           </Chip>
@@ -465,7 +485,8 @@ function SkillLinkEditor({
               leftSection={<IconPlus size={12} />}
               onClick={() => save([...linked, item.id])}
               data-testid={`suggest-skill-${item.id}`}
-              style={{ color: inscription.bodyColor }}
+              style={{ color: inscription.bodyColor, maxWidth: '100%', height: 'auto' }}
+              styles={{ inner: { height: 'auto' }, label: WRAP_LABEL }}
             >
               {item.label}
               {item.category ? ` · ${item.category}` : ''}
@@ -742,7 +763,10 @@ function EvidenceDetailCard({
                   color="brand"
                   leftSection={<IconCheck size={14} />}
                   loading={review.isPending}
-                  onClick={() => review.mutate({ entryId, body: reviewBody('accept'), etag })}
+                  onClick={() => {
+                    if (!confirmAcceptUnrated(detail.strength)) return;
+                    review.mutate({ entryId, body: reviewBody('accept'), etag });
+                  }}
                   data-testid="evidence-accept"
                 >
                   接受
@@ -780,27 +804,55 @@ function EvidenceDetailCard({
   );
 }
 
-function RiskDetailCard({ risk }: { risk: EvidenceStageRisk }) {
+const RISK_STATUS_LABELS: Record<string, string> = { solid: '扎实', expert: '精通' };
+const RISK_LEVEL_LABELS: Record<string, string> = {
+  missing_evidence: '无计分证据',
+  insufficient_score: '分数不够',
+};
+
+/** 待补强 card: the rung's progress gap plus the two ways to close it. */
+function RiskDetailCard({
+  risk,
+  onGoto,
+}: {
+  risk: EvidenceStageRisk;
+  onGoto: (stage: Stage) => void;
+}) {
   return (
     <InscriptionCard title={risk.label || risk.skill_id} testId="risk-detail">
       <Stack gap={4}>
         <Group gap="xs">
           <Badge color="orange" variant="light">
-            {risk.status}
+            {RISK_STATUS_LABELS[risk.status ?? ''] ?? risk.status}
           </Badge>
           <Badge color="red" variant="outline">
-            {risk.risk_level}
+            {RISK_LEVEL_LABELS[risk.risk_level ?? ''] ?? risk.risk_level}
           </Badge>
         </Group>
         <InscriptionRow label="原因">{risk.risk_reason}</InscriptionRow>
-        <InscriptionRow label="要求">
-          {risk.required_strength || '—'}(当前最高 {risk.highest_strength || '未评级'})
+        <InscriptionRow label="进阶分">
+          <span data-testid="risk-score">
+            {risk.threshold != null
+              ? `${risk.score ?? 0} / ${risk.threshold}，还差 ${risk.points_needed ?? 0} 分`
+              : `${risk.score ?? 0}`}
+          </span>
         </InscriptionRow>
         <InscriptionRow label="证据">
           {(risk.evidence_refs ?? []).length
             ? (risk.evidence_refs ?? []).join('、')
-            : '无关联证据 — 去结晶或录一条'}
+            : '无关联证据'}
         </InscriptionRow>
+        <Group gap="xs" mt="xs">
+          <Button size="compact-sm" variant="light" color="brand" onClick={() => onGoto('unlinked')} data-testid="risk-goto-unlinked">
+            去挂证据
+          </Button>
+          <Button size="compact-sm" variant="subtle" color="brand" onClick={() => onGoto('crystallize')} data-testid="risk-goto-crystallize">
+            去结晶
+          </Button>
+        </Group>
+        <Text size="xs" style={{ color: inscription.dimColor }}>
+          只计已审阅的证据；分值和门槛在「设置 → 技能进阶」。
+        </Text>
       </Stack>
     </InscriptionCard>
   );
@@ -1452,6 +1504,9 @@ export function EvidencePage() {
     if (stage === 'seated') {
       return allItems.filter((item) => (item.usage_count ?? 0) > 0);
     }
+    if (stage === 'unlinked') {
+      return allItems.filter((item) => (item.usage_count ?? 0) === 0);
+    }
     return allItems;
   }, [allItems, stage]);
   const risks = useMemo(() => stages.data?.risks ?? [], [stages.data]);
@@ -1502,6 +1557,10 @@ export function EvidencePage() {
       } else if (!current) {
         return;
       } else if (event.key === 'a') {
+        if (!confirmAcceptUnrated(current.strength)) {
+          event.preventDefault();
+          return;
+        }
         reviewAction.mutate(
           { entryId: current.id, body: reviewBody('accept'), etag },
           { onSuccess: () => setCursor((value) => Math.max(0, value - 0)) },
@@ -1673,14 +1732,18 @@ export function EvidencePage() {
                       </Text>
                     </Stack>
                     <Badge color="orange" variant="light" size="sm">
-                      {risk.status}
+                      {RISK_STATUS_LABELS[risk.status ?? ''] ?? risk.status}
                     </Badge>
                   </Group>
                 </Card>
               ))
             )
           ) : items.length === 0 ? (
-            <Text c="dimmed">当前过滤条件下没有待处理的证据。</Text>
+            <Text c="dimmed">
+              {stage === 'unlinked'
+                ? '已审阅的证据都挂到技能上了。'
+                : '当前过滤条件下没有待处理的证据。'}
+            </Text>
           ) : (
             items.map((item, index) => (
               <EvidenceRow
@@ -1736,7 +1799,7 @@ export function EvidencePage() {
               onClose={() => setSelectedCandidate(null)}
             />
           ) : selectedRisk ? (
-            <RiskDetailCard risk={selectedRisk} />
+            <RiskDetailCard risk={selectedRisk} onGoto={setStage} />
           ) : (
             <Card
               withBorder

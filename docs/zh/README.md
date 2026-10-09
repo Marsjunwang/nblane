@@ -59,7 +59,7 @@ source_of_truth: true
 | [home.md](guides/home.md) | 首页星图、星表与目标、占卜、习惯印 |
 | [projects.md](guides/projects.md) | 项目：看板 / 时间轴 / 编年史、习惯阶段计划 |
 | [skill-tree.md](guides/skill-tree.md) | 技能树 |
-| [evidence.md](guides/evidence.md) | 证据五阶段、审阅、待补强、结晶 |
+| [evidence.md](guides/evidence.md) | 证据六阶段、审阅、待补强、结晶 |
 | [research.md](guides/research.md) | 研究台：论文库、概览、阅读器、来源 |
 | [content.md](guides/content.md) | 内容工作台 |
 | [career.md](guides/career.md) | 求职工作台：简历、目标岗位、JD 定制 |

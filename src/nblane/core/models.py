@@ -5,7 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 EVIDENCE_TYPES = frozenset(
-    {"project", "paper", "course", "practice", "learning"}
+    {
+        "project",
+        "paper",
+        "course",
+        "practice",
+        "learning",
+        # Types the crystallize AI already emits; kept instead of being
+        # folded into practice.
+        "engineering_fact",
+        "experiment",
+        "reproduction",
+        "industry_exchange",
+    }
 )
 EVIDENCE_STRENGTHS = ("weak", "medium", "strong", "high_trust")
 EVIDENCE_CONFIDENCES = ("low", "medium", "high")

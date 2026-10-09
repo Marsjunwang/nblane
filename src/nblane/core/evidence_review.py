@@ -718,35 +718,6 @@ def _node_review_status(
     return "reviewed"
 
 
-def _risk_for_status(
-    *,
-    status: str,
-    evidence_count: int,
-    highest_strength: str,
-    highest_rank: int,
-) -> tuple[str, str, str]:
-    required = _STATUS_STRENGTH_REQUIREMENTS.get(status, "")
-    if not required:
-        return "", "", ""
-    if evidence_count <= 0:
-        return (
-            "missing_evidence",
-            required,
-            f"{status} 技能还没有关联任何证据。",
-        )
-    required_rank = evidence_strength_rank(required)
-    if highest_rank < required_rank:
-        return (
-            "insufficient_strength",
-            required,
-            (
-                f"{status} 技能需要{required}及以上分量的证据;"
-                f"当前最高为 {highest_strength or '未评级'}。"
-            ),
-        )
-    return "", required, ""
-
-
 # Confidence auto-derivation by provenance (评审收敛单维度「分量」后,置信度
 # 不再手评): paper/官方来源 → high,practice/自述 → medium,其余 → low。
 _CONFIDENCE_BY_ORIGIN: dict[str, str] = {
@@ -763,10 +734,21 @@ def confidence_for_origin(origin: object) -> str:
 
 
 def skill_evidence_summaries(profile: str | Path) -> list[dict[str, object]]:
-    """Return one evidence signal row for every skill in the active tree."""
+    """Return one evidence signal row for every skill in the active tree.
+
+    ``risk_level`` (待补强) follows the profile's skill-progression rules: a
+    solid/expert node is at risk when its scored evidence (reviewed only
+    under ``reviewed_only``) falls short of that rung's threshold —
+    ``missing_evidence`` when nothing scores, ``insufficient_score``
+    otherwise. ``score`` / ``threshold`` / ``points_needed`` carry the gap.
+    """
+    from nblane.core import skill_progression
+
     tree = _tree_raw(profile)
     index = _schema_index(tree)
     pool = _pool_by_id(profile)
+    pool_model = io_facade.load_evidence_pool(profile)
+    rules = skill_progression.rules_from_preferences(load_web_preferences(profile))
     nodes = {
         str(node.get("id", "") or "").strip(): node
         for node in _as_list(tree.get("nodes"))
@@ -809,12 +791,11 @@ def skill_evidence_summaries(profile: str | Path) -> list[dict[str, object]]:
             inline_count,
         )
         review_status = _node_review_status(records, inline_count)
-        risk_level, required_strength, risk_reason = _risk_for_status(
-            status=status,
-            evidence_count=evidence_count,
-            highest_strength=highest_strength,
-            highest_rank=highest_rank,
+        support = skill_progression.rung_support(
+            {"status": status, "evidence_refs": refs}, pool_model, rules
         )
+        risk_level, risk_reason = _risk_for_support(status, support)
+        required_strength = _STATUS_STRENGTH_REQUIREMENTS.get(status, "")
         summaries.append(
             {
                 "id": node_id,
@@ -834,9 +815,32 @@ def skill_evidence_summaries(profile: str | Path) -> list[dict[str, object]]:
                 "required_strength": required_strength,
                 "risk_level": risk_level,
                 "risk_reason": risk_reason,
+                "score": support.score,
+                "threshold": support.threshold,
+                "points_needed": support.points_needed,
             }
         )
     return summaries
+
+
+_RUNG_LABELS = {"solid": "扎实", "expert": "精通"}
+
+
+def _risk_for_support(status: str, support: Any) -> tuple[str, str]:
+    """(risk_level, reason) for one node from its rung support check."""
+    if support.met or support.threshold is None:
+        return "", ""
+    rung = _RUNG_LABELS.get(status, status)
+    if support.counted == 0:
+        return (
+            "missing_evidence",
+            f"{rung}技能还没有计分的证据（已审阅且未废弃）。",
+        )
+    return (
+        "insufficient_score",
+        f"{rung}需要 {support.threshold} 分，当前 {support.score} 分，"
+        f"还差 {support.points_needed} 分。",
+    )
 
 
 def _row_match_text(row: dict[str, Any]) -> str:

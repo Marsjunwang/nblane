@@ -3572,8 +3572,10 @@ def get_profile_evidence_stages(name: str) -> EvidenceStagesResponse:
     """Five-stage pipeline counters for the single Evidence page.
 
     待结晶 = uncrystallized Done tasks; 待评审 = active rows not yet
-    reviewed; 已入座 = reviewed rows linked to at least one skill node;
-    待补强 = solid/expert skills with missing/weak evidence
+    reviewed; 待关联 = reviewed rows not linked to any skill node;
+    已入座 = reviewed rows linked to at least one skill node;
+    待补强 = solid/expert skills whose scored evidence misses the rung's
+    progress threshold
     (``core.evidence_review.evidence_status_risks``); 已废弃 = deprecated
     rows. Counts are queue-wide (unfiltered).
     """
@@ -3599,6 +3601,7 @@ def get_profile_evidence_stages(name: str) -> EvidenceStagesResponse:
         == "reviewed"
         and usage.get(str(row.get("id", "") or "").strip())
     )
+    unlinked = len(active) - needs_review - seated
     sections = parse_kanban(pdir)
     pending_crystallize = sum(
         1
@@ -3617,6 +3620,9 @@ def get_profile_evidence_stages(name: str) -> EvidenceStagesResponse:
             evidence_refs=[
                 str(ref) for ref in (item.get("active_evidence_refs") or [])
             ],
+            score=int(item.get("score") or 0),
+            threshold=item.get("threshold"),
+            points_needed=int(item.get("points_needed") or 0),
         )
         for item in evidence_review_core.evidence_status_risks(pdir)
     ]
@@ -3624,6 +3630,7 @@ def get_profile_evidence_stages(name: str) -> EvidenceStagesResponse:
         profile=pdir.name,
         pending_crystallize_count=pending_crystallize,
         needs_review_count=needs_review,
+        unlinked_count=unlinked,
         seated_count=seated,
         strengthen_count=len(risks),
         deprecated_count=len(rows) - len(active),
