@@ -14,7 +14,7 @@ import {
 } from '@mantine/core';
 import { IconChevronDown, IconChevronRight, IconSearch, IconX } from '@tabler/icons-react';
 import { useMediaQuery } from '@mantine/hooks';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
@@ -623,8 +623,14 @@ function SkillInscriptionCard({
     (node.progress?.contributions ?? []).map((item) => [item.evidence_id, item]),
   );
   const unmet = node.unmet_requires ?? [];
+  // Stacked under a long list the card would open off-screen; bring it in.
+  const cardRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (stacked) cardRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }, [stacked, node.id]);
   return (
     <Box
+      ref={cardRef}
       component="aside"
       w={stacked ? '100%' : 320}
       data-testid="skill-inscription"

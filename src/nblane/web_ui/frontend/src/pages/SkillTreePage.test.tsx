@@ -578,14 +578,18 @@ describe('SkillTreePage 列表筛选', () => {
       removeEventListener: () => {},
       dispatchEvent: () => false,
     })) as typeof window.matchMedia;
+    const scroll = vi.spyOn(window.HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {});
     try {
       stubFetch(TREE_FOR_FILTERS);
       renderPage();
       fireEvent.click(await screen.findByText('Git / GitHub workflow'));
       const card = await screen.findByTestId('skill-inscription');
       await waitFor(() => expect(card).toHaveAttribute('data-layout', layout));
+      // Only the stacked card scrolls itself into view.
+      expect(scroll).toHaveBeenCalledTimes(wide ? 0 : 1);
     } finally {
       window.matchMedia = original;
+      scroll.mockRestore();
     }
   });
 });
