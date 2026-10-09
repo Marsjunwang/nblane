@@ -310,6 +310,12 @@
 /* 手机竖屏 = 立轴: 小匾在上, 详情卡底部升起 */
 @media (max-width: 700px), (orientation: portrait) and (max-width: 900px) {
   .starmap-cartouche { width: clamp(140px, 44vw, 210px); }
+  /* The seal rows fill the bottom band on phones, so the briefing hangs
+   * under the cartouche instead of running beneath 日课印. */
+  .starmap-mount-top { order: 0; padding-bottom: 2px; }
+  .starmap-mount-bottom { order: 1; padding: 0 16px 4px; }
+  .starmap-heart { order: 2; }
+  .starmap-briefing { white-space: normal; text-align: center; }
   /* 印章族规: never below the 44px module, even on mobile. The L-cluster
    * rises one row so 日课印 (bottom row) never covers the 卜印 hit target. */
   .starmap-toggle { right: 12px; bottom: 68px; }

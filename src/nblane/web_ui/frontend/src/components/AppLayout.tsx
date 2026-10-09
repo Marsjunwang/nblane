@@ -143,8 +143,8 @@ export function AppLayout() {
       padding={immersive ? 0 : 'md'}
     >
       <AppShell.Header style={{ background: chrome.panelBg }}>
-        <Group h="100%" px="md" justify="space-between">
-          <Group gap="sm">
+        <Group h="100%" px={isDesktop ? 'md' : 'sm'} justify="space-between" wrap="nowrap" gap="xs">
+          <Group gap={isDesktop ? 'sm' : 'xs'} wrap="nowrap" miw={0}>
             {profileMatch && (
               <Burger
                 opened={navbarOpened}
@@ -154,7 +154,7 @@ export function AppLayout() {
                 aria-label="切换导航"
               />
             )}
-            <Title order={3}>nblane</Title>
+            <Title order={3} visibleFrom="sm">nblane</Title>
             {currentProfile && (
               <Badge
                 color="brand"
@@ -169,7 +169,7 @@ export function AppLayout() {
           {/* One line at every width: below sm the actions go icon-only (names
               stay as aria-labels) so the cluster never wraps past the fixed
               56px header and over the page content. */}
-          <Group gap="sm" wrap="nowrap">
+          <Group gap={isDesktop ? 'sm' : 4} wrap="nowrap" style={{ flexShrink: 0 }}>
             {/* The workshop opens in its own browser tab: the terminal keeps its
                 connection while the rest of the app navigates, and the tab is
                 the full-screen terminal (with the mobile key bar). */}
