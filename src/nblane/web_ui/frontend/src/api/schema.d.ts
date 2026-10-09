@@ -2655,6 +2655,9 @@ export interface paths {
         /**
          * Patch Profile Settings
          * @description Merge a safe profile preferences patch using the existing normalizer.
+         *
+         *     A ``skill_progression`` patch replaces the whole rule set and must keep
+         *     the thresholds climbing (422 ``invalid_skill_progression`` otherwise).
          */
         patch: operations["patch_profile_settings_api_v1_profiles__name__settings_patch"];
         trace?: never;
@@ -8732,6 +8735,10 @@ export interface components {
             } | null;
             /** Research */
             research?: {
+                [key: string]: unknown;
+            } | null;
+            /** Skill Progression */
+            skill_progression?: {
                 [key: string]: unknown;
             } | null;
         };

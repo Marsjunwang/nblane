@@ -7510,6 +7510,18 @@
        }
       ],
       "title": "Research"
+     },
+     "skill_progression": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Skill Progression"
      }
     },
     "title": "ProfileSettingsPatch",
@@ -23814,7 +23826,7 @@
     "summary": "Get Profile Settings"
    },
    "patch": {
-    "description": "Merge a safe profile preferences patch using the existing normalizer.",
+    "description": "Merge a safe profile preferences patch using the existing normalizer.\n\nA ``skill_progression`` patch replaces the whole rule set and must keep\nthe thresholds climbing (422 ``invalid_skill_progression`` otherwise).",
     "operationId": "patch_profile_settings_api_v1_profiles__name__settings_patch",
     "parameters": [
      {
