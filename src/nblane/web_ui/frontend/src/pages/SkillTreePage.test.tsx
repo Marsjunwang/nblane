@@ -426,4 +426,31 @@ describe('SkillTreePage node inscription card', () => {
     // Optimistic update: the row flips to 扎实 before the refetch lands.
     expect(await within(card).findByText('扎实')).toBeInTheDocument();
   });
+
+  it('asks before promoting to 精通 and before stepping down', async () => {
+    const calls = stubRichFetch();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderPage();
+
+    fireEvent.click(await screen.findByText('NumPy internals'));
+    const card = await screen.findByTestId('skill-inscription');
+    const patches = () =>
+      calls.filter((c) => c.url.includes('/skill-tree/nodes/') && c.init?.method === 'PATCH');
+
+    // Declined: neither 精通 nor 锁定 writes anything.
+    fireEvent.click(within(card).getByTestId('stepper-expert'));
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('晋升为精通'));
+    fireEvent.click(within(card).getByTestId('stepper-locked'));
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('从在学降到锁定'));
+    expect(patches()).toHaveLength(0);
+
+    // Accepted: 精通 lands as the YAML status expert.
+    confirm.mockReturnValue(true);
+    fireEvent.click(within(card).getByTestId('stepper-expert'));
+    await waitFor(() => {
+      expect(patches()).toHaveLength(1);
+      expect(JSON.parse(String(patches()[0].init?.body))).toEqual({ status: 'expert' });
+    });
+    confirm.mockRestore();
+  });
 });

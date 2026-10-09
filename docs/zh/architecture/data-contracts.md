@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-08
+last_verified: 2026-10-09
 source_of_truth: true
 ---
 
@@ -102,9 +102,10 @@ evidence-pool.yaml
 
 技能状态写端点（2026-09-24，G3）：
 `PATCH /api/v1/profiles/{name}/skill-tree/nodes/{node_id}` 是 skill-tree.yaml 节点
-状态的 UI 写路径。词汇表映射：UI/星图三态 `locked | learning | lit`，YAML 事实源
+状态的 UI 写路径。词汇表映射：UI/星图三态 `locked | learning | lit` 加 `expert`，YAML 事实源
 `locked | learning | solid | expert`（`core/profile_io.py STATUSES`）——端点把 `lit`
-落为 `solid`;`expert`（精通）是评审授予的第四级，不可经此端点写入。写纪律与
+落为 `solid`，`expert`（精通）原样写入（2026-10-09 起；页面在晋升精通和任何降阶前
+二次确认，助手走 T2 聊天确认）。写纪律与
 skill-links 一致：`If-Match` 携带 skill-tree.yaml 弱 ETag（412 重试），写经
 `profile_io.update_skill_tree` 的锁内快照复核；状态落盘后在 SKILL.md 存在时重写其
 生成块（`write_generated_blocks`）。no-op patch 不写文件、不改 ETag。状态沿
@@ -114,12 +115,12 @@ skill-links 一致：`If-Match` 携带 skill-tree.yaml 弱 ETag（412 重试）�
 技能进阶进度（同日落地,只读）:`GET /skill-tree` 每个节点带 `progress`
 对象 `{score, next_rung, threshold_next, breakthrough_count, eligible}`,规则全部
 集中在 `core/skill_progression.py`(唯一调参处,常量 + docstring):
-节点非废弃 `evidence_refs` 逐条计分,分量 弱/中/强 = 1/10/100(`high_trust`
+节点非废弃且已审阅（`review_status: reviewed`，`COUNT_REVIEWED_ONLY`，2026-10-09 起）的 `evidence_refs` 逐条计分,分量 弱/中/强 = 1/10/100(`high_trust`
 按强计,未评级按 1),`breakthrough: true` 的证据行额外 +1000;升阶阈值
 locked→learning 10、learning→solid 30、solid→expert 100,expert 无下一阶
 (`next_rung`/`threshold_next` 为 null);`eligible` = 存在下一阶 且
 (score ≥ threshold_next 或 breakthrough_count ≥ 1)。eligible 只是升阶提示,
-状态写入仍走上面的 PATCH 端点(三态词汇,`lit` 落 `solid`)。
+状态写入仍走上面的 PATCH 端点(`lit` 落 `solid`)。
 
 证据按技能反查（同日）：`GET /api/v1/profiles/{name}/evidence?skill_id=<id>` 复用
 `evidence_usage_index` 的反向映射（skill-tree.yaml `evidence_refs` 是唯一写侧），

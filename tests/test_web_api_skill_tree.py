@@ -413,11 +413,7 @@ class TestSkillNodePatch(unittest.TestCase):
                     "/api/v1/profiles/alice/skill-tree/nodes/root_a",
                     json={"status": "glowing"},
                 ),
-                # Raw YAML rungs are not part of the 三态 write vocabulary.
-                client.patch(
-                    "/api/v1/profiles/alice/skill-tree/nodes/root_a",
-                    json={"status": "expert"},
-                ),
+                # Raw YAML solid is not part of the write vocabulary (lit is).
                 client.patch(
                     "/api/v1/profiles/alice/skill-tree/nodes/root_a",
                     json={"status": "solid"},

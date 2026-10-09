@@ -42,7 +42,8 @@ SKILL_TREE = {
             "evidence_refs": ["ev_strong", "ev_breakthrough",
                               "ev_deprecated", "ev_missing"],
         },
-        {"id": "child_a1", "status": "locked", "evidence_refs": ["ev_weak"]},
+        {"id": "child_a1", "status": "locked",
+         "evidence_refs": ["ev_weak", "ev_unreviewed"]},
         {"id": "child_a2", "status": "expert",
          "evidence_refs": ["ev_breakthrough"]},
     ],
@@ -51,14 +52,16 @@ SKILL_TREE = {
 EVIDENCE_POOL = {
     "profile": "alice",
     "evidence_entries": [
-        {"id": "ev_strong", "type": "project", "title": "Strong",
+        {"id": "ev_strong", "type": "project", "title": "Strong", "review_status": "reviewed",
          "strength": "strong"},
-        {"id": "ev_breakthrough", "type": "project", "title": "Landmark",
+        {"id": "ev_breakthrough", "type": "project", "title": "Landmark", "review_status": "reviewed",
          "strength": "medium", "breakthrough": True},
-        {"id": "ev_weak", "type": "practice", "title": "Weak",
+        {"id": "ev_weak", "type": "practice", "title": "Weak", "review_status": "reviewed",
          "strength": "weak"},
-        {"id": "ev_deprecated", "type": "project", "title": "Old",
+        {"id": "ev_deprecated", "type": "project", "title": "Old", "review_status": "reviewed",
          "strength": "strong", "deprecated": True},
+        {"id": "ev_unreviewed", "type": "project", "title": "AI prefill",
+         "review_status": "needs_review", "strength": "strong"},
     ],
 }
 
@@ -149,6 +152,7 @@ class TestSkillTreeProgress(SkillProgressionApiTestBase):
         self.assertTrue(root_a["eligible"])
 
         child_a1 = nodes["child_a1"]["progress"]
+        # The unreviewed strong row does not score.
         self.assertEqual(child_a1["score"], 1)
         self.assertEqual(child_a1["breakthrough_count"], 0)
         self.assertEqual(child_a1["next_rung"], "learning")
@@ -214,6 +218,22 @@ class TestSkillLitChronicle(SkillProgressionApiTestBase):
         self.assertEqual(noop.status_code, 200)
         self.assertFalse(noop.json()["changed"])
         self.assertEqual(chronicle, [])
+
+    def test_expert_promotion_logs_and_lit_steps_down(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client, pdir = self._setup(Path(tmp))
+            lit = self._patch(client, "root_a", "lit")
+            expert = self._patch(client, "root_a", "expert")
+            down = self._patch(client, "child_a2", "lit")
+            chronicle = _read_chronicle(pdir)
+        self.assertEqual(lit.status_code, 200)
+        self.assertEqual(expert.status_code, 200)
+        self.assertEqual(expert.json()["status"], "expert")
+        self.assertEqual(expert.json()["previous_status"], "solid")
+        self.assertEqual(down.json()["status"], "solid")
+        self.assertEqual(down.json()["previous_status"], "expert")
+        # lit + expert are rung-ups; expert -> solid is not.
+        self.assertEqual([e["ref"] for e in chronicle], ["root_a", "root_a"])
 
 
 if __name__ == "__main__":

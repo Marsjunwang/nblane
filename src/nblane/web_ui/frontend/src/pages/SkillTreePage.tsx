@@ -402,18 +402,33 @@ const STUB_SNAPSHOT: StarmapSnapshot = {
   },
 };
 
-/** 三态 stepper rungs (锁定 → 在学 → 点亮); the PATCH endpoint maps 点亮
- * onto the YAML status solid (expert stays review-earned, not settable). */
+/** Stepper rungs (锁定 → 在学 → 点亮 → 精通); the PATCH endpoint maps 点亮
+ * onto the YAML status solid. 精通 and every step down ask first. */
 const STATUS_STEPS: { key: string; label: string; shape: StateShape }[] = [
   { key: 'locked', label: '锁定', shape: 'ring' },
   { key: 'learning', label: '在学', shape: 'dot' },
   { key: 'lit', label: '点亮', shape: 'dot-ring' },
+  { key: 'expert', label: '精通', shape: 'dot-ring' },
 ];
 
 function stepIndexOf(status: string): number {
   if (status === 'learning') return 1;
-  if (status === 'solid' || status === 'expert') return 2;
+  if (status === 'solid') return 2;
+  if (status === 'expert') return 3;
   return 0;
+}
+
+/** Confirmation copy for a stepper move, or null when it writes directly
+ * (a plain rung-up below 精通). */
+function stepConfirmMessage(title: string, from: number, to: number): string | null {
+  const target = STATUS_STEPS[to].label;
+  if (to < from) {
+    return `把「${title}」从${STATUS_STEPS[from].label}降到${target}？`;
+  }
+  if (STATUS_STEPS[to].key === 'expert') {
+    return `把「${title}」晋升为精通？精通应有强证据支撑，确认你已可迁移地深度掌握。`;
+  }
+  return null;
 }
 
 /** Deep-link stage on the Evidence page for one linked row (the page also
@@ -480,7 +495,7 @@ function SkillProgressBlock({ node }: { node: SkillTreeNode }) {
           )}
           {progress.eligible && (
             <Text size="xs" style={{ color: GOLD }} data-testid="skill-eligible-hint">
-              已达进阶门槛 — 可在下方境界晋升
+              已达进阶门槛，可在上方境界晋升
             </Text>
           )}
         </Group>
@@ -508,13 +523,12 @@ function SkillInscriptionCard({
   const mapping = category ? SECTOR_ASTERISM_TABLE[category.name || category.id || ''] : undefined;
   const activeStep = stepIndexOf(node.status ?? 'locked');
   // Suggested upgrade: progress.eligible points at the stepper rung matching
-  // next_rung (solid → the 点亮 step; expert is review-earned, no step).
-  const upgradeStepKey = node.progress?.eligible
-    ? node.progress.next_rung === 'solid'
+  // next_rung (solid → the 点亮 step).
+  const nextRung = node.progress?.next_rung;
+  const upgradeStepKey = node.progress?.eligible && nextRung
+    ? nextRung === 'solid'
       ? 'lit'
-      : node.progress.next_rung === 'learning'
-        ? 'learning'
-        : null
+      : nextRung
     : null;
 
   const selection: StarmapSelection = {
@@ -571,7 +585,7 @@ function SkillInscriptionCard({
           <p className="starmap-detail-hint" style={hintStyle}>
             境界
           </p>
-          <Group gap={6} wrap="nowrap">
+          <Group gap={6} wrap="wrap">
             {STATUS_STEPS.map((step, index) => {
               const active = index === activeStep;
               const suggested = !active && step.key === upgradeStepKey;
@@ -585,9 +599,14 @@ function SkillInscriptionCard({
                   aria-pressed={active}
                   disabled={active || patchStatus.isPending}
                   onClick={() => {
-                    if (!active) {
-                      patchStatus.mutate({ nodeId: node.id, status: step.key, etag });
-                    }
+                    if (active) return;
+                    const message = stepConfirmMessage(
+                      node.title || node.id,
+                      activeStep,
+                      index,
+                    );
+                    if (message && !window.confirm(message)) return;
+                    patchStatus.mutate({ nodeId: node.id, status: step.key, etag });
                   }}
                   style={{
                     display: 'inline-flex',
@@ -612,7 +631,11 @@ function SkillInscriptionCard({
                 >
                   <StateGlyph
                     shape={step.shape}
-                    color={active || suggested ? GOLD : 'rgba(232, 226, 210, 0.4)'}
+                    color={
+                      active || suggested || step.key === 'expert'
+                        ? GOLD
+                        : 'rgba(232, 226, 210, 0.4)'
+                    }
                   />
                   {step.label}
                   {suggested && (
@@ -627,9 +650,6 @@ function SkillInscriptionCard({
               );
             })}
           </Group>
-          {node.status === 'expert' && (
-            <p style={{ ...hintStyle, marginTop: 6 }}>精通为评审所得;点亮记作扎实。</p>
-          )}
           {patchStatus.isError && (
             <p role="alert" style={{ ...hintStyle, color: '#e3968b', marginTop: 6 }}>
               {patchStatus.error.message}

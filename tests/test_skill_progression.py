@@ -9,8 +9,10 @@ from nblane.core import skill_progression as sp
 
 
 def _pool(*rows: dict) -> EvidencePool:
+    # Rows default to reviewed: only human-confirmed evidence scores.
+    entries = [{"review_status": "reviewed", **row} for row in rows]
     return EvidencePool.from_dict(
-        {"profile": "alice", "evidence_entries": list(rows)}
+        {"profile": "alice", "evidence_entries": entries}
     )
 
 
@@ -66,6 +68,24 @@ class TestWeights(unittest.TestCase):
         }
         progress = sp.node_progress(node, pool)
         self.assertEqual(progress.score, 10)
+
+    def test_unreviewed_rows_do_not_score(self) -> None:
+        pool = _pool(
+            {"id": "ev_r", "type": "practice", "title": "R", "strength": "medium"},
+            {"id": "ev_n", "type": "practice", "title": "N", "strength": "strong",
+             "review_status": "needs_review", "breakthrough": True},
+            {"id": "ev_e", "type": "practice", "title": "E", "strength": "strong",
+             "review_status": ""},
+        )
+        node = {"id": "n", "status": "locked",
+                "evidence_refs": ["ev_r", "ev_n", "ev_e"]}
+        progress = sp.node_progress(node, pool)
+        self.assertEqual(progress.score, 10)
+        self.assertEqual(progress.breakthrough_count, 0)
+        # The switch restores the old count-everything behavior.
+        loose = sp.node_progress(node, pool, reviewed_only=False)
+        self.assertEqual(loose.score, 10 + 100 + sp.BREAKTHROUGH_WEIGHT + 100)
+        self.assertEqual(loose.breakthrough_count, 1)
 
     def test_no_pool_scores_zero(self) -> None:
         node = {"id": "n", "status": "locked", "evidence_refs": ["ev_a"]}

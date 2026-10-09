@@ -11,7 +11,9 @@ callers):
   (locked -> learning -> solid -> expert). ``next_rung`` is the rung above
   the node's current status; expert has none (``threshold_next`` is null).
 - Each of the node's *non-deprecated* ``evidence_refs`` that resolves to a
-  pool row contributes its strength weight (``STRENGTH_WEIGHTS``: 弱 weak=1,
+  pool row contributes (with ``COUNT_REVIEWED_ONLY`` only rows whose
+  ``review_status`` is ``reviewed`` — AI-prefilled, unconfirmed evidence
+  does not move a skill) its strength weight (``STRENGTH_WEIGHTS``: 弱 weak=1,
   中 medium=10, 强 strong=100; ``high_trust`` scores as strong, unrated or
   unknown strengths score ``DEFAULT_STRENGTH_WEIGHT``) plus
   ``BREAKTHROUGH_WEIGHT`` (1000) when the row carries ``breakthrough: true``
@@ -25,7 +27,8 @@ callers):
   eligible — there is no next rung.
 
 Eligibility is advisory: status writes still go through the existing PATCH
-endpoint (三态 vocabulary; ``lit`` lands as ``solid``), which appends the
+endpoint (三态 vocabulary plus ``expert``; ``lit`` lands as ``solid``), which
+appends the
 ``skill.lit`` chronicle entry when the rung actually advances.
 """
 
@@ -51,6 +54,9 @@ DEFAULT_STRENGTH_WEIGHT = 1
 
 # A breakthrough evidence row adds this on top of its strength weight.
 BREAKTHROUGH_WEIGHT = 1000
+
+# Only human-reviewed evidence scores (unreviewed rows are AI prefills).
+COUNT_REVIEWED_ONLY = True
 
 # Score required to advance from one rung to the next.
 RUNG_THRESHOLDS: dict[tuple[str, str], int] = {
@@ -117,12 +123,18 @@ def _evidence_weight(record: EvidenceRecord) -> int:
     return weight
 
 
-def node_progress(node: dict, pool: EvidencePool | None) -> NodeProgress:
+def node_progress(
+    node: dict,
+    pool: EvidencePool | None,
+    *,
+    reviewed_only: bool = COUNT_REVIEWED_ONLY,
+) -> NodeProgress:
     """Compute the progression readout for one raw skill-tree node dict.
 
-    Only ``evidence_refs`` resolving to non-deprecated pool rows score —
-    inline ``evidence`` rows are ungraded by definition and missing ids are
-    skipped (validate catches dangling refs).
+    Only ``evidence_refs`` resolving to non-deprecated pool rows score (and,
+    with *reviewed_only*, only reviewed ones) — inline ``evidence`` rows are
+    ungraded by definition and missing ids are skipped (validate catches
+    dangling refs).
     """
     index: dict[str, EvidenceRecord] = pool.by_id() if pool is not None else {}
     score = 0
@@ -139,6 +151,8 @@ def node_progress(node: dict, pool: EvidencePool | None) -> NodeProgress:
             seen.add(key)
             record = index.get(key)
             if record is None or record.deprecated:
+                continue
+            if reviewed_only and record.review_status.strip() != "reviewed":
                 continue
             score += _evidence_weight(record)
             if record.breakthrough:

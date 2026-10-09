@@ -133,7 +133,7 @@ class SkillTreeSummary(BaseModel):
 class SkillNodeProgressModel(BaseModel):
     """Progression readout for one skill node (core.skill_progression).
 
-    ``score`` sums the node's non-deprecated evidence_refs (weak/medium/
+    ``score`` sums the node's reviewed, non-deprecated evidence_refs (weak/medium/
     strong = 1/10/100, plus 1000 per breakthrough row); ``next_rung`` /
     ``threshold_next`` describe the rung above the current YAML status
     (both null at expert); ``eligible`` means the node qualifies for a
@@ -216,8 +216,8 @@ class SkillNodePatchRequest(BaseModel):
     """Body for the skill-node status mutation (G3, 三态 write).
 
     The UI vocabulary is the starmap 三态 — ``locked`` / ``learning`` /
-    ``lit``; the endpoint maps ``lit`` onto the YAML status ``solid`` (the
-    精通 rung ``expert`` is review-earned and not settable here)."""
+    ``lit`` — plus the 精通 rung ``expert``; the endpoint maps ``lit`` onto
+    the YAML status ``solid``."""
 
     status: str
 

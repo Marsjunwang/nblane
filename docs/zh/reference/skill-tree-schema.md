@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-08
+last_verified: 2026-10-09
 source_of_truth: true
 ---
 
@@ -83,7 +83,7 @@ nodes:
 
 `GET /api/v1/profiles/{name}/skill-tree` 给每个节点附带 `progress`，技能树页据此提示「可以升一级」。规则在 `core/skill_progression.py`：
 
-- 节点下每条未弃用的证据按强度计分：弱 1、中 10、强 100；带 `breakthrough: true` 的再加 1000。
+- 节点下每条未弃用、已审阅的证据按强度计分（待审阅的 AI 预填不计）：弱 1、中 10、强 100；带 `breakthrough: true` 的再加 1000。
 - 升到下一级的门槛：locked→learning 10，learning→solid 30，solid→expert 100。
 - 分数达标或有一条 breakthrough 即提示。只是建议，状态仍由人改；改技能点对助手是需要聊天确认的重要操作。
 

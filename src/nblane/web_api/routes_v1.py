@@ -911,11 +911,17 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
 
 
 # 三态 (UI/starmap) → skill-tree.yaml status mapping. locked=空圈 → locked,
-# learning=实点 → learning, lit=点套圈 → solid. The YAML also knows `expert`
-# (精通) — a review-earned rung above 点亮 that this endpoint never writes;
-# patching an expert node to "lit" steps it down to solid.
-SKILL_NODE_EDIT_STATUSES = ("locked", "learning", "lit")
-_SKILL_NODE_STATUS_TO_YAML = {"locked": "locked", "learning": "learning", "lit": "solid"}
+# learning=实点 → learning, lit=点套圈 → solid, plus the fourth rung
+# expert=精通 (the SPA asks for confirmation before writing it; agents go
+# through the T2 chat confirmation). Patching an expert node to "lit" steps
+# it down to solid.
+SKILL_NODE_EDIT_STATUSES = ("locked", "learning", "lit", "expert")
+_SKILL_NODE_STATUS_TO_YAML = {
+    "locked": "locked",
+    "learning": "learning",
+    "lit": "solid",
+    "expert": "expert",
+}
 
 SKILL_NODE_MUTATION_RESPONSES = {
     **ERROR_RESPONSES,
@@ -929,7 +935,7 @@ SKILL_NODE_MUTATION_RESPONSES = {
     },
     422: {
         "model": ErrorResponse,
-        "description": "Status outside the 三态 vocabulary (locked/learning/lit).",
+        "description": "Status outside locked/learning/lit/expert.",
     },
 }
 
@@ -950,8 +956,8 @@ def patch_profile_skill_node(
 ) -> SkillNodePatchResponse | JSONResponse:
     """Set one skill node's 三态 status in skill-tree.yaml (G3 write).
 
-    Body vocabulary is the UI 三态 (``locked`` / ``learning`` / ``lit``);
-    ``lit`` lands as the YAML status ``solid`` (see
+    Body vocabulary is the UI 三态 (``locked`` / ``learning`` / ``lit``)
+    plus ``expert``; ``lit`` lands as the YAML status ``solid`` (see
     ``SKILL_NODE_EDIT_STATUSES``). ``If-Match`` carries the skill-tree.yaml
     ETag from the tree read (412 on mismatch); the write goes through
     ``profile_io.update_skill_tree`` with an in-lock snapshot re-check, and
