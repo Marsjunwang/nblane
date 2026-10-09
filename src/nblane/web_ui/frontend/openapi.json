@@ -10977,6 +10977,40 @@
     "title": "SidecarInfoModel",
     "type": "object"
    },
+   "SkillEvidenceContributionModel": {
+    "description": "One linked evidence row's share of a node's progress score.",
+    "properties": {
+     "breakthrough": {
+      "default": false,
+      "title": "Breakthrough",
+      "type": "boolean"
+     },
+     "counted": {
+      "default": true,
+      "title": "Counted",
+      "type": "boolean"
+     },
+     "evidence_id": {
+      "title": "Evidence Id",
+      "type": "string"
+     },
+     "points": {
+      "default": 0,
+      "title": "Points",
+      "type": "integer"
+     },
+     "strength": {
+      "default": "",
+      "title": "Strength",
+      "type": "string"
+     }
+    },
+    "required": [
+     "evidence_id"
+    ],
+    "title": "SkillEvidenceContributionModel",
+    "type": "object"
+   },
    "SkillNodePatchRequest": {
     "description": "Body for the skill-node status mutation (G3, 三态 write).\n\nThe UI vocabulary is the starmap 三态 — ``locked`` / ``learning`` /\n``lit`` — plus the 精通 rung ``expert``; the endpoint maps ``lit`` onto\nthe YAML status ``solid``.",
     "properties": {
@@ -11026,17 +11060,35 @@
     "type": "object"
    },
    "SkillNodeProgressModel": {
-    "description": "Progression readout for one skill node (core.skill_progression).\n\n``score`` sums the node's reviewed, non-deprecated evidence_refs (weak/medium/\nstrong = 1/10/100, plus 1000 per breakthrough row); ``next_rung`` /\n``threshold_next`` describe the rung above the current YAML status\n(both null at expert); ``eligible`` means the node qualifies for a\nrung-up prompt (score threshold met, or at least one breakthrough).",
+    "description": "Progression readout for one skill node (core.skill_progression).\n\n``score`` sums the node's reviewed, non-deprecated evidence_refs (weak/medium/\nstrong = 1/10/100, plus 1000 per breakthrough row); ``next_rung`` /\n``threshold_next`` describe the rung above the current YAML status\n(both null at expert); ``eligible`` means the node qualifies for a\nrung-up prompt (score threshold met, or at least one breakthrough).\nWeights and thresholds follow the profile's skill_progression rules.\n``points_to_next`` / ``medium_needed`` state the gap; ``contributions``\nlists each linked evidence row's points (``counted`` false when the\nrules skip it, e.g. unreviewed).",
     "properties": {
      "breakthrough_count": {
       "default": 0,
       "title": "Breakthrough Count",
       "type": "integer"
      },
+     "contributions": {
+      "items": {
+       "$ref": "#/components/schemas/SkillEvidenceContributionModel"
+      },
+      "title": "Contributions",
+      "type": "array"
+     },
      "eligible": {
       "default": false,
       "title": "Eligible",
       "type": "boolean"
+     },
+     "medium_needed": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Medium Needed"
      },
      "next_rung": {
       "anyOf": [
@@ -11048,6 +11100,17 @@
        }
       ],
       "title": "Next Rung"
+     },
+     "points_to_next": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Points To Next"
      },
      "score": {
       "default": 0,
@@ -11067,6 +11130,25 @@
      }
     },
     "title": "SkillNodeProgressModel",
+    "type": "object"
+   },
+   "SkillNodeRefModel": {
+    "description": "A skill node reference (id + schema label).",
+    "properties": {
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "SkillNodeRefModel",
     "type": "object"
    },
    "SkillTreeCategoryModel": {
@@ -11104,7 +11186,7 @@
     "type": "object"
    },
    "SkillTreeNodeModel": {
-    "description": "One node in the recursive skill-tree view.\n\n``title`` comes from the domain schema ``label`` (node id as fallback);\n``children`` are derived from schema ``requires`` edges restricted to\nthe profile overlay; ``evidence_count`` counts resolved evidence (pool\nrefs plus inline rows, deprecated/missing refs excluded). ``category``\nis the schema grouping (empty for nodes unknown to the schema) — the\nhome starmap uses it to size its sector band. ``progress`` is the\ntunable rung-up readout (see ``SkillNodeProgressModel``).",
+    "description": "One node in the recursive skill-tree view.\n\n``title`` comes from the domain schema ``label`` (node id as fallback);\n``children`` are derived from schema ``requires`` edges restricted to\nthe profile overlay; ``evidence_count`` counts resolved evidence (pool\nrefs plus inline rows, deprecated/missing refs excluded). ``category``\nis the schema grouping (empty for nodes unknown to the schema) — the\nhome starmap uses it to size its sector band. ``progress`` is the\ntunable rung-up readout (see ``SkillNodeProgressModel``).\n``unmet_requires`` lists schema prerequisites that are not lit yet\n(status below solid) — advisory only, writes are never blocked.",
     "properties": {
      "category": {
       "default": "",
@@ -11139,6 +11221,13 @@
       "default": "",
       "title": "Title",
       "type": "string"
+     },
+     "unmet_requires": {
+      "items": {
+       "$ref": "#/components/schemas/SkillNodeRefModel"
+      },
+      "title": "Unmet Requires",
+      "type": "array"
      }
     },
     "required": [

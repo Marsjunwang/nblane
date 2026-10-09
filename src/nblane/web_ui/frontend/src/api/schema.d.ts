@@ -10952,6 +10952,34 @@ export interface components {
             paper_library_url: string;
         };
         /**
+         * SkillEvidenceContributionModel
+         * @description One linked evidence row's share of a node's progress score.
+         */
+        SkillEvidenceContributionModel: {
+            /**
+             * Breakthrough
+             * @default false
+             */
+            breakthrough: boolean;
+            /**
+             * Counted
+             * @default true
+             */
+            counted: boolean;
+            /** Evidence Id */
+            evidence_id: string;
+            /**
+             * Points
+             * @default 0
+             */
+            points: number;
+            /**
+             * Strength
+             * @default
+             */
+            strength: string;
+        };
+        /**
          * SkillNodePatchRequest
          * @description Body for the skill-node status mutation (G3, 三态 write).
          *
@@ -11000,6 +11028,10 @@ export interface components {
          *     ``threshold_next`` describe the rung above the current YAML status
          *     (both null at expert); ``eligible`` means the node qualifies for a
          *     rung-up prompt (score threshold met, or at least one breakthrough).
+         *     Weights and thresholds follow the profile's skill_progression rules.
+         *     ``points_to_next`` / ``medium_needed`` state the gap; ``contributions``
+         *     lists each linked evidence row's points (``counted`` false when the
+         *     rules skip it, e.g. unreviewed).
          */
         SkillNodeProgressModel: {
             /**
@@ -11007,13 +11039,19 @@ export interface components {
              * @default 0
              */
             breakthrough_count: number;
+            /** Contributions */
+            contributions?: components["schemas"]["SkillEvidenceContributionModel"][];
             /**
              * Eligible
              * @default false
              */
             eligible: boolean;
+            /** Medium Needed */
+            medium_needed?: number | null;
             /** Next Rung */
             next_rung?: string | null;
+            /** Points To Next */
+            points_to_next?: number | null;
             /**
              * Score
              * @default 0
@@ -11021,6 +11059,19 @@ export interface components {
             score: number;
             /** Threshold Next */
             threshold_next?: number | null;
+        };
+        /**
+         * SkillNodeRefModel
+         * @description A skill node reference (id + schema label).
+         */
+        SkillNodeRefModel: {
+            /** Id */
+            id: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
         };
         /**
          * SkillTreeCategoryModel
@@ -11067,6 +11118,8 @@ export interface components {
          *     is the schema grouping (empty for nodes unknown to the schema) — the
          *     home starmap uses it to size its sector band. ``progress`` is the
          *     tunable rung-up readout (see ``SkillNodeProgressModel``).
+         *     ``unmet_requires`` lists schema prerequisites that are not lit yet
+         *     (status below solid) — advisory only, writes are never blocked.
          */
         SkillTreeNodeModel: {
             /**
@@ -11094,6 +11147,8 @@ export interface components {
              * @default
              */
             title: string;
+            /** Unmet Requires */
+            unmet_requires?: components["schemas"]["SkillNodeRefModel"][];
         };
         /**
          * SkillTreeResponse
