@@ -454,3 +454,60 @@ describe('SkillTreePage node inscription card', () => {
     confirm.mockRestore();
   });
 });
+
+describe('SkillTreePage 分数来源', () => {
+  it('shows per-evidence points, the gap hint and unmet prerequisites', async () => {
+    const tree = {
+      ...TREE_WITH_CATEGORIES,
+      nodes: [
+        {
+          id: 'python_core',
+          title: 'Python (numpy, scipy)',
+          status: 'learning',
+          category: 'foundations',
+          evidence_count: 2,
+          children: [],
+          unmet_requires: [{ id: 'linear_algebra', title: 'Linear Algebra' }],
+          progress: {
+            score: 10,
+            next_rung: 'solid',
+            threshold_next: 30,
+            breakthrough_count: 0,
+            eligible: false,
+            points_to_next: 20,
+            medium_needed: 2,
+            contributions: [
+              { evidence_id: 'ev_9', points: 10, counted: true, strength: 'medium', breakthrough: false },
+              { evidence_id: 'ev_10', points: 100, counted: false, strength: 'strong', breakthrough: false },
+            ],
+          },
+        },
+      ],
+    };
+    const evidence = {
+      ...SKILL_EVIDENCE,
+      total: 2,
+      items: [
+        ...SKILL_EVIDENCE.items,
+        { id: 'ev_10', title: 'AI drafted note', evidence_type: 'practice', review_status: 'needs_review', date: '' },
+      ],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/evidence') && url.includes('skill_id=')) return jsonResponse(200, evidence);
+        if (url.includes('/profiles/alice/skill-tree')) return jsonResponse(200, tree);
+        return jsonResponse(404, { code: 'not_found', message: 'not found' });
+      }),
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByText('Python (numpy, scipy)'));
+    const card = await screen.findByTestId('skill-inscription');
+    expect(within(card).getByTestId('skill-gap-hint')).toHaveTextContent('还差 20 分，约 2 条中等证据');
+    expect(within(card).getByTestId('skill-unmet-requires')).toHaveTextContent('前置未点亮：Linear Algebra');
+    expect(await within(card).findByTestId('skill-evidence-points-ev_9')).toHaveTextContent('中 +10');
+    expect(within(card).getByTestId('skill-evidence-points-ev_10')).toHaveTextContent('强 待评审·未计分');
+  });
+});

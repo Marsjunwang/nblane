@@ -173,6 +173,16 @@ class TestSkillTreeRead(unittest.TestCase):
         # under the first parent in schema order.
         self.assertEqual([g["id"] for g in children[0]["children"]], ["grand_a11"])
         self.assertEqual(children[1]["children"], [])
+        # Unmet prerequisites: root_a is solid (met); grand_a11 needs both
+        # learning children (unmet, advisory only).
+        self.assertEqual(children[0]["unmet_requires"], [])
+        self.assertEqual(
+            children[0]["children"][0]["unmet_requires"],
+            [
+                {"id": "child_a1", "title": "Child A1"},
+                {"id": "child_a2", "title": "Child A2"},
+            ],
+        )
 
         def flatten(nodes: list[dict]) -> list[str]:
             out: list[str] = []

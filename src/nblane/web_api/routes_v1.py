@@ -333,6 +333,7 @@ from nblane.web_api.schemas import (
     SkillNodePatchRequest,
     SkillNodePatchResponse,
     SkillNodeProgressModel,
+    SkillNodeRefModel,
     SchemaInfo,
     SkillTreeCategoryModel,
     SkillTreeNodeModel,
@@ -865,6 +866,17 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
             progress=SkillNodeProgressModel(
                 **skill_progression_core.node_progress(node, pool, rules).to_dict()
             ),
+            unmet_requires=[
+                SkillNodeRefModel(
+                    id=req,
+                    title=(schema_index[req].label if req in schema_index else "")
+                    or req,
+                )
+                for req in (meta.requires if meta else [])
+                if req != nid
+                and str((overlay.get(req) or {}).get("status") or "locked")
+                not in ("solid", "expert")
+            ],
             children=[
                 build(kid, ancestors | {kid})
                 for kid in children_of[nid]

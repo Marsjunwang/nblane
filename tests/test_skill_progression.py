@@ -189,8 +189,33 @@ class TestEligible(unittest.TestCase):
                 "threshold_next": 30,
                 "breakthrough_count": 0,
                 "eligible": False,
+                "points_to_next": 30,
+                "medium_needed": 3,
+                "contributions": [],
             },
         )
+
+    def test_contributions_and_gap(self) -> None:
+        pool = _pool(
+            {"id": "ev_m", "type": "practice", "title": "M", "strength": "medium"},
+            {"id": "ev_n", "type": "practice", "title": "N", "strength": "strong",
+             "review_status": "needs_review"},
+        )
+        node = {"id": "n", "status": "learning", "evidence_refs": ["ev_m", "ev_n"]}
+        progress = sp.node_progress(node, pool)
+        self.assertEqual(
+            [(c.evidence_id, c.points, c.counted) for c in progress.contributions],
+            [("ev_m", 10, True), ("ev_n", 100, False)],
+        )
+        # 30 - 10 = 20 left, i.e. 2 medium rows.
+        self.assertEqual(progress.points_to_next, 20)
+        self.assertEqual(progress.medium_needed, 2)
+        # Met threshold: no gap; top rung: no gap at all.
+        met = sp.node_progress({**node, "status": "locked"}, pool)
+        self.assertEqual(met.points_to_next, 0)
+        self.assertIsNone(met.medium_needed)
+        top = sp.node_progress({**node, "status": "expert"}, pool)
+        self.assertIsNone(top.points_to_next)
 
 
 class TestConfigurableRules(unittest.TestCase):

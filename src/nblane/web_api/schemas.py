@@ -131,6 +131,23 @@ class SkillTreeSummary(BaseModel):
     status_counts: dict[str, int] = Field(default_factory=dict)
 
 
+class SkillEvidenceContributionModel(BaseModel):
+    """One linked evidence row's share of a node's progress score."""
+
+    evidence_id: str
+    points: int = 0
+    counted: bool = True
+    strength: str = ""
+    breakthrough: bool = False
+
+
+class SkillNodeRefModel(BaseModel):
+    """A skill node reference (id + schema label)."""
+
+    id: str
+    title: str = ""
+
+
 class SkillNodeProgressModel(BaseModel):
     """Progression readout for one skill node (core.skill_progression).
 
@@ -139,6 +156,10 @@ class SkillNodeProgressModel(BaseModel):
     ``threshold_next`` describe the rung above the current YAML status
     (both null at expert); ``eligible`` means the node qualifies for a
     rung-up prompt (score threshold met, or at least one breakthrough).
+    Weights and thresholds follow the profile's skill_progression rules.
+    ``points_to_next`` / ``medium_needed`` state the gap; ``contributions``
+    lists each linked evidence row's points (``counted`` false when the
+    rules skip it, e.g. unreviewed).
     """
 
     score: int = 0
@@ -146,6 +167,9 @@ class SkillNodeProgressModel(BaseModel):
     threshold_next: int | None = None
     breakthrough_count: int = 0
     eligible: bool = False
+    points_to_next: int | None = None
+    medium_needed: int | None = None
+    contributions: list[SkillEvidenceContributionModel] = Field(default_factory=list)
 
 
 class SkillTreeNodeModel(BaseModel):
@@ -158,6 +182,8 @@ class SkillTreeNodeModel(BaseModel):
     is the schema grouping (empty for nodes unknown to the schema) — the
     home starmap uses it to size its sector band. ``progress`` is the
     tunable rung-up readout (see ``SkillNodeProgressModel``).
+    ``unmet_requires`` lists schema prerequisites that are not lit yet
+    (status below solid) — advisory only, writes are never blocked.
     """
 
     id: str
@@ -168,6 +194,7 @@ class SkillTreeNodeModel(BaseModel):
     progress: SkillNodeProgressModel = Field(
         default_factory=SkillNodeProgressModel
     )
+    unmet_requires: list[SkillNodeRefModel] = Field(default_factory=list)
     children: list[SkillTreeNodeModel] = Field(default_factory=list)
 
 

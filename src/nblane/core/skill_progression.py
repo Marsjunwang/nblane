@@ -35,6 +35,7 @@ appends the
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -179,14 +180,45 @@ def rules_from_preferences(preferences: dict[str, Any] | None) -> ProgressionRul
 
 
 @dataclass
+class EvidenceContribution:
+    """How one linked pool row feeds (or does not feed) the node score."""
+
+    evidence_id: str
+    points: int = 0
+    counted: bool = True
+    strength: str = ""
+    breakthrough: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "evidence_id": self.evidence_id,
+            "points": self.points,
+            "counted": self.counted,
+            "strength": self.strength,
+            "breakthrough": self.breakthrough,
+        }
+
+
+@dataclass
 class NodeProgress:
-    """Progression readout for one skill-tree node."""
+    """Progression readout for one skill-tree node.
+
+    ``points_to_next`` is the score still missing for the next rung (0 when
+    met, None at the top); ``medium_needed`` restates it as a count of
+    medium-strength evidence rows (None when not applicable).
+    ``contributions`` lists every linked, non-deprecated pool row with the
+    points it would add; ``counted`` is false for rows the rules skip
+    (unreviewed under ``reviewed_only``).
+    """
 
     score: int = 0
     next_rung: str | None = None
     threshold_next: int | None = None
     breakthrough_count: int = 0
     eligible: bool = False
+    points_to_next: int | None = None
+    medium_needed: int | None = None
+    contributions: list[EvidenceContribution] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         """Serialize for API responses."""
@@ -196,6 +228,9 @@ class NodeProgress:
             "threshold_next": self.threshold_next,
             "breakthrough_count": self.breakthrough_count,
             "eligible": self.eligible,
+            "points_to_next": self.points_to_next,
+            "medium_needed": self.medium_needed,
+            "contributions": [item.to_dict() for item in self.contributions],
         }
 
 
@@ -250,6 +285,7 @@ def node_progress(
     index: dict[str, EvidenceRecord] = pool.by_id() if pool is not None else {}
     score = 0
     breakthrough_count = 0
+    contributions: list[EvidenceContribution] = []
     seen: set[str] = set()
     raw_refs = node.get("evidence_refs") or []
     if isinstance(raw_refs, list):
@@ -263,9 +299,22 @@ def node_progress(
             record = index.get(key)
             if record is None or record.deprecated:
                 continue
-            if rules.reviewed_only and record.review_status.strip() != "reviewed":
+            counted = not (
+                rules.reviewed_only and record.review_status.strip() != "reviewed"
+            )
+            points = _evidence_weight(record, rules)
+            contributions.append(
+                EvidenceContribution(
+                    evidence_id=key,
+                    points=points,
+                    counted=counted,
+                    strength=str(record.strength or "").strip(),
+                    breakthrough=bool(record.breakthrough),
+                )
+            )
+            if not counted:
                 continue
-            score += _evidence_weight(record, rules)
+            score += points
             if record.breakthrough:
                 breakthrough_count += 1
     status = node.get("status")
@@ -279,10 +328,20 @@ def node_progress(
             or (rules.breakthrough_unlocks and breakthrough_count >= 1)
         )
     )
+    points_to_next = max(0, threshold - score) if threshold is not None else None
+    medium = rules.weights.get("medium", 0)
+    medium_needed = (
+        math.ceil(points_to_next / medium)
+        if points_to_next and medium > 0 and not eligible
+        else None
+    )
     return NodeProgress(
         score=score,
         next_rung=nxt,
         threshold_next=threshold,
         breakthrough_count=breakthrough_count,
         eligible=eligible,
+        points_to_next=points_to_next,
+        medium_needed=medium_needed,
+        contributions=contributions,
     )

@@ -439,8 +439,16 @@ function evidenceStageFor(item: { review_status?: string }): string {
   return 'review';
 }
 
+const STRENGTH_LABELS: Record<string, string> = {
+  weak: '弱',
+  medium: '中',
+  strong: '强',
+  high_trust: '高可信',
+};
+
 /** 进阶进度 block: current rung → next rung with a score/threshold 泥金 bar,
- * breakthrough count, and the 可进阶 hint that pairs with the stepper pulse. */
+ * breakthrough count, the gap to the next rung, and the 可进阶 hint that
+ * pairs with the stepper pulse. */
 function SkillProgressBlock({ node }: { node: SkillTreeNode }) {
   const progress = node.progress;
   if (!progress) {
@@ -486,6 +494,12 @@ function SkillProgressBlock({ node }: { node: SkillTreeNode }) {
           }}
         />
       </div>
+      {!progress.eligible && (progress.points_to_next ?? 0) > 0 && (
+        <Text size="xs" style={{ color: chrome.dim, marginTop: 4 }} data-testid="skill-gap-hint">
+          {`还差 ${progress.points_to_next} 分`}
+          {progress.medium_needed ? `，约 ${progress.medium_needed} 条中等证据` : ''}
+        </Text>
+      )}
       {(progress.breakthrough_count > 0 || progress.eligible) && (
         <Group gap="sm" wrap="wrap" style={{ marginTop: 4 }}>
           {progress.breakthrough_count > 0 && (
@@ -548,6 +562,10 @@ function SkillInscriptionCard({
   };
 
   const evidenceItems = evidence.data?.items ?? [];
+  const contributionById = new Map(
+    (node.progress?.contributions ?? []).map((item) => [item.evidence_id, item]),
+  );
+  const unmet = node.unmet_requires ?? [];
   return (
     <Box
       component="aside"
@@ -657,6 +675,11 @@ function SkillInscriptionCard({
           )}
         </div>
         <SkillProgressBlock node={node} />
+        {unmet.length > 0 && (
+          <p data-testid="skill-unmet-requires" style={{ ...hintStyle, letterSpacing: 0.5 }}>
+            前置未点亮：{unmet.map((item) => item.title || item.id).join('、')}
+          </p>
+        )}
         <div data-testid="skill-evidence" style={{ marginTop: 14 }}>
           <p style={hintStyle}>关联证据</p>
           {evidence.isPending && <Loader size="xs" />}
@@ -666,8 +689,10 @@ function SkillInscriptionCard({
           {!evidence.isPending && !evidence.isError && evidenceItems.length === 0 && (
             <p style={hintStyle}>尚无关联证据。</p>
           )}
-          {evidenceItems.map((item) => (
-            <div key={item.id} style={{ paddingBlock: 4 }}>
+          {evidenceItems.map((item) => {
+            const share = contributionById.get(item.id);
+            return (
+            <div key={item.id} style={{ paddingBlock: 4, opacity: share && !share.counted ? 0.55 : 1 }}>
               <Link
                 className="starmap-detail-link"
                 data-testid={`skill-evidence-link-${item.id}`}
@@ -676,11 +701,28 @@ function SkillInscriptionCard({
               >
                 {item.title || item.id}
               </Link>
-              <div style={{ ...hintStyle, marginTop: 0 }}>
-                {[item.date, item.evidence_type].filter(Boolean).join(' · ') || '—'}
-              </div>
+              <Group justify="space-between" wrap="nowrap" gap={6}>
+                <div style={{ ...hintStyle, marginTop: 0 }}>
+                  {[item.date, item.evidence_type].filter(Boolean).join(' · ') || '—'}
+                </div>
+                {share && (
+                  <Text
+                    size="xs"
+                    data-testid={`skill-evidence-points-${item.id}`}
+                    style={{
+                      flexShrink: 0,
+                      color: share.counted ? GOLD : chrome.dim,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {`${STRENGTH_LABELS[share.strength] ?? '未评级'}${share.breakthrough ? '·突破' : ''} `}
+                    {share.counted ? `+${share.points}` : '待评审·未计分'}
+                  </Text>
+                )}
+              </Group>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </Box>
