@@ -170,6 +170,7 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
         fallback_backend="rule_fallback",
         output_mode="json",
         activity_policy="candidate",
+        json_repair=True,
         # Only the fields the card cannot do without are required: a long
         # generation that skips e.g. "usefulness" is still a usable card, and
         # the normalizer fills missing lists. Failing it wasted a 2-min call.
@@ -237,16 +238,11 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
                         },
                     },
                 },
+                # Individual scores are not required: the normalizer fills a
+                # missing one with 0, and one skipped metric must not throw
+                # away an otherwise complete whole-paper card.
                 "scores": {
                     "type": "object",
-                    "required": [
-                        "novelty",
-                        "technical_depth",
-                        "evidence_quality",
-                        "reproducibility",
-                        "relevance",
-                        "overall",
-                    ],
                     "properties": {
                         "novelty": {"type": "number"},
                         "technical_depth": {"type": "number"},

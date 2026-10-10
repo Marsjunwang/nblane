@@ -368,6 +368,78 @@ class TestAIGateway(unittest.TestCase):
         self.assertTrue(result.error.startswith("output_truncated:"))
         self.assertIn("4096", result.error)
 
+    def test_review_card_repairs_non_json_reply_once(self) -> None:
+        """A prose-wrapped card gets one reshape call instead of rule fallback."""
+
+        spec = get_action_spec("research.paper_review_card")
+        request = AIActionRequest(
+            action="research.paper_review_card",
+            profile="",
+            payload={"source_id": "source:paper:1", "paper_markdown": "FULL PAPER BODY"},
+        )
+        replies = [
+            "TL;DR: a planner. Key point: fast replanning.",
+            '{"tldr": "a planner", "key_points": [{"text": "fast replanning"}], "scores": {"overall": 7}}',
+        ]
+
+        with (
+            patch("nblane.core.llm.is_configured", return_value=True),
+            patch("nblane.core.llm.chat", side_effect=replies) as chat,
+        ):
+            result = DirectLLMBackend().run(request, spec)  # type: ignore[arg-type]
+
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(chat.call_count, 2)
+        repair_user = chat.call_args_list[1].args[1]
+        self.assertIn("did not contain a JSON", repair_user)
+        self.assertNotIn("FULL PAPER BODY", repair_user)
+        self.assertEqual(result.structured["tldr"], "a planner")
+        self.assertTrue(any("repaired" in w for w in result.warnings))
+
+    def test_review_card_repair_failure_keeps_validation_error(self) -> None:
+        """A failed repair still reports the original validation error."""
+
+        spec = get_action_spec("research.paper_review_card")
+        request = AIActionRequest(
+            action="research.paper_review_card",
+            profile="",
+            payload={"source_id": "source:paper:1"},
+        )
+
+        with (
+            patch("nblane.core.llm.is_configured", return_value=True),
+            patch("nblane.core.llm.chat", side_effect=["not json", "LLM error: Request timed out."]) as chat,
+        ):
+            result = DirectLLMBackend().run(request, spec)  # type: ignore[arg-type]
+
+        self.assertFalse(result.ok)
+        self.assertEqual(chat.call_count, 2)
+        self.assertIn("validation_error", result.error)
+
+    def test_review_card_accepts_partial_scores(self) -> None:
+        """One skipped metric does not fail an otherwise complete card."""
+
+        spec = get_action_spec("research.paper_review_card")
+        card = {"tldr": "x", "key_points": [], "scores": {"novelty": 6, "overall": 7}}
+        self.assertEqual(validate_schema(card, spec.schema or {}), "")
+
+    def test_json_repair_is_opt_in(self) -> None:
+        """Actions without json_repair make a single call on bad JSON."""
+
+        with (
+            patch("nblane.core.llm._API_KEY", "test-key"),
+            patch("nblane.core.llm.chat", return_value="not json") as chat,
+        ):
+            result = run_ai_action(
+                "resume.bullets_from_claims",
+                {"claims": []},
+                profile="",
+                require_review=False,
+            )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(chat.call_count, 1)
+
     def test_translate_paper_segments_sets_long_translation_timeout(self) -> None:
         """Full-paper translation batches should not inherit short UI polling limits."""
 

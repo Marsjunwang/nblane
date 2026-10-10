@@ -47,6 +47,10 @@ class AIActionSpec:
     prompt_id: str = ""
     prompt_version: str = "v1"
     temperature: float = 0.2
+    # direct_llm only: when a JSON reply fails validation (not truncation),
+    # make one short follow-up call that reshapes that reply into the schema
+    # instead of discarding a long generation.
+    json_repair: bool = False
 
 
 @dataclass

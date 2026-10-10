@@ -109,6 +109,14 @@ class DirectLLMBackend:
                         "JSON 不完整；可在「设置 → AI 服务」调高输出上限"
                     ),
                 )
+            warnings: list[str] = []
+            if not validation.ok and spec.json_repair:
+                first_error = validation.error
+                repaired = _repair_json_reply(raw, first_error, request, spec, max_tokens)
+                if repaired is not None:
+                    raw, validation = repaired
+                    if validation.ok:
+                        warnings.append(f"JSON reply repaired by a follow-up call ({first_error}).")
             if not validation.ok:
                 return AIActionResult(
                     ok=False,
@@ -126,6 +134,7 @@ class DirectLLMBackend:
                 run_id=run_id,
                 content=raw,
                 structured=validation.data,
+                warnings=warnings,
             )
         return AIActionResult(
             ok=True,
@@ -654,6 +663,55 @@ def _run_crystallize_ingest(
         content=json.dumps(patch, ensure_ascii=False),
         structured=patch,
     )
+
+
+_JSON_REPAIR_SYSTEM = (
+    "You fix malformed JSON. Return exactly one JSON object and nothing else: "
+    "no prose, no Markdown fences. Keep every piece of content from the "
+    "reply; only restructure it so it satisfies the required keys. Do not "
+    "invent facts; for a missing required key use an empty string, an empty "
+    "list, or 0 as fits the type."
+)
+
+
+def _repair_json_reply(
+    raw: str,
+    error: str,
+    request: AIActionRequest,
+    spec: AIActionSpec,
+    max_tokens: int | None,
+) -> tuple[str, Any] | None:
+    """One follow-up call that reshapes an invalid JSON reply.
+
+    Returns ``(raw, validation)`` for the repaired reply, or None when the
+    repair call itself failed. The original prompt (often a whole paper) is
+    not re-sent; only the reply and the schema are.
+    """
+
+    if not raw.strip():
+        return None
+    user = (
+        f"Validation error: {error}\n\n"
+        f"Required JSON schema:\n{json.dumps(spec.schema or {}, ensure_ascii=False)}\n\n"
+        f"Reply to fix:\n{raw}"
+    )
+    fixed = llm.chat(
+        _JSON_REPAIR_SYSTEM,
+        user,
+        temperature=0.0,
+        max_tokens=max_tokens,
+        model=_model_override(request.payload),
+        timeout=_positive_float_override(
+            request.payload,
+            "model_timeout_seconds",
+            "llm_timeout_seconds",
+            "timeout_seconds",
+        ),
+        max_retries=0,
+    )
+    if fixed.startswith("LLM error:") or fixed.startswith("AI features not configured"):
+        return None
+    return fixed, validate_json_response(fixed, spec.schema)
 
 
 def _model_override(payload: dict[str, Any], *keys: str) -> str:
