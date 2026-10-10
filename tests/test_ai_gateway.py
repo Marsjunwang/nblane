@@ -423,6 +423,31 @@ class TestAIGateway(unittest.TestCase):
         card = {"tldr": "x", "key_points": [], "scores": {"novelty": 6, "overall": 7}}
         self.assertEqual(validate_schema(card, spec.schema or {}), "")
 
+    def test_run_record_stores_duration_and_primary_duration(self) -> None:
+        """ai-runs.yaml rows carry wall time; fallbacks also time the failed backend."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pdir = Path(tmp) / "alice"
+            pdir.mkdir()
+            with (
+                patch("nblane.core.ai.runs.profile_dir", return_value=pdir),
+                patch("nblane.core.ai.runs.git_backup.record_change"),
+                patch("nblane.core.ai.gateway.time.monotonic", side_effect=[100.0, 103.25, 104.5]),
+                patch("nblane.core.llm._API_KEY", "test-key"),
+                patch("nblane.core.llm.chat", return_value="LLM error: Request timed out."),
+            ):
+                result = run_ai_action(
+                    "research.paper_review_card",
+                    {"source_id": "source:paper:1"},
+                    profile="alice",
+                    require_review=False,
+                )
+            row = yaml.safe_load((pdir / "ai-runs.yaml").read_text(encoding="utf-8"))["runs"][-1]
+
+        self.assertEqual(result.backend, "rule_fallback")
+        self.assertEqual(row["primary_duration_ms"], 3250)
+        self.assertEqual(row["duration_ms"], 4500)
+
     def test_json_repair_is_opt_in(self) -> None:
         """Actions without json_repair make a single call on bad JSON."""
 

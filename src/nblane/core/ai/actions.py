@@ -66,6 +66,10 @@ class AIActionResult:
     warnings: list[str] = field(default_factory=list)
     error: str = ""
     activity_item_id: str = ""
+    # Wall time of the whole action (set by the gateway); when a fallback ran,
+    # ``primary_duration_ms`` is how long the failed first backend took.
+    duration_ms: int = 0
+    primary_duration_ms: int = 0
 
 
 class AIBackend(Protocol):

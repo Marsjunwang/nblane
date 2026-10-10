@@ -171,6 +171,10 @@ def append_ai_run(
         "error": result.error,
         "created": now_iso(),
     }
+    if result.duration_ms:
+        item["duration_ms"] = int(result.duration_ms)
+    if result.primary_duration_ms:
+        item["primary_duration_ms"] = int(result.primary_duration_ms)
     doc = load_ai_runs(profile)
     runs = list(doc.get("runs") or [])
     runs.append(item)

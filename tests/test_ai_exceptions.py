@@ -132,6 +132,45 @@ def test_fallback_runs_surface_primary_failure_as_warning(tmp_path: Path) -> Non
     assert "Request timed out" in items[0]["message"]
 
 
+def test_exception_messages_include_recorded_duration(tmp_path: Path) -> None:
+    profile = tmp_path / "alice"
+    profile.mkdir()
+    _dump(
+        profile / "ai-runs.yaml",
+        {
+            "runs": [
+                {
+                    "id": "run-slow",
+                    "action": "divination.cast",
+                    "ok": False,
+                    "error": "provider_error: LLM error: Request timed out.",
+                    "duration_ms": 90412,
+                },
+                {
+                    "id": "run-fb",
+                    "action": "research.paper_review_card",
+                    "ok": True,
+                    "warnings": ["direct_llm failed (provider_error: x); used rule_fallback."],
+                    "duration_ms": 300900,
+                    "primary_duration_ms": 300500,
+                },
+                {
+                    "id": "run-old",
+                    "action": "research.paper_qa",
+                    "ok": False,
+                    "error": "模型不可用",
+                },
+            ]
+        },
+    )
+
+    by_id = {item["id"]: item for item in collect_profile_exceptions(profile)}
+
+    assert by_id["run:run-slow"]["message"].endswith("（耗时 90.4 秒）")
+    assert by_id["run:run-fb"]["message"].endswith("（耗时 300.5 秒）")
+    assert by_id["run:run-old"]["message"] == "模型不可用"
+
+
 def test_dismissed_runs_jobs_and_tasks_are_hidden(tmp_path: Path) -> None:
     profile = tmp_path / "alice"
     profile.mkdir()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -100,6 +101,7 @@ def run_ai_action(
         _record_if_profile(request, spec, result)
         return result
     backend = registry[backend_name]
+    started = time.monotonic()
     try:
         result = backend.run(request, spec)
     except Exception as exc:
@@ -132,6 +134,7 @@ def run_ai_action(
     ):
         failed_backend = result.backend
         failed_error = result.error
+        primary_ms = _elapsed_ms(started)
         # Keep the failed run's diagnostics (e.g. Codex reconnects / last
         # output before a timeout) so the job shows why it failed.
         failed_notes = [
@@ -145,8 +148,14 @@ def run_ai_action(
             f"{failed_backend} failed ({failed_error}); used {result.backend}.",
             *failed_notes,
         ]
+        result.primary_duration_ms = primary_ms
+    result.duration_ms = _elapsed_ms(started)
     _record_if_profile(request, spec, result)
     return result
+
+
+def _elapsed_ms(started: float) -> int:
+    return max(0, int(round((time.monotonic() - started) * 1000)))
 
 
 def run_text(

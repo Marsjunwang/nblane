@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-09
+last_verified: 2026-10-10
 source_of_truth: true
 ---
 
@@ -480,11 +480,11 @@ research/connectors.yaml
 ### AI Run
 
 ```text
-ai-runs/YYYY-MM-DD.jsonl
+profiles/<name>/ai-runs.yaml
 ```
 
 不变量：
 
 - 默认不保存完整私密 prompt。
-- 保存 task、model、input refs、output refs、status、warnings、accepted 状态。
-- 用于审计和调试，不是业务事实源。
+- 每次调用一行：action、backend、ok、context refs、warnings、error、created；`duration_ms` 是整次调用耗时，降级时 `primary_duration_ms` 是失败的首选 backend 耗时（旧记录没有这两个字段）。
+- 用于审计和调试，不是业务事实源；顶栏「AI 异常」从这里汇总，耗时会附在异常说明后。

@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-07
+last_verified: 2026-10-10
 source_of_truth: true
 ---
 
@@ -29,13 +29,13 @@ SPA / CLI / Reader 短任务
 
 | 文件 | 职责 |
 |------|------|
-| `gateway.py` | `run_ai_action` 统一入口：选 backend、调用、修复一次、记录 run |
+| `gateway.py` | `run_ai_action` 统一入口：选 backend、调用、修复一次、计时、记录 run |
 | `router.py` | `ACTION_SPECS` 动作注册表：owner、默认 / 兜底 backend、输出模式、schema |
 | `actions.py` | 请求 / 结果 / 规格数据结构 |
 | `backends.py` | `direct_llm`、`local_translation`、`rule_fallback`、`workflow_agent`、`external_agent`、`local_codex_readonly` |
 | `structured.py` | JSON 提取与轻量 schema 校验 |
 | `prompts.py` | prompt 注册 |
-| `runs.py` | `ai-runs/YYYY-MM-DD.jsonl` 运行记录 |
+| `runs.py` | `ai-runs.yaml` 运行记录（含耗时） |
 | `exceptions.py` | AI 异常汇总（顶栏「AI 异常」抽屉），支持忽略 |
 | `skill_suggest.py` | 技能关联建议：embedding → LLM → 规则三级 |
 | `local_models.py` / `local_translation.py` | 可安装的本地翻译模型（llama.cpp，懒启动） |

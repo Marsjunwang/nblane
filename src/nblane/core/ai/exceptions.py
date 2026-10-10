@@ -148,6 +148,18 @@ def _base_item(
     }
 
 
+def _with_duration(message: str, run: dict[str, Any], key: str) -> str:
+    """Append how long the failed call ran, when the run recorded it."""
+
+    try:
+        ms = int(run.get(key) or 0)
+    except (TypeError, ValueError):
+        ms = 0
+    if ms <= 0 or not message:
+        return message
+    return f"{message}（耗时 {ms / 1000:.1f} 秒）"
+
+
 def _fallback_failure(run: dict[str, Any]) -> str:
     """Return the primary-backend failure of a run that fell back, if any.
 
@@ -224,7 +236,7 @@ def collect_profile_exceptions(
                     item_id=f"run:{run_id}",
                     source="AI 降级",
                     title=action or "AI 调用降级",
-                    message=fallback,
+                    message=_with_duration(fallback, run, "primary_duration_ms"),
                     action=action,
                     created=run.get("created"),
                     source_ref=run_id,
@@ -244,7 +256,7 @@ def collect_profile_exceptions(
                 item_id=f"run:{run_id}",
                 source="AI 调用",
                 title=action or "AI 调用失败",
-                message=_text(run.get("error")),
+                message=_with_duration(_text(run.get("error")), run, "duration_ms"),
                 action=action,
                 created=run.get("created"),
                 source_ref=run_id,
