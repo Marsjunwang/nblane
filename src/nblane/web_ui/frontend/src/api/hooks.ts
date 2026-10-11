@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 
 import { ApiError, apiBase, apiDelete, apiDeleteWithHeaders, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, apiPostForm, apiPut, apiPutWithHeaders, ifMatch } from './client';
+import { markSessionRestored } from './session';
 import type {
   AccountCreate,
   AccountInfo,
@@ -154,6 +155,7 @@ export function useLogin() {
       apiPost<CurrentUser>('/auth/login', credentials),
     onSuccess: (user) => {
       queryClient.setQueryData(['auth', 'me'], user);
+      markSessionRestored();
     },
   });
 }
@@ -2113,13 +2115,16 @@ function useInvalidateContentList(profile: string) {
   return () => void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content'], exact: true });
 }
 
+/** One post plus its ETag, straight from the server (no cache). */
+export async function fetchContentPost(profile: string, slug: string): Promise<StudioPostResult> {
+  const { data, headers } = await apiGetWithHeaders<StudioPostDetail>(contentBlogPath(profile, slug));
+  return { post: data, etag: headers.get('ETag') ?? '' };
+}
+
 export function useContentPost(profile: string, slug: string) {
   return useQuery({
     queryKey: ['profiles', profile, 'content', 'post', slug],
-    queryFn: async (): Promise<StudioPostResult> => {
-      const { data, headers } = await apiGetWithHeaders<StudioPostDetail>(contentBlogPath(profile, slug));
-      return { post: data, etag: headers.get('ETag') ?? '' };
-    },
+    queryFn: () => fetchContentPost(profile, slug),
     enabled: profile.length > 0 && slug.length > 0,
     staleTime: Infinity,
   });
@@ -2154,14 +2159,21 @@ export function useSaveContentPost(profile: string) {
       body,
       etag,
       autosave = false,
+      allowEmpty = false,
     }: {
       slug: string;
       body: StudioPostSaveRequest;
       etag: string;
       /** Debounced editor save: written to disk, no Git backup commit. */
       autosave?: boolean;
+      /** The owner confirmed erasing the whole body (else 409). */
+      allowEmpty?: boolean;
     }): Promise<ContentPostWriteResult> => {
-      const path = `${contentBlogPath(profile, slug)}${autosave ? '?autosave=1' : ''}`;
+      const params = new URLSearchParams();
+      if (autosave) params.set('autosave', '1');
+      if (allowEmpty) params.set('allow_empty', '1');
+      const query = params.toString();
+      const path = `${contentBlogPath(profile, slug)}${query ? `?${query}` : ''}`;
       const { data, headers } = await apiPutWithHeaders<StudioPostMutationResponse>(path, body, {
         headers: ifMatch(etag),
       });

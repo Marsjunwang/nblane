@@ -200,6 +200,9 @@ export function BackupSection() {
           <Button size="xs" variant="subtle" leftSection={<IconRefresh size={14} />} loading={status.isFetching} onClick={() => status.refetch()}>刷新</Button>
         </Group>
         {data.data_git && !data.data_git.autopush && <Text size="xs" c="orange">nblane 数据未开启写入即推送（NBLANE_DATA_GIT_AUTOPUSH），只能依赖每日备份。</Text>}
+        {data.data_git?.autopush && data.data_git.push_error && (
+          <Text size="xs" c="orange">nblane 数据最近一次后台推送失败（修改已在本机提交，下次写入会重试）：{data.data_git.push_error}</Text>
+        )}
     </SettingsCard>
   );
 }

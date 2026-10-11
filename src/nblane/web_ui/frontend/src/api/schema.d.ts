@@ -701,6 +701,9 @@ export interface paths {
          *     ``autosave=1`` writes the files but skips the Git backup commit, so the
          *     editor's debounced saves do not produce a commit every few seconds; the
          *     next explicit save (Ctrl/Cmd+S, leaving the editor) commits the diff.
+         *     Erasing a non-empty body is 409 ``empty_body_requires_confirm`` unless
+         *     ``allow_empty=1``. A stale ``If-Match`` whose body equals the files on
+         *     disk (a replayed save) succeeds without writing.
          */
         put: operations["save_profile_content_blog_api_v1_profiles__name__content_blog__slug__put"];
         post?: never;
@@ -4066,6 +4069,16 @@ export interface components {
              * @default false
              */
             autopush: boolean;
+            /**
+             * Last Push At
+             * @default
+             */
+            last_push_at: string;
+            /**
+             * Push Error
+             * @default
+             */
+            push_error: string;
         };
         /**
          * BackupKeyResponse
@@ -14018,6 +14031,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Save would erase a non-empty body without allow_empty=1. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description If-Match ETag does not match the studio source files. */
             412: {
                 headers: {
@@ -14101,6 +14123,7 @@ export interface operations {
         parameters: {
             query?: {
                 autosave?: boolean;
+                allow_empty?: boolean;
             };
             header?: {
                 "if-match"?: string | null;
@@ -14146,6 +14169,15 @@ export interface operations {
             };
             /** @description Profile or blog post not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Save would erase a non-empty body without allow_empty=1. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14225,6 +14257,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Save would erase a non-empty body without allow_empty=1. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description If-Match ETag does not match the studio source files. */
             412: {
                 headers: {
@@ -14290,6 +14331,15 @@ export interface operations {
             };
             /** @description Profile or blog post not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Save would erase a non-empty body without allow_empty=1. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14432,6 +14482,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Save would erase a non-empty body without allow_empty=1. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description If-Match ETag does not match the studio source files. */
             412: {
                 headers: {
@@ -14496,6 +14555,15 @@ export interface operations {
             };
             /** @description Profile or blog post not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Save would erase a non-empty body without allow_empty=1. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14577,6 +14645,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Save would erase a non-empty body without allow_empty=1. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description If-Match ETag does not match the studio source files. */
             412: {
                 headers: {
@@ -14643,6 +14720,15 @@ export interface operations {
             };
             /** @description Profile or blog post not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Save would erase a non-empty body without allow_empty=1. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -20476,6 +20562,15 @@ export interface operations {
             };
             /** @description Profile or blog post not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Save would erase a non-empty body without allow_empty=1. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

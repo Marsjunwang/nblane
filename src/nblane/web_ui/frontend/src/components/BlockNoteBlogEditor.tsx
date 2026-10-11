@@ -194,16 +194,24 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
     const loadMarkdown = useCallback(
       (text: string, blocks: EditorBlocks) => {
         hydratingRef.current = true;
+        // Loading a document is not an edit: keep it out of the undo history,
+        // or Ctrl+Z right after opening a post undoes the load and the next
+        // autosave writes an empty post.
+        const replaceAll = (blocksToInsert: unknown[]) =>
+          editor.transact((tr: { setMeta: (key: string, value: unknown) => unknown }) => {
+            tr.setMeta('addToHistory', false);
+            editor.replaceBlocks(editor.document, blocksToInsert as never);
+          });
         try {
           let next: unknown[] = blocks;
           if (!next.length) next = parseMarkdownToEditorBlocks(editor, text || '');
           try {
-            editor.replaceBlocks(editor.document, next as never);
+            replaceAll(next);
           } catch (error) {
             // A stale/invalid sidecar must not block editing: fall back to
             // the Markdown, which is the publishing source of truth anyway.
             if (!blocks.length) throw error;
-            editor.replaceBlocks(editor.document, parseMarkdownToEditorBlocks(editor, text || '') as never);
+            replaceAll(parseMarkdownToEditorBlocks(editor, text || ''));
           }
           setLoadError('');
         } catch (error) {

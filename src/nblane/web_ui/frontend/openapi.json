@@ -841,6 +841,16 @@
       "default": false,
       "title": "Autopush",
       "type": "boolean"
+     },
+     "last_push_at": {
+      "default": "",
+      "title": "Last Push At",
+      "type": "string"
+     },
+     "push_error": {
+      "default": "",
+      "title": "Push Error",
+      "type": "string"
      }
     },
     "title": "BackupDataGitModel",
@@ -15424,6 +15434,16 @@
       },
       "description": "Profile or blog post not found."
      },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Save would erase a non-empty body without allow_empty=1."
+     },
      "412": {
       "content": {
        "application/json": {
@@ -15526,7 +15546,7 @@
     "summary": "Get Profile Content Blog"
    },
    "put": {
-    "description": "Conflict-safe save that cannot flip a post to ``published``.\n\nPublishing must go through ``.../publish`` so the readiness gate runs;\na plain save that asks for ``published`` on an unpublished post is 422.\n``autosave=1`` writes the files but skips the Git backup commit, so the\neditor's debounced saves do not produce a commit every few seconds; the\nnext explicit save (Ctrl/Cmd+S, leaving the editor) commits the diff.",
+    "description": "Conflict-safe save that cannot flip a post to ``published``.\n\nPublishing must go through ``.../publish`` so the readiness gate runs;\na plain save that asks for ``published`` on an unpublished post is 422.\n``autosave=1`` writes the files but skips the Git backup commit, so the\neditor's debounced saves do not produce a commit every few seconds; the\nnext explicit save (Ctrl/Cmd+S, leaving the editor) commits the diff.\nErasing a non-empty body is 409 ``empty_body_requires_confirm`` unless\n``allow_empty=1``. A stale ``If-Match`` whose body equals the files on\ndisk (a replayed save) succeeds without writing.",
     "operationId": "save_profile_content_blog_api_v1_profiles__name__content_blog__slug__put",
     "parameters": [
      {
@@ -15554,6 +15574,16 @@
       "schema": {
        "default": false,
        "title": "Autosave",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
+      "name": "allow_empty",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Allow Empty",
        "type": "boolean"
       }
      },
@@ -15624,6 +15654,16 @@
        }
       },
       "description": "Profile or blog post not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Save would erase a non-empty body without allow_empty=1."
      },
      "412": {
       "content": {
@@ -15730,6 +15770,16 @@
       },
       "description": "Profile or blog post not found."
      },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Save would erase a non-empty body without allow_empty=1."
+     },
      "412": {
       "content": {
        "application/json": {
@@ -15828,6 +15878,16 @@
        }
       },
       "description": "Profile or blog post not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Save would erase a non-empty body without allow_empty=1."
      },
      "412": {
       "content": {
@@ -16038,6 +16098,16 @@
       },
       "description": "Profile or blog post not found."
      },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Save would erase a non-empty body without allow_empty=1."
+     },
      "412": {
       "content": {
        "application/json": {
@@ -16138,6 +16208,16 @@
        }
       },
       "description": "Profile or blog post not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Save would erase a non-empty body without allow_empty=1."
      },
      "412": {
       "content": {
@@ -16260,6 +16340,16 @@
       },
       "description": "Profile or blog post not found."
      },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Save would erase a non-empty body without allow_empty=1."
+     },
      "412": {
       "content": {
        "application/json": {
@@ -16352,6 +16442,16 @@
        }
       },
       "description": "Profile or blog post not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Save would erase a non-empty body without allow_empty=1."
      },
      "412": {
       "content": {
@@ -24493,6 +24593,16 @@
        }
       },
       "description": "Profile or blog post not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Save would erase a non-empty body without allow_empty=1."
      },
      "412": {
       "content": {

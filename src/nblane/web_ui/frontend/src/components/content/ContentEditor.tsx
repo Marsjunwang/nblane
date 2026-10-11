@@ -51,10 +51,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import { containsDisplayMathBlock } from '../../blogBlocks/markdown.js';
-import { ifMatch } from '../../api/client';
+import { ApiError, ifMatch } from '../../api/client';
+import { SESSION_RESTORED_EVENT, isSessionExpired } from '../../api/session';
 import {
   contentBlogApiUrl,
   contentMediaUrl,
+  fetchContentPost,
   publicSitePreviewPageUrl,
   useCheckContentPost,
   useContentPost,
@@ -75,10 +77,16 @@ import {
   STATUS_COLORS,
   STATUS_LABELS,
   checkMessage,
+  clearLocalDraft,
   contentEditorPath,
   contentLibraryPath,
   draftFromPost,
   draftToSaveRequest,
+  erasesBody,
+  readLocalDraft,
+  sameDraftContent,
+  writeLocalDraft,
+  type LocalDraft,
   isMissingSummary,
   mediaSnippet,
   outlineFromBlocks,
@@ -95,10 +103,12 @@ import { PostSwitcher } from './PostSwitcher';
 import { useContentAIStatus, useContentWorkspace } from '../../api/hooks';
 
 type EditorMode = 'visual' | 'source' | 'preview';
-type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
+type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict' | 'empty';
 
 /** Idle time after the last keystroke before the draft is written. */
 const AUTOSAVE_DELAY_MS = 1500;
+/** Idle time before the draft is mirrored into localStorage. */
+const LOCAL_DRAFT_DELAY_MS = 500;
 /** keepalive fetch bodies are capped at 64 KiB by browsers. */
 const KEEPALIVE_MAX_BYTES = 60_000;
 
@@ -446,6 +456,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState('');
+  const [localCandidate, setLocalCandidate] = useState<LocalDraft | null>(null);
   const [revision, setRevision] = useState(0);
   const [checked, setChecked] = useState<{ result: StudioValidationResponse; revision: number } | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -472,68 +483,157 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const timerRef = useRef<number | undefined>(undefined);
   const loadedSlugRef = useRef('');
   const editorRef = useRef<BlockNoteBlogEditorHandle>(null);
+  // Body the server holds now: an edit that would erase it waits for consent.
+  const serverBodyRef = useRef('');
+  const emptyPendingRef = useRef(false);
+  const localTimerRef = useRef<number | undefined>(undefined);
+  // Draft of a save whose response never arrived: it may have landed.
+  const unknownSaveRef = useRef<PostDraft | null>(null);
 
   const isDirty = () => revisionRef.current !== savedRevisionRef.current;
+
+  const applyServerPost = useCallback(
+    (result: { post: Parameters<typeof draftFromPost>[0]; etag: string }) => {
+      loadedSlugRef.current = slug;
+      const next = draftFromPost(result.post);
+      draftRef.current = next;
+      etagRef.current = result.etag;
+      serverBodyRef.current = next.body;
+      emptyPendingRef.current = false;
+      unknownSaveRef.current = null;
+      setDraft(next);
+      const local = readLocalDraft(window.localStorage, profile, slug);
+      if (local && !sameDraftContent(local.draft, next)) setLocalCandidate(local);
+      else {
+        if (local) clearLocalDraft(window.localStorage, profile, slug);
+        setLocalCandidate(null);
+      }
+      setMode(containsDisplayMathBlock(next.body) ? 'source' : 'visual');
+      setOutline([]);
+      setActiveHeading('');
+      setEditorKey(`${slug}:${Date.now()}`);
+    },
+    [profile, slug],
+  );
 
   // Load the post once per mount (the page remounts this component per slug).
   useEffect(() => {
     const result = detail.data;
     if (!result || result.post.slug !== slug || loadedSlugRef.current === slug) return;
-    loadedSlugRef.current = slug;
-    const next = draftFromPost(result.post);
-    draftRef.current = next;
-    etagRef.current = result.etag;
-    setDraft(next);
-    setMode(containsDisplayMathBlock(next.body) ? 'source' : 'visual');
-    setOutline([]);
-    setActiveHeading('');
-    setEditorKey(`${slug}:${Date.now()}`);
+    applyServerPost(result);
     if ((location.state as { focusBody?: boolean } | null)?.focusBody) {
       window.setTimeout(() => editorRef.current?.focusStart(), 120);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.data, location.state, slug]);
 
+  const markSaved = (atRevision: number, autosave: boolean, etag: string, body: string) => {
+    etagRef.current = etag;
+    serverBodyRef.current = body;
+    savedRevisionRef.current = atRevision;
+    uncommittedRef.current = autosave;
+    setSavedAt(new Date());
+    setSaveError('');
+    setPreviewNonce((value) => value + 1);
+    if (!isDirty()) clearLocalDraft(window.localStorage, profile, slug);
+  };
+
   const runSave = useCallback(
-    async (autosave: boolean): Promise<boolean> => {
+    async (autosave: boolean, options: { allowEmpty?: boolean } = {}): Promise<boolean> => {
       window.clearTimeout(timerRef.current);
       if (conflictRef.current || !draftRef.current) return false;
-      if (inFlightRef.current) {
-        // Autosaves coalesce: the in-flight save reschedules itself when it
-        // finishes and edits are still pending. Explicit saves wait their turn.
+      // Saves run one at a time. Autosaves coalesce into the running one (it
+      // reschedules itself when edits are pending); explicit saves wait in
+      // turn, so a burst of Ctrl+S never sends parallel PUTs with one ETag.
+      while (inFlightRef.current) {
         if (autosave) return inFlightRef.current;
         await inFlightRef.current;
         if (conflictRef.current) return false;
       }
       if (!isDirty() && !(uncommittedRef.current && !autosave)) return true;
+      if (isSessionExpired()) {
+        setSaveState('error');
+        setSaveError('登录已过期，重新登录后会自动保存。');
+        return false;
+      }
+      const current = draftRef.current!;
+      if (!options.allowEmpty && erasesBody(current, serverBodyRef.current)) {
+        emptyPendingRef.current = true;
+        setSaveState('empty');
+        return false;
+      }
+      emptyPendingRef.current = false;
       const atRevision = revisionRef.current;
       setSaveState('saving');
       const promise = save
-        .mutateAsync({ slug, body: draftToSaveRequest(draftRef.current!), etag: etagRef.current, autosave })
-        .then((result) => {
-          etagRef.current = result.etag;
-          savedRevisionRef.current = atRevision;
-          uncommittedRef.current = autosave;
-          queryClient.setQueryData(['profiles', profile, 'content', 'post', slug], { post: result.post, etag: result.etag });
-          setSavedAt(new Date());
-          setSaveError('');
-          setPreviewNonce((value) => value + 1);
-          if (isDirty()) {
-            setSaveState('dirty');
-            timerRef.current = window.setTimeout(() => void runSave(true), AUTOSAVE_DELAY_MS);
-          } else {
-            setSaveState('saved');
-          }
-          return true;
+        .mutateAsync({
+          slug,
+          body: draftToSaveRequest(current),
+          etag: etagRef.current,
+          autosave,
+          allowEmpty: options.allowEmpty,
         })
-        .catch((error: unknown) => {
-          if (isConflictError(error)) {
-            conflictRef.current = true;
-            setSaveState('conflict');
-          } else {
+        .then(
+          (result) => {
+            unknownSaveRef.current = null;
+            markSaved(atRevision, autosave, result.etag, draftFromPost(result.post).body);
+            queryClient.setQueryData(['profiles', profile, 'content', 'post', slug], { post: result.post, etag: result.etag });
+            return true;
+          },
+          async (error: unknown) => {
+            if (isConflictError(error)) {
+              // The response to an earlier save may have been lost (dropped
+              // connection): if the server already holds exactly this draft,
+              // adopt its ETag and carry on instead of reporting a conflict.
+              try {
+                const server = await fetchContentPost(profile, slug);
+                const onServer = draftFromPost(server.post);
+                if (sameDraftContent(onServer, current)) {
+                  markSaved(atRevision, autosave, server.etag, onServer.body);
+                  queryClient.setQueryData(['profiles', profile, 'content', 'post', slug], server);
+                  return true;
+                }
+                const lost = unknownSaveRef.current;
+                if (lost && sameDraftContent(onServer, lost)) {
+                  // Our earlier save did land; newer edits are still pending.
+                  // Rebase on its ETag and save again (marked dirty, so the
+                  // follow-up below reschedules the autosave).
+                  unknownSaveRef.current = null;
+                  etagRef.current = server.etag;
+                  serverBodyRef.current = onServer.body;
+                  queryClient.setQueryData(['profiles', profile, 'content', 'post', slug], server);
+                  return true;
+                }
+              } catch {
+                // fall through to the conflict state
+              }
+              conflictRef.current = true;
+              setSaveState('conflict');
+              return false;
+            }
+            if (error instanceof ApiError && error.code === 'empty_body_requires_confirm') {
+              emptyPendingRef.current = true;
+              setSaveState('empty');
+              return false;
+            }
+            if (!(error instanceof ApiError)) unknownSaveRef.current = current;
             setSaveState('error');
-            setSaveError(errorText(error));
+            setSaveError(
+              error instanceof ApiError && error.status === 401 ? '登录已过期，重新登录后会自动保存。' : errorText(error),
+            );
+            return false;
+          },
+        )
+        .then((ok) => {
+          if (ok) {
+            if (isDirty()) {
+              setSaveState('dirty');
+              timerRef.current = window.setTimeout(() => void runSave(true), AUTOSAVE_DELAY_MS);
+            } else {
+              setSaveState('saved');
+            }
           }
-          return false;
+          return ok;
         })
         .finally(() => {
           inFlightRef.current = null;
@@ -545,6 +645,15 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
     [profile, queryClient, slug],
   );
 
+  // After re-login in the session modal, push what piled up meanwhile.
+  useEffect(() => {
+    const onRestored = () => {
+      if (isDirty() || uncommittedRef.current) void runSave(false);
+    };
+    window.addEventListener(SESSION_RESTORED_EVENT, onRestored);
+    return () => window.removeEventListener(SESSION_RESTORED_EVENT, onRestored);
+  }, [runSave]);
+
   const edit = useCallback(
     (patch: Partial<PostDraft>) => {
       if (!draftRef.current) return;
@@ -552,20 +661,31 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
       setDraft(draftRef.current);
       revisionRef.current += 1;
       setRevision(revisionRef.current);
+      window.clearTimeout(localTimerRef.current);
+      localTimerRef.current = window.setTimeout(() => {
+        if (draftRef.current && isDirty()) {
+          writeLocalDraft(window.localStorage, profile, slug, draftRef.current, etagRef.current);
+        }
+      }, LOCAL_DRAFT_DELAY_MS);
+      if (emptyPendingRef.current && draftRef.current.body.trim()) emptyPendingRef.current = false;
       if (conflictRef.current) return;
       setSaveState('dirty');
       window.clearTimeout(timerRef.current);
       timerRef.current = window.setTimeout(() => void runSave(true), AUTOSAVE_DELAY_MS);
     },
-    [runSave],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [profile, runSave, slug],
   );
 
   // Last-chance save when the tab closes or the user navigates elsewhere in
   // the app (rail links). keepalive lets the request outlive the page.
   const flushOnExit = useCallback(() => {
     window.clearTimeout(timerRef.current);
+    window.clearTimeout(localTimerRef.current);
     const current = draftRef.current;
-    if (!current || conflictRef.current || (!isDirty() && !uncommittedRef.current)) return;
+    if (!current || (!isDirty() && !uncommittedRef.current)) return;
+    if (isDirty()) writeLocalDraft(window.localStorage, profile, slug, current, etagRef.current);
+    if (conflictRef.current || isSessionExpired() || erasesBody(current, serverBodyRef.current)) return;
     let body = draftToSaveRequest(current);
     let payload = JSON.stringify(body);
     if (payload.length > KEEPALIVE_MAX_BYTES) {
@@ -608,14 +728,58 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   };
 
   const reloadFromServer = async () => {
+    window.clearTimeout(timerRef.current);
+    window.clearTimeout(localTimerRef.current);
+    let result;
+    try {
+      result = await fetchContentPost(profile, slug);
+    } catch (error) {
+      notifications.show({ color: 'red', title: '加载最新版本失败', message: errorText(error) });
+      return;
+    }
     conflictRef.current = false;
-    loadedSlugRef.current = '';
+    clearLocalDraft(window.localStorage, profile, slug);
     revisionRef.current = 0;
     savedRevisionRef.current = 0;
+    setRevision(0);
     uncommittedRef.current = false;
-    setEditorKey('');
+    queryClient.setQueryData(['profiles', profile, 'content', 'post', slug], result);
+    applyServerPost(result);
     setSaveState('saved');
-    await queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content', 'post', slug] });
+  };
+
+  // Conflict: keep this editor's text and overwrite the server copy.
+  const keepMine = async () => {
+    try {
+      const server = await fetchContentPost(profile, slug);
+      etagRef.current = server.etag;
+      serverBodyRef.current = draftFromPost(server.post).body;
+    } catch (error) {
+      notifications.show({ color: 'red', title: '无法读取最新版本', message: errorText(error) });
+      return;
+    }
+    conflictRef.current = false;
+    savedRevisionRef.current = -1;
+    await runSave(false);
+  };
+
+  const restoreLocalDraft = () => {
+    if (!localCandidate) return;
+    draftRef.current = localCandidate.draft;
+    setDraft(localCandidate.draft);
+    setMode(containsDisplayMathBlock(localCandidate.draft.body) ? 'source' : 'visual');
+    setEditorKey(`${slug}:${Date.now()}`);
+    revisionRef.current += 1;
+    setRevision(revisionRef.current);
+    setLocalCandidate(null);
+    setSaveState('dirty');
+    window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => void runSave(true), AUTOSAVE_DELAY_MS);
+  };
+
+  const discardLocalDraft = () => {
+    clearLocalDraft(window.localStorage, profile, slug);
+    setLocalCandidate(null);
   };
 
   const runCheck = useCallback(() => {
@@ -816,6 +980,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
     saving: '保存中…',
     error: '保存失败，将在下次修改时重试',
     conflict: '文章已在别处被修改',
+    empty: '正文已清空，等待确认',
   };
 
   const settings = (
@@ -875,7 +1040,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
         <Text
           visibleFrom="sm"
           size="xs"
-          c={saveState === 'error' || saveState === 'conflict' ? 'red' : 'dimmed'}
+          c={saveState === 'error' || saveState === 'conflict' || saveState === 'empty' ? 'red' : 'dimmed'}
           truncate
           data-testid="content-save-state"
         >
@@ -1008,10 +1173,47 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
       {saveState === 'conflict' && (
         <Box maw={columnWidth} mx="auto" px="md" pt="md">
           <Alert color="yellow" title="文章已在别处被修改" data-testid="conflict-alert">
-            <Text size="sm">自动保存已暂停，你的修改还在编辑器里。需要的话先复制内容，再加载最新版本。</Text>
-            <Button mt="xs" size="compact-sm" variant="default" leftSection={<IconRefresh size={14} />} onClick={() => void reloadFromServer()}>
-              加载最新版本（放弃本地修改）
-            </Button>
+            <Text size="sm">自动保存已暂停，你的修改还在编辑器里。可以保留你的版本覆盖服务器上的，或加载最新版本。</Text>
+            <Group gap="xs" mt="xs">
+              <Button size="compact-sm" variant="light" color="yellow" onClick={() => void keepMine()} data-testid="conflict-keep-mine">
+                保留我的版本
+              </Button>
+              <Button size="compact-sm" variant="default" leftSection={<IconRefresh size={14} />} onClick={() => void reloadFromServer()}>
+                加载最新版本（放弃本地修改）
+              </Button>
+            </Group>
+          </Alert>
+        </Box>
+      )}
+      {saveState === 'empty' && (
+        <Box maw={columnWidth} mx="auto" px="md" pt="md">
+          <Alert color="red" title="正文已被清空" data-testid="empty-body-alert">
+            <Text size="sm">服务器上的正文还在，自动保存已暂停。是误操作的话点「恢复正文」。</Text>
+            <Group gap="xs" mt="xs">
+              <Button size="compact-sm" variant="light" leftSection={<IconRefresh size={14} />} onClick={() => void reloadFromServer()}>
+                恢复正文
+              </Button>
+              <Button size="compact-sm" variant="subtle" color="red" onClick={() => void runSave(false, { allowEmpty: true })}>
+                确认保存为空白
+              </Button>
+            </Group>
+          </Alert>
+        </Box>
+      )}
+      {localCandidate && (
+        <Box maw={columnWidth} mx="auto" px="md" pt="md">
+          <Alert color="blue" title="发现未保存的本地草稿" data-testid="local-draft-alert">
+            <Text size="sm">
+              这台设备上有 {formatTime(new Date(localCandidate.savedAt))} 的修改没存到服务器（例如登录过期或页面被关掉）。
+            </Text>
+            <Group gap="xs" mt="xs">
+              <Button size="compact-sm" variant="light" onClick={restoreLocalDraft} data-testid="local-draft-restore">
+                恢复本地草稿
+              </Button>
+              <Button size="compact-sm" variant="subtle" color="gray" onClick={discardLocalDraft}>
+                丢弃
+              </Button>
+            </Group>
           </Alert>
         </Box>
       )}

@@ -22,7 +22,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       </Center>
     );
   }
-  if (me.isError) {
+  // A session that expires mid-use keeps the page mounted: the cached user
+  // stays, and SessionExpiredModal (AppLayout) asks for the password on top
+  // so unsaved work is not thrown away by a redirect.
+  if (me.isError && !me.data) {
     if (me.error instanceof ApiError && me.error.status === 401) {
       return <Navigate to="/login" state={{ from: location }} replace />;
     }

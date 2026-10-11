@@ -10,6 +10,7 @@ import {
   installUnauthorizedHandler,
   setUnauthorizedHandler,
 } from './client';
+import { SESSION_RESTORED_EVENT, isSessionExpired, markSessionRestored } from './session';
 
 afterEach(() => {
   setUnauthorizedHandler(undefined);
@@ -88,7 +89,7 @@ describe('api client', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('installUnauthorizedHandler resets a cached session exactly once per expiry', async () => {
+  it('installUnauthorizedHandler flags a mid-use expiry without dropping the user', async () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(['auth', 'me'], { id: 'u1', display_name: 'Admin' });
     installUnauthorizedHandler(queryClient);
@@ -98,14 +99,27 @@ describe('api client', () => {
     );
 
     await apiGet('/profiles').catch(() => undefined);
-    // The stale session was dropped so RequireAuth refetches and redirects.
-    expect(queryClient.getQueryData(['auth', 'me'])).toBeUndefined();
+    // The page stays mounted (cached user kept) and the login modal opens.
+    expect(queryClient.getQueryData(['auth', 'me'])).toEqual({ id: 'u1', display_name: 'Admin' });
+    expect(isSessionExpired()).toBe(true);
 
-    // A second 401 (the guard's refetch, or a failed login attempt) must not
-    // retrigger the reset — otherwise the handler would loop on itself.
-    queryClient.setQueryData(['auth', 'me'], undefined);
-    await apiGet('/profiles').catch(() => undefined);
-    expect(queryClient.getQueryState(['auth', 'me'])?.status).not.toBe('success');
+    const restored = vi.fn();
+    window.addEventListener(SESSION_RESTORED_EVENT, restored);
+    markSessionRestored();
+    window.removeEventListener(SESSION_RESTORED_EVENT, restored);
+    expect(isSessionExpired()).toBe(false);
+    expect(restored).toHaveBeenCalledTimes(1);
+  });
+
+  it('installUnauthorizedHandler leaves a 401 before login to RequireAuth', async () => {
+    const queryClient = new QueryClient();
+    installUnauthorizedHandler(queryClient);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(401, { detail: 'Authentication required' })),
+    );
+    await apiGet('/auth/me').catch(() => undefined);
+    expect(isSessionExpired()).toBe(false);
   });
 
   it('keeps Content-Type: application/json when init carries extra headers (If-Match)', async () => {

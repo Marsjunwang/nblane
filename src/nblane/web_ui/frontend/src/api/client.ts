@@ -6,6 +6,8 @@
 
 import type { QueryClient } from '@tanstack/react-query';
 
+import { markSessionExpired } from './session';
+
 const API_BASE = '/api/v1';
 
 /** Base path of the JSON API (same origin). Used by the SSE job stream. */
@@ -64,15 +66,16 @@ export function setUnauthorizedHandler(handler: (() => void) | undefined): void 
 }
 
 /**
- * Drop the cached session on any 401 so the RequireAuth guard refetches,
- * sees the 401 itself, and redirects to /login. Guarded on a *successful*
- * cached session: without it the refetch's own 401 (or a failed login
- * attempt on /login) would retrigger this handler in a loop.
+ * A 401 while a session was established means it expired mid-use: flag it
+ * (api/session.ts) so a login modal opens over the current page instead of
+ * navigating away and discarding unsaved edits. Guarded on a *successful*
+ * cached session, so a 401 before anyone logged in (or a failed login
+ * attempt on /login) still goes through RequireAuth's redirect.
  */
 export function installUnauthorizedHandler(queryClient: QueryClient): void {
   setUnauthorizedHandler(() => {
     if (queryClient.getQueryState(['auth', 'me'])?.status === 'success') {
-      void queryClient.resetQueries({ queryKey: ['auth', 'me'], exact: true });
+      markSessionExpired();
     }
   });
 }

@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   checkMessage,
+  clearLocalDraft,
   contentEditorPath,
   draftFromPost,
+  erasesBody,
+  readLocalDraft,
+  sameDraftContent,
+  writeLocalDraft,
   mediaSnippet,
   outlineFromBlocks,
   stripDuplicateTitle,
@@ -89,5 +94,46 @@ describe('outlineFromBlocks', () => {
       { id: 'a', level: 1, text: 'Intro' },
       { id: 'c', level: 2, text: 'Part A' },
     ]);
+  });
+});
+
+describe('local draft backup', () => {
+  function memoryStorage() {
+    const data = new Map<string, string>();
+    return {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => void data.set(key, value),
+      removeItem: (key: string) => void data.delete(key),
+    };
+  }
+
+  it('round-trips per profile and post, then clears', () => {
+    const storage = memoryStorage();
+    const draft = draftFromPost(post({ body: 'Unsaved text.' }));
+    writeLocalDraft(storage, 'alice', 'a/b', draft, 'W/"1"', 42);
+    expect(readLocalDraft(storage, 'alice', 'a/b')).toEqual({ draft, etag: 'W/"1"', savedAt: 42 });
+    expect(readLocalDraft(storage, 'bob', 'a/b')).toBeNull();
+    clearLocalDraft(storage, 'alice', 'a/b');
+    expect(readLocalDraft(storage, 'alice', 'a/b')).toBeNull();
+  });
+
+  it('ignores corrupt entries', () => {
+    const storage = memoryStorage();
+    storage.setItem('nblane.content.localDraft:alice/p', '{not json');
+    expect(readLocalDraft(storage, 'alice', 'p')).toBeNull();
+  });
+
+  it('compares saved content, not derived blocks', () => {
+    const a = draftFromPost(post({ body: 'Same.\n' }));
+    const b = { ...a, body: 'Same.', blocksJson: [{ id: 'x' }] };
+    expect(sameDraftContent(a, b)).toBe(true);
+    expect(sameDraftContent(a, { ...a, title: 'Other' })).toBe(false);
+  });
+
+  it('flags an edit that would erase the server body', () => {
+    const empty = draftFromPost(post({ body: '' }));
+    expect(erasesBody(empty, 'Server text')).toBe(true);
+    expect(erasesBody(empty, '  ')).toBe(false);
+    expect(erasesBody({ ...empty, body: 'x' }, 'Server text')).toBe(false);
   });
 });

@@ -150,3 +150,75 @@ export function wordCount(markdown: string): number {
   const latin = text.replace(/[㐀-鿿豈-﫿]/g, ' ').match(/[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*/g)?.length ?? 0;
   return cjk + latin;
 }
+
+// --- Local draft backup -----------------------------------------------------------
+//
+// The editor mirrors every edit into localStorage so a lost session, a
+// reload or a crashed tab never loses text the server has not seen yet.
+// The entry is dropped once the server holds the same content.
+
+export interface LocalDraft {
+  draft: PostDraft;
+  /** ETag of the server copy the edits were based on. */
+  etag: string;
+  savedAt: number;
+}
+
+const LOCAL_DRAFT_PREFIX = 'nblane.content.localDraft:';
+
+export function localDraftKey(profile: string, slug: string): string {
+  return `${LOCAL_DRAFT_PREFIX}${profile}/${slug}`;
+}
+
+export function writeLocalDraft(
+  storage: Pick<Storage, 'setItem'>,
+  profile: string,
+  slug: string,
+  draft: PostDraft,
+  etag: string,
+  now = Date.now(),
+): void {
+  try {
+    storage.setItem(localDraftKey(profile, slug), JSON.stringify({ draft, etag, savedAt: now } satisfies LocalDraft));
+  } catch {
+    // Quota exceeded or storage disabled: the server autosave still runs.
+  }
+}
+
+export function readLocalDraft(storage: Pick<Storage, 'getItem'>, profile: string, slug: string): LocalDraft | null {
+  try {
+    const raw = storage.getItem(localDraftKey(profile, slug));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LocalDraft;
+    if (!parsed || typeof parsed !== 'object' || !parsed.draft || typeof parsed.draft.body !== 'string') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearLocalDraft(storage: Pick<Storage, 'removeItem'>, profile: string, slug: string): void {
+  try {
+    storage.removeItem(localDraftKey(profile, slug));
+  } catch {
+    // ignore
+  }
+}
+
+/** True when two drafts would save the same post (blocks are derived). */
+export function sameDraftContent(a: PostDraft, b: PostDraft): boolean {
+  return (
+    a.title.trim() === b.title.trim() &&
+    a.date === b.date &&
+    a.status === b.status &&
+    a.summary.trim() === b.summary.trim() &&
+    a.cover.trim() === b.cover.trim() &&
+    a.tags.join('\n') === b.tags.join('\n') &&
+    a.body.trim() === b.body.trim()
+  );
+}
+
+/** True when saving *next* would erase a body the server still has. */
+export function erasesBody(next: PostDraft, serverBody: string): boolean {
+  return !next.body.trim() && serverBody.trim().length > 0;
+}

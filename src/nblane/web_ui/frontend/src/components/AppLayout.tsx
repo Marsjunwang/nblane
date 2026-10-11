@@ -22,6 +22,7 @@ import {
 import { NavLink as RouterNavLink, Link as RouterLink, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom';
 
 import { useAIExceptions, useLogout, useMe } from '../api/hooks';
+import { SessionExpiredModal } from '../auth/SessionExpiredModal';
 import { AIExceptionDrawer } from './AIExceptionDrawer';
 import { chrome } from '../theme';
 
@@ -295,6 +296,7 @@ export function AppLayout() {
           onClose={setExceptionsOpened.close}
         />
       )}
+      {authEnabled && <SessionExpiredModal />}
     </AppShell>
   );
 }
