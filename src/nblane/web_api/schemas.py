@@ -3060,6 +3060,10 @@ class BackupDataGitModel(BaseModel):
 
     autocommit: bool = False
     autopush: bool = False
+    # Last background push failure in this process ("" when the last push
+    # succeeded or none ran yet) and the time of the last successful push.
+    push_error: str = ""
+    last_push_at: str = ""
 
 
 class BackupStatusResponse(BaseModel):

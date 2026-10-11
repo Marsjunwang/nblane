@@ -161,6 +161,53 @@ class ContentWorkspaceApiTest(unittest.TestCase):
         )
         self.assertEqual(stale.status_code, 412)
 
+    def test_replayed_save_with_stale_etag_succeeds_without_writing(self) -> None:
+        slug, etag = self._create()
+        blocks = [{"id": "b1", "type": "paragraph", "props": {}, "content": [], "children": []}]
+        payload = {"title": "Hello", "body": "Saved once.\n", "blocks_json": blocks}
+        first = self.client.put(
+            f"/api/v1/profiles/alice/content/blog/{slug}",
+            json=payload,
+            headers={"If-Match": etag},
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        # The client never saw the first response and retries with the old ETag.
+        replay = self.client.put(
+            f"/api/v1/profiles/alice/content/blog/{slug}",
+            json=payload,
+            headers={"If-Match": etag},
+        )
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(replay.headers["ETag"], first.headers["ETag"])
+        # A different body with the stale ETag is still a real conflict.
+        stale = self.client.put(
+            f"/api/v1/profiles/alice/content/blog/{slug}",
+            json={**payload, "body": "Someone else's edit.\n"},
+            headers={"If-Match": etag},
+        )
+        self.assertEqual(stale.status_code, 412)
+
+    def test_erasing_a_non_empty_body_needs_allow_empty(self) -> None:
+        slug, etag = self._create(body="Keep me.")
+        blocked = self.client.put(
+            f"/api/v1/profiles/alice/content/blog/{slug}?autosave=1",
+            json={"body": "", "blocks_json": []},
+            headers={"If-Match": etag},
+        )
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertEqual(blocked.json()["code"], "empty_body_requires_confirm")
+        detail = self.client.get(f"/api/v1/profiles/alice/content/blog/{slug}").json()
+        self.assertEqual(detail["body"].strip(), "Keep me.")
+        allowed = self.client.put(
+            f"/api/v1/profiles/alice/content/blog/{slug}?allow_empty=1",
+            json={"body": "", "blocks_json": []},
+            headers={"If-Match": etag},
+        )
+        self.assertEqual(allowed.status_code, 200, allowed.text)
+        self.assertEqual(
+            self.client.get(f"/api/v1/profiles/alice/content/blog/{slug}").json()["body"].strip(), ""
+        )
+
     def test_autosave_writes_but_skips_git_backup(self) -> None:
         from nblane.core import git_backup
 

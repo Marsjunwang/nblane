@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-07
+last_verified: 2026-10-11
 source_of_truth: true
 ---
 
@@ -56,7 +56,7 @@ schemas/*.yaml
 auth/users.yaml
 ```
 
-生产通过 `NBLANE_ROOT` 把数据目录独立到 `/srv/nblane-data`。每次写入可由 `NBLANE_DATA_GIT_AUTOCOMMIT` / `NBLANE_DATA_GIT_AUTOPUSH` 自动提交 / 推送；设置 → 助手与备份另有每日推送到私有远端。Web API 用文件指纹 ETag + `If-Match`（412）做并发保护，写入持有 flock 边车锁。
+生产通过 `NBLANE_ROOT` 把数据目录独立到 `/srv/nblane-data`。每次写入可由 `NBLANE_DATA_GIT_AUTOCOMMIT` / `NBLANE_DATA_GIT_AUTOPUSH` 自动提交 / 推送。提交是同步的本地操作；Web 进程（8504 / 8502）的推送在后台线程进行，同一仓库的推送合并、限时 60 秒，失败原因显示在设置 → 助手与备份，8504 启动时补推积压的提交；CLI 仍同步推送。设置 → 助手与备份另有每日推送到私有远端。Web API 用文件指纹 ETag + `If-Match`（412）做并发保护，写入持有 flock 边车锁。
 
 ### 2.1 文件职责
 

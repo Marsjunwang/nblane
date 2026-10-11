@@ -299,10 +299,57 @@ class GitActorMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] == "http":
-            user = _resolve_request_user(Request(scope))
-            git_backup.start_operation(user.id if user is not None else None)
-        await self.app(scope, receive, send)
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope)
+        user = _resolve_request_user(request)
+        git_backup.start_operation(user.id if user is not None else None)
+        renewal = _session_renewal_header(request) if user is not None else None
+        if renewal is None:
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_renewal(message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                # Login/logout/password routes set the cookie themselves.
+                if not any(
+                    name.lower() == b"set-cookie"
+                    and value.startswith(auth_core.AUTH_SESSION_COOKIE_NAME.encode() + b"=")
+                    for name, value in headers
+                ):
+                    headers.append(renewal)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_renewal)
+
+
+def _session_renewal_header(request: Request) -> tuple[bytes, bytes] | None:
+    """Fresh session cookie when the current one is past half its lifetime.
+
+    Sliding expiry: an owner who keeps using the app is never logged out in
+    the middle of writing; an idle session still expires after
+    ``SESSION_TTL_SECONDS``. Bearer-token requests are never renewed.
+    """
+    if not auth_core.auth_configured() or _bearer_token(request):
+        return None
+    cookie = request.cookies.get(auth_core.AUTH_SESSION_COOKIE_NAME, "")
+    if not cookie:
+        return None
+    try:
+        claims = _verify_token(cookie)
+    except HTTPException:
+        return None
+    if claims is None or claims.exp - int(time.time()) > SESSION_TTL_SECONDS // 2:
+        return None
+    scratch = Response()
+    _set_session_cookie(scratch, claims.user_id, session_version=claims.session_version)
+    for name, value in scratch.raw_headers:
+        if name.lower() == b"set-cookie":
+            return (b"set-cookie", value)
+    return None
 
 
 @router.post("/login", response_model=CurrentUser)

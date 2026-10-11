@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import importlib.metadata
 import logging
 import os
@@ -102,6 +103,7 @@ from nblane.core.models import (
     KanbanTodo,
 )
 from nblane.core.paths import REPO_ROOT
+from schemas.blocknote_doc import coerce_blocks
 from nblane.core.public_site import (
     BLOG_DIRNAME,
     BLOG_TAXONOMY_FILENAME,
@@ -6950,6 +6952,10 @@ STUDIO_MUTATION_RESPONSES = {
         "model": ErrorResponse,
         "description": "Profile or blog post not found.",
     },
+    409: {
+        "model": ErrorResponse,
+        "description": "Save would erase a non-empty body without allow_empty=1.",
+    },
     412: {
         "model": ErrorResponse,
         "description": "If-Match ETag does not match the studio source files.",
@@ -7038,12 +7044,52 @@ def _require_post_status(value: str | None) -> str | None:
     return clean
 
 
+def _save_matches_post(post, body: StudioPostSaveRequest) -> bool:
+    """True when saving *body* would leave *post* exactly as it is on disk.
+
+    Compares only the fields the request carries (``None`` keeps the
+    current value). Blocks go through the same coercion the sidecar writer
+    applies, so a replay of the exact request compares equal.
+    """
+    meta = post.meta or {}
+    for key in ("title", "date", "status", "summary", "cover"):
+        value = getattr(body, key)
+        if value is not None and value.strip() != str(meta.get(key) or "").strip():
+            return False
+    for key in (
+        "tags",
+        "related_evidence",
+        "related_kanban",
+        "related_claims",
+        "related_sources",
+        "related_research_claims",
+        "related_citations",
+    ):
+        value = getattr(body, key)
+        if value is not None and _string_list(value) != _string_list(meta.get(key)):
+            return False
+    if body.body is not None and body.body.strip() != (post.body or "").strip():
+        return False
+    if body.blocks_json is not None:
+        sent = coerce_blocks(body.blocks_json)
+        current = [dict(block) for block in (post.blocks_json or [])]
+        if _canonical_json(sent) != _canonical_json(current):
+            return False
+    return True
+
+
+def _canonical_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
 def _save_blog_post(
     name: str,
     slug: str,
     body: StudioPostSaveRequest,
     response: Response,
     if_match: str | None = Header(default=None),
+    *,
+    allow_empty: bool = False,
 ) -> StudioPostMutationResponse | JSONResponse:
     """Save one blog post's front matter + Markdown body.
 
@@ -7057,6 +7103,18 @@ def _save_blog_post(
     post = _load_studio_post(pdir, slug)
     etag = _studio_post_etag(post)
     if not _if_match_satisfied(if_match, etag):
+        if _save_matches_post(post, body):
+            # A replay of a save that already landed (the client lost the
+            # response, e.g. a dropped mobile connection): nothing to write,
+            # hand back the current ETag instead of a false conflict. An
+            # explicit save still commits whatever autosaves left uncommitted
+            # (a no-op inside autosave's skip_changes()).
+            paths = [post.path] + ([post.sidecar_path] if post.sidecar_path else [])
+            git_backup.record_change(paths, action=f"update {pdir.name}/blog/{post.path.name}")
+            response.headers["ETag"] = etag
+            return StudioPostMutationResponse(
+                ok=True, post=_studio_post_detail(post), changed_paths=[]
+            )
         return _studio_error(
             412,
             "etag_mismatch",
@@ -7070,6 +7128,15 @@ def _save_blog_post(
         )
     meta = _apply_post_save(post.meta, body)
     text_body = post.body if body.body is None else body.body
+    if not allow_empty and not text_body.strip() and post.body.strip():
+        # Guard against an editor that lost its document (undo past the
+        # initial load, a failed hydrate) silently wiping the post.
+        return _studio_error(
+            409,
+            "empty_body_requires_confirm",
+            "Saving would erase the whole post body; confirm to save it empty.",
+            etag,
+        )
     try:
         path, changed = save_blog_post(
             pdir.name,
@@ -7374,6 +7441,7 @@ def save_profile_content_blog(
     response: Response,
     if_match: str | None = Header(default=None),
     autosave: bool = Query(default=False),
+    allow_empty: bool = Query(default=False),
 ) -> StudioPostMutationResponse | JSONResponse:
     """Conflict-safe save that cannot flip a post to ``published``.
 
@@ -7382,6 +7450,9 @@ def save_profile_content_blog(
     ``autosave=1`` writes the files but skips the Git backup commit, so the
     editor's debounced saves do not produce a commit every few seconds; the
     next explicit save (Ctrl/Cmd+S, leaving the editor) commits the diff.
+    Erasing a non-empty body is 409 ``empty_body_requires_confirm`` unless
+    ``allow_empty=1``. A stale ``If-Match`` whose body equals the files on
+    disk (a replayed save) succeeds without writing.
     """
     pdir = _resolve_profile(name)
     post = _load_studio_post(pdir, slug)
@@ -7397,8 +7468,10 @@ def save_profile_content_blog(
         )
     if autosave:
         with git_backup.skip_changes():
-            return _save_blog_post(name, slug, body, response, if_match)
-    return _save_blog_post(name, slug, body, response, if_match)
+            return _save_blog_post(
+                name, slug, body, response, if_match, allow_empty=allow_empty
+            )
+    return _save_blog_post(name, slug, body, response, if_match, allow_empty=allow_empty)
 
 
 @router.post(

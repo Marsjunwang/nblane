@@ -1,4 +1,11 @@
-"""Optional Git backup hook for file-backed nblane data."""
+"""Optional Git backup hook for file-backed nblane data.
+
+Commits are always local and synchronous so every recorded write has a
+history entry. Pushing is the slow part (a network round trip of seconds):
+long-lived web processes call :func:`enable_background_push` so a push runs
+on a worker thread, coalesced per repository, and a save request never
+waits on the network. CLI runs keep the synchronous push.
+"""
 
 from __future__ import annotations
 
@@ -7,9 +14,14 @@ from contextlib import contextmanager
 from collections.abc import Iterator
 import os
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
+
+GIT_TIMEOUT_SECONDS = 30
+PUSH_TIMEOUT_SECONDS = 60
 
 _actor_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "nblane_git_actor",
@@ -31,6 +43,8 @@ class GitBackupResult:
     error: str = ""
     push_error: str = ""
     commit_hash: str = ""
+    # The push was handed to the background worker (see push_status()).
+    push_queued: bool = False
 
     @property
     def has_warning(self) -> bool:
@@ -93,15 +107,116 @@ def _find_git_root(path: Path) -> Path | None:
     return None
 
 
-def _run_git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
-        cwd=repo,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
+def _run_git(
+    repo: Path,
+    args: list[str],
+    *,
+    timeout: float = GIT_TIMEOUT_SECONDS,
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            ["git", *args], 124, "", f"git {args[0]} timed out after {timeout:.0f}s"
+        )
+
+
+# --- background push ----------------------------------------------------------
+
+_background_push = False
+_push_lock = threading.Lock()
+_push_state: dict[str, dict[str, Any]] = {}
+
+
+def enable_background_push(root: Path | None = None) -> None:
+    """Push commits on a worker thread from now on (web processes only).
+
+    When *root* is a data repository and autopush is on, schedule one push
+    right away so commits left unpushed by a previous process (restart,
+    network outage) catch up.
+    """
+    global _background_push
+    _background_push = True
+    if root is None or not autopush_enabled():
+        return
+    repo = _find_git_root(root) if root.exists() else None
+    if repo is not None:
+        _schedule_push(repo)
+
+
+def disable_background_push() -> None:
+    """Return to synchronous pushes (test helper)."""
+    global _background_push
+    _background_push = False
+
+
+def push_status() -> dict[str, dict[str, Any]]:
+    """Per-repository state of the background pusher (for status pages)."""
+    with _push_lock:
+        return {
+            repo: {key: value for key, value in state.items() if key != "thread"}
+            for repo, state in _push_state.items()
+        }
+
+
+def wait_for_pushes(timeout: float = 10.0) -> bool:
+    """Block until no background push is running or pending (test helper)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with _push_lock:
+            busy = any(state.get("running") for state in _push_state.values())
+        if not busy:
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def _schedule_push(repo: Path) -> None:
+    """Ask for a push of *repo*; concurrent requests coalesce into one."""
+    key = str(repo)
+    with _push_lock:
+        state = _push_state.setdefault(key, {"running": False, "pending": False})
+        state["pending"] = True
+        if state["running"]:
+            return
+        state["running"] = True
+    worker = threading.Thread(
+        target=_push_worker, args=(repo,), name="nblane-git-push", daemon=True
     )
+    worker.start()
+
+
+def _push_worker(repo: Path) -> None:
+    key = str(repo)
+    while True:
+        with _push_lock:
+            state = _push_state[key]
+            if not state["pending"]:
+                state["running"] = False
+                return
+            state["pending"] = False
+        started = time.time()
+        try:
+            push = _run_git(repo, ["push"], timeout=PUSH_TIMEOUT_SECONDS)
+            error = "" if push.returncode == 0 else (push.stderr or push.stdout).strip()
+        except Exception as exc:  # never let the worker die with running=True
+            error = str(exc)
+        with _push_lock:
+            state = _push_state[key]
+            state["last_attempt_at"] = started
+            if error:
+                state["last_error"] = error[-500:]
+            else:
+                state["last_error"] = ""
+                state["last_ok_at"] = time.time()
 
 
 def _relative_paths(repo: Path, paths: Iterable[Path]) -> list[str]:
@@ -234,7 +349,17 @@ def record_change(
                 commit_hash=commit_hash,
             )
         )
-    push = _run_git(repo, ["push"])
+    if _background_push:
+        _schedule_push(repo)
+        return _append_result(
+            GitBackupResult(
+                enabled=True,
+                committed=True,
+                commit_hash=commit_hash,
+                push_queued=True,
+            )
+        )
+    push = _run_git(repo, ["push"], timeout=PUSH_TIMEOUT_SECONDS)
     if push.returncode != 0:
         return _append_result(
             GitBackupResult(

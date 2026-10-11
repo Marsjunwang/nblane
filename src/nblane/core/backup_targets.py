@@ -355,10 +355,25 @@ def target_status(target: BackupTarget) -> dict[str, Any]:
     return data
 
 
-def autocommit_flags() -> dict[str, bool]:
+def autocommit_flags() -> dict[str, Any]:
     from nblane.core import git_backup
 
-    return {"autocommit": git_backup.autocommit_enabled(), "autopush": git_backup.autopush_enabled()}
+    flags: dict[str, Any] = {
+        "autocommit": git_backup.autocommit_enabled(),
+        "autopush": git_backup.autopush_enabled(),
+        "push_error": "",
+        "last_push_at": "",
+    }
+    # Web processes push in the background; surface its last outcome so a
+    # failing push (network, key) is visible instead of silently piling up.
+    for state in git_backup.push_status().values():
+        if state.get("last_error"):
+            flags["push_error"] = str(state["last_error"])
+        if state.get("last_ok_at"):
+            flags["last_push_at"] = datetime.fromtimestamp(
+                float(state["last_ok_at"]), tz=timezone.utc
+            ).isoformat()
+    return flags
 
 
 def status() -> dict[str, Any]:

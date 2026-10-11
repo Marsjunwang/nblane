@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -86,7 +87,17 @@ _PAPER_LIBRARY_SEARCH_JOBS_LOCK = threading.Lock()
 _PAPER_LIBRARY_EVENT_JOBS: dict[str, dict[str, object]] = {}
 _PAPER_LIBRARY_EVENT_JOBS_LOCK = threading.Lock()
 
-app = FastAPI(title="nblane Paper Reader API")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Server startup: push data commits in the background, not per request."""
+    from nblane.core import git_backup
+
+    # No catch-up push here: the SPA backend owns that at its own startup.
+    git_backup.enable_background_push()
+    yield
+
+
+app = FastAPI(title="nblane Paper Reader API", lifespan=_lifespan)
 
 
 def _loopback_name(value: str) -> bool:

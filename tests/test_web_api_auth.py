@@ -303,6 +303,33 @@ class TestSessionsAndTokens(unittest.TestCase):
         self.assertEqual(other.get("/api/v1/auth/me").status_code, 401)
         self._login(password="brand-new-password")
 
+    def test_session_renews_after_half_its_lifetime(self) -> None:
+        from nblane.web_api.auth import SESSION_TTL_SECONDS
+
+        client = TestClient(self.app)
+        old = auth_core.mint_auth_session_token("admin", ttl_seconds=SESSION_TTL_SECONDS // 2 - 60)
+        client.cookies.set(auth_core.AUTH_SESSION_COOKIE_NAME, old)
+        response = client.get("/api/v1/auth/me")
+        self.assertEqual(response.status_code, 200)
+        renewed = response.cookies.get(auth_core.AUTH_SESSION_COOKIE_NAME)
+        self.assertTrue(renewed and renewed != old)
+        claims = auth_core.verify_auth_session_token(renewed)
+        self.assertGreater(claims.exp, auth_core.verify_auth_session_token(old).exp)
+
+        fresh = self._login()
+        response = fresh.get("/api/v1/auth/me")
+        self.assertIsNone(response.cookies.get(auth_core.AUTH_SESSION_COOKIE_NAME))
+
+    def test_renewal_keeps_session_version_revocation(self) -> None:
+        client = TestClient(self.app)
+        old = auth_core.mint_auth_session_token("admin", ttl_seconds=600)
+        client.cookies.set(auth_core.AUTH_SESSION_COOKIE_NAME, old)
+        self._edit_user("admin", session_version=1)
+        auth_core.clear_users_cache()
+        response = client.get("/api/v1/auth/me")
+        self.assertEqual(response.status_code, 401)
+        self.assertIsNone(response.cookies.get(auth_core.AUTH_SESSION_COOKIE_NAME))
+
     def test_logout_all(self) -> None:
         first = self._login()
         second = self._login()

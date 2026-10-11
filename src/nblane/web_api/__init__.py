@@ -12,6 +12,8 @@ Uvicorn entry point: ``nblane.web_api:app``.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
@@ -39,6 +41,16 @@ from nblane.web_api.workshop import router as workshop_router
 from nblane.web_api.workshop_terminal import router as workshop_terminal_router
 
 
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Server startup: push data commits in the background, not per request."""
+    from nblane.core import git_backup
+    from nblane.core.paths import REPO_ROOT
+
+    git_backup.enable_background_push(REPO_ROOT)
+    yield
+
+
 def create_app(
     *,
     login_rate_limiter: LoginRateLimiter | None = None,
@@ -52,7 +64,12 @@ def create_app(
         guard = Depends(agent_write_guard, scope="function")
     except TypeError:  # FastAPI < 0.121 has no dependency scope
         guard = Depends(agent_write_guard)
-    app = FastAPI(title="nblane API", version=app_version(), dependencies=[guard])
+    app = FastAPI(
+        title="nblane API",
+        version=app_version(),
+        dependencies=[guard],
+        lifespan=_lifespan,
+    )
     app.add_middleware(GitActorMiddleware)
     app.state.login_rate_limiter = login_rate_limiter or LoginRateLimiter()
     app.add_exception_handler(ApiError, api_error_handler)
