@@ -271,3 +271,21 @@ class TestCover(ContentAITestBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_suggest_social_copy_parses_json_reply() -> None:
+    from unittest.mock import patch
+
+    from nblane.core import content_ai
+
+    reply = (
+        '{"cover_titles": ["30岁，\\n失业了"], "cover_subtitles": ["做有价值的事"], '
+        '"xhs_title": "30岁失业", "xhs_body": "第一段\\n\\n#成长", "x_text": "一句话"}'
+    )
+    with patch("nblane.core.content_ai.llm_client.is_configured", return_value=True), patch(
+        "nblane.core.content_ai.llm_client.chat", return_value=reply
+    ):
+        result = content_ai.suggest_social_copy(title="随笔", body="正文" * 40)
+    assert result["cover_titles"] == ["30岁，\n失业了"]
+    assert result["xhs_title"] == "30岁失业"
+    assert result["x_text"] == "一句话"

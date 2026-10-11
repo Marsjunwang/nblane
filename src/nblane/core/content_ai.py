@@ -210,6 +210,54 @@ def suggest_meta(*, title: str, summary: str, tags: list[str], body: str) -> dic
     return result
 
 
+# --- Share copy (Xiaohongshu / X) ---------------------------------------------
+
+_SOCIAL_SYSTEM = (
+    "你是社交平台文案助手。只依据给定的文章内容写文案，不编造文中没有的事实、数字或经历，"
+    "保持作者原本的语气，不要营销腔、不要堆砌感叹号和表情。只返回一个 JSON 对象，不要任何解释。"
+)
+_SOCIAL_TASK = (
+    "为这篇文章准备分享文案：\n"
+    '- "cover_titles"：3 个封面大标题备选，每个不超过 16 字，可用 \\n 分成 2–3 行；\n'
+    '- "cover_subtitles"：3 句封面引文备选，优先摘取原文里最打动人的一句，不超过 40 字；\n'
+    '- "xhs_title"：小红书笔记标题，不超过 20 字；\n'
+    '- "xhs_body"：小红书正文，200–500 字，分 2–4 段，结尾附 3–5 个话题标签（#标签）；\n'
+    '- "x_text"：X（Twitter）单条推文，不超过 120 个汉字，不带链接和话题标签。\n'
+    '输出格式：{"cover_titles": [...], "cover_subtitles": [...], "xhs_title": "", "xhs_body": "", "x_text": ""}'
+)
+_SOCIAL_BODY_CHARS = 8000
+
+
+def suggest_social_copy(*, title: str, body: str) -> dict[str, Any]:
+    """Return cover title/quote candidates plus Xiaohongshu and X copy."""
+    text = _clean(body)
+    if len(text) < 40:
+        raise ContentAIError("invalid_content_ai_request", "正文太短，先写一些内容再生成文案。")
+    _require_llm()
+    user = "\n\n".join(
+        part
+        for part in (
+            _SOCIAL_TASK,
+            f"文章标题：{_clean(title)}" if _clean(title) else "",
+            f"正文：\n{_trim(text, _SOCIAL_BODY_CHARS)}",
+        )
+        if part
+    )
+    data = extract_json_value(_chat(_SOCIAL_SYSTEM, user, temperature=0.6, thinking=False))
+    if not isinstance(data, dict):
+        raise ContentAIError("content_ai_failed", "模型返回格式不正确，请重试。")
+    result = {
+        "cover_titles": _string_list(data.get("cover_titles"), limit=3, max_len=60),
+        "cover_subtitles": _string_list(data.get("cover_subtitles"), limit=3, max_len=120),
+        "xhs_title": _trim(_clean(data.get("xhs_title")), 40),
+        "xhs_body": _trim(_clean(data.get("xhs_body")), 2000),
+        "x_text": _trim(_clean(data.get("x_text")), 1000),
+    }
+    if not (result["cover_titles"] or result["xhs_body"] or result["x_text"]):
+        raise ContentAIError("content_ai_failed", "模型没有给出可用的文案，请重试。")
+    return result
+
+
 # --- Cover images -------------------------------------------------------------
 
 

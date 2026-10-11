@@ -48,6 +48,7 @@ KIND_EVIDENCE_CRYSTALLIZE = "evidence-crystallize"
 KIND_CONTENT_REWRITE = "content-rewrite"
 KIND_CONTENT_META = "content-meta"
 KIND_CONTENT_COVER = "content-cover"
+KIND_CONTENT_SOCIAL = "content-social"
 KIND_CAREER_MATCH = "career-match"
 KIND_CAREER_TAILOR = "career-tailor"
 KIND_CAREER_STRUCTURE = "career-structure"
@@ -699,6 +700,18 @@ def _run_content_cover(profile: str, job_input: dict[str, Any], report: Callable
     return {"slug": slug, "candidates": rows}
 
 
+def _validate_content_social_input(job_input: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "title": _clean(job_input.get("title"))[:300],
+        "body": str(job_input.get("body") or "")[:200_000],
+    }
+
+
+def _run_content_social(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
+    report(phase="generating", message="AI 正在读全文并写分享文案。")
+    return _content_ai_call(lambda: content_ai.suggest_social_copy(**job_input))
+
+
 _KINDS[KIND_CONTENT_REWRITE] = JobKind(
     name=KIND_CONTENT_REWRITE,
     validate=_validate_content_rewrite_input,
@@ -715,6 +728,15 @@ _KINDS[KIND_CONTENT_META] = JobKind(
     queued_message="Queued title/summary suggestions.",
     timeout_seconds=120,
     timeout_message="AI 建议超时（120 秒），请重试。",
+)
+
+_KINDS[KIND_CONTENT_SOCIAL] = JobKind(
+    name=KIND_CONTENT_SOCIAL,
+    validate=_validate_content_social_input,
+    run=_run_content_social,
+    queued_message="Queued share copy suggestions.",
+    timeout_seconds=150,
+    timeout_message="AI 文案超时（150 秒），请重试。",
 )
 
 _KINDS[KIND_CONTENT_COVER] = JobKind(

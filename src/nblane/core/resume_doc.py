@@ -708,14 +708,29 @@ def find_chromium() -> str:
 
 def render_resume_pdf(page_html: str, *, timeout: float = 60.0) -> bytes:
     """Print *page_html* to an A4 PDF with headless Chromium."""
+    return print_html_to_pdf(page_html, scratch_name="resume-pdf", timeout=timeout)
+
+
+def print_html_to_pdf(
+    page_html: str,
+    *,
+    scratch_name: str,
+    extra_args: tuple[str, ...] = (),
+    timeout: float = 60.0,
+) -> bytes:
+    """Print *page_html* to PDF with headless Chromium (page size from CSS).
+
+    *extra_args* go before the URL, e.g. ``--virtual-time-budget=…`` so a
+    page that lays itself out in script finishes before printing.
+    """
     binary = find_chromium()
     if not binary:
         raise ResumePdfUnavailable("未找到 Chromium，无法导出 PDF；可下载 HTML 后用浏览器打印。")
-    scratch = Path.home() / ".cache" / "nblane" / "resume-pdf"
+    scratch = Path.home() / ".cache" / "nblane" / scratch_name
     scratch.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=scratch) as tmp:
-        src = Path(tmp) / "resume.html"
-        out = Path(tmp) / "resume.pdf"
+        src = Path(tmp) / "page.html"
+        out = Path(tmp) / "page.pdf"
         src.write_text(page_html, encoding="utf-8")
         cmd = [
             binary,
@@ -723,6 +738,7 @@ def render_resume_pdf(page_html: str, *, timeout: float = 60.0) -> bytes:
             "--no-sandbox",
             "--disable-gpu",
             "--no-pdf-header-footer",
+            *extra_args,
             f"--print-to-pdf={out}",
             src.as_uri(),
         ]

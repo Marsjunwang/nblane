@@ -2124,6 +2124,53 @@ class ContentAIStatusResponse(BaseModel):
     cover: bool = False
 
 
+class SocialCardSettingsModel(BaseModel):
+    """Per-post share-card settings (``social-cards.yaml``)."""
+
+    theme: Literal["paper", "warm", "night"] = "paper"
+    kicker: str = Field(default="", max_length=40)
+    cover_title: str = Field(default="", max_length=80)
+    cover_subtitle: str = Field(default="", max_length=200)
+    cover_image: bool = False
+    signature: Literal["site", "custom", "none"] = "site"
+    signature_text: str = Field(default="", max_length=60)
+    end_card: Literal["thanks_url", "thanks", "none"] = "thanks"
+    site_url: str = Field(default="", max_length=200)
+    xhs_title: str = Field(default="", max_length=40)
+    xhs_body: str = Field(default="", max_length=2000)
+    x_text: str = Field(default="", max_length=1000)
+
+
+class SocialCardSettingsResponse(BaseModel):
+    """Saved share settings for one post plus what the editor needs."""
+
+    slug: str
+    settings: SocialCardSettingsModel
+    post_url: str = ""
+    published: bool = False
+    has_cover: bool = False
+    max_images: int = 18
+
+
+class SocialCardRenderRequest(BaseModel):
+    """Render the cards for one post with these settings (also saved)."""
+
+    slug: str = Field(min_length=1, max_length=300)
+    settings: SocialCardSettingsModel
+    allow_draft: bool = False
+
+
+class SocialCardRenderResponse(BaseModel):
+    """One rendered set: PNG URLs in order plus the zip download."""
+
+    key: str
+    count: int
+    images: list[str] = Field(default_factory=list)
+    pack_url: str = ""
+    warnings: list[str] = Field(default_factory=list)
+    settings: SocialCardSettingsModel
+
+
 class ContentCoverCandidateRequest(BaseModel):
     candidate_path: str = Field(min_length=1, max_length=500)
 

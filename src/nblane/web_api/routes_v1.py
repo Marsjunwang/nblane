@@ -44,6 +44,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 
 from nblane.core import agent_activity, agent_tasks, file_state
 from nblane.core import agent_journal, agent_policy
+from nblane.core import social_cards
 from nblane.core import career_ai, career_workspace, content_ai, content_workspace, git_backup, resume_doc, visual_candidate_store
 from nblane.core import public_console
 from nblane.core.file_lock import locked_profile_write
@@ -362,6 +363,10 @@ from nblane.web_api.schemas import (
     CareerWorkspaceResponse,
     ContentAIStatusResponse,
     ContentCoverCandidateRequest,
+    SocialCardRenderRequest,
+    SocialCardRenderResponse,
+    SocialCardSettingsModel,
+    SocialCardSettingsResponse,
     ContentCoverPromoteResponse,
     ContentMediaModel,
     ContentMediaUploadResponse,
@@ -7568,6 +7573,110 @@ def promote_profile_content_cover(name: str, slug: str, body: ContentCoverCandid
 def discard_profile_content_cover(name: str, body: ContentCoverCandidateRequest) -> dict[str, bool]:
     pdir = _resolve_profile(name)
     return {"ok": True, "removed": content_ai.discard_cover(pdir.name, body.candidate_path)}
+
+
+# --- Share cards (Xiaohongshu / X) ------------------------------------------
+#
+# The post slug travels as a query/body field: "/content/blog/{slug:path}"
+# already owns every path below a post.
+
+
+def _social_card_url(name: str, key: str, index: int) -> str:
+    return f"/api/v1/profiles/{quote(name)}/content/social/cards/{key}/{index}.png"
+
+
+@router.get(
+    "/profiles/{name}/content/social",
+    response_model=SocialCardSettingsResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_content_social(name: str, slug: str = Query(min_length=1, max_length=300)) -> SocialCardSettingsResponse:
+    """Saved share-card settings for one post (defaults when none yet)."""
+    pdir = _resolve_profile(name)
+    post = _load_studio_post(pdir, slug)
+    settings = social_cards.load_settings(pdir.name, post.route)
+    return SocialCardSettingsResponse(
+        slug=post.route,
+        settings=SocialCardSettingsModel(**settings),
+        post_url=social_cards.post_url(settings, post),
+        published=post.status == "published",
+        has_cover=bool(str(post.meta.get("cover") or "").strip()),
+        max_images=social_cards.XHS_MAX_IMAGES,
+    )
+
+
+@router.post(
+    "/profiles/{name}/content/social/render",
+    response_model=SocialCardRenderResponse,
+    responses={**ERROR_RESPONSES, 409: {"model": ErrorResponse, "description": "Draft post without allow_draft."}},
+    dependencies=PROFILE_DEPENDENCY,
+)
+def render_profile_content_social(name: str, body: SocialCardRenderRequest) -> SocialCardRenderResponse:
+    """Save the settings and render the post as 1080×1440 PNG cards.
+
+    Drafts are refused (409 ``social_post_draft``) unless ``allow_draft``:
+    cards are meant for posting outside, after the post is published.
+    Rendering is local (headless Chromium + PyMuPDF), ~1–3 s, cached.
+    """
+    pdir = _resolve_profile(name)
+    post = _load_studio_post(pdir, body.slug)
+    if post.status != "published" and not body.allow_draft:
+        raise ApiError(409, "social_post_draft", "这篇文章还是草稿；确认要导出草稿再生成。")
+    settings = social_cards.save_settings(pdir.name, post.route, body.settings.model_dump())
+    try:
+        result = social_cards.render_cards(pdir.name, post, settings)
+    except social_cards.SocialCardError as exc:
+        status = 503 if exc.code == "social_render_unavailable" else 422
+        raise ApiError(status, exc.code, exc.message) from exc
+    key = result["key"]
+    return SocialCardRenderResponse(
+        key=key,
+        count=result["count"],
+        images=[_social_card_url(pdir.name, key, i + 1) for i in range(result["count"])],
+        pack_url=(
+            f"/api/v1/profiles/{quote(pdir.name)}/content/social/cards/{key}/pack.zip"
+            f"?slug={quote(post.route)}"
+        ),
+        warnings=result["warnings"],
+        settings=SocialCardSettingsModel(**settings),
+    )
+
+
+@router.get(
+    "/profiles/{name}/content/social/cards/{key}/pack.zip",
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_content_social_pack(name: str, key: str, slug: str = Query(min_length=1, max_length=300)) -> Response:
+    """Zip of the rendered cards plus ``xiaohongshu.txt`` / ``x.txt``."""
+    pdir = _resolve_profile(name)
+    post = _load_studio_post(pdir, slug)
+    settings = social_cards.load_settings(pdir.name, post.route)
+    try:
+        data = social_cards.build_pack(pdir.name, key, settings, post_url=social_cards.post_url(settings, post))
+    except social_cards.SocialCardError as exc:
+        raise ApiError(404, exc.code, exc.message) from exc
+    filename = quote(f"{post.leaf_slug}-cards.zip")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
+
+
+@router.get(
+    "/profiles/{name}/content/social/cards/{key}/{index}.png",
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def get_profile_content_social_card(name: str, key: str, index: int) -> FileResponse:
+    """One rendered card PNG (1-based index)."""
+    pdir = _resolve_profile(name)
+    files = social_cards.card_files(pdir.name, key)
+    if index < 1 or index > len(files):
+        raise ApiError(404, "social_cards_not_found", "卡片已过期，请重新生成。")
+    return FileResponse(files[index - 1], media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
 
 
 # --- Career workspace --------------------------------------------------------

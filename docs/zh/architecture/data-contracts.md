@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-10
+last_verified: 2026-10-11
 source_of_truth: true
 ---
 
@@ -266,6 +266,7 @@ private profile facts
 - Blog front matter 可保存 `related_claims`、`related_sources`、`related_research_claims`、`related_citations`；发布校验会检查 accepted claim、research source visibility、promoted research claim 与 citation/chunk 断链。
 - Project update 草稿和 resume bullet 候选也可从 accepted claims 生成，并保留 `related_claims` / `evidence_refs` provenance；resume bullet 第一版只返回候选预览，不自动写入 `resume-source.yaml`。
 - 公开输出不直接渲染 claim/source/citation id；这些 refs 只用于 provenance、候选生成和发布前检查。
+- 分享卡片（小红书 / X）：`profiles/<name>/social-cards.yaml` 是 `{site_url, posts: {<blog route>: settings}}`，settings 字段为 `theme`（paper/warm/night）、`kicker`、`cover_title`、`cover_subtitle`、`cover_image`、`signature`（site/custom/none）、`signature_text`、`end_card`（thanks_url/thanks/none）、`site_url`、`xhs_title`、`xhs_body`、`x_text`。由 `core/social_cards.py` 读写，不改文章文件；PNG 只缓存在 `~/.cache/nblane/social-cards/`。默认只导出已发布文章，草稿需 `allow_draft`。
 
 ### Agent Journal 撤销日志
 
