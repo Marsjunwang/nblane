@@ -872,6 +872,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/content/social": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Content Social
+         * @description Saved share-card settings for one post (defaults when none yet).
+         */
+        get: operations["get_profile_content_social_api_v1_profiles__name__content_social_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/content/social/cards/{key}/pack.zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Content Social Pack
+         * @description Zip of the rendered cards plus ``xiaohongshu.txt`` / ``x.txt``.
+         */
+        get: operations["get_profile_content_social_pack_api_v1_profiles__name__content_social_cards__key__pack_zip_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/content/social/cards/{key}/{index}.png": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Content Social Card
+         * @description One rendered card PNG (1-based index).
+         */
+        get: operations["get_profile_content_social_card_api_v1_profiles__name__content_social_cards__key___index__png_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/content/social/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Render Profile Content Social
+         * @description Save the settings and render the post as 1080×1440 PNG cards.
+         *
+         *     Drafts are refused (409 ``social_post_draft``) unless ``allow_draft``:
+         *     cards are meant for posting outside, after the post is published.
+         *     Rendering is local (headless Chromium + PyMuPDF), ~1–3 s, cached.
+         */
+        post: operations["render_profile_content_social_api_v1_profiles__name__content_social_render_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/crystallize/apply": {
         parameters: {
             query?: never;
@@ -11238,6 +11322,138 @@ export interface components {
             updated: string;
         };
         /**
+         * SocialCardRenderRequest
+         * @description Render the cards for one post with these settings (also saved).
+         */
+        SocialCardRenderRequest: {
+            /**
+             * Allow Draft
+             * @default false
+             */
+            allow_draft: boolean;
+            settings: components["schemas"]["SocialCardSettingsModel"];
+            /** Slug */
+            slug: string;
+        };
+        /**
+         * SocialCardRenderResponse
+         * @description One rendered set: PNG URLs in order plus the zip download.
+         */
+        SocialCardRenderResponse: {
+            /** Count */
+            count: number;
+            /** Images */
+            images?: string[];
+            /** Key */
+            key: string;
+            /**
+             * Pack Url
+             * @default
+             */
+            pack_url: string;
+            settings: components["schemas"]["SocialCardSettingsModel"];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * SocialCardSettingsModel
+         * @description Per-post share-card settings (``social-cards.yaml``).
+         */
+        SocialCardSettingsModel: {
+            /**
+             * Cover Image
+             * @default false
+             */
+            cover_image: boolean;
+            /**
+             * Cover Subtitle
+             * @default
+             */
+            cover_subtitle: string;
+            /**
+             * Cover Title
+             * @default
+             */
+            cover_title: string;
+            /**
+             * End Card
+             * @default thanks
+             * @enum {string}
+             */
+            end_card: "thanks_url" | "thanks" | "none";
+            /**
+             * Kicker
+             * @default
+             */
+            kicker: string;
+            /**
+             * Signature
+             * @default site
+             * @enum {string}
+             */
+            signature: "site" | "custom" | "none";
+            /**
+             * Signature Text
+             * @default
+             */
+            signature_text: string;
+            /**
+             * Site Url
+             * @default
+             */
+            site_url: string;
+            /**
+             * Theme
+             * @default paper
+             * @enum {string}
+             */
+            theme: "paper" | "warm" | "night";
+            /**
+             * X Text
+             * @default
+             */
+            x_text: string;
+            /**
+             * Xhs Body
+             * @default
+             */
+            xhs_body: string;
+            /**
+             * Xhs Title
+             * @default
+             */
+            xhs_title: string;
+        };
+        /**
+         * SocialCardSettingsResponse
+         * @description Saved share settings for one post plus what the editor needs.
+         */
+        SocialCardSettingsResponse: {
+            /**
+             * Has Cover
+             * @default false
+             */
+            has_cover: boolean;
+            /**
+             * Max Images
+             * @default 18
+             */
+            max_images: number;
+            /**
+             * Post Url
+             * @default
+             */
+            post_url: string;
+            /**
+             * Published
+             * @default false
+             */
+            published: boolean;
+            settings: components["schemas"]["SocialCardSettingsModel"];
+            /** Slug */
+            slug: string;
+        };
+        /**
          * StarmapCategoryModel
          * @description One skill category (starmap sector band) with status counters.
          *
@@ -14857,6 +15073,258 @@ export interface operations {
             };
             /** @description Profile not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_profile_content_social_api_v1_profiles__name__content_social_get: {
+        parameters: {
+            query: {
+                slug: string;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialCardSettingsResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_profile_content_social_pack_api_v1_profiles__name__content_social_cards__key__pack_zip_get: {
+        parameters: {
+            query: {
+                slug: string;
+            };
+            header?: never;
+            path: {
+                name: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_profile_content_social_card_api_v1_profiles__name__content_social_cards__key___index__png_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                key: string;
+                index: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_profile_content_social_api_v1_profiles__name__content_social_render_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialCardRenderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialCardRenderResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Draft post without allow_draft. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

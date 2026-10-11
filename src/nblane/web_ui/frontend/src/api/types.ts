@@ -356,6 +356,11 @@ export type ContentMedia = Schemas['ContentMediaModel'];
 
 /** ContentAIStatusResponse from web_api/schemas.py (configured AI features). */
 export type ContentAIStatus = Schemas['ContentAIStatusResponse'];
+/** Share-card (Xiaohongshu / X) settings, info and render result. */
+export type SocialCardSettings = Schemas['SocialCardSettingsModel'];
+export type SocialCardSettingsResponse = Schemas['SocialCardSettingsResponse'];
+export type SocialCardRenderRequest = Schemas['SocialCardRenderRequest'];
+export type SocialCardRenderResponse = Schemas['SocialCardRenderResponse'];
 
 /** Result payloads of the content-* job kinds (web_api/jobs.py). */
 export interface ContentRewriteResult {

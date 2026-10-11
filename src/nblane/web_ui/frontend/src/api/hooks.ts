@@ -6,6 +6,9 @@ import type { QueryClient } from '@tanstack/react-query';
 import { ApiError, apiBase, apiDelete, apiDeleteWithHeaders, apiGet, apiGetWithHeaders, apiPatch, apiPatchWithHeaders, apiPost, apiPostWithHeaders, apiPostForm, apiPut, apiPutWithHeaders, ifMatch } from './client';
 import { markSessionRestored } from './session';
 import type {
+  SocialCardRenderRequest,
+  SocialCardRenderResponse,
+  SocialCardSettingsResponse,
   AccountCreate,
   AccountInfo,
   AccountPatch,
@@ -2200,6 +2203,29 @@ export function usePublishContentPost(profile: string) {
       return { post: data.post, etag: headers.get('ETag') ?? '' };
     },
     onSuccess: invalidate,
+  });
+}
+
+/** Share-card settings for one post (slug in the query: blog/{slug} owns the path). */
+export function useSocialCardSettings(profile: string, slug: string, enabled = true) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'content', 'social', slug],
+    queryFn: () =>
+      apiGet<SocialCardSettingsResponse>(
+        `/profiles/${encodeURIComponent(profile)}/content/social?slug=${encodeURIComponent(slug)}`,
+      ),
+    enabled: enabled && profile.length > 0 && slug.length > 0,
+  });
+}
+
+/** Save settings and render the cards (~1–3 s on the server). */
+export function useRenderSocialCards(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SocialCardRenderRequest) =>
+      apiPost<SocialCardRenderResponse>(`/profiles/${encodeURIComponent(profile)}/content/social/render`, body),
+    onSuccess: (_result, body) =>
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content', 'social', body.slug] }),
   });
 }
 

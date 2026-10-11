@@ -11346,6 +11346,201 @@
     "title": "SkillTreeSummary",
     "type": "object"
    },
+   "SocialCardRenderRequest": {
+    "description": "Render the cards for one post with these settings (also saved).",
+    "properties": {
+     "allow_draft": {
+      "default": false,
+      "title": "Allow Draft",
+      "type": "boolean"
+     },
+     "settings": {
+      "$ref": "#/components/schemas/SocialCardSettingsModel"
+     },
+     "slug": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Slug",
+      "type": "string"
+     }
+    },
+    "required": [
+     "slug",
+     "settings"
+    ],
+    "title": "SocialCardRenderRequest",
+    "type": "object"
+   },
+   "SocialCardRenderResponse": {
+    "description": "One rendered set: PNG URLs in order plus the zip download.",
+    "properties": {
+     "count": {
+      "title": "Count",
+      "type": "integer"
+     },
+     "images": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Images",
+      "type": "array"
+     },
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "pack_url": {
+      "default": "",
+      "title": "Pack Url",
+      "type": "string"
+     },
+     "settings": {
+      "$ref": "#/components/schemas/SocialCardSettingsModel"
+     },
+     "warnings": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+     }
+    },
+    "required": [
+     "key",
+     "count",
+     "settings"
+    ],
+    "title": "SocialCardRenderResponse",
+    "type": "object"
+   },
+   "SocialCardSettingsModel": {
+    "description": "Per-post share-card settings (``social-cards.yaml``).",
+    "properties": {
+     "cover_image": {
+      "default": false,
+      "title": "Cover Image",
+      "type": "boolean"
+     },
+     "cover_subtitle": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Cover Subtitle",
+      "type": "string"
+     },
+     "cover_title": {
+      "default": "",
+      "maxLength": 80,
+      "title": "Cover Title",
+      "type": "string"
+     },
+     "end_card": {
+      "default": "thanks",
+      "enum": [
+       "thanks_url",
+       "thanks",
+       "none"
+      ],
+      "title": "End Card",
+      "type": "string"
+     },
+     "kicker": {
+      "default": "",
+      "maxLength": 40,
+      "title": "Kicker",
+      "type": "string"
+     },
+     "signature": {
+      "default": "site",
+      "enum": [
+       "site",
+       "custom",
+       "none"
+      ],
+      "title": "Signature",
+      "type": "string"
+     },
+     "signature_text": {
+      "default": "",
+      "maxLength": 60,
+      "title": "Signature Text",
+      "type": "string"
+     },
+     "site_url": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Site Url",
+      "type": "string"
+     },
+     "theme": {
+      "default": "paper",
+      "enum": [
+       "paper",
+       "warm",
+       "night"
+      ],
+      "title": "Theme",
+      "type": "string"
+     },
+     "x_text": {
+      "default": "",
+      "maxLength": 1000,
+      "title": "X Text",
+      "type": "string"
+     },
+     "xhs_body": {
+      "default": "",
+      "maxLength": 2000,
+      "title": "Xhs Body",
+      "type": "string"
+     },
+     "xhs_title": {
+      "default": "",
+      "maxLength": 40,
+      "title": "Xhs Title",
+      "type": "string"
+     }
+    },
+    "title": "SocialCardSettingsModel",
+    "type": "object"
+   },
+   "SocialCardSettingsResponse": {
+    "description": "Saved share settings for one post plus what the editor needs.",
+    "properties": {
+     "has_cover": {
+      "default": false,
+      "title": "Has Cover",
+      "type": "boolean"
+     },
+     "max_images": {
+      "default": 18,
+      "title": "Max Images",
+      "type": "integer"
+     },
+     "post_url": {
+      "default": "",
+      "title": "Post Url",
+      "type": "string"
+     },
+     "published": {
+      "default": false,
+      "title": "Published",
+      "type": "boolean"
+     },
+     "settings": {
+      "$ref": "#/components/schemas/SocialCardSettingsModel"
+     },
+     "slug": {
+      "title": "Slug",
+      "type": "string"
+     }
+    },
+    "required": [
+     "slug",
+     "settings"
+    ],
+    "title": "SocialCardSettingsResponse",
+    "type": "object"
+   },
    "StarmapCategoryModel": {
     "description": "One skill category (starmap sector band) with status counters.\n\n``name`` is the server-provided zh display name (category id as fallback\nfor ids outside the known table).",
     "properties": {
@@ -16629,6 +16824,351 @@
      }
     },
     "summary": "Get Profile Content Media File"
+   }
+  },
+  "/api/v1/profiles/{name}/content/social": {
+   "get": {
+    "description": "Saved share-card settings for one post (defaults when none yet).",
+    "operationId": "get_profile_content_social_api_v1_profiles__name__content_social_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "maxLength": 300,
+       "minLength": 1,
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SocialCardSettingsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Content Social"
+   }
+  },
+  "/api/v1/profiles/{name}/content/social/cards/{key}/pack.zip": {
+   "get": {
+    "description": "Zip of the rendered cards plus ``xiaohongshu.txt`` / ``x.txt``.",
+    "operationId": "get_profile_content_social_pack_api_v1_profiles__name__content_social_cards__key__pack_zip_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "key",
+      "required": true,
+      "schema": {
+       "title": "Key",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "maxLength": 300,
+       "minLength": 1,
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Content Social Pack"
+   }
+  },
+  "/api/v1/profiles/{name}/content/social/cards/{key}/{index}.png": {
+   "get": {
+    "description": "One rendered card PNG (1-based index).",
+    "operationId": "get_profile_content_social_card_api_v1_profiles__name__content_social_cards__key___index__png_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "key",
+      "required": true,
+      "schema": {
+       "title": "Key",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "index",
+      "required": true,
+      "schema": {
+       "title": "Index",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Content Social Card"
+   }
+  },
+  "/api/v1/profiles/{name}/content/social/render": {
+   "post": {
+    "description": "Save the settings and render the post as 1080×1440 PNG cards.\n\nDrafts are refused (409 ``social_post_draft``) unless ``allow_draft``:\ncards are meant for posting outside, after the post is published.\nRendering is local (headless Chromium + PyMuPDF), ~1–3 s, cached.",
+    "operationId": "render_profile_content_social_api_v1_profiles__name__content_social_render_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SocialCardRenderRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SocialCardRenderResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Draft post without allow_draft."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Render Profile Content Social"
    }
   },
   "/api/v1/profiles/{name}/crystallize/apply": {

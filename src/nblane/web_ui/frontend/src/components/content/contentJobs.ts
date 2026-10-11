@@ -13,6 +13,7 @@ export type ContentJobKind =
   | 'content-rewrite'
   | 'content-meta'
   | 'content-cover'
+  | 'content-social'
   // Career workspace kinds share the same runner.
   | 'career-match'
   | 'career-tailor'

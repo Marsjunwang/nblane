@@ -44,6 +44,7 @@ import {
   IconRocket,
   IconRowInsertBottom,
   IconSearch,
+  IconShare,
   IconUpload,
 } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -100,6 +101,7 @@ import { AIRewriteDialog, type RewriteState } from './AIRewriteDialog';
 import { runContentJob, type ContentJobHandle } from './contentJobs';
 import { OutlinePanel } from './OutlinePanel';
 import { PostSwitcher } from './PostSwitcher';
+import { SocialShareDrawer } from './SocialShareDrawer';
 import { useContentAIStatus, useContentWorkspace } from '../../api/hooks';
 
 type EditorMode = 'visual' | 'source' | 'preview';
@@ -468,6 +470,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [activeHeading, setActiveHeading] = useState('');
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [rewrite, setRewrite] = useState<(RewriteState & { request: AIRewriteRequest }) | null>(null);
   const [rewriteView, setRewriteView] = useState<'diff' | 'edit'>('diff');
   const rewriteJobRef = useRef<ContentJobHandle<ContentRewriteResult> | null>(null);
@@ -1129,6 +1132,13 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
             <IconLayoutSidebarRight size={18} />
           </ActionIcon>
         </Tooltip>
+        {!published && (
+          <Tooltip label="发到小红书 / X">
+            <ActionIcon variant="subtle" color="gray" size="lg" aria-label="发到小红书 / X" onClick={() => setShareOpen(true)} data-testid="content-share-draft">
+              <IconShare size={18} />
+            </ActionIcon>
+          </Tooltip>
+        )}
         {published ? (
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>
@@ -1146,6 +1156,9 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
                 to={`/p/${encodeURIComponent(profile)}/public-build`}
               >
                 去公开站点发布
+              </Menu.Item>
+              <Menu.Item leftSection={<IconShare size={14} />} onClick={() => setShareOpen(true)} data-testid="content-share">
+                发到小红书 / X
               </Menu.Item>
               <Menu.Divider />
               <Menu.Item leftSection={<IconArrowBackUp size={14} />} onClick={() => void unpublish()}>
@@ -1409,6 +1422,17 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
         onAccept={acceptRewrite}
         onRetry={() => rewrite && startRewrite(rewrite.request)}
         onClose={closeRewrite}
+      />
+
+      <SocialShareDrawer
+        profile={profile}
+        slug={slug}
+        title={draft.title}
+        body={draft.body}
+        opened={shareOpen}
+        onClose={() => setShareOpen(false)}
+        aiText={aiText}
+        mobile={mobile}
       />
 
       <PostSwitcher
