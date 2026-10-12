@@ -2,7 +2,8 @@
 
 Commands:
     nblane setup [--yes ...]        First-run wizard (profile, AI, login)
-    nblane doctor [--online]        Check the environment, with fix hints
+    nblane doctor [--online] [--unit U]
+                                    Check the environment, with fix hints
     nblane init <name> [--schema S] Create a new profile
     nblane context <name> [--mode | --chat | --review | ...]
                                     Print agent system prompt
@@ -174,6 +175,12 @@ def main() -> None:
 
     p_doctor = sub.add_parser("doctor", help="Check the environment, with fix hints")
     p_doctor.add_argument("--online", action="store_true", help="Also make one small LLM call")
+    p_doctor.add_argument(
+        "--unit",
+        default=None,
+        metavar="NAME",
+        help="Check with a systemd unit's environment (e.g. nblane-web-api.service)",
+    )
 
     p_init = sub.add_parser(
         "init", help="Create a new profile"
@@ -1334,7 +1341,7 @@ def main() -> None:
     elif args.command == "doctor":
         from nblane.commands.setup import cmd_doctor
 
-        cmd_doctor(online=args.online)
+        cmd_doctor(online=args.online, unit=args.unit)
     elif args.command == "backup":
         from nblane.commands.backup import cmd_backup
 

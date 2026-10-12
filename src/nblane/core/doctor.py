@@ -9,8 +9,11 @@ Network probes (the LLM call) run only when asked for.
 from __future__ import annotations
 
 import os
+import re
+import shlex
 import shutil
 import socket
+import subprocess
 import sys
 import unicodedata
 from dataclasses import dataclass
@@ -188,9 +191,69 @@ def check_grobid() -> Check | None:
     return Check("GROBID", WARN, f"{url} 连不上，论文结构化会降级", "在「设置 → 本地服务」里安装或启动")
 
 
+UNIT_ENV_MARKER = "NBLANE_DOCTOR_UNIT"
+
+_ENV_FILE_RE = re.compile(r"(\S+) \(ignore_errors=(yes|no)\)")
+
+
+class UnitEnvError(RuntimeError):
+    """The systemd unit cannot be read."""
+
+
+def parse_unit_show(text: str) -> tuple[dict[str, str], list[tuple[str, bool]], str]:
+    """Parse ``systemctl show -p Environment -p EnvironmentFiles -p WorkingDirectory``.
+
+    Returns ``(environment, [(env_file, ignore_errors)], working_directory)``.
+    """
+    env: dict[str, str] = {}
+    files: list[tuple[str, bool]] = []
+    workdir = ""
+    for line in text.splitlines():
+        key, _sep, value = line.partition("=")
+        if key == "Environment" and value:
+            for item in shlex.split(value):
+                name, eq, val = item.partition("=")
+                if eq and name:
+                    env[name] = val
+        elif key == "EnvironmentFiles" and value:
+            files += [(path, flag == "yes") for path, flag in _ENV_FILE_RE.findall(value)]
+        elif key == "WorkingDirectory":
+            workdir = value
+    return env, files, workdir
+
+
+def unit_environment(unit: str) -> tuple[dict[str, str], str]:
+    """Environment a systemd unit's process gets, plus its working directory.
+
+    ``EnvironmentFile=`` values override ``Environment=``, as in systemd.
+    Values are never printed; only the doctor checks look at them.
+    """
+    if not shutil.which("systemctl"):
+        raise UnitEnvError("没有 systemctl")
+    args = ["systemctl", "show", unit, "-p", "LoadState", "-p", "Environment", "-p", "EnvironmentFiles", "-p", "WorkingDirectory"]
+    result = subprocess.run(args, capture_output=True, text=True, check=False)
+    if result.returncode != 0 or "LoadState=not-found" in result.stdout:
+        raise UnitEnvError(f"找不到 systemd 单元 {unit}")
+    env, files, workdir = parse_unit_show(result.stdout)
+    from dotenv import dotenv_values
+
+    for path, ignore_errors in files:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                values = dotenv_values(stream=handle)
+        except OSError as exc:
+            if ignore_errors:
+                continue
+            raise UnitEnvError(f"读不了 {path}：{exc.strerror}") from exc
+        env.update({key: value for key, value in values.items() if value is not None})
+    return env, workdir
+
+
 def run_checks(*, online: bool = False, ports: bool = True) -> list[Check]:
     """Run every check in display order."""
-    checks: list[Check] = [
+    unit = os.getenv(UNIT_ENV_MARKER, "").strip()
+    checks: list[Check] = [Check("服务环境", INFO, f"按 systemd 单元 {unit} 的环境检查")] if unit else []
+    checks += [
         check_python(),
         check_binary("git", "Git", required=True, purpose="数据备份和历史", hint="apt install git"),
         check_binary("tmux", "tmux", required=False, purpose="scripts/dev-web.sh 用它托管服务", hint="apt install tmux"),

@@ -61,6 +61,12 @@ cp .env.example .env      # 只在使用 AI 功能时填 LLM_API_KEY
 
 逐项列出 Python、Git、tmux、Chromium、Node、档案、`.env` 权限、AI 服务、登录配置、数据备份和端口。`✗` 必须修（退出码 1），`!` 是可选功能没就绪，每项后面给出修复命令。某个功能不能用时先跑它。
 
+服务器上的服务配置常写在 systemd 单元里（`Environment=`、`EnvironmentFile=`），普通 shell 看不到。这时用 `--unit` 按服务实际拿到的环境和工作目录来查，变量值不会打印：
+
+```bash
+.venv/bin/nblane doctor --unit nblane-web-api.service
+```
+
 CLI 自检：
 
 ```bash

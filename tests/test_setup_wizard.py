@@ -242,6 +242,62 @@ class TestDoctor:
         assert not any(check.name.startswith("端口") for check in checks)
 
 
+class TestUnitEnvironment:
+    SHOW = (
+        "LoadState=loaded\n"
+        'Environment=NBLANE_ROOT=/srv/data NBLANE_AUTH_FILE=/srv/data/auth/users.yaml "NO_PROXY=a,b c" EMPTY=\n'
+        "EnvironmentFiles={env} (ignore_errors=no) /missing.env (ignore_errors=yes)\n"
+        "WorkingDirectory=/srv/app\n"
+    )
+
+    def test_parse_unit_show(self):
+        env, files, workdir = doctor.parse_unit_show(self.SHOW.format(env="/srv/data/.env"))
+        assert env == {
+            "NBLANE_ROOT": "/srv/data",
+            "NBLANE_AUTH_FILE": "/srv/data/auth/users.yaml",
+            "NO_PROXY": "a,b c",
+            "EMPTY": "",
+        }
+        assert files == [("/srv/data/.env", False), ("/missing.env", True)]
+        assert workdir == "/srv/app"
+
+    def _fake_show(self, monkeypatch, stdout: str, returncode: int = 0):
+        import subprocess
+
+        monkeypatch.setattr(doctor.shutil, "which", lambda _name: "/usr/bin/systemctl")
+        monkeypatch.setattr(
+            doctor.subprocess,
+            "run",
+            lambda *a, **k: subprocess.CompletedProcess(a[0], returncode, stdout, ""),
+        )
+
+    def test_env_file_overrides_environment(self, tmp_path, monkeypatch):
+        env_file = tmp_path / "unit.env"
+        env_file.write_text("NBLANE_ROOT=/from/file\nLLM_MODEL=m\n", encoding="utf-8")
+        self._fake_show(monkeypatch, self.SHOW.format(env=env_file))
+        env, workdir = doctor.unit_environment("x.service")
+        assert env["NBLANE_ROOT"] == "/from/file"
+        assert env["LLM_MODEL"] == "m"
+        assert env["NBLANE_AUTH_FILE"] == "/srv/data/auth/users.yaml"
+        assert workdir == "/srv/app"
+
+    def test_required_env_file_missing_raises(self, tmp_path, monkeypatch):
+        self._fake_show(monkeypatch, self.SHOW.format(env=tmp_path / "nope.env"))
+        with pytest.raises(doctor.UnitEnvError):
+            doctor.unit_environment("x.service")
+
+    def test_unknown_unit_raises(self, monkeypatch):
+        self._fake_show(monkeypatch, "LoadState=not-found\n")
+        with pytest.raises(doctor.UnitEnvError):
+            doctor.unit_environment("nope.service")
+
+    def test_marker_adds_context_line(self, sandbox, monkeypatch):
+        monkeypatch.setenv(doctor.UNIT_ENV_MARKER, "x.service")
+        checks = doctor.run_checks(ports=False)
+        assert checks[0].name == "服务环境"
+        assert "x.service" in checks[0].detail
+
+
 def test_install_script_is_executable_shell():
     script = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
     text = script.read_text(encoding="utf-8")

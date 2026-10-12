@@ -21,9 +21,26 @@ LLM_PRESETS: dict[str, tuple[str, str, str]] = {
 }
 
 
-def cmd_doctor(*, online: bool) -> None:
-    """Print environment checks; exit 1 when something must be fixed."""
+def cmd_doctor(*, online: bool, unit: str | None = None) -> None:
+    """Print environment checks; exit 1 when something must be fixed.
+
+    With *unit*, re-run in a child process that has that systemd unit's
+    environment and working directory, so the checks see what the service
+    sees (module-level paths are fixed at import time).
+    """
+    import subprocess
+
     from nblane.core import doctor
+
+    if unit:
+        try:
+            unit_env, workdir = doctor.unit_environment(unit)
+        except doctor.UnitEnvError as exc:
+            print(f"✗ {exc}", file=sys.stderr)
+            sys.exit(1)
+        env = {**os.environ, **unit_env, doctor.UNIT_ENV_MARKER: unit}
+        args = [sys.executable, "-m", "nblane.cli", "doctor", *(["--online"] if online else [])]
+        sys.exit(subprocess.run(args, env=env, cwd=workdir or None, check=False).returncode)
 
     checks = doctor.run_checks(online=online)
     print(doctor.format_checks(checks))

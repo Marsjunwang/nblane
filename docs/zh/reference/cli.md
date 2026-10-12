@@ -13,7 +13,7 @@ source_of_truth: true
 
 ```bash
 nblane setup [--yes] [--profile NAME] [--llm PRESET] [--auth] ...   # 首次设置向导
-nblane doctor [--online]                # 环境检查，✗ 时退出码 1
+nblane doctor [--online] [--unit NAME]  # 环境检查，✗ 时退出码 1；--unit 按 systemd 服务的环境查
 ```
 
 参数和非交互用法见 [安装与配置](../guides/setup.md#安装)。
