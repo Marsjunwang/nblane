@@ -309,6 +309,51 @@ class TestDoneCrystallization(unittest.TestCase):
 
             self._run_with_profiles(tmp, go)
 
+    def test_apply_crystallization_leaves_uncovered_tasks_uncrystallized(self) -> None:
+        """A draft that skips a selected task applies the rest; the skipped one stays a candidate."""
+        from nblane.core import crystallize, profile_io
+        from nblane.core.kanban_io import render_kanban
+        from nblane.core.models import KanbanTask
+
+        with tempfile.TemporaryDirectory() as tmp_s:
+            tmp = Path(tmp_s)
+            pdir = self._make_profile(tmp)
+            (pdir / "kanban.md").write_text(
+                render_kanban(
+                    "dev",
+                    {
+                        "Done": [
+                            KanbanTask(title="Tuned latency", id="taskA", done=True),
+                            KanbanTask(title="Wrote notes", id="taskC", done=True),
+                        ]
+                    },
+                ),
+                encoding="utf-8",
+            )
+
+            def go():
+                patch = {
+                    "evidence_entries": [
+                        {"type": "practice", "title": "Latency work", "source_task_id": "taskA"},
+                    ]
+                }
+                result = crystallize.apply_crystallization("dev", patch, task_ids=["taskA", "taskC"])
+                self.assertTrue(result["ok"], result)
+                self.assertEqual(result["crystallized_count"], 1)
+                self.assertEqual([item["task_id"] for item in result["items"]], ["taskA"])
+                self.assertTrue(any("taskC" in w for w in result["warnings"]))
+                done = {t.id: t for t in crystallize.parse_kanban("dev")["Done"]}
+                self.assertTrue(done["taskA"].crystallized)
+                self.assertFalse(done["taskC"].crystallized)
+                rows = (profile_io.load_evidence_pool_raw("dev") or {}).get("evidence_entries") or []
+                self.assertEqual([row["kanban_refs"] for row in rows], [["kanban:taskA"]])
+
+                outside = {"evidence_entries": [{"type": "practice", "title": "X", "source_task_id": "zzz"}]}
+                failed = crystallize.apply_crystallization("dev", outside, task_ids=["taskC"])
+                self.assertFalse(failed["ok"])
+
+            self._run_with_profiles(tmp, go)
+
     def test_apply_crystallization_is_idempotent_on_retry(self) -> None:
         """Retrying the same task patch reuses evidence and leaves state stable."""
         from nblane.core import crystallize, profile_io

@@ -1,7 +1,7 @@
 ---
 status: active
 owner: product
-last_verified: 2026-10-09
+last_verified: 2026-10-12
 source_of_truth: true
 ---
 
@@ -44,7 +44,7 @@ source_of_truth: true
    - AI 草稿：后台运行并显示进度，会同时给出分量和技能建议。失败时可以重试，或改用规则草稿。
 3. 评级入库：勾选要保留的条目，确认或调整分量，查看原文快照和技能建议，点「入库并标记已结晶」。
 
-入库会一起写入 `evidence-pool.yaml`、`skill-tree.yaml`（技能关联）、`SKILL.md` 生成块和 `kanban.md`（任务标为已结晶），任一步失败整体回滚。结晶不会改技能境界，晋升在 [技能树](skill-tree.md) 由你确认。新证据进入「待评审」。
+入库会一起写入 `evidence-pool.yaml`、`skill-tree.yaml`（技能关联）、`SKILL.md` 生成块和 `kanban.md`（任务标为已结晶），任一步失败整体回滚。选中的任务里，没有对应证据的（AI 跳过了，或你取消勾选了它的条目）不会标为已结晶，入库后提示一下，仍留在「待结晶」。结晶不会改技能境界，晋升在 [技能树](skill-tree.md) 由你确认。新证据进入「待评审」。
 
 ## 评审：确认预填
 

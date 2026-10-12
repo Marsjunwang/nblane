@@ -20,6 +20,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
 import {
   IconArchive,
   IconCheck,
@@ -1048,7 +1049,17 @@ function CrystallizeWizard({
         allow_status_change: false,
       },
       {
-        onSuccess: () => {
+        onSuccess: (result) => {
+          // Tasks the draft skipped (or whose rows were unticked) stay in 待结晶.
+          const applied = new Set((result.items ?? []).map((item) => item.task_id));
+          const left = (draft.tasks ?? []).filter((task) => task.id && !applied.has(task.id));
+          if (left.length > 0) {
+            notifications.show({
+              color: 'yellow',
+              title: `${left.length} 个任务没有入库`,
+              message: `${left.map((task) => task.title || task.id).join('、')} 没有对应的证据，仍留在「待结晶」。`,
+            });
+          }
           onApplied();
           reset();
           onClose();

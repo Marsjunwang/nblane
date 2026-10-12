@@ -319,10 +319,13 @@ def apply_crystallization(
             )
             covered = set().union(*(task_source_refs(row) for row in filtered.evidence_entries))
             expected_refs = {kanban_ref(task.id) for task in tasks}
-            if covered != expected_refs:
-                raise ValueError(
-                    "Each selected task must have one separately attributed evidence row."
-                )
+            if not covered <= expected_refs:
+                raise ValueError("Evidence source tasks are outside the selection.")
+            # Tasks the draft skipped (or whose rows were unticked) are not
+            # marked crystallized; they stay in the candidate list.
+            for task in tasks:
+                if kanban_ref(task.id) not in covered:
+                    warnings.append(f"{task.id}: no evidence row; left uncrystallized.")
             if any(len(task_source_refs(row) & expected_refs) != 1 for row in filtered.evidence_entries):
                 raise ValueError(
                     "Each evidence row must reference exactly one selected source task."
