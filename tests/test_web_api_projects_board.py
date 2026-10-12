@@ -348,7 +348,9 @@ class TestProjectsBoardGet(ProjectsBoardTestBase):
         self.assertEqual(week[0]["date"], week_start.isoformat())
         by_date = {day["date"]: day for day in week}
         self.assertTrue(by_date[TODAY.isoformat()]["done"])
-        self.assertTrue(by_date[YESTERDAY.isoformat()]["done"])
+        # On Mondays yesterday belongs to last week and is not in the strip.
+        if YESTERDAY >= week_start:
+            self.assertTrue(by_date[YESTERDAY.isoformat()]["done"])
         if FIVE_DAYS_AGO >= week_start:
             self.assertTrue(by_date[FIVE_DAYS_AGO.isoformat()]["done"])
         for day in week:
