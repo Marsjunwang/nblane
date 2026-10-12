@@ -110,8 +110,11 @@ Design principles that shape all changes:
 
 ```bash
 # Setup (Python 3.11+)
+scripts/install.sh            # venv + pip install -e . + `nblane setup` wizard
+# or by hand:
 python3 -m venv .venv && .venv/bin/pip install -e .
 cp .env.example .env          # fill LLM_API_KEY only if using AI features
+nblane doctor [--online]      # environment check with fix hints
 
 # CLI smoke
 nblane init yourname

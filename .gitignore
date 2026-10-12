@@ -39,3 +39,7 @@ src/nblane/home_dashboard_component/frontend/playground/data/snapshot.json
 # Full CJK fonts are subsetting source material (download from GitHub releases); only subsets ship
 src/nblane/home_dashboard_component/frontend/playground/assets/fonts/I.Ming-*.ttf
 src/nblane/home_dashboard_component/frontend/playground/assets/fonts/LXGWWenKai-Regular.ttf
+
+# Real login accounts written by `nblane setup` / auth_store (password hashes)
+/auth/*
+!/auth/users.example.yaml

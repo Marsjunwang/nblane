@@ -1,6 +1,8 @@
 """nblane -- CLI entry point.
 
 Commands:
+    nblane setup [--yes ...]        First-run wizard (profile, AI, login)
+    nblane doctor [--online]        Check the environment, with fix hints
     nblane init <name> [--schema S] Create a new profile
     nblane context <name> [--mode | --chat | --review | ...]
                                     Print agent system prompt
@@ -138,6 +140,40 @@ def main() -> None:
     sub = parser.add_subparsers(
         dest="command", required=True
     )
+
+    p_setup = sub.add_parser(
+        "setup",
+        help="First-run wizard: profile, AI service, login, checks",
+    )
+    p_setup.add_argument("--profile", default=None, help="Profile to create")
+    p_setup.add_argument("--schema", default=None, metavar="NAME", help="Domain schema for a new profile")
+    p_setup.add_argument(
+        "--llm",
+        default=None,
+        metavar="PRESET",
+        help="dashscope | deepseek | openai | ollama | custom | skip",
+    )
+    p_setup.add_argument("--llm-base-url", default=None, help="Override the preset's base URL")
+    p_setup.add_argument("--llm-model", default=None, help="Override the preset's model")
+    p_setup.add_argument(
+        "--llm-key-env",
+        default=None,
+        metavar="VAR",
+        help="Read the API key from this environment variable (keeps it out of argv)",
+    )
+    p_setup.add_argument("--auth", action=argparse.BooleanOptionalAction, default=None, help="Turn on login")
+    p_setup.add_argument("--admin-user", default=None, help="Admin account id when turning on login")
+    p_setup.add_argument(
+        "--admin-password-env",
+        default=None,
+        metavar="VAR",
+        help="Read the admin password from this environment variable",
+    )
+    p_setup.add_argument("--test-llm", action=argparse.BooleanOptionalAction, default=None, help="Probe the LLM after saving")
+    p_setup.add_argument("--yes", "-y", action="store_true", help="Non-interactive: only do what the flags ask")
+
+    p_doctor = sub.add_parser("doctor", help="Check the environment, with fix hints")
+    p_doctor.add_argument("--online", action="store_true", help="Also make one small LLM call")
 
     p_init = sub.add_parser(
         "init", help="Create a new profile"
@@ -1275,6 +1311,30 @@ def main() -> None:
                     apply=args.apply,
                     prune=args.prune,
                 )
+    elif args.command == "setup":
+        from nblane.commands.setup import SetupOptions, cmd_setup
+
+        sys.exit(
+            cmd_setup(
+                SetupOptions(
+                    profile=args.profile,
+                    schema=args.schema,
+                    llm=args.llm,
+                    llm_base_url=args.llm_base_url,
+                    llm_model=args.llm_model,
+                    llm_key_env=args.llm_key_env,
+                    auth=args.auth,
+                    admin_user=args.admin_user,
+                    admin_password_env=args.admin_password_env,
+                    test_llm=args.test_llm,
+                    yes=args.yes,
+                )
+            )
+        )
+    elif args.command == "doctor":
+        from nblane.commands.setup import cmd_doctor
+
+        cmd_doctor(online=args.online)
     elif args.command == "backup":
         from nblane.commands.backup import cmd_backup
 

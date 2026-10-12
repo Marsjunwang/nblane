@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-07
+last_verified: 2026-10-12
 source_of_truth: true
 ---
 
@@ -13,6 +13,7 @@ source_of_truth: true
 
 - Python ≥ 3.11、Git。
 - tmux：`scripts/dev-web.sh` 用它托管开发服务。
+- Chromium（可选）：简历 PDF 和小红书 / X 分享卡片用 headless Chromium 打印；没有时这两项不可用。`npm run test:e2e:install` 装的 Playwright headless shell 会被优先使用，也可以用 `NBLANE_PDF_CHROMIUM` 指定。
 - Node.js 与 npm：只在重新构建 SPA 前端或跑浏览器 e2e 时需要。
 
 ## 安装
@@ -20,6 +21,30 @@ source_of_truth: true
 ```bash
 git clone <repo-url>
 cd nblane
+scripts/install.sh        # 建 .venv、pip install -e .，然后进入 nblane setup
+```
+
+`nblane setup` 是交互式向导，依次做四件事，每步都可以回车跳过：
+
+1. 档案：输入名字、选领域技能树，等于 `nblane init <name> --schema ...`。已有同名档案时不动它。
+2. AI 服务：选预设（百炼、DeepSeek、OpenAI、本机 Ollama 或自定义），Key 不回显，写进 `.env`（权限 600）。可以顺手测一次连接。
+3. 登录：要开就创建管理员（密码至少 10 位），写 `auth/users.yaml`（600，已 gitignore），并把 `NBLANE_AUTH_FILE` 和会话密钥 `NBLANE_READER_TOKEN_SECRET` 写进 `.env`。
+4. 环境检查：跑一遍 `nblane doctor`，打印启动命令。
+
+数据要放在代码目录以外时，先设置 `NBLANE_ROOT` 再运行向导。
+
+服务器上不方便交互时，用参数和 `--yes`；Key 和密码通过环境变量传，不出现在命令行里：
+
+```bash
+LLM_KEY=... ADMIN_PW=... .venv/bin/nblane setup --yes \
+  --profile alice --schema robotics-engineer \
+  --llm dashscope --llm-key-env LLM_KEY \
+  --auth --admin-user admin --admin-password-env ADMIN_PW
+```
+
+手动安装也可以：
+
+```bash
 python3 -m venv .venv
 .venv/bin/pip install -e .
 cp .env.example .env      # 只在使用 AI 功能时填 LLM_API_KEY
@@ -27,10 +52,18 @@ cp .env.example .env      # 只在使用 AI 功能时填 LLM_API_KEY
 
 依赖以 `pyproject.toml` 为准（`uv.lock` 锁定版本，`requirements.txt` 给 pip 用户镜像一份）。走 SOCKS 代理访问外部服务时需要 `httpx[socks]`，已包含在依赖里。
 
+## 环境自检
+
+```bash
+.venv/bin/nblane doctor            # 不联网
+.venv/bin/nblane doctor --online   # 再发一次很小的模型请求，确认 Key / 地址 / 代理
+```
+
+逐项列出 Python、Git、tmux、Chromium、Node、档案、`.env` 权限、AI 服务、登录配置、数据备份和端口。`✗` 必须修（退出码 1），`!` 是可选功能没就绪，每项后面给出修复命令。某个功能不能用时先跑它。
+
 CLI 自检：
 
 ```bash
-.venv/bin/nblane init <name>
 .venv/bin/nblane validate
 .venv/bin/nblane status
 ```
@@ -155,4 +188,4 @@ codex login
 
 ## 登录
 
-本机单人使用默认不登录。需要登录时准备 `auth/users.yaml`（示例 `auth/users.example.yaml`），密码哈希用 `nblane auth hash-password`，再用 `NBLANE_AUTH_FILE` 指向它。账号分本人（member）、助手服务账号（`agent: true`）和管理员（admin）。
+本机单人使用默认不登录。需要登录时最简单的是重新运行 `nblane setup` 开启；也可以手动准备 `auth/users.yaml`（示例 `auth/users.example.yaml`），密码哈希用 `nblane auth hash-password`，再用 `NBLANE_AUTH_FILE` 指向它。账号分本人（member）、助手服务账号（`agent: true`）和管理员（admin）。

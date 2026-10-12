@@ -1,13 +1,22 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-08
+last_verified: 2026-10-12
 source_of_truth: true
 ---
 
 # CLI 参考
 
 安装后入口为 `nblane <command> ...`。子命令以 `src/nblane/cli.py` 为准，`nblane <command> --help` 看完整参数。
+
+## 安装与自检
+
+```bash
+nblane setup [--yes] [--profile NAME] [--llm PRESET] [--auth] ...   # 首次设置向导
+nblane doctor [--online]                # 环境检查，✗ 时退出码 1
+```
+
+参数和非交互用法见 [安装与配置](../guides/setup.md#安装)。
 
 ## 档案
 
