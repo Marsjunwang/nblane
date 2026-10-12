@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -525,6 +526,13 @@ def _crystallize_friendly_error(err: str) -> str:
         or "llm not configured" in lowered
     ):
         return "未配置 LLM/AI 后端(请在设置页配置兼容 API 或 Codex);可改用规则草稿。"
+    missing_source = re.search(r"evidence_entries\[(\d+)\]\.source_task_id is required", text)
+    if missing_source:
+        index = int(missing_source.group(1)) + 1
+        return (
+            f"AI 草稿第 {index} 条证据没标明来自哪个任务;"
+            "选了多个任务时容易出现,可重试,或少选几个任务,或改用规则草稿。"
+        )
     if any(
         marker in lowered
         for marker in (

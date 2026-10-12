@@ -773,6 +773,13 @@ class TestCrystallizeJobKind(unittest.TestCase):
         self.assertIn("格式不符合结晶协议", schema)
         self.assertIn("格式不符合结晶协议", codex_json)
 
+    def test_friendly_error_names_entry_missing_source(self) -> None:
+        friendly = jobs_module._crystallize_friendly_error
+        text = friendly("crystallize_schema_error: $.evidence_entries[2].source_task_id is required")
+        self.assertIn("第 3 条证据", text)
+        self.assertIn("来自哪个任务", text)
+        self.assertIn("规则草稿", text)
+
     def test_runner_fails_when_selected_ai_backend_is_unavailable(self) -> None:
         """A missing selected backend fails; no implicit rule fallback occurs."""
         with tempfile.TemporaryDirectory() as tmp:

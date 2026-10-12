@@ -592,6 +592,39 @@ def _merge_warning_texts(*values: object) -> list[str]:
     return out
 
 
+def _backfill_source_task_ids(patch: dict[str, Any], done_tasks: list[Any]) -> None:
+    """Fill ``source_task_id`` on evidence rows the model left unattributed.
+
+    Models sometimes put the task under an alias (``source_task_ids``,
+    ``kanban_refs``, ``origin_ref``) or drop it entirely. Aliases naming one
+    selected task are copied over; with a single selected task there is only
+    one possible source. Rows still ambiguous are left alone so the schema
+    check rejects them rather than guessing an attribution.
+    """
+    from nblane.core.kanban_archive import kanban_ref_id
+
+    selected = [str(getattr(t, "id", "") or "").strip() for t in done_tasks]
+    selected = [task_id for task_id in selected if task_id]
+    rows = patch.get("evidence_entries")
+    if not isinstance(rows, list):
+        return
+    for row in rows:
+        if not isinstance(row, dict) or str(row.get("source_task_id") or "").strip():
+            continue
+        candidates: list[str] = []
+        aliases = row.get("source_task_ids")
+        candidates += [str(t) for t in aliases] if isinstance(aliases, list) else []
+        refs = row.get("kanban_refs")
+        candidates += [kanban_ref_id(str(r)) for r in refs] if isinstance(refs, list) else []
+        if row.get("origin_ref"):
+            candidates.append(kanban_ref_id(str(row["origin_ref"])))
+        matched = list(dict.fromkeys(c.strip() for c in candidates if c.strip() in selected))
+        if len(matched) == 1:
+            row["source_task_id"] = matched[0]
+        elif not matched and len(selected) == 1:
+            row["source_task_id"] = selected[0]
+
+
 def _run_crystallize_ingest(
     request: AIActionRequest,
     spec: AIActionSpec,
@@ -645,6 +678,7 @@ def _run_crystallize_ingest(
             run_id=run_id,
             error=error or "crystallize_draft_failed",
         )
+    _backfill_source_task_ids(patch, done_tasks)
     schema_error = validate_schema(patch, spec.schema or {})
     if schema_error:
         return AIActionResult(

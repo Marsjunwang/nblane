@@ -116,6 +116,50 @@ class TestAIGateway(unittest.TestCase):
         self.assertEqual(ingest.call_args.kwargs["timeout_seconds"], 12.0)
         self.assertEqual(ingest.call_args.kwargs["ai_backend"], "llm")
 
+    def _crystallize(self, tasks: list[str], entries: list[dict]):
+        spec = get_action_spec("evidence.crystallize")
+        request = AIActionRequest(
+            action="evidence.crystallize",
+            profile="alice",
+            payload={"done_tasks": [SimpleNamespace(id=t) for t in tasks]},
+        )
+        with patch(
+            "nblane.core.profile_ingest_llm.ingest_kanban_done_json",
+            return_value=({"evidence_entries": entries, "node_updates": []}, None),
+        ):
+            return DirectLLMBackend().run(request, spec)  # type: ignore[arg-type]
+
+    def test_crystallize_single_task_fills_missing_source(self) -> None:
+        result = self._crystallize(["task-1"], [{"title": "E"}])
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(result.structured["evidence_entries"][0]["source_task_id"], "task-1")
+
+    def test_crystallize_alias_fields_fill_source(self) -> None:
+        result = self._crystallize(
+            ["a", "b"],
+            [
+                {"title": "A", "kanban_refs": ["kanban:a"]},
+                {"title": "B", "source_task_ids": ["b"]},
+                {"title": "C", "origin_ref": "kanban:b"},
+            ],
+        )
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(
+            [row["source_task_id"] for row in result.structured["evidence_entries"]],
+            ["a", "b", "b"],
+        )
+
+    def test_crystallize_ambiguous_source_still_fails(self) -> None:
+        for entries in (
+            [{"title": "none"}],
+            [{"title": "both", "source_task_ids": ["a", "b"]}],
+            [{"title": "outside", "kanban_refs": ["kanban:zzz"]}],
+        ):
+            with self.subTest(entries=entries):
+                result = self._crystallize(["a", "b"], entries)
+                self.assertFalse(result.ok)
+                self.assertIn("evidence_entries[0].source_task_id is required", result.error)
+
     def test_crystallize_preference_selects_codex_and_model(self) -> None:
         """Profile action preferences choose Codex without a rule fallback."""
 
