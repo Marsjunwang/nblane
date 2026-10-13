@@ -686,6 +686,13 @@
       "default": 0,
       "title": "Total",
       "type": "integer"
+     },
+     "undelivered": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Undelivered",
+      "type": "array"
      }
     },
     "title": "AssistantAutomationsStatus",

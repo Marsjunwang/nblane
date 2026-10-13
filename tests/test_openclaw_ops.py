@@ -14,6 +14,7 @@ from nblane.core.openclaw_ops import (
     SEVERITY_WARNING,
     check_automations_in_sync,
     check_backup_schedule,
+    check_last_runs,
     check_gateway_port,
     check_linger,
     check_node_version,
@@ -420,3 +421,33 @@ class TestRunDoctor(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLastRuns(unittest.TestCase):
+    @staticmethod
+    def _job(name, *, enabled=True, mode="announce", run="ok", delivered="delivered"):
+        state = {"lastRunStatus": run} if run else {}
+        if delivered:
+            state["lastDeliveryStatus"] = delivered
+        return {"displayName": name, "enabled": enabled, "delivery": {"mode": mode}, "state": state}
+
+    def test_all_delivered_is_ok(self):
+        check = check_last_runs(live_jobs=[self._job("每日计划"), self._job("从没跑过", run="", delivered="")])
+        self.assertTrue(check.ok)
+        self.assertIn("1 个", check.detail)
+
+    def test_undelivered_and_failed_runs_warn(self):
+        check = check_last_runs(
+            live_jobs=[
+                self._job("每日计划", delivered="not-delivered"),
+                self._job("每周占卜", run="error"),
+                self._job("停用的", enabled=False, delivered="not-delivered"),
+                self._job("不推送的", mode="none", delivered="not-delivered"),
+            ]
+        )
+        self.assertFalse(check.ok)
+        self.assertEqual(check.severity, SEVERITY_WARNING)
+        self.assertIn("每日计划", check.detail)
+        self.assertIn("每周占卜", check.detail)
+        self.assertNotIn("停用的", check.detail)
+        self.assertNotIn("不推送的", check.detail)

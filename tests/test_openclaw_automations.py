@@ -763,6 +763,65 @@ class TestCmdAutomationsSync(unittest.TestCase):
         self.assertIn("list", runner.calls[0])
 
 
+class TestFailureAlert(unittest.TestCase):
+    ALERT_YAML = VALID_YAML.replace(
+        "    to: ${WEIXIN_OWNER_ID}\n",
+        "    to: ${WEIXIN_OWNER_ID}\n  failure_alert:\n    after: 1\n    cooldown: 6h\n",
+    )
+
+    def test_defaults_failure_alert_applies_to_push_jobs_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_tree(Path(tmp), self.ALERT_YAML, _default_prompts())
+            plan, weekly = load_automations_file(path, env=TEST_ENV)
+        self.assertEqual((plan.failure_alert_after, plan.failure_alert_cooldown), (1, "6h"))
+        # main-session jobs have no announce target to alert to
+        self.assertIsNone(weekly.failure_alert_after)
+
+    def test_bad_failure_alert_values_rejected(self) -> None:
+        for line, snippet in (
+            ("after: 1", "after: 0"),
+            ("cooldown: 6h", "cooldown: soon"),
+            ("after: 1", "bogus: 1"),
+        ):
+            bad = self.ALERT_YAML.replace(f"    {line}\n", f"    {snippet}\n")
+            with self.subTest(snippet=snippet), tempfile.TemporaryDirectory() as tmp:
+                path = _write_tree(Path(tmp), bad, _default_prompts())
+                with self.assertRaises(ValueError):
+                    load_automations_file(path, env=TEST_ENV)
+
+    def test_edit_argv_turns_off_best_effort_and_sets_alert(self) -> None:
+        spec = _spec(failure_alert_after=1, failure_alert_cooldown="6h")
+        argv = build_action_argv(ReconcileAction(ACTION_UPDATE, spec.key, "", spec, live_id="job-1"))
+        self.assertIn("--no-best-effort-deliver", argv)
+        self.assertNotIn("--best-effort-deliver", argv)
+        i = argv.index("--failure-alert-after")
+        self.assertEqual(argv[i + 1], "1")
+        self.assertEqual(argv[argv.index("--failure-alert-cooldown") + 1], "6h")
+
+    def test_add_argv_has_no_alert_flags(self) -> None:
+        spec = _spec(failure_alert_after=1)
+        argv = build_action_argv(ReconcileAction(ACTION_ADD, spec.key, "", spec))
+        self.assertFalse(any(a.startswith("--failure-alert") for a in argv))
+        self.assertNotIn("--best-effort-deliver", argv)
+
+    def test_without_alert_keeps_best_effort(self) -> None:
+        spec = _spec()
+        argv = build_action_argv(ReconcileAction(ACTION_UPDATE, spec.key, "", spec, live_id="job-1"))
+        self.assertIn("--best-effort-deliver", argv)
+        self.assertFalse(any(a.startswith("--failure-alert") for a in argv))
+
+    def test_drift_until_live_job_matches(self) -> None:
+        spec = _spec(failure_alert_after=1, failure_alert_cooldown="6h")
+        best_effort = _live_job(delivery={"mode": "announce", "channel": "openclaw-weixin", "to": "owner@im.wechat", "bestEffort": True})
+        plan = plan_reconcile([spec], [best_effort])
+        self.assertEqual(plan[0].kind, ACTION_UPDATE)
+        self.assertIn("failure_alert", plan[0].reason)
+        matched = _live_job(failureAlert={"after": 1, "cooldownMs": 21_600_000})
+        self.assertEqual(plan_reconcile([spec], [matched])[0].kind, ACTION_KEEP)
+        # Undeclared alerts never cause drift.
+        self.assertEqual(plan_reconcile([_spec()], [best_effort])[0].kind, ACTION_KEEP)
+
+
 class TestCliSmoke(unittest.TestCase):
     def _run(self, *argv: str) -> subprocess.CompletedProcess:
         return subprocess.run(

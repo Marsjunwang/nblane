@@ -1,7 +1,7 @@
 ---
 status: active
 owner: 王军
-last_verified: 2026-10-08
+last_verified: 2026-10-13
 source_of_truth: false
 ---
 
@@ -193,6 +193,20 @@ tools.message.crossContext = {allowAcrossProviders: true, marker: {enabled: true
 
 `nblane openclaw automations sync <profile> [--apply] [--prune]` 是可选手动工具：想把 `profiles/<name>/assistant/automations.yaml` 当声明维护时才用，只处理 `nblane:` 前缀的任务，默认 dry-run。参数见 [CLI 参考](../reference/cli.md#openclaw)。
 
+提示词里调 `nblane_api` 要写完整路径 `<workspace>/skills/bin/nblane_api`：它不在网关的 PATH 里，只写命令名时模型可能找不到，晨报就会报「nblane 暂不可达」。
+
+### 失败告警
+
+OpenClaw 把 best-effort 推送没送达的运行仍记为 `ok`，默认不告警。要告警时在 `automations.yaml` 的 `defaults` 或单个任务里加：
+
+```yaml
+failure_alert:
+  after: 1      # 连续失败几次后告警
+  cooldown: 6h  # 两次告警的最短间隔
+```
+
+sync 会把这类任务改成必须送达（`--no-best-effort-deliver`），并设好告警阈值和冷却。告警发到任务自己的推送目标，所以微信本身发不出去时告警也收不到；这种情况看「助手」页自动化卡片或 `nblane openclaw doctor` 的「上次没送到」。微信报 `sendMessage ret=-2 errmsg=prepare failed` 时，先给机器人发条消息刷新会话再重试。
+
 ## 模型
 
 - 新装默认复用 nblane 的 AI 连接（OpenAI 兼容自定义 provider `nblane`）。已有安装不改。
@@ -216,7 +230,7 @@ python3 -m unittest discover -s scripts/openclaw/skills/bin/tests -v   # 不访�
 nblane openclaw doctor [--profile <name>]
 ```
 
-只读检查：OpenClaw 版本、Node 版本、linger、`127.0.0.1:18789` 监听、openclaw-weixin 插件已启用、存在 OpenClaw 备份调度。任一 error 级失败退出码为 1。它不调用 `openclaw doctor`（那个会重启网关）。
+只读检查：OpenClaw 版本、Node 版本、linger、`127.0.0.1:18789` 监听、openclaw-weixin 插件已启用、存在 OpenClaw 备份调度，以及每个启用的推送任务上次是否送达（没送达只是警告，不影响退出码）。任一 error 级失败退出码为 1。它不调用 `openclaw doctor`（那个会重启网关）。
 
 ## 升级
 

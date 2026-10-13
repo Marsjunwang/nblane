@@ -93,8 +93,11 @@ _DEFAULTS_KEYS = {
     "session",
     "timeout_seconds",
     "deliver",
+    "failure_alert",
 }
 _DELIVER_KEYS = {"channel", "to"}
+_FAILURE_ALERT_KEYS = {"after", "cooldown"}
+_COOLDOWN_RE = re.compile(r"^(\d+)(m|h)$")
 _AUTOMATION_KEYS = {
     "key",
     "name",
@@ -106,6 +109,7 @@ _AUTOMATION_KEYS = {
     "fallbacks",
     "timeout_seconds",
     "deliver",
+    "failure_alert",
     "adopt",
 }
 _REQUIRED_ENTRY_KEYS = ("key", "cron", "prompt")
@@ -197,6 +201,10 @@ class AutomationSpec:
     deliver_to: str
     prompt_text: str
     adopted: bool = False
+    # Failure alert after N consecutive errors (None = leave OpenClaw's
+    # default and keep best-effort delivery); cooldown like "6h" / "30m".
+    failure_alert_after: int | None = None
+    failure_alert_cooldown: str = ""
 
 
 @dataclass(frozen=True)
@@ -330,6 +338,36 @@ def _parse_timeout(value: Any, where: str) -> int | None:
     return value
 
 
+def _parse_failure_alert(value: Any, where: str) -> tuple[int | None, str]:
+    """``{after: N, cooldown: "6h"}`` -> (N, "6h"); absent/false -> (None, "")."""
+
+    if value is None or value is False:
+        return None, ""
+    if not isinstance(value, dict):
+        raise ValueError(f"{where}: field 'failure_alert' must be a mapping or false")
+    _unknown_keys(value, _FAILURE_ALERT_KEYS, f"{where}.failure_alert")
+    after = value.get("after", 1)
+    if isinstance(after, bool) or not isinstance(after, int) or after < 1:
+        raise ValueError(f"{where}.failure_alert: 'after' must be a positive integer")
+    cooldown = value.get("cooldown", "")
+    cooldown = "" if cooldown is None else str(cooldown).strip()
+    if cooldown and not _COOLDOWN_RE.match(cooldown):
+        raise ValueError(
+            f"{where}.failure_alert: 'cooldown' must look like 30m or 6h, got {cooldown!r}"
+        )
+    return after, cooldown
+
+
+def cooldown_ms(cooldown: str) -> int | None:
+    """``"6h"`` -> 21600000; empty -> None."""
+
+    match = _COOLDOWN_RE.match(cooldown or "")
+    if not match:
+        return None
+    unit = 60_000 if match.group(2) == "m" else 3_600_000
+    return int(match.group(1)) * unit
+
+
 def _parse_adopt(value: Any, where: str) -> bool:
     if value is None:
         return False
@@ -457,6 +495,13 @@ def load_automations_file(
         fallbacks = _parse_fallbacks(merged.get("fallbacks"), where)
         timeout_seconds = _parse_timeout(merged.get("timeout_seconds"), where)
         channel, to = _parse_deliver(merged.get("deliver"), where)
+        alert_after, alert_cooldown = _parse_failure_alert(
+            merged.get("failure_alert"), where
+        )
+        if session == "main" or not channel:
+            # Alerts route to the job's announce target; main-session jobs
+            # have none (system events), so there is nothing to alert to.
+            alert_after, alert_cooldown = None, ""
         if session == "main":
             # OpenClaw 2026.9: main-session jobs are system events — the
             # gateway rejects announce delivery and silently drops the
@@ -482,6 +527,8 @@ def load_automations_file(
                 deliver_to=to,
                 prompt_text=prompt_text,
                 adopted=adopted,
+                failure_alert_after=alert_after,
+                failure_alert_cooldown=alert_cooldown,
             )
         )
     return specs
@@ -533,14 +580,24 @@ def _normalize_live_job(job: Mapping[str, Any]) -> dict[str, Any]:
 
     delivery = job.get("delivery")
     announce = False
+    best_effort = False
     channel = to = ""
     if isinstance(delivery, Mapping):
         mode = str(delivery.get("mode") or "").strip().lower()
         announce = mode == "announce" or delivery.get("announce") is True
+        best_effort = delivery.get("bestEffort") is True
         channel = str(delivery.get("channel") or "")
         to = str(delivery.get("to") or "")
     elif isinstance(delivery, str):
         announce = delivery.strip().lower() == "announce"
+    alert = job.get("failureAlert")
+    if isinstance(alert, Mapping) and alert.get("enabled", True) is not False:
+        after_raw = alert.get("after")
+        alert_after = after_raw if isinstance(after_raw, int) and not isinstance(after_raw, bool) else 1
+        cooldown_raw = alert.get("cooldownMs")
+        alert_cooldown_ms = cooldown_raw if isinstance(cooldown_raw, (int, float)) else None
+    else:
+        alert_after, alert_cooldown_ms = None, None
     channel = channel or str(job.get("channel") or "")
     to = to or str(job.get("to") or "")
 
@@ -568,6 +625,9 @@ def _normalize_live_job(job: Mapping[str, Any]) -> dict[str, Any]:
         else [],
         "timeout_seconds": timeout_raw if isinstance(timeout_raw, int) else None,
         "announce": announce,
+        "best_effort": best_effort,
+        "failure_alert_after": alert_after,
+        "failure_alert_cooldown_ms": alert_cooldown_ms,
         "channel": channel,
         "to": to,
         "message": str(
@@ -608,6 +668,15 @@ def _drifted_fields(spec: AutomationSpec, live: Mapping[str, Any]) -> list[str]:
         live["timeout_seconds"] != spec.timeout_seconds
     ):
         drifted.append("timeout_seconds")
+    if spec.failure_alert_after is not None and (
+        live.get("best_effort", False)
+        or live.get("failure_alert_after") != spec.failure_alert_after
+        or (
+            spec.failure_alert_cooldown
+            and live.get("failure_alert_cooldown_ms") != cooldown_ms(spec.failure_alert_cooldown)
+        )
+    ):
+        drifted.append("failure_alert")
     return drifted
 
 
@@ -698,7 +767,7 @@ def plan_reconcile(
 # -- apply -------------------------------------------------------------------
 
 
-def _spec_field_argv(spec: AutomationSpec) -> list[str]:
+def _spec_field_argv(spec: AutomationSpec, *, editing: bool = True) -> list[str]:
     argv = [
         "--cron",
         spec.cron,
@@ -726,14 +795,20 @@ def _spec_field_argv(spec: AutomationSpec) -> list[str]:
     if spec.deliver_channel and spec.session != "main":
         # 2026.9 rejects --announce on main-session jobs; a main-session
         # system event already lands in the owner's chat.
-        argv += [
-            "--announce",
-            "--best-effort-deliver",
-            "--channel",
-            spec.deliver_channel,
-            "--to",
-            spec.deliver_to,
-        ]
+        alerting = spec.failure_alert_after is not None
+        argv += ["--announce"]
+        if not alerting:
+            argv += ["--best-effort-deliver"]
+        elif editing:
+            # best-effort delivery suppresses failure alerts; `add` has no
+            # such flag and defaults to required delivery.
+            argv += ["--no-best-effort-deliver"]
+        argv += ["--channel", spec.deliver_channel, "--to", spec.deliver_to]
+        if alerting and editing:
+            # `add` takes no alert flags; the next sync edits them in.
+            argv += ["--failure-alert", "--failure-alert-after", str(spec.failure_alert_after)]
+            if spec.failure_alert_cooldown:
+                argv += ["--failure-alert-cooldown", spec.failure_alert_cooldown]
     if spec.session == "main":
         # 2026.9 rejects --message for main-session jobs; the payload must
         # arrive as a system event instead.
@@ -758,7 +833,7 @@ def build_action_argv(action: ReconcileAction) -> list[str] | None:
                 "add",
                 "--declaration-key",
                 action.key,
-                *_spec_field_argv(action.spec),
+                *_spec_field_argv(action.spec, editing=False),
             ]
         # 2026.9: `edit` targets the live job id positionally and does not
         # accept --declaration-key.

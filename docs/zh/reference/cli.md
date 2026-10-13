@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 source_of_truth: true
 ---
 
@@ -121,10 +121,10 @@ nblane openclaw automations sync <profile> [--apply] [--prune]   # 可选的手�
 nblane notify <text> [--dry-run]
 ```
 
-- `doctor`：只读体检。OpenClaw 版本、Node 版本（>=24.16 且 <25，或 >=26.1）、systemd linger、`127.0.0.1:18789` 监听、openclaw-weixin 插件已启用、存在备份调度。任一 error 级失败退出码 1。不调用 `openclaw doctor`（它会重启网关）。
+- `doctor`：只读体检。OpenClaw 版本、Node 版本（>=24.16 且 <25，或 >=26.1）、systemd linger、`127.0.0.1:18789` 监听、openclaw-weixin 插件已启用、存在备份调度、推送任务上次是否送达（警告级）。任一 error 级失败退出码 1。不调用 `openclaw doctor`（它会重启网关）。
 - `sync`：渲染只读档案语料到 `~/.openclaw/workspace/memory/nblane/`，把 `scripts/openclaw/skills/` 同步到工作区 `skills/`。会删除纳管目录里仓库已不存在的文件，其他技能树不碰；`skills/bin/nblane_api` 是生成物，不算多余。`--check` 不写文件，有漂移退出码 1。缺省 `--profile` 时用唯一存在的档案。
 - `install`：一键幂等安装，默认 dry-run。三步：技能与语料；安装 `weixin-task-bridge` 插件；profile 有 `assistant/openclaw.overlay.json5` 时经 `openclaw config patch --stdin` 应用（`${VAR}` 从环境替换，未设置即报错）。不注册 MCP，不碰定时任务。
-- `automations sync`：可选手动工具。定时任务归 OpenClaw 管，平时直接在 OpenClaw 里建和改。只有想把 `profiles/<profile>/assistant/automations.yaml` 当声明维护时才用：默认 dry-run 打印计划和命令，有新增或更新时退出码 1；`--apply` 执行 add / edit；`--apply --prune` 才删除声明里已移除的任务。只处理 `nblane:` 前缀的任务（或声明里标了 `adopt: true` 的），其他任务不碰。
+- `automations sync`：可选手动工具。定时任务归 OpenClaw 管，平时直接在 OpenClaw 里建和改。只有想把 `profiles/<profile>/assistant/automations.yaml` 当声明维护时才用：默认 dry-run 打印计划和命令，有新增或更新时退出码 1；`--apply` 执行 add / edit；`--apply --prune` 才删除声明里已移除的任务。只处理 `nblane:` 前缀的任务（或声明里标了 `adopt: true` 的），其他任务不碰。声明里写了 `failure_alert` 的任务改为必须送达并开启失败告警，见 [OpenClaw 运维](../guides/openclaw-ops.md#失败告警)。
 - `notify`：经 OpenClaw 入站 webhook 推消息到微信。地址 `NBLANE_OPENCLAW_HOOK_URL`（默认 `http://127.0.0.1:18789/hooks/agent`），token 只读 `NBLANE_OPENCLAW_HOOK_TOKEN`。`--dry-run` 只打印 URL 和 payload。
 
 运维背景见 [OpenClaw 运维](../guides/openclaw-ops.md)。

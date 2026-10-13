@@ -91,6 +91,25 @@ describe('AssistantPage', () => {
     expect(screen.getByText('共 3 条,启用 2 条')).toBeInTheDocument();
   });
 
+  it('lists jobs whose last run did not reach the chat', async () => {
+    stubFetch({
+      ...READY_PAYLOAD,
+      automations: { total: 3, enabled: 2, undelivered: ['每日计划：上次没有送达（not-delivered）'] },
+    });
+    renderWithProviders(<AssistantPage />, '/assistant');
+
+    expect(await screen.findByTestId('assistant-undelivered')).toBeInTheDocument();
+    expect(screen.getByText('每日计划：上次没有送达（not-delivered）')).toBeInTheDocument();
+  });
+
+  it('hides the undelivered alert when everything was delivered', async () => {
+    stubFetch(READY_PAYLOAD);
+    renderWithProviders(<AssistantPage />, '/assistant');
+
+    expect(await screen.findByText('共 3 条,启用 2 条')).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-undelivered')).not.toBeInTheDocument();
+  });
+
   it('links the console button to console_url in a new tab', async () => {
     stubFetch(READY_PAYLOAD);
     renderWithProviders(<AssistantPage />, '/assistant');

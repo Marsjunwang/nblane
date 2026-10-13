@@ -142,7 +142,7 @@ class TestAssistantProbes(unittest.TestCase):
             payload["gateway"], {"ready": True, "uptime_ms": 123456}
         )
         self.assertTrue(payload["mcp_nblane_registered"])
-        self.assertEqual(payload["automations"], {"total": 2, "enabled": 1})
+        self.assertEqual(payload["automations"], {"total": 2, "enabled": 1, "undelivered": []})
 
     def test_gateway_down_leaves_other_probes_intact(self) -> None:
         def down_http_get(url: str, timeout: float) -> FakeResponse:
@@ -157,7 +157,7 @@ class TestAssistantProbes(unittest.TestCase):
         )
         self.assertEqual(payload["version"], "openclaw 2026.9.4")
         self.assertTrue(payload["mcp_nblane_registered"])
-        self.assertEqual(payload["automations"], {"total": 2, "enabled": 1})
+        self.assertEqual(payload["automations"], {"total": 2, "enabled": 1, "undelivered": []})
 
     def test_automations_jobs_wrapped_shape(self) -> None:
         # OpenClaw 2026.9 wraps the list in a "jobs" key.
@@ -168,7 +168,7 @@ class TestAssistantProbes(unittest.TestCase):
         )
         with patch.dict(os.environ, {"NBLANE_AUTH_FILE": ""}):
             payload = client.get("/api/v1/system/assistant").json()
-        self.assertEqual(payload["automations"], {"total": 1, "enabled": 1})
+        self.assertEqual(payload["automations"], {"total": 1, "enabled": 1, "undelivered": []})
 
     def test_probe_timeouts_yield_null_fields(self) -> None:
         client = make_client(runner=make_runner(fail=True))

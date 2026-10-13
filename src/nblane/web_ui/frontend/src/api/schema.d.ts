@@ -4086,6 +4086,8 @@ export interface components {
              * @default 0
              */
             total: number;
+            /** Undelivered */
+            undelivered?: string[];
         };
         /**
          * AssistantChannelsStatus

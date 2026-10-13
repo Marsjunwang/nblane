@@ -14,6 +14,12 @@ defaults:
   deliver:
     channel: openclaw-weixin
     to: ${WEIXIN_OWNER_ID} # 微信 Owner 路由 ID，形态 <id>@im.wechat
+  # 失败告警（可选）：运行出错或没送达时往同一个聊天发告警，冷却期内不重复。
+  # 不写时送达按 best-effort 处理，失败不告警。main 会话任务没有推送目标，忽略此项。
+  # 新建任务时 OpenClaw 不接受告警参数，下一次 sync 会补上。
+  # failure_alert:
+  #   after: 1        # 连续失败几次后告警
+  #   cooldown: 6h    # 两次告警的最短间隔，如 30m / 6h
 automations:
   - key: nblane:daily-plan
     name: 每日计划

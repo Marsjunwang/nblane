@@ -302,9 +302,24 @@ export function AssistantPage() {
             <Text fw={500}>自动化</Text>
           </Group>
           {data.automations ? (
-            <Text size="sm" c="dimmed">
-              共 {data.automations.total} 条,启用 {data.automations.enabled} 条
-            </Text>
+            <Stack gap={6}>
+              <Text size="sm" c="dimmed">
+                共 {data.automations.total} 条,启用 {data.automations.enabled} 条
+              </Text>
+              {(data.automations.undelivered ?? []).length > 0 && (
+                <Alert color="yellow" variant="light" p="xs" data-testid="assistant-undelivered">
+                  <Text size="sm">上次没送到：</Text>
+                  {(data.automations.undelivered ?? []).map((item) => (
+                    <Text key={item} size="xs">
+                      {item}
+                    </Text>
+                  ))}
+                  <Text size="xs" c="dimmed" mt={4}>
+                    微信报 prepare failed 时，先给机器人发条消息再重试。
+                  </Text>
+                </Alert>
+              )}
+            </Stack>
           ) : (
             <Text size="sm" c="dimmed">
               未知

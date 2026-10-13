@@ -2,7 +2,8 @@
 
 Scripts the layered prerequisites from ``docs/zh/guides/openclaw-ops.md``
 and the deep-integration plan (§5.4): Node version, systemd linger, gateway
-port, WeChat plugin, backup schedule. The assistant reaches nblane over HTTP
+port, WeChat plugin, backup schedule, and whether the last run of each
+scheduled job actually reached its chat. The assistant reaches nblane over HTTP
 only, so MCP registration is no longer a prerequisite. Scheduled jobs are
 owned by OpenClaw; ``check_automations_in_sync`` stays available for the
 optional ``nblane openclaw automations sync`` tool but is not part of doctor.
@@ -377,6 +378,57 @@ def check_backup_schedule(
 # -- aggregate ---------------------------------------------------------------
 
 
+def _job_label(job: Mapping[str, Any]) -> str:
+    return str(
+        job.get("displayName") or job.get("declarationKey") or job.get("name") or job.get("id") or "?"
+    )
+
+
+def check_last_runs(
+    runner: Runner = run_command,
+    *,
+    live_jobs: Sequence[Mapping[str, Any]] | None = None,
+) -> DoctorCheck:
+    """Enabled announce jobs whose last run errored or was not delivered.
+
+    OpenClaw records a run as ``ok`` even when best-effort delivery failed,
+    so a silent WeChat outage only shows up in ``lastDeliveryStatus``.
+    """
+
+    if live_jobs is None:
+        try:
+            live_jobs = fetch_live_automations(runner)
+        except RuntimeError as exc:
+            return _check("last_runs", False, SEVERITY_WARNING, str(exc), "确认 Gateway 在运行后重试")
+    problems: list[str] = []
+    checked = 0
+    for job in live_jobs:
+        delivery = job.get("delivery")
+        if not job.get("enabled") or not isinstance(delivery, Mapping):
+            continue
+        if str(delivery.get("mode") or "").lower() != "announce":
+            continue
+        state = job.get("state") if isinstance(job.get("state"), Mapping) else {}
+        status = str(state.get("lastRunStatus") or job.get("lastRunStatus") or "")
+        if not status:
+            continue  # never ran yet
+        checked += 1
+        delivered = state.get("lastDeliveryStatus") or job.get("lastDeliveryStatus")
+        if status not in ("ok", "skipped"):
+            problems.append(f"{_job_label(job)}：上次运行 {status}")
+        elif delivered and delivered not in ("delivered", "not-requested"):
+            problems.append(f"{_job_label(job)}：上次没有送达（{delivered}）")
+    if problems:
+        return _check(
+            "last_runs",
+            False,
+            SEVERITY_WARNING,
+            "；".join(problems),
+            "openclaw automations runs <任务id> --limit 3 看原因；微信报 prepare failed 时先给机器人发条消息",
+        )
+    return _check("last_runs", True, SEVERITY_INFO, f"{checked} 个推送任务上次都已送达")
+
+
 def run_doctor(
     profile_name: str | None = None,
     *,
@@ -398,6 +450,7 @@ def run_doctor(
         check_gateway_port(connect=connect),
         check_weixin_plugin(runner),
         check_backup_schedule(runner, live_jobs=live_jobs),
+        check_last_runs(runner, live_jobs=live_jobs),
     ]
 
 

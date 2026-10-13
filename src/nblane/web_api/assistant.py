@@ -40,7 +40,7 @@ from typing import Any, Callable, Literal
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from nblane.core import openclaw_setup
+from nblane.core import openclaw_ops, openclaw_setup
 from nblane.web_api.auth import require_user
 
 PROBE_TIMEOUT_SECONDS = 5.0
@@ -66,6 +66,9 @@ class AssistantAutomationsStatus(BaseModel):
 
     total: int = 0
     enabled: int = 0
+    # Enabled chat-push jobs whose last run errored or did not reach the chat
+    # (OpenClaw still records best-effort delivery failures as ``ok``).
+    undelivered: list[str] = Field(default_factory=list)
 
 
 SyncState = Literal["synced", "outdated", "missing"]
@@ -195,10 +198,11 @@ def _probe_automations(
         items = data
     else:
         return None
-    enabled = sum(
-        1 for item in items if isinstance(item, dict) and item.get("enabled")
-    )
-    return AssistantAutomationsStatus(total=len(items), enabled=enabled)
+    jobs = [item for item in items if isinstance(item, dict)]
+    enabled = sum(1 for item in jobs if item.get("enabled"))
+    check = openclaw_ops.check_last_runs(live_jobs=jobs)
+    undelivered = [] if check.ok else [part for part in check.detail.split("；") if part]
+    return AssistantAutomationsStatus(total=len(items), enabled=enabled, undelivered=undelivered)
 
 
 def _default_workspace(read_config: Callable[[], dict[str, Any] | None]) -> Path | None:
