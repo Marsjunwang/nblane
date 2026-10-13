@@ -7974,7 +7974,10 @@ def draft_blog_from_kanban_done(name: str) -> Path:
 
 def draft_resume_for_target(name: str, target: str) -> tuple[Path, Path]:
     """Create a target-specific resume draft from resume-source.yaml."""
-    source = load_resume_source(name)
+    from nblane.core import resume_doc
+
+    # Hidden rows never reach the model or the draft.
+    source = resume_doc.visible_resume(load_resume_source(name))
     fallback = render_resume_markdown(source)
     system = (
         "You draft a targeted resume from a structured fact source. "

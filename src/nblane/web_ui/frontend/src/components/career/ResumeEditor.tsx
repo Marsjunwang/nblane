@@ -28,6 +28,8 @@ import {
   IconPhoto,
   IconPlus,
   IconRefresh,
+  IconEye,
+  IconEyeOff,
   IconTrash,
 } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -144,8 +146,17 @@ function RecordCard({
       groups.map((group, i) => (i === groupIndex ? { ...group, ...patch } : group)),
     );
   const detailed = section !== 'education' || record.bullets.length > 0 || Boolean(record.summary);
+  const hidden = record.hidden === true;
   return (
-    <Paper withBorder radius="sm" p="sm" bg="var(--mantine-color-dark-7)" data-testid={`resume-record-${section}`}>
+    <Paper
+      withBorder
+      radius="sm"
+      p="sm"
+      bg="var(--mantine-color-dark-7)"
+      style={hidden ? { opacity: 0.55, borderStyle: 'dashed' } : undefined}
+      data-testid={`resume-record-${section}`}
+      data-hidden={hidden ? 'true' : undefined}
+    >
       <Stack gap="xs">
         <Group gap="xs" align="flex-end" wrap="nowrap">
           <TextInput
@@ -164,8 +175,24 @@ function RecordCard({
           />
           <TextInput size="xs" label="开始" placeholder="2022/08" value={record.start} onChange={(event) => set('start', event.currentTarget.value)} style={{ flex: 2 }} />
           <TextInput size="xs" label="结束" placeholder="至今" value={record.end} onChange={(event) => set('end', event.currentTarget.value)} style={{ flex: 2 }} />
+          <ActionIcon
+            size="sm"
+            variant={hidden ? 'light' : 'subtle'}
+            color={hidden ? 'yellow' : 'gray'}
+            aria-label={hidden ? '显示这一条' : '隐藏这一条'}
+            title={hidden ? '已隐藏，不出现在简历里；点击显示' : '隐藏：保留内容，不出现在简历里'}
+            onClick={() => onChange({ ...record, hidden: !hidden })}
+            data-testid="resume-record-hide"
+          >
+            {hidden ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+          </ActionIcon>
           <RowTools index={index} count={count} onMove={onMove} onRemove={onRemove} label="这一条" />
         </Group>
+        {hidden && (
+          <Text size="xs" c="yellow">
+            已隐藏：内容保留，预览和导出里不出现。
+          </Text>
+        )}
         {detailed && (
           <>
             <Textarea
@@ -244,6 +271,11 @@ function RecordSectionEditor({ doc, section, edit }: { doc: ResumeDoc; section: 
         {records.length === 0 && (
           <Text size="xs" c="dimmed">
             暂无。点「添加」新增一条，空的段落不会出现在简历里。
+          </Text>
+        )}
+        {records.length > 1 && (section === 'experiences' || section === 'projects') && (
+          <Text size="xs" c="dimmed">
+            简历里按时间排列（在职的在最前），这里的顺序只影响编辑。
           </Text>
         )}
         {records.map((record, index) => (

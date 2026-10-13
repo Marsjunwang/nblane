@@ -158,3 +158,52 @@ class HtmlTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOrderAndHidden(unittest.TestCase):
+    def _doc(self) -> dict:
+        return {
+            "basics": {"name": "张三"},
+            "experiences": [
+                {"company": "甲", "role": "工程师", "start": "2021/06", "end": "2022/07"},
+                {"company": "乙", "role": "实习", "start": "2020/07", "end": "2020/09", "hidden": True},
+                {"company": "丙", "role": "工程师", "start": "2022/08", "end": "2025/04"},
+                {"company": "丁", "role": "工程师", "start": "2026/10", "end": ""},
+                {"company": "戊", "role": "顾问", "start": "", "end": ""},
+            ],
+            "education": [
+                {"school": "A 大学", "degree": "本科", "start": "2014/09", "end": "2018/06"},
+                {"school": "B 大学", "degree": "硕士", "start": "2018/09", "end": "2021/06"},
+            ],
+        }
+
+    def test_markdown_sorts_experiences_newest_first_and_drops_hidden(self) -> None:
+        md = resume_doc.render_resume_markdown(self._doc())
+        order = [name for name in ("丁", "丙", "甲", "戊") if name in md]
+        self.assertEqual(order, ["丁", "丙", "甲", "戊"])
+        self.assertLess(md.index("丁"), md.index("丙"))
+        self.assertLess(md.index("丙"), md.index("甲"))
+        self.assertLess(md.index("甲"), md.index("戊"))
+        self.assertNotIn("乙", md)
+
+    def test_education_keeps_owner_order(self) -> None:
+        md = resume_doc.render_resume_markdown(self._doc())
+        self.assertLess(md.index("A 大学"), md.index("B 大学"))
+
+    def test_hidden_flag_survives_normalize_and_is_dropped_when_false(self) -> None:
+        doc = resume_doc.normalize_resume(self._doc())
+        self.assertTrue(doc["experiences"][1]["hidden"])
+        self.assertNotIn("hidden", doc["experiences"][0])
+        doc["experiences"][1]["hidden"] = False
+        self.assertNotIn("hidden", resume_doc.normalize_resume(doc)["experiences"][1])
+        # File order is untouched; only rendering sorts.
+        self.assertEqual([r["company"] for r in doc["experiences"]], ["甲", "乙", "丙", "丁", "戊"])
+
+    def test_ongoing_variants_and_visible_resume(self) -> None:
+        rows = [
+            {"company": "旧", "start": "2019.03", "end": "2020.01"},
+            {"company": "在职", "start": "2018-01", "end": "至今"},
+        ]
+        self.assertEqual([r["company"] for r in resume_doc.time_sorted(rows)], ["在职", "旧"])
+        visible = resume_doc.visible_resume(self._doc())
+        self.assertEqual([r["company"] for r in visible["experiences"]], ["丁", "丙", "甲", "戊"])

@@ -23,7 +23,8 @@ Canonical shape (every field optional except ``basics.name``)::
     skill_groups: [{label, text}]
     skills: [str]                         # flat list (legacy / simple)
     experiences: [{company, role, start, end, location, summary,
-                   bullets: [str], groups: [{label, bullets: [str]}]}]
+                   bullets: [str], groups: [{label, bullets: [str]}],
+                   hidden: bool}]           # hidden rows stay in the file only
     projects: [{name, role, start, end, summary, bullets, groups}]
     outputs: [{title, ...same body fields}]
     education: [{school, degree, start, end, summary, bullets}]
@@ -50,6 +51,8 @@ from typing import Any
 
 SECTION_KEYS = ("summary", "skills", "experiences", "projects", "outputs", "education", "honors")
 RECORD_SECTIONS = ("experiences", "projects", "outputs", "education")
+# Rendered newest first by date; education / outputs keep the owner's order.
+TIME_SORTED_SECTIONS = ("experiences", "projects")
 
 DEFAULT_SECTION_TITLES = {
     "zh": {
@@ -147,6 +150,11 @@ def _normalize_record(section: str, raw: dict[str, Any]) -> dict[str, Any]:
         record[key] = _text(record.get(key))
     record["bullets"] = _str_list(record.get("bullets"))
     record["groups"] = _normalize_groups(record.get("groups"))
+    # Only written when set, so untouched files stay as they were.
+    if record.get("hidden") is True or str(record.get("hidden")).strip().lower() in {"true", "1", "yes"}:
+        record["hidden"] = True
+    else:
+        record.pop("hidden", None)
     return record
 
 
@@ -218,6 +226,55 @@ def has_content(resume: dict[str, Any]) -> bool:
     )
 
 
+# --- Ordering and visibility ---------------------------------------------------
+
+_DATE_RE = re.compile(r"((?:19|20)\d{2})(?:\D{1,3}(\d{1,2}))?")
+_ONGOING_RE = re.compile(r"至今|现在|今|present|now|current", re.I)
+
+
+def _date_key(text: str) -> tuple[int, int] | None:
+    match = _DATE_RE.search(text or "")
+    if not match:
+        return None
+    month = int(match.group(2)) if match.group(2) else 0
+    return int(match.group(1)), month if 0 < month <= 12 else 0
+
+
+def _is_ongoing(record: dict[str, Any]) -> bool:
+    end = _text(record.get("end"))
+    return not end or bool(_ONGOING_RE.search(end))
+
+
+def time_sorted(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Newest first: ongoing rows, then by start date (end date breaks ties).
+
+    Rows without a readable start date keep their order after the dated ones.
+    """
+    dated = [r for r in records if _date_key(_text(r.get("start")))]
+    undated = [r for r in records if not _date_key(_text(r.get("start")))]
+
+    def key(record: dict[str, Any]) -> tuple:
+        start = _date_key(_text(record.get("start"))) or (0, 0)
+        end = (9999, 99) if _is_ongoing(record) else (_date_key(_text(record.get("end"))) or (0, 0))
+        return (_is_ongoing(record), start, end)
+
+    return sorted(dated, key=key, reverse=True) + undated
+
+
+def shown_records(doc: dict[str, Any], section: str) -> list[dict[str, Any]]:
+    """Records of *section* as they appear on the resume: no hidden rows, ordered."""
+    rows = [r for r in doc.get(section) or [] if isinstance(r, dict) and not r.get("hidden")]
+    return time_sorted(rows) if section in TIME_SORTED_SECTIONS else rows
+
+
+def visible_resume(resume_source: dict[str, Any]) -> dict[str, Any]:
+    """Normalized copy without hidden rows, in display order (for exports / AI)."""
+    doc = normalize_resume(resume_source)
+    for section in RECORD_SECTIONS:
+        doc[section] = shown_records(doc, section)
+    return doc
+
+
 # --- Markdown rendering --------------------------------------------------------
 
 
@@ -277,7 +334,7 @@ def render_resume_markdown(resume_source: dict[str, Any]) -> str:
         lines += [f"- {skill}" for skill in doc["skills"]]
         lines.append("")
     for section in RECORD_SECTIONS:
-        records = [r for r in doc[section] if _record_heading(section, r) or _record_has_body(r)]
+        records = [r for r in shown_records(doc, section) if _record_heading(section, r) or _record_has_body(r)]
         if not records:
             continue
         lines += [f"## {section_title(doc, section)}", ""]
