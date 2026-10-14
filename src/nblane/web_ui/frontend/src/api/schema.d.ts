@@ -707,7 +707,14 @@ export interface paths {
          */
         put: operations["save_profile_content_blog_api_v1_profiles__name__content_blog__slug__put"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete Profile Content Blog
+         * @description Delete Markdown, BlockNote and library entries after title confirmation.
+         *
+         *     Media files remain available to other posts. Published sites need a new
+         *     build and deployment before the removed article disappears online.
+         */
+        delete: operations["delete_profile_content_blog_api_v1_profiles__name__content_blog__slug__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -5074,6 +5081,31 @@ export interface components {
              * @default
              */
             snippet: string;
+        };
+        /**
+         * ContentPostDeleteRequest
+         * @description Exact title confirmation for deleting a blog document.
+         */
+        ContentPostDeleteRequest: {
+            /** Confirm Title */
+            confirm_title: string;
+            /**
+             * Record Chronicle
+             * @default false
+             */
+            record_chronicle: boolean;
+        };
+        /** ContentPostDeleteResponse */
+        ContentPostDeleteResponse: {
+            /** Changed Paths */
+            changed_paths?: string[];
+            /** Deleted Slug */
+            deleted_slug: string;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
         };
         /** ContentWorkspaceResponse */
         ContentWorkspaceResponse: {
@@ -14414,6 +14446,98 @@ export interface operations {
             };
             /** @description Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_profile_content_blog_api_v1_profiles__name__content_blog__slug__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                name: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentPostDeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentPostDeleteResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile or blog post not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Save would erase a non-empty body without allow_empty=1. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description If-Match ETag does not match the studio source files. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };

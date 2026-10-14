@@ -98,6 +98,7 @@ ROUTE_ACTIONS: dict[tuple[str, str], str] = {
     ("POST", f"{P}/agent/journal/{{entry_id}}/undo"): "journal.undo",
     # AI exception triage
     ("POST", f"{P}/ai-exceptions/dismiss"): "review.decide",
+    ("DELETE", f"{P}/content/blog/{{slug:path}}"): "public.publish",
 }
 
 # Profile-scoped prefixes that stay in the web UI: publishing, résumé,

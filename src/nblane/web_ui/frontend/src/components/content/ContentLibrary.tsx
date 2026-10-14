@@ -1,5 +1,6 @@
 import {
   Alert,
+  ActionIcon,
   Badge,
   Box,
   Button,
@@ -15,9 +16,10 @@ import {
   Text,
   TextInput,
   Title,
+  Tooltip,
 } from '@mantine/core';
 import { useLocalStorage } from '@mantine/hooks';
-import { IconBook2, IconPhoto, IconPlus, IconRocket, IconSearch } from '@tabler/icons-react';
+import { IconBook2, IconPhoto, IconPlus, IconRocket, IconSearch, IconTrash } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -25,6 +27,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { contentMediaUrl, useContentWorkspace, useCreateContentPost } from '../../api/hooks';
 import type { StudioPost } from '../../api/types';
 import { STATUS_COLORS, STATUS_LABELS, contentEditorPath } from './contentDraft';
+import { DeleteContentPostDialog } from './DeleteContentPostDialog';
 
 type SortKey = 'date' | 'title';
 
@@ -47,6 +50,7 @@ export function ContentLibrary({ profile }: { profile: string }) {
   const [showFixtures, setShowFixtures] = useLocalStorage({ key: 'nblane.content.showFixtures', defaultValue: false });
   const [createOpen, setCreateOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [deleteSlug, setDeleteSlug] = useState<string | null>(null);
 
   const posts = useMemo(() => content.data?.data.posts ?? [], [content.data]);
   const fixtureCount = useMemo(() => posts.filter(isFixture).length, [posts]);
@@ -168,6 +172,7 @@ export function ContentLibrary({ profile }: { profile: string }) {
               <Table.Th>标题</Table.Th>
               <Table.Th w={110}>状态</Table.Th>
               <Table.Th w={130}>日期</Table.Th>
+              <Table.Th w={52}><Text size="xs" c="dimmed">操作</Text></Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -220,6 +225,15 @@ export function ContentLibrary({ profile }: { profile: string }) {
                     {post.date}
                   </Text>
                 </Table.Td>
+                <Table.Td>
+                  <Tooltip label="删除文章">
+                    <ActionIcon size={44} variant="subtle" color="red" aria-label={`删除文章 ${post.title}`}
+                      data-testid={`content-delete-open-${post.slug}`}
+                      onClick={(event) => { event.stopPropagation(); setDeleteSlug(post.slug); }}>
+                      <IconTrash size={17} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>
@@ -237,6 +251,9 @@ export function ContentLibrary({ profile }: { profile: string }) {
           </Stack>
         </Box>
       )}
+
+      {deleteSlug && <DeleteContentPostDialog profile={profile} slug={deleteSlug}
+        onClose={() => setDeleteSlug(null)} onDeleted={() => setDeleteSlug(null)} />}
 
       <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="新建文章" centered>
         <form

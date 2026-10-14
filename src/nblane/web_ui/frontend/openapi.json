@@ -2211,6 +2211,52 @@
     "title": "ContentMediaUploadResponse",
     "type": "object"
    },
+   "ContentPostDeleteRequest": {
+    "description": "Exact title confirmation for deleting a blog document.",
+    "properties": {
+     "confirm_title": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Confirm Title",
+      "type": "string"
+     },
+     "record_chronicle": {
+      "default": false,
+      "title": "Record Chronicle",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "confirm_title"
+    ],
+    "title": "ContentPostDeleteRequest",
+    "type": "object"
+   },
+   "ContentPostDeleteResponse": {
+    "properties": {
+     "changed_paths": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Changed Paths",
+      "type": "array"
+     },
+     "deleted_slug": {
+      "title": "Deleted Slug",
+      "type": "string"
+     },
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "deleted_slug"
+    ],
+    "title": "ContentPostDeleteResponse",
+    "type": "object"
+   },
    "ContentWorkspaceResponse": {
     "properties": {
      "posts": {
@@ -15671,6 +15717,139 @@
    }
   },
   "/api/v1/profiles/{name}/content/blog/{slug}": {
+   "delete": {
+    "description": "Delete Markdown, BlockNote and library entries after title confirmation.\n\nMedia files remain available to other posts. Published sites need a new\nbuild and deployment before the removed article disappears online.",
+    "operationId": "delete_profile_content_blog_api_v1_profiles__name__content_blog__slug__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ContentPostDeleteRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentPostDeleteResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile or blog post not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Save would erase a non-empty body without allow_empty=1."
+     },
+     "412": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "If-Match ETag does not match the studio source files."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Blank title, out-of-domain status, publish-readiness failure, invalid candidate target/source, or LLM-backed feature unavailable."
+     },
+     "428": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Precondition Required"
+     }
+    },
+    "summary": "Delete Profile Content Blog"
+   },
    "get": {
     "operationId": "get_profile_content_blog_api_v1_profiles__name__content_blog__slug__get",
     "parameters": [

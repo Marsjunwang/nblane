@@ -255,6 +255,7 @@ class TestGuardPolicy(JournalTestBase):
             ("PATCH", f"{BASE}/settings"),
             ("POST", f"{BASE}/ai-exceptions/dismiss"),
             ("POST", f"{BASE}/studio/init"),
+            ("DELETE", f"{BASE}/content/blog/example"),
         ):
             response = client.request(method, url, json={})
             self.assertEqual(response.status_code, 403, (url, response.text))

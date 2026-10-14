@@ -45,6 +45,7 @@ import {
   IconRowInsertBottom,
   IconSearch,
   IconShare,
+  IconTrash,
   IconUpload,
 } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -102,6 +103,7 @@ import { runContentJob, type ContentJobHandle } from './contentJobs';
 import { OutlinePanel } from './OutlinePanel';
 import { PostSwitcher } from './PostSwitcher';
 import { SocialShareDrawer } from './SocialShareDrawer';
+import { DeleteContentPostDialog } from './DeleteContentPostDialog';
 import { useContentAIStatus, useContentWorkspace } from '../../api/hooks';
 
 type EditorMode = 'visual' | 'source' | 'preview';
@@ -471,6 +473,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const [activeHeading, setActiveHeading] = useState('');
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [rewrite, setRewrite] = useState<(RewriteState & { request: AIRewriteRequest }) | null>(null);
   const [rewriteView, setRewriteView] = useState<'diff' | 'edit'>('diff');
   const rewriteJobRef = useRef<ContentJobHandle<ContentRewriteResult> | null>(null);
@@ -492,6 +495,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const localTimerRef = useRef<number | undefined>(undefined);
   // Draft of a save whose response never arrived: it may have landed.
   const unknownSaveRef = useRef<PostDraft | null>(null);
+  const deletingRef = useRef(false);
 
   const isDirty = () => revisionRef.current !== savedRevisionRef.current;
 
@@ -544,14 +548,14 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const runSave = useCallback(
     async (autosave: boolean, options: { allowEmpty?: boolean } = {}): Promise<boolean> => {
       window.clearTimeout(timerRef.current);
-      if (conflictRef.current || !draftRef.current) return false;
+      if (deletingRef.current || conflictRef.current || !draftRef.current) return false;
       // Saves run one at a time. Autosaves coalesce into the running one (it
       // reschedules itself when edits are pending); explicit saves wait in
       // turn, so a burst of Ctrl+S never sends parallel PUTs with one ETag.
       while (inFlightRef.current) {
         if (autosave) return inFlightRef.current;
         await inFlightRef.current;
-        if (conflictRef.current) return false;
+        if (deletingRef.current || conflictRef.current) return false;
       }
       if (!isDirty() && !(uncommittedRef.current && !autosave)) return true;
       if (isSessionExpired()) {
@@ -659,7 +663,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
 
   const edit = useCallback(
     (patch: Partial<PostDraft>) => {
-      if (!draftRef.current) return;
+      if (deletingRef.current || !draftRef.current) return;
       draftRef.current = { ...draftRef.current, ...patch };
       setDraft(draftRef.current);
       revisionRef.current += 1;
@@ -685,6 +689,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const flushOnExit = useCallback(() => {
     window.clearTimeout(timerRef.current);
     window.clearTimeout(localTimerRef.current);
+    if (deletingRef.current) return;
     const current = draftRef.current;
     if (!current || (!isDirty() && !uncommittedRef.current)) return;
     if (isDirty()) writeLocalDraft(window.localStorage, profile, slug, current, etagRef.current);
@@ -842,6 +847,38 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
     if (ok) notifications.show({ color: 'gray', title: '已撤回为草稿', message: '下次构建站点时会从网站移除。' });
   };
 
+  const openDelete = async () => {
+    if (deletingRef.current || publish.isPending || upload.isPending) return;
+    deletingRef.current = true;
+    window.clearTimeout(timerRef.current);
+    window.clearTimeout(localTimerRef.current);
+    // Wait for an already-sent save before the dialog reads its ETag. Any
+    // follow-up autosave or unmount keepalive is blocked until cancellation.
+    if (inFlightRef.current) await inFlightRef.current;
+    if (draftRef.current && isDirty()) {
+      writeLocalDraft(window.localStorage, profile, slug, draftRef.current, etagRef.current);
+    }
+    setDeleteOpen(true);
+  };
+
+  const closeDelete = () => {
+    setDeleteOpen(false);
+    deletingRef.current = false;
+    if (isDirty() || uncommittedRef.current) {
+      timerRef.current = window.setTimeout(() => void runSave(true), AUTOSAVE_DELAY_MS);
+    }
+  };
+
+  const onDeleted = () => {
+    window.clearTimeout(timerRef.current);
+    window.clearTimeout(localTimerRef.current);
+    rewriteJobRef.current?.cancel();
+    clearLocalDraft(window.localStorage, profile, slug);
+    // Keep deletingRef set through unmount so exit flushing cannot recreate
+    // the deleted document or its browser draft.
+    navigate(contentLibraryPath(profile), { replace: true });
+  };
+
   const uploadToPost = useCallback(
     async (file: File) => (await upload.mutateAsync({ slug, file })).path,
     [slug, upload],
@@ -987,6 +1024,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   };
 
   const settings = (
+    <Stack>
     <PostSettings
       profile={profile}
       slug={slug}
@@ -1000,6 +1038,10 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
       onUpload={uploadFromPanel}
       onInsert={(item) => insertSnippet(mediaSnippet(item.kind, item.path, item.name))}
     />
+    <Button color="red" variant="outline" leftSection={<IconTrash size={16} />}
+      onClick={() => void openDelete()} disabled={publish.isPending || upload.isPending}
+      data-testid="content-editor-delete">删除文章</Button>
+    </Stack>
   );
 
   const topBar = (
@@ -1397,6 +1439,9 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
       >
         <OutlinePanel items={outline} activeId={activeHeading} onJump={(id) => { setOutlinePinned(false); jumpToHeading(id); }} />
       </Drawer>
+
+      {deleteOpen && <DeleteContentPostDialog profile={profile} slug={slug}
+        onClose={closeDelete} onDeleted={onDeleted} />}
 
       <PublishDialog
         opened={publishOpen}

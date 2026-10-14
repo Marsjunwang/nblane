@@ -53,6 +53,7 @@ CHRONICLE_KINDS: tuple[str, ...] = (
     "habit_plan.deleted",
     "skill.lit",
     "task.deleted",
+    "content.deleted",
 )
 
 

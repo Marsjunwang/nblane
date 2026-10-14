@@ -22,7 +22,7 @@ import yaml
 
 from schemas.blocknote_doc import Document as BlockNoteDocument
 from schemas.blocknote_doc import coerce_blocks, document_to_dict
-from nblane.core import git_backup, llm, visual_generation
+from nblane.core import chronicle, git_backup, llm, visual_generation
 from nblane.core.ai_blog_prompts import get_prompt
 from nblane.core.claims import (
     accepted_claim_index_for_profile,
@@ -30,7 +30,7 @@ from nblane.core.claims import (
 )
 from nblane.core.file_lock import locked_profile_write
 from nblane.core.file_state import FileSnapshot, assert_unchanged
-from nblane.core.file_write import atomic_write_text
+from nblane.core.file_write import atomic_write_text, rollback_profile_files
 from nblane.core.kanban_io import KANBAN_DONE, parse_kanban
 from nblane.core.paths import REPO_ROOT
 from nblane.core.profile_io import profile_dir
@@ -6958,6 +6958,72 @@ def save_blog_post(
             blocks_json=blocks_json,
         )
     return path, changed
+
+
+def delete_blog_post(
+    name: str,
+    slug: str,
+    *,
+    expected_snapshot: FileSnapshot,
+    expected_sidecar_snapshot: FileSnapshot,
+    record_chronicle: bool = False,
+) -> list[Path]:
+    """Delete a blog document and its library entries, retaining shared media.
+
+    Use the same lock as saves and recheck both source files inside it. A
+    failed deletion restores the source documents and library index.
+    """
+    route = _resolve_blog_route(name, slug)
+    path = _safe_blog_path(name, route)
+    sidecar = _blog_sidecar_path_for_markdown(path)
+    profile_root = _profile_path(name)
+    library_path = _public_library_path(name)
+    with locked_profile_write(profile_root, "blog"):
+        assert_unchanged(path, expected_snapshot, label=path.name)
+        assert_unchanged(sidecar, expected_sidecar_snapshot, label=sidecar.name)
+        if not path.exists() and not sidecar.exists():
+            raise PublicSiteError(f"Unknown blog post: {slug}")
+        library = load_public_library(name)
+        removed = {
+            node.id: node.parent_id
+            for node in library.nodes
+            if node.type == "post" and _library_blog_route(node.ref) == route
+        }
+        title = parse_blog_post(path).title
+        rollback_paths = [path, sidecar, library_path]
+        if record_chronicle:
+            rollback_paths.append(profile_root / chronicle.CHRONICLE_FILENAME)
+        filenames = tuple(
+            item.relative_to(profile_root).as_posix()
+            for item in rollback_paths
+        )
+        changed: list[Path] = []
+        with rollback_profile_files(profile_root, filenames):
+            for item in (path, sidecar):
+                if item.exists():
+                    item.unlink()
+                    changed.append(item)
+            if removed:
+                library.nodes = [node for node in library.nodes if node.id not in removed]
+                # Media entries survive with their files. Lift them out of
+                # the removed post, including any legacy nested post nodes.
+                for node in library.nodes:
+                    seen: set[str] = set()
+                    while node.parent_id in removed:
+                        if node.parent_id in seen:
+                            node.parent_id = "root"
+                            break
+                        seen.add(node.parent_id)
+                        node.parent_id = removed[node.parent_id]
+                with git_backup.skip_changes():
+                    save_public_library(name, library)
+                changed.append(library_path)
+            if record_chronicle:
+                with git_backup.skip_changes():
+                    chronicle.append_chronicle(profile_root, "content.deleted", ref=route, note=title)
+                changed.append(profile_root / chronicle.CHRONICLE_FILENAME)
+    git_backup.record_change(changed, action=f"delete {name}/blog/{route}")
+    return changed
 
 
 def _blog_media_snippet(

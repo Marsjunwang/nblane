@@ -11,6 +11,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -252,6 +253,124 @@ class ContentWorkspaceApiTest(unittest.TestCase):
         )
         self.assertEqual(published.status_code, 200, published.text)
         self.assertEqual(published.json()["post"]["status"], "published")
+
+    def _delete(self, slug: str, etag: str, title: str = "Hello", **extra):
+        return self.client.request(
+            "DELETE", f"/api/v1/profiles/alice/content/blog/{slug}",
+            json={"confirm_title": title, **extra}, headers={"If-Match": etag},
+        )
+
+    def test_delete_removes_documents_and_library_entry_but_keeps_shared_media(self) -> None:
+        from nblane.core import public_site
+
+        slug, etag = self._create()
+        uploaded = self._upload(slug)
+        # Another article uses this article's media; deleting must not break it.
+        other, _ = self._create("Other", body=uploaded["snippet"])
+        attached = public_site.attach_existing_public_library_node("alice", None, f"blog/{slug}.md")
+        public_site.attach_existing_public_library_node("alice", attached.node.id, uploaded["path"])
+        response = self._delete(slug, etag)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["deleted_slug"], slug)
+        for suffix in (".md", ".blocknote.json"):
+            self.assertFalse((self.profile / "blog" / f"{slug}{suffix}").exists())
+        self.assertTrue((self.profile / uploaded["path"]).exists())
+        library = public_site.load_public_library("alice")
+        self.assertFalse(any(node.ref == f"blog/{slug}.md" for node in library.nodes))
+        media = next(node for node in library.nodes if node.ref == uploaded["path"])
+        self.assertEqual(media.parent_id, "root")
+        self.assertEqual(self.client.get(f"/api/v1/profiles/alice/content/blog/{slug}").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/v1/profiles/alice/content/blog/{other}").status_code, 200)
+        posts = self.client.get("/api/v1/profiles/alice/content").json()["posts"]
+        self.assertNotIn(slug, [post["slug"] for post in posts])
+        self.assertFalse((self.profile / "chronicle.yaml").exists())
+        # A late autosave cannot resurrect either source document.
+        late = self.client.put(f"/api/v1/profiles/alice/content/blog/{slug}", json={"body": "late"})
+        self.assertEqual(late.status_code, 404)
+
+    def test_delete_requires_exact_title_and_concrete_etag(self) -> None:
+        slug, etag = self._create()
+        for bad_etag in ("", "*"):
+            response = self._delete(slug, bad_etag)
+            self.assertEqual(response.status_code, 428, response.text)
+        for bad_title in ("hello", " Hello", "Hello "):
+            response = self._delete(slug, etag, bad_title)
+            self.assertEqual(response.status_code, 422, response.text)
+            self.assertEqual(response.json()["code"], "content_delete_confirm_mismatch")
+        self.assertEqual(self.client.get(f"/api/v1/profiles/alice/content/blog/{slug}").status_code, 200)
+
+    def test_delete_rejects_stale_etag_and_unknown_post(self) -> None:
+        slug, etag = self._create()
+        updated = self.client.put(f"/api/v1/profiles/alice/content/blog/{slug}", json={"body": "New body"})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        stale = self._delete(slug, etag)
+        self.assertEqual(stale.status_code, 412, stale.text)
+        self.assertEqual(stale.headers["ETag"], updated.headers["ETag"])
+        self.assertEqual(self._delete("missing", etag).status_code, 404)
+
+    def test_delete_detects_edit_landing_before_lock(self) -> None:
+        from nblane.core import public_site
+
+        slug, etag = self._create()
+        real_lock = public_site.locked_profile_write
+        path = self.profile / "blog" / f"{slug}.md"
+
+        @contextmanager
+        def racing_lock(*args, **kwargs):
+            path.write_text(path.read_text() + "\nConcurrent edit\n", encoding="utf-8")
+            with real_lock(*args, **kwargs) as lock:
+                yield lock
+
+        with patch.object(public_site, "locked_profile_write", racing_lock):
+            response = self._delete(slug, etag)
+        self.assertEqual(response.status_code, 412, response.text)
+        self.assertIn("Concurrent edit", path.read_text())
+        self.assertTrue(path.with_suffix(".blocknote.json").exists())
+
+    def test_delete_rolls_back_when_library_write_fails(self) -> None:
+        from nblane.core import public_site
+
+        slug, etag = self._create()
+        public_site.attach_existing_public_library_node("alice", None, f"blog/{slug}.md")
+        paths = [self.profile / "blog" / f"{slug}.md", self.profile / "blog" / f"{slug}.blocknote.json",
+                 self.profile / "public-library.yaml"]
+        before = [path.read_bytes() for path in paths]
+        with patch.object(public_site, "save_public_library", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self._delete(slug, etag)
+        self.assertEqual([path.read_bytes() for path in paths], before)
+
+    def test_delete_published_and_archived_posts_with_optional_chronicle(self) -> None:
+        from nblane.core.chronicle import load_chronicle
+
+        for status in ("published", "archived"):
+            slug, etag = self._create(status)
+            endpoint = f"/api/v1/profiles/alice/content/blog/{slug}"
+            if status == "published":
+                changed = self.client.post(endpoint + "/publish", json={"summary": "Summary"}, headers={"If-Match": etag})
+            else:
+                changed = self.client.put(endpoint, json={"status": status}, headers={"If-Match": etag})
+            self.assertEqual(changed.status_code, 200, changed.text)
+            deleted = self._delete(slug, changed.headers["ETag"], status, record_chronicle=True)
+            self.assertEqual(deleted.status_code, 200, deleted.text)
+            self.assertEqual(self.client.get(endpoint).status_code, 404)
+        entries = load_chronicle(self.profile)
+        self.assertEqual([entry.kind for entry in entries], ["content.deleted", "content.deleted"])
+        self.assertEqual([entry.note for entry in entries], ["published", "archived"])
+
+    def test_delete_supports_nested_routes_and_sidecar_only_posts(self) -> None:
+        slug, _ = self._create()
+        directory = self.profile / "blog" / "notes"
+        directory.mkdir()
+        for suffix in (".md", ".blocknote.json"):
+            (self.profile / "blog" / f"{slug}{suffix}").rename(directory / f"{slug}{suffix}")
+        (directory / f"{slug}.md").unlink()
+        nested = f"notes/{slug}"
+        detail = self.client.get(f"/api/v1/profiles/alice/content/blog/{nested}")
+        self.assertEqual(detail.status_code, 200, detail.text)
+        response = self._delete(nested, detail.headers["ETag"])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse((directory / f"{slug}.blocknote.json").exists())
 
 
 def test_skip_changes_suppresses_record_change(tmp_path: Path) -> None:

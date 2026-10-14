@@ -2059,6 +2059,19 @@ class StudioPostCreateRequest(BaseModel):
     body: str = Field(default="", max_length=200_000)
 
 
+class ContentPostDeleteRequest(BaseModel):
+    """Exact title confirmation for deleting a blog document."""
+
+    confirm_title: str = Field(min_length=1, max_length=300)
+    record_chronicle: bool = False
+
+
+class ContentPostDeleteResponse(BaseModel):
+    ok: bool = True
+    deleted_slug: str
+    changed_paths: list[str] = Field(default_factory=list)
+
+
 class StudioPostSaveRequest(BaseModel):
     """Body for the blog save (``None`` fields keep the current value)."""
 

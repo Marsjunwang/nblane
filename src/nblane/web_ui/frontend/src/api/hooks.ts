@@ -101,6 +101,8 @@ import type {
   SkillTreeResponse,
   StudioInitResponse,
   StudioPostCreateRequest,
+  ContentPostDeleteRequest,
+  ContentPostDeleteResponse,
   StudioPostDetail,
   StudioPostMutationResponse,
   StudioPostResult,
@@ -2151,6 +2153,22 @@ export function useCreateContentPost(profile: string) {
       return { post: data.post, etag: headers.get('ETag') ?? '' };
     },
     onSuccess: invalidate,
+  });
+}
+
+export function useDeleteContentPost(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ slug, body, etag }: { slug: string; body: ContentPostDeleteRequest; etag: string }) =>
+      apiDelete<ContentPostDeleteResponse>(contentBlogPath(profile, slug), body, { headers: ifMatch(etag) }),
+    onSuccess: (_result, { slug }) => {
+      queryClient.removeQueries({ queryKey: ['profiles', profile, 'content', 'post', slug], exact: true });
+      queryClient.removeQueries({ queryKey: ['profiles', profile, 'content', 'media', slug] });
+      queryClient.removeQueries({ queryKey: ['profiles', profile, 'content', 'social', slug] });
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content'], exact: true });
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'public-site'] });
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'home'] });
+    },
   });
 }
 

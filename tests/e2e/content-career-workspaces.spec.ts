@@ -2,6 +2,40 @@ import { expect, test } from "@playwright/test";
 import { SPA_BASE_URL, SPA_E2E_PROFILE } from "./spa_auth_shared";
 
 test.describe("SPA content and career workspaces", () => {
+  test("deletes articles from the editor and library after exact-title confirmation", async ({ page }) => {
+    const libraryUrl = `${SPA_BASE_URL}/p/${encodeURIComponent(SPA_E2E_PROFILE)}/content`;
+    const editorTitle = `编辑器删除验收 ${Date.now()}`;
+    await page.goto(libraryUrl);
+    await page.getByTestId("content-create").click();
+    await page.getByTestId("content-new-title").fill(editorTitle);
+    await page.getByTestId("content-create-confirm").click();
+    await expect(page.getByTestId("content-title")).toHaveValue(editorTitle);
+
+    await page.getByTestId("content-settings-toggle").click();
+    await page.getByTestId("content-editor-delete").click();
+    const dialog = page.getByRole("dialog", { name: "删除文章" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("content-delete-chronicle")).not.toBeChecked();
+    await dialog.getByTestId("content-delete-title").fill(`${editorTitle} `);
+    await expect(dialog.getByTestId("content-delete-confirm")).toBeDisabled();
+    await dialog.getByTestId("content-delete-title").fill(editorTitle);
+    await dialog.getByTestId("content-delete-confirm").click();
+    await expect(page).toHaveURL(libraryUrl);
+    await expect(page.getByTestId("content-post-item").filter({ hasText: editorTitle })).toHaveCount(0);
+
+    const libraryTitle = `文章库删除验收 ${Date.now()}`;
+    await page.getByTestId("content-create").click();
+    await page.getByTestId("content-new-title").fill(libraryTitle);
+    await page.getByTestId("content-create-confirm").click();
+    await page.getByTestId("content-back").first().click();
+    const row = page.getByTestId("content-post-item").filter({ hasText: libraryTitle });
+    await expect(row).toBeVisible();
+    await row.getByRole("button", { name: `删除文章 ${libraryTitle}` }).click();
+    await dialog.getByTestId("content-delete-title").fill(libraryTitle);
+    await dialog.getByTestId("content-delete-confirm").click();
+    await expect(row).toHaveCount(0);
+  });
+
   test("creates a post, autosaves, restores and publishes without Evidence", async ({ page }) => {
     const title = `内容工作台验收 ${Date.now()}`;
     await page.goto(`${SPA_BASE_URL}/p/${encodeURIComponent(SPA_E2E_PROFILE)}/content`);

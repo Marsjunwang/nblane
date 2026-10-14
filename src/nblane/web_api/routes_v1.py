@@ -45,7 +45,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from nblane.core import agent_activity, agent_tasks, file_state
 from nblane.core import agent_journal, agent_policy
 from nblane.core import social_cards
-from nblane.core import career_ai, career_workspace, content_ai, content_workspace, git_backup, resume_doc, visual_candidate_store
+from nblane.core import career_ai, career_workspace, content_ai, content_workspace, git_backup, public_site, resume_doc, visual_candidate_store
 from nblane.core import public_console
 from nblane.core.file_lock import locked_profile_write
 from nblane.core.ai.exceptions import (
@@ -371,6 +371,8 @@ from nblane.web_api.schemas import (
     ContentMediaModel,
     ContentMediaUploadResponse,
     ContentWorkspaceResponse,
+    ContentPostDeleteRequest,
+    ContentPostDeleteResponse,
     StudioPostCreateRequest,
     StudioPostDetailModel,
     StudioPostModel,
@@ -7477,6 +7479,51 @@ def save_profile_content_blog(
                 name, slug, body, response, if_match, allow_empty=allow_empty
             )
     return _save_blog_post(name, slug, body, response, if_match, allow_empty=allow_empty)
+
+
+@router.delete(
+    "/profiles/{name}/content/blog/{slug:path}",
+    response_model=ContentPostDeleteResponse,
+    responses={**STUDIO_MUTATION_RESPONSES, 428: {"model": ErrorResponse}},
+    dependencies=PROFILE_DEPENDENCY,
+)
+def delete_profile_content_blog(
+    name: str,
+    slug: str,
+    body: ContentPostDeleteRequest,
+    if_match: str | None = Header(default=None),
+) -> ContentPostDeleteResponse | JSONResponse:
+    """Delete Markdown, BlockNote and library entries after title confirmation.
+
+    Media files remain available to other posts. Published sites need a new
+    build and deployment before the removed article disappears online.
+    """
+    pdir = _resolve_profile(name)
+    post = _load_studio_post(pdir, slug)
+    markdown = public_site.blog_path_for_slug(pdir.name, post.slug)
+    sidecar = public_site.blog_sidecar_path_for_slug(pdir.name, post.slug)
+    snapshot = file_state.snapshot_file(markdown)
+    sidecar_snapshot = file_state.snapshot_file(sidecar)
+    post = _load_studio_post(pdir, post.slug)
+    etag = _studio_post_etag(post)
+    if not if_match or if_match.strip() == "*":
+        return _studio_error(428, "content_delete_requires_etag", "Reload the post before deleting.", etag)
+    if not _if_match_satisfied(if_match, etag):
+        return _studio_error(412, "etag_mismatch", "This post changed; reload before deleting.", etag)
+    if body.confirm_title != post.title:
+        raise ApiError(422, "content_delete_confirm_mismatch", "Type the article title exactly to delete.")
+    try:
+        changed = public_site.delete_blog_post(
+            pdir.name, post.slug,
+            expected_snapshot=snapshot,
+            expected_sidecar_snapshot=sidecar_snapshot,
+            record_chronicle=body.record_chronicle,
+        )
+    except file_state.FileConflictError:
+        return _studio_error(412, "etag_mismatch", "This post changed while deleting; reload before retrying.", _studio_post_etag(post))
+    except PublicSiteError as exc:
+        raise ApiError(422, "content_delete_failed", str(exc)) from exc
+    return ContentPostDeleteResponse(deleted_slug=post.slug, changed_paths=[str(path) for path in changed])
 
 
 @router.post(
