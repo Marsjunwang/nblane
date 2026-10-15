@@ -1,7 +1,7 @@
 ---
 status: active
 owner: product
-last_verified: 2026-10-08
+last_verified: 2026-10-15
 source_of_truth: true
 ---
 
@@ -103,9 +103,15 @@ GROBID 由 nblane 以无 root 的 Podman 托管；如果检测到不是 nblane �
 有些 PDF 经 GROBID 返回结构化文本但没有段落级坐标。此时阅读器优先用版面结构锚点定位，
 没有可用锚点才退回页级定位。这通常不是部署失败。
 
+GROBID 解析一篇论文最多等 `NBLANE_GROBID_FULLTEXT_TIMEOUT_SECONDS` 秒（默认 600）。三十多页、图多的 PDF
+在小服务器上要几分钟，超时后提示「结构化提取超时」并改用 PyMuPDF 降级结构，阅读和翻译照常可用；
+同一个 PDF 失败后 24 小时内不会自动重试。
+
 ## 全文翻译
 
-阅读器的「全文翻译」按结构单元翻译，适合长论文。生产环境如果走 SOCKS 代理，必须装 `httpx[socks]`，
+阅读器的「全文翻译」按结构单元翻译，适合长论文。如果模型服务商的内容审核拦下一批译文（百炼报
+`DataInspectionFailed`，常见于作者名单和参考文献），nblane 会把这一批拆成单段重试，只有真正被拦的段保留原文，
+并在任务结果里提示被拦了几段；这些段可以在阅读器里单独重新翻译。生产环境如果走 SOCKS 代理，必须装 `httpx[socks]`，
 否则会报 `socksio` 缺失。部署更新后运行：
 
 ```bash

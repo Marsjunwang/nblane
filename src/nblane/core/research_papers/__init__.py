@@ -1207,7 +1207,7 @@ def extract_paper_segments(
                 return segments
             notices.append("GROBID 未返回可用段落，已自动切换到文本降级方案。")
         except Exception as exc:
-            grobid_failure = "结构化提取遇到问题，已自动切换到文本降级方案。"
+            grobid_failure = _grobid_failure_message(exc)
             grobid_failure_detail = f"GROBID extraction failed: {exc}"
             warnings.append(grobid_failure)
     elif clean_backend in {"auto", "grobid"}:
@@ -1729,6 +1729,20 @@ def grobid_available(url: str | None = None) -> bool:
     """Return True when a configured GROBID service responds."""
 
     return bool(grobid_readiness(url).get("available"))
+
+
+def _grobid_failure_message(exc: BaseException) -> str:
+    """Owner-facing reason for a failed GROBID call (timeout vs. other errors)."""
+    text = str(exc).casefold()
+    if isinstance(exc, TimeoutError) or "timed out" in text or "timeout" in text:
+        seconds = int(_grobid_fulltext_timeout_seconds())
+        return (
+            f"结构化提取超时（GROBID 超过 {seconds} 秒没有返回，大而图多的 PDF 常见），"
+            "已自动切换到文本降级方案。"
+        )
+    if "connection refused" in text or "name or service not known" in text or "unreachable" in text:
+        return "结构化提取失败：连不上 GROBID 服务，已自动切换到文本降级方案。"
+    return "结构化提取遇到问题，已自动切换到文本降级方案。"
 
 
 def _grobid_fulltext_timeout_seconds() -> float:
@@ -6409,6 +6423,23 @@ def _translation_streaming_enabled() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+_CONTENT_FILTER_MARKERS = ("datainspectionfailed", "inappropriate content", "content_filter", "content filter")
+
+
+def _content_filter_blocked(result: object) -> bool:
+    """True when the provider's content moderation rejected the batch."""
+    text = " ".join(
+        [str(getattr(result, "error", "") or ""), *map(str, getattr(result, "warnings", []) or [])]
+    ).casefold()
+    return any(marker in text for marker in _CONTENT_FILTER_MARKERS)
+
+
+CONTENT_FILTER_TRANSLATION_WARNING = (
+    "模型服务商的内容审核拦下了 {count} 段译文（常见于作者名单、参考文献），这些段保留原文；"
+    "可在阅读器里对这些段重新翻译，或换一个翻译服务。"
+)
+
+
 def _process_translation_batches(
     batches: list[list[dict[str, object]]],
     *,
@@ -6450,6 +6481,10 @@ def _process_translation_batches(
                 batch,
                 **kwargs,
             )
+            if len(batch) > 1 and _content_filter_blocked(result):
+                # One flagged line sinks the whole batch; retry one by one so
+                # only the segment that trips moderation is left untranslated.
+                return ("split", [run_single(item) for item in batch], batch)
             return ("ok", result, batch)
         except TypeError:
             # Gateway might not yet accept stream_callback; retry without it.
@@ -6467,14 +6502,61 @@ def _process_translation_batches(
         except Exception as exc:
             return ("err", exc, batch)
 
+    def run_single(item: dict[str, object]):
+        try:
+            return translate_paper_segments(
+                ai_profile_arg,
+                source_id,
+                [item],
+                target_lang=target_lang,
+                require_review=require_review,
+                scope="full",
+            )
+        except Exception as exc:  # reported per segment by the caller
+            return exc
+
+    def merge_singles(singles: list[object]) -> object:
+        """One batch result from per-segment retries (keeps batch progress counts right)."""
+        from dataclasses import replace
+
+        base = next((r for r in singles if not isinstance(r, BaseException)), None)
+        rows: list[object] = []
+        warnings: list[str] = []
+        blocked = 0
+        for single in singles:
+            if isinstance(single, BaseException):
+                warnings.append(f"Translation batch failed: {single}")
+                continue
+            if _content_filter_blocked(single):
+                blocked += 1
+                continue  # its rule_fallback row is blank; keep the source text
+            structured = single.structured if isinstance(single.structured, dict) else {}
+            rows.extend(structured.get("translations") or [])
+            warnings.extend(str(w) for w in single.warnings)
+        if blocked:
+            warnings.append(CONTENT_FILTER_TRANSLATION_WARNING.format(count=blocked))
+        if base is None:
+            raise RuntimeError("; ".join(warnings) or "Translation failed.")
+        return replace(base, structured={"translations": rows}, warnings=warnings, error="")
+
+    def deliver(tag: str, payload: object, b: list[dict[str, object]]) -> None:
+        if tag == "ok":
+            handle_result(b, payload, None)
+        elif tag == "split":
+            try:
+                merged = merge_singles(payload)  # type: ignore[arg-type]
+            except Exception as exc:
+                handle_result(b, None, exc)
+                return
+            handle_result(b, merged, None)
+        else:
+            handle_result(b, None, payload)
+
     if concurrency <= 1:
         for batch in batches:
             tag, payload, b = run_one(batch)
             with progress_lock:
-                if tag == "ok":
-                    handle_result(b, payload, None)
-                else:
-                    handle_result(b, None, payload)
+                deliver(tag, payload, b)
         return
 
     with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="translate-batch") as executor:
@@ -6485,10 +6567,7 @@ def _process_translation_batches(
             except Exception as exc:
                 tag, payload, b = "err", exc, futures[fut]
             with progress_lock:
-                if tag == "ok":
-                    handle_result(b, payload, None)
-                else:
-                    handle_result(b, None, payload)
+                deliver(tag, payload, b)
 
 
 def translate_full_paper(
