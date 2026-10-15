@@ -154,6 +154,7 @@ function translationModePayload(paperIds, mode) {
 const WORKSPACE_JOB_POLL_TIMEOUT_MS = 45000;
 const WORKSPACE_JOB_MAX_STATUS_MISSES = 4;
 const WORKSPACE_JOB_RECONNECT_GRACE_MS = 180000;
+const WORKSPACE_JOB_DONE_DISMISS_MS = 6000;
 
 function isTransientWorkspaceJobPollError(error) {
   const message = cleanText(error?.message || error);
@@ -565,7 +566,11 @@ function workspaceProgressText(progress) {
   const selected = Number(progress?.segments_selected || 0);
   const processed = Number(progress?.segments_processed || 0);
   const segmentText = selected > 0 ? t("progress_units", "{done}/{total} units", { done: Math.min(processed, selected), total: selected }) : "";
-  return [status, phase, elapsed, batchText || stepText, segmentText].filter(Boolean).join(" · ");
+  const statusText = t(`job_status_${status}`, "");
+  // Raw phase ids ("pdf_download", "done") are internal; only show the
+  // localized status, and the phase while it is still running.
+  const phaseText = status === "running" && phase !== status ? t(`job_phase_${phase}`, "") : "";
+  return [statusText, phaseText, elapsed, batchText || stepText, segmentText].filter(Boolean).join(" · ");
 }
 
 function workspaceProgressPercent(progress) {
@@ -1426,6 +1431,16 @@ function PaperList({
 
 function DiscoveryPanel({ payload, profile, onImported, workspaceBusy = false }) {
   const [open, setOpen] = useState(true);
+  // Fold once, when the first payload shows the library already has papers,
+  // so the workbench gets the height; the user can reopen it any time.
+  const autoFolded = useRef(false);
+  const paperCount = Number(payload.metrics?.papers || 0);
+  useEffect(() => {
+    if (!autoFolded.current && paperCount > 0) {
+      autoFolded.current = true;
+      setOpen(false);
+    }
+  }, [paperCount]);
   const [mode, setMode] = useState("codex");
   const [codexDepth, setCodexDepth] = useState("quick");
   const [query, setQuery] = useState("");
@@ -2491,7 +2506,7 @@ function PaperDetailPane({ payload, emit, onDeletePaper, onUploadPdf, onExport, 
   const focusDetail = focusDetails[focus];
   const returnHref = safeReturnHref(payload.returnUrl);
   return (
-    <aside className="paper-detail-pane">
+    <aside className="paper-detail-pane" data-source-id={sourceId}>
       {payload.returnTo === "overview" ? (
         <a className="paper-return-link" href={returnHref}>
           {label(payload.labels, "back_to_overview", "Back to Overview")}
@@ -2509,7 +2524,6 @@ function PaperDetailPane({ payload, emit, onDeletePaper, onUploadPdf, onExport, 
           <span key={badge}>{badge}</span>
         ))}
       </div>
-      <code className="paper-detail-source">{sourceId}</code>
       {action ? (
         <div className="paper-deep-link-hint" data-deep-link-action={action}>
           <span>{label(payload.labels, "overview_suggested_action", "Suggested from Overview")}</span>
@@ -2722,10 +2736,11 @@ function PaperDetailPane({ payload, emit, onDeletePaper, onUploadPdf, onExport, 
   );
 }
 
-function WorkspaceTaskProgress({ job }) {
+function WorkspaceTaskProgress({ job, onDismiss }) {
   if (!job) {
     return null;
   }
+  const finished = !isJobRunning(job);
   const warnings = Number(job.warning_count || 0);
   const warningItems = asArray(job.warnings).map(cleanText).filter(Boolean).slice(0, 2);
   const updated = Number(job.updated || 0);
@@ -2735,13 +2750,15 @@ function WorkspaceTaskProgress({ job }) {
       <div className="paper-workspace-task-progress-top">
         <strong>{cleanText(job.message) || t("working", "Working...")}</strong>
         <span>{workspaceProgressText(job)}</span>
+        {finished && onDismiss ? (
+          <button type="button" className="paper-workspace-task-dismiss" onClick={onDismiss}
+            aria-label={t("dismiss", "Dismiss")} title={t("dismiss", "Dismiss")}>×</button>
+        ) : null}
       </div>
       <div className="paper-workspace-task-progress-track">
         <span style={{ width: `${workspaceProgressPercent(job)}%` }} />
       </div>
       <div className="paper-workspace-task-progress-meta">
-        {cleanText(job.source_id) ? <span>{cleanText(job.source_id)}</span> : null}
-        {cleanText(job.scope) ? <span>{cleanText(job.scope)}</span> : null}
         {updated ? <span>{t("progress_updated", "{count} updated", { count: updated })}</span> : null}
         {!updated && saved ? <span>{t("progress_saved", "{count} saved", { count: saved })}</span> : null}
         {warnings ? <span>{t("progress_warnings", "{count} warnings", { count: warnings })}</span> : null}
@@ -2780,6 +2797,27 @@ function App() {
     [payload, selectedPaperIds],
   );
   const workspaceBusy = loading || isJobRunning(workspaceJob);
+  // The finished job box already says what the result notice says.
+  const noticeDuplicatesJob = Boolean(workspaceJob) && cleanText(notice) === cleanText(workspaceJob.message);
+  const dismissWorkspaceJob = () => {
+    if (noticeDuplicatesJob) {
+      setNotice("");
+    }
+    setWorkspaceJob(null);
+  };
+  // A clean success folds away on its own; warnings and failures stay
+  // until dismissed so they are not missed.
+  useEffect(() => {
+    if (!workspaceJob || workspaceJob.status !== "done" || Number(workspaceJob.warning_count || 0) > 0
+      || asArray(workspaceJob.warnings).length > 0) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setWorkspaceJob((current) => (current === workspaceJob ? null : current));
+      setNotice((current) => (cleanText(current) === cleanText(workspaceJob.message) ? "" : current));
+    }, WORKSPACE_JOB_DONE_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [workspaceJob]);
   const filteredSections = useMemo(() => {
     return payload.sections.map((section) => ({
       ...section,
@@ -3368,8 +3406,8 @@ function App() {
           />
         </>
       ) : null}
-      {notice ? <div className="paper-workspace-notice" role="status" aria-live="polite">{notice}</div> : null}
-      <WorkspaceTaskProgress job={workspaceJob} />
+      {notice && !noticeDuplicatesJob ? <div className="paper-workspace-notice" role="status" aria-live="polite">{notice}</div> : null}
+      <WorkspaceTaskProgress job={workspaceJob} onDismiss={dismissWorkspaceJob} />
       {loading && !workspaceJob ? <div className="paper-workspace-loading" role="status">{t("loading", "Loading...")}</div> : null}
       {hasPapers ? (
         <div className="paper-workbench">

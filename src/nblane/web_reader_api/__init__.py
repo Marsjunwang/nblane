@@ -30,6 +30,7 @@ from nblane.core.paper_library_workspace import (
     build_paper_library_payload,
     handle_paper_library_event,
     paper_library_labels,
+    pdf_download_warning_text,
     resolve_paper_library_lang,
 )
 from nblane.core.profile_io import list_profiles, profile_dir
@@ -2009,8 +2010,13 @@ async def paper_library_search_job_cancel(request: Request, profile: str, job_id
     return JSONResponse({"ok": True, "job": snapshot, "job_id": job_id})
 
 
-def _paper_library_pdf_download_warnings(profile_path: Path, source_ids: list[str]) -> list[str]:
+def _paper_library_pdf_download_warnings(
+    profile_path: Path,
+    source_ids: list[str],
+    labels: dict[str, str] | None = None,
+) -> list[str]:
     sources = load_research_sources(profile_path).by_id()
+    labels = labels if labels is not None else paper_library_labels("en")
     warnings: list[str] = []
     for source_id in source_ids:
         source = sources.get(source_id)
@@ -2019,9 +2025,7 @@ def _paper_library_pdf_download_warnings(profile_path: Path, source_ids: list[st
         metadata = source.metadata or {}
         status = _clean_text(metadata.get("pdf_download_status"))
         if status in {"failed", "skipped_needs_link_check", "skipped_no_pdf_url"}:
-            error = _clean_text(metadata.get("pdf_download_error"))
-            title = _clean_text(source.title) or source_id
-            warnings.append(f"{title}: {error or status.replace('_', ' ')}")
+            warnings.append(pdf_download_warning_text(profile_path, source_id, metadata, labels))
     return warnings
 
 
@@ -2085,9 +2089,9 @@ async def paper_library_import(request: Request, profile: str):
     detail_id = imported[0] if imported else ""
     updated = [source_id for source_id in imported if source_id in selected_existing_ids]
     created = [source_id for source_id in imported if source_id not in set(updated)]
-    pdf_warnings = await asyncio.to_thread(_paper_library_pdf_download_warnings, profile_path, imported)
     lang = _paper_library_ui_lang(request, body)
     labels = paper_library_labels(lang)
+    pdf_warnings = await asyncio.to_thread(_paper_library_pdf_download_warnings, profile_path, imported, labels)
 
     def plural(count: int) -> str:
         return "" if count == 1 or lang == "zh" else "s"
@@ -2163,9 +2167,9 @@ async def paper_library_import_url(request: Request, profile: str):
             detail={"message": str(exc), "code": "url_import_failed", "retryable": False},
         ) from exc
     imported = [source_id] if source_id else []
-    pdf_warnings = await asyncio.to_thread(_paper_library_pdf_download_warnings, profile_path, imported)
     lang = _paper_library_ui_lang(request, body)
     labels = paper_library_labels(lang)
+    pdf_warnings = await asyncio.to_thread(_paper_library_pdf_download_warnings, profile_path, imported, labels)
     message = labels["srv_imported_url"]
     if pdf_warnings:
         message = labels["srv_pdf_attention"].format(

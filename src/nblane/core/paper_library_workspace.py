@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from importlib import resources
@@ -146,6 +147,28 @@ def paper_library_labels(lang: object | None = None) -> dict[str, str]:
     if clean != "en":
         labels.update(_label_table(clean))
     return labels
+
+
+def pdf_download_warning_text(
+    profile: str | Path,
+    source_id: str,
+    summary: dict[str, object],
+    labels: dict[str, str],
+) -> str:
+    """One readable line for a PDF that did not download: title + reason."""
+
+    source = load_research_sources(_profile_root(profile)).by_id().get(source_id)
+    title = _clean_text(getattr(source, "title", "")) or source_id
+    status = _clean_text(summary.get("status") or summary.get("pdf_download_status"))
+    if status == "skipped_no_pdf_url":
+        reason = labels.get("srv_pdf_no_url") or "no open-access PDF link; upload the PDF yourself."
+    else:
+        error = _clean_text(summary.get("error") or summary.get("pdf_download_error"))
+        # Drop our own "PDF download failed[ during import]: " prefix.
+        error = re.sub(r"^PDF download failed( during import)?:\s*", "", error)
+        reason = _fmt(labels, "srv_pdf_failed_reason", "download failed ({error}); retry or upload the PDF.",
+                      error=error or status or "?")
+    return f"{title}: {reason}"
 
 
 def _fmt(labels: dict[str, str], key: str, fallback: str = "", **values: object) -> str:
@@ -1111,8 +1134,7 @@ def handle_paper_library_event(
             download_summaries.append(summary)
             changed_sources.append(source_id)
             if _clean_text(summary.get("status")) != "downloaded":
-                warning = _clean_text(summary.get("error")) or "PDF download did not complete."
-                warnings.append(f"{source_id}: {warning}")
+                warnings.append(pdf_download_warning_text(profile, source_id, summary, labels))
         changed["sources"] = changed_sources
         downloaded = sum(1 for summary in download_summaries if _clean_text(summary.get("status")) == "downloaded")
         failed = len(download_summaries) - downloaded

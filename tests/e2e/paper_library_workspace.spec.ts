@@ -302,7 +302,7 @@ test("Standalone Paper Library completes core workspace actions", async ({ page 
   await treeRow(page, "Discarded").locator(".paper-tree-main").click();
   await expect(paperCard(page, "source:e2e:discarded")).toBeVisible();
   await paperCard(page, "source:e2e:discarded").locator(".paper-card-body").click();
-  await expect(page.locator(".paper-detail-source")).toHaveText("source:e2e:discarded");
+  await expect(page.locator(".paper-detail-pane")).toHaveAttribute("data-source-id", "source:e2e:discarded");
   await page.locator(".paper-detail-danger").getByRole("button", { name: "Delete paper..." }).click();
   const deleteDialog = page.locator(".paper-delete-dialog");
   await expect(deleteDialog).toBeVisible();

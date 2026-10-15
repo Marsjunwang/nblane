@@ -326,6 +326,18 @@ progress_warnings: "{count} warnings"
 progress_batches: "{done}/{total} batches"
 progress_steps: "{done}/{total} steps"
 progress_units: "{done}/{total} units"
+job_status_queued: Queued
+job_status_starting: Starting
+job_status_running: Running
+job_status_cancelling: Cancelling
+job_status_cancelled: Cancelled
+job_status_done: Done
+job_status_failed: Failed
+job_phase_pdf_download: downloading PDF
+job_phase_extraction: extracting
+job_phase_translation: translating
+job_phase_waiting: waiting
+dismiss: Dismiss
 # Server-side event / import messages
 srv_invalid_event: Invalid Paper Library event.
 srv_unknown_event: "Unknown Paper Library event: {action}"
@@ -340,6 +352,8 @@ srv_downloading_pdf: Downloading PDF.
 srv_downloaded_partial: Downloaded {count} PDF{s}; {failed} need attention.
 srv_downloaded: Downloaded {count} PDF{s}.
 srv_download_incomplete: PDF download did not complete.
+srv_pdf_no_url: no open-access PDF link; upload the PDF yourself.
+srv_pdf_failed_reason: download failed ({error}); retry or upload the PDF.
 srv_extracting: Extracting reader artifacts.
 srv_preparing_translation: Preparing reader artifacts before translation.
 srv_starting_translation: Starting full-paper translation.

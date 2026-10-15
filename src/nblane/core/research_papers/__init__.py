@@ -674,23 +674,8 @@ def ensure_paper_pdf_downloaded(
             "pdf_url": "",
             "error": message,
         }
-    if bool((source.metadata or {}).get("needs_link_check")):
-        message = "PDF download skipped because the link still needs checking."
-        _update_source_metadata(
-            profile,
-            clean_source_id,
-            {
-                "pdf_download_status": "skipped_needs_link_check",
-                "pdf_download_attempted_at": attempted_at,
-                "pdf_download_error": message,
-            },
-        )
-        return {
-            "source_id": clean_source_id,
-            "status": "skipped_needs_link_check",
-            "pdf_url": clean_url,
-            "error": message,
-        }
+    # An unchecked link is not skipped: the download is the check
+    # (non-PDF bytes are rejected), and success clears the flag below.
     _update_source_metadata(
         profile,
         clean_source_id,
@@ -726,6 +711,7 @@ def ensure_paper_pdf_downloaded(
             "pdf_download_status": "downloaded",
             "pdf_download_attempted_at": _now(),
             "pdf_download_error": "",
+            "needs_link_check": False,
         },
     )
     return {
@@ -8666,8 +8652,8 @@ def _result_from_url(url: str, *, enrich: bool = True) -> PaperSearchResult:
         open_access_pdf=bool(pdf_url),
         provider_refs=_clean_list(metadata.get("provider_refs")) or ["manual"],
         why_relevant="Manual URL / DOI import candidate.",
+        # The user pasted this link themselves; the PDF download verifies it.
         link_check={"status": "needs check"},
-        needs_link_check=True,
         abstract=abstract,
         authors=authors,
         year=year,

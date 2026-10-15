@@ -88,6 +88,8 @@ from nblane.core.paper_library_workspace import (
     PAPER_LIBRARY_RUNTIME_DEFAULT,
     build_paper_library_payload,
     handle_paper_library_event,
+    paper_library_labels,
+    pdf_download_warning_text,
     resolve_paper_library_runtime,
 )
 from nblane.core.research_sources import (
@@ -4047,7 +4049,25 @@ class TestResearchPapers(unittest.TestCase):
         self.assertEqual(rows[0].explanation_links[0]["title"], "arXiv abstract")
         self.assertEqual(rows[0].explanation_links[0]["source"], "arXiv")
 
-    def test_import_pdf_download_skips_unchecked_links(self) -> None:
+    def test_import_pdf_download_checks_unverified_links_by_downloading(self) -> None:
+        class PdfResponse:
+            headers = {"content-length": str(len(PDF_BYTES))}
+
+            def __init__(self) -> None:
+                self._sent = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self, size: int) -> bytes:
+                if self._sent:
+                    return b""
+                self._sent = True
+                return PDF_BYTES
+
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))
             result = {
@@ -4056,7 +4076,11 @@ class TestResearchPapers(unittest.TestCase):
                 "pdf_url": "https://example.com/unchecked.pdf",
                 "needs_link_check": True,
             }
-            with patch("nblane.core.research_sources.git_backup.record_change"):
+            with (
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch.dict(os.environ, {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")}),
+                patch("nblane.core.research_papers.urllib.request.urlopen", return_value=PdfResponse()),
+            ):
                 imported = import_paper_search_results(
                     profile,
                     [result],
@@ -4065,8 +4089,32 @@ class TestResearchPapers(unittest.TestCase):
                 )
             source = load_research_sources(profile).by_id()[imported[0]]
 
-        self.assertEqual(source.metadata["pdf_download_status"], "skipped_needs_link_check")
-        self.assertNotIn("pdf_asset_ref", source.metadata)
+        self.assertEqual(source.metadata["pdf_download_status"], "downloaded")
+        self.assertIn("pdf_asset_ref", source.metadata)
+        self.assertFalse(source.metadata.get("needs_link_check"))
+
+    def test_pdf_download_warning_text_uses_title_and_readable_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                imported = import_paper_search_results(
+                    profile,
+                    [{"candidate_id": "c1", "title": "Readable Title", "pdf_url": "https://example.com/a.pdf"}],
+                    ["c1"],
+                    {"download_pdf": False},
+                )
+            labels = paper_library_labels("zh")
+            failed = pdf_download_warning_text(
+                profile,
+                imported[0],
+                {"status": "failed", "error": "PDF download failed during import: HTTP Error 404: Not Found"},
+                labels,
+            )
+            missing = pdf_download_warning_text(profile, imported[0], {"status": "skipped_no_pdf_url"}, labels)
+
+        self.assertEqual(failed, "Readable Title: PDF 下载失败（HTTP Error 404: Not Found），可以重试或手动上传。")
+        self.assertNotIn("source:", failed)
+        self.assertTrue(missing.startswith("Readable Title: 没有找到开放的 PDF 链接"))
 
     def test_import_pdf_download_failure_records_warning_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
