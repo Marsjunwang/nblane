@@ -2139,6 +2139,38 @@
     "title": "ContentCoverPromoteResponse",
     "type": "object"
    },
+   "ContentMediaCleanupRequest": {
+    "properties": {
+     "paths": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 500,
+      "title": "Paths",
+      "type": "array"
+     }
+    },
+    "title": "ContentMediaCleanupRequest",
+    "type": "object"
+   },
+   "ContentMediaCleanupResponse": {
+    "properties": {
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "removed": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Removed",
+      "type": "array"
+     }
+    },
+    "title": "ContentMediaCleanupResponse",
+    "type": "object"
+   },
    "ContentMediaModel": {
     "description": "One file in a post's media directory (profile-relative path).",
     "properties": {
@@ -2336,6 +2368,63 @@
      "slug"
     ],
     "title": "ContentTrashRestoreResponse",
+    "type": "object"
+   },
+   "ContentUnusedMedia": {
+    "description": "A media file under media/blog/ that no post or library node uses.",
+    "properties": {
+     "kind": {
+      "default": "",
+      "title": "Kind",
+      "type": "string"
+     },
+     "modified": {
+      "default": "",
+      "title": "Modified",
+      "type": "string"
+     },
+     "name": {
+      "default": "",
+      "title": "Name",
+      "type": "string"
+     },
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
+     "post": {
+      "default": "",
+      "title": "Post",
+      "type": "string"
+     },
+     "size": {
+      "default": 0,
+      "title": "Size",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "title": "ContentUnusedMedia",
+    "type": "object"
+   },
+   "ContentUnusedMediaResponse": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/ContentUnusedMedia"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "total_size": {
+      "default": 0,
+      "title": "Total Size",
+      "type": "integer"
+     }
+    },
+    "title": "ContentUnusedMediaResponse",
     "type": "object"
    },
    "ContentWorkspaceResponse": {
@@ -17674,6 +17763,156 @@
      }
     },
     "summary": "Restore Profile Content Trash"
+   }
+  },
+  "/api/v1/profiles/{name}/content/unused-media": {
+   "get": {
+    "description": "Blog media no post (including trashed ones) or library node references.",
+    "operationId": "list_profile_content_unused_media_api_v1_profiles__name__content_unused_media_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentUnusedMediaResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "List Profile Content Unused Media"
+   }
+  },
+  "/api/v1/profiles/{name}/content/unused-media/delete": {
+   "post": {
+    "description": "Delete the chosen files; anything referenced again since listing is skipped.",
+    "operationId": "delete_profile_content_unused_media_api_v1_profiles__name__content_unused_media_delete_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ContentMediaCleanupRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentMediaCleanupResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Delete Profile Content Unused Media"
    }
   },
   "/api/v1/profiles/{name}/crystallize/apply": {

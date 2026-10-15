@@ -451,6 +451,48 @@ class ContentWorkspaceApiTest(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200, deleted.text)
         self.assertTrue(deleted.json()["was_published"])
 
+    def _unused(self) -> list[str]:
+        response = self.client.get("/api/v1/profiles/alice/content/unused-media")
+        self.assertEqual(response.status_code, 200, response.text)
+        return [item["path"] for item in response.json()["items"]]
+
+    def test_unused_media_counts_every_post_and_the_trash(self) -> None:
+        slug, etag = self._create()
+        used = self._upload(slug)
+        spare = self._upload(slug)
+        # This post embeds one file; the other is only used by a second post.
+        put = self.client.put(f"/api/v1/profiles/alice/content/blog/{slug}",
+                              json={"body": used["snippet"]}, headers={"If-Match": etag})
+        self.assertEqual(put.status_code, 200, put.text)
+        other, other_etag = self._create("Other", body=spare["snippet"])
+        self.assertEqual(self._unused(), [])
+        # Deleting the second post keeps its file in use while it sits in the trash.
+        self.assertEqual(self._delete(other, other_etag, "Other").status_code, 200)
+        self.assertEqual(self._unused(), [])
+        trash_id = self.client.get("/api/v1/profiles/alice/content/trash").json()["items"][0]["id"]
+        self.assertEqual(self.client.delete(f"/api/v1/profiles/alice/content/trash/{trash_id}").status_code, 200)
+        self.assertEqual(self._unused(), [spare["path"]])
+
+        removed = self.client.post("/api/v1/profiles/alice/content/unused-media/delete",
+                                   json={"paths": [spare["path"], used["path"], "../../etc/passwd"]})
+        self.assertEqual(removed.status_code, 200, removed.text)
+        # Only the unused file goes; the referenced one and junk are skipped.
+        self.assertEqual(removed.json()["removed"], [spare["path"]])
+        self.assertFalse((self.profile / spare["path"]).exists())
+        self.assertTrue((self.profile / used["path"]).exists())
+        self.assertEqual(self._unused(), [])
+
+    def test_single_media_delete_refuses_files_other_posts_use(self) -> None:
+        from nblane.core import public_site
+        from nblane.core.public_site import PublicSiteError
+
+        slug, _ = self._create()
+        uploaded = self._upload(slug)
+        self._create("Other", body=uploaded["snippet"])
+        with self.assertRaisesRegex(PublicSiteError, "another post"):
+            public_site.delete_blog_media("alice", slug, uploaded["path"])
+        self.assertTrue((self.profile / uploaded["path"]).exists())
+
 
 def test_skip_changes_suppresses_record_change(tmp_path: Path) -> None:
     """Inside skip_changes() the real hook neither commits nor queues."""

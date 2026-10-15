@@ -2074,6 +2074,31 @@ class ContentPostDeleteResponse(BaseModel):
     was_published: bool = False
 
 
+class ContentUnusedMedia(BaseModel):
+    """A media file under media/blog/ that no post or library node uses."""
+
+    path: str
+    name: str = ""
+    post: str = ""
+    kind: str = ""
+    size: int = 0
+    modified: str = ""
+
+
+class ContentUnusedMediaResponse(BaseModel):
+    items: list[ContentUnusedMedia] = Field(default_factory=list)
+    total_size: int = 0
+
+
+class ContentMediaCleanupRequest(BaseModel):
+    paths: list[str] = Field(default_factory=list, max_length=500)
+
+
+class ContentMediaCleanupResponse(BaseModel):
+    ok: bool = True
+    removed: list[str] = Field(default_factory=list)
+
+
 class ContentTrashItem(BaseModel):
     """One post in the content trash."""
 

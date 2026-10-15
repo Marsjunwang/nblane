@@ -339,6 +339,9 @@ export type StudioPostCreateRequest = Schemas['StudioPostCreateRequest'];
 export type ContentPostDeleteRequest = Schemas['ContentPostDeleteRequest'];
 export type ContentPostDeleteResponse = Schemas['ContentPostDeleteResponse'];
 export type ContentTrashItem = Schemas['ContentTrashItem'];
+export type ContentUnusedMedia = Schemas['ContentUnusedMedia'];
+export type ContentUnusedMediaResponse = Schemas['ContentUnusedMediaResponse'];
+export type ContentMediaCleanupResponse = Schemas['ContentMediaCleanupResponse'];
 export type ContentTrashResponse = Schemas['ContentTrashResponse'];
 export type ContentTrashRestoreResponse = Schemas['ContentTrashRestoreResponse'];
 

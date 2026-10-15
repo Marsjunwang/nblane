@@ -373,7 +373,10 @@ from nblane.web_api.schemas import (
     ContentWorkspaceResponse,
     ContentPostDeleteRequest,
     ContentPostDeleteResponse,
+    ContentMediaCleanupRequest,
+    ContentMediaCleanupResponse,
     ContentTrashPurgeResponse,
+    ContentUnusedMediaResponse,
     ContentTrashResponse,
     ContentTrashRestoreResponse,
     StudioPostCreateRequest,
@@ -7531,6 +7534,31 @@ def delete_profile_content_blog(
         changed_paths=[str(path) for path in changed],
         was_published=post.status == "published",
     )
+
+
+@router.get(
+    "/profiles/{name}/content/unused-media",
+    response_model=ContentUnusedMediaResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def list_profile_content_unused_media(name: str) -> ContentUnusedMediaResponse:
+    """Blog media no post (including trashed ones) or library node references."""
+    pdir = _resolve_profile(name)
+    items = public_site.unused_blog_media(pdir.name)
+    return ContentUnusedMediaResponse(items=items, total_size=sum(row["size"] for row in items))
+
+
+@router.post(
+    "/profiles/{name}/content/unused-media/delete",
+    response_model=ContentMediaCleanupResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def delete_profile_content_unused_media(name: str, body: ContentMediaCleanupRequest) -> ContentMediaCleanupResponse:
+    """Delete the chosen files; anything referenced again since listing is skipped."""
+    pdir = _resolve_profile(name)
+    return ContentMediaCleanupResponse(removed=public_site.delete_unused_blog_media(pdir.name, body.paths))
 
 
 @router.get(

@@ -1023,6 +1023,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/content/unused-media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Profile Content Unused Media
+         * @description Blog media no post (including trashed ones) or library node references.
+         */
+        get: operations["list_profile_content_unused_media_api_v1_profiles__name__content_unused_media_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/content/unused-media/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Profile Content Unused Media
+         * @description Delete the chosen files; anything referenced again since listing is skipped.
+         */
+        post: operations["delete_profile_content_unused_media_api_v1_profiles__name__content_unused_media_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/crystallize/apply": {
         parameters: {
             query?: never;
@@ -5087,6 +5127,21 @@ export interface components {
             /** Path */
             path: string;
         };
+        /** ContentMediaCleanupRequest */
+        ContentMediaCleanupRequest: {
+            /** Paths */
+            paths?: string[];
+        };
+        /** ContentMediaCleanupResponse */
+        ContentMediaCleanupResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Removed */
+            removed?: string[];
+        };
         /**
          * ContentMediaModel
          * @description One file in a post's media directory (profile-relative path).
@@ -5219,6 +5274,49 @@ export interface components {
             ok: boolean;
             /** Slug */
             slug: string;
+        };
+        /**
+         * ContentUnusedMedia
+         * @description A media file under media/blog/ that no post or library node uses.
+         */
+        ContentUnusedMedia: {
+            /**
+             * Kind
+             * @default
+             */
+            kind: string;
+            /**
+             * Modified
+             * @default
+             */
+            modified: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /** Path */
+            path: string;
+            /**
+             * Post
+             * @default
+             */
+            post: string;
+            /**
+             * Size
+             * @default 0
+             */
+            size: number;
+        };
+        /** ContentUnusedMediaResponse */
+        ContentUnusedMediaResponse: {
+            /** Items */
+            items?: components["schemas"]["ContentUnusedMedia"][];
+            /**
+             * Total Size
+             * @default 0
+             */
+            total_size: number;
         };
         /** ContentWorkspaceResponse */
         ContentWorkspaceResponse: {
@@ -15749,6 +15847,126 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_profile_content_unused_media_api_v1_profiles__name__content_unused_media_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentUnusedMediaResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_profile_content_unused_media_api_v1_profiles__name__content_unused_media_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentMediaCleanupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentMediaCleanupResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

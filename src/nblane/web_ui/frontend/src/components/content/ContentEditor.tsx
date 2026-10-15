@@ -63,6 +63,7 @@ import {
   useCheckContentPost,
   useContentPost,
   useContentPostMedia,
+  useDeleteContentPostMedia,
   usePublishContentPost,
   useSaveContentPost,
   useUploadContentMedia,
@@ -140,6 +141,9 @@ function MediaList({
   onUpload,
   onInsert,
   onSetCover,
+  onDelete,
+  deleting,
+  bodyUses,
 }: {
   profile: string;
   media: ContentMedia[];
@@ -149,6 +153,10 @@ function MediaList({
   onUpload: (file: File | null) => void;
   onInsert: (item: ContentMedia) => void;
   onSetCover: (path: string) => void;
+  onDelete?: (item: ContentMedia) => void;
+  deleting?: string;
+  /** True when the unsaved editor text already uses this file. */
+  bodyUses?: (path: string) => boolean;
 }) {
   return (
     <Stack gap="sm" data-testid="content-media">
@@ -194,6 +202,15 @@ function MediaList({
                 </ActionIcon>
               </Tooltip>
             )}
+            {onDelete && !item.referenced && item.path !== cover && !bodyUses?.(item.path) && (
+              <Tooltip label="删除这个文件（其他文章在用时会拒绝）">
+                <ActionIcon variant="subtle" color="red" aria-label={`删除 ${item.name}`}
+                  loading={deleting === item.path} disabled={Boolean(deleting)} onClick={() => onDelete(item)}
+                  data-testid="content-media-delete">
+                  <IconTrash size={16} />
+                </ActionIcon>
+              </Tooltip>
+            )}
           </Group>
         ))
       )}
@@ -226,6 +243,13 @@ function PostSettings({
   onUpload: (file: File | null) => void;
   onInsert: (item: ContentMedia) => void;
 }) {
+  const removeMedia = useDeleteContentPostMedia(profile, slug);
+  const deleteMedia = (item: ContentMedia) =>
+    removeMedia.mutate(item.path, {
+      onSuccess: () => notifications.show({ color: 'gray', title: '已删除', message: item.name }),
+      onError: (error) =>
+        notifications.show({ color: 'red', title: '没有删除', message: error instanceof Error ? error.message : String(error) }),
+    });
   const coverOptions = media.filter((item) => item.kind === 'image').map((item) => ({ value: item.path, label: item.name }));
   if (draft.cover && !coverOptions.some((option) => option.value === draft.cover)) {
     coverOptions.unshift({ value: draft.cover, label: draft.cover });
@@ -313,6 +337,9 @@ function PostSettings({
           onUpload={onUpload}
           onInsert={onInsert}
           onSetCover={(path) => onEdit({ cover: path })}
+          onDelete={deleteMedia}
+          deleting={removeMedia.isPending ? removeMedia.variables : undefined}
+          bodyUses={(path) => draft.body.includes(path)}
         />
       </Tabs.Panel>
     </Tabs>

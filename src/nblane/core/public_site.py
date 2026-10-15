@@ -7428,6 +7428,13 @@ def delete_blog_media(
         raise PublicSiteError(
             "Media is still referenced by this post; remove it from the body or cover before deleting."
         )
+    # Other posts (including trashed ones that may be restored) and the
+    # library may embed the same file; never break them.
+    users = [route for route in media_users(name).get(clean, []) if route != post.route]
+    if users and not allow_referenced:
+        raise PublicSiteError(
+            "Media is still used by another post: " + ", ".join(sorted(users))
+        )
     target.unlink()
     try:
         target.parent.rmdir()
@@ -7438,6 +7445,118 @@ def delete_blog_media(
         action=f"delete {name}/blog/{post.slug} media",
     )
     return target
+
+
+def _trashed_post_bodies(name: str) -> list[tuple[str, dict, str]]:
+    """``(route, meta, body)`` for posts in the content trash."""
+    rows: list[tuple[str, dict, str]] = []
+    root = _blog_trash_dir(name)
+    if not root.is_dir():
+        return rows
+    for folder in root.iterdir():
+        if not folder.is_dir():
+            continue
+        for path in folder.iterdir():
+            if path.name == BLOG_TRASH_MANIFEST or not path.is_file():
+                continue
+            try:
+                post = parse_blog_post(path)
+            except Exception:
+                continue
+            route = ""
+            try:
+                route = str(_read_trash_manifest(folder).get("route") or "")
+            except (OSError, yaml.YAMLError):
+                pass
+            rows.append((f"回收站:{route or folder.name}", post.meta, post.body))
+            break
+    return rows
+
+
+def media_users(name: str) -> dict[str, list[str]]:
+    """Map each referenced profile-relative media path to the posts using it.
+
+    Counts every post (drafts, archived, library-trashed and content-trash
+    posts), as cover or in the body, plus public-library media nodes.
+    """
+    users: dict[str, list[str]] = {}
+
+    def add(ref: str, who: str) -> None:
+        clean = _normalize_media_ref(_strip_markdown_url(str(ref or ""))).lstrip("/")
+        if clean and who not in users.setdefault(clean, []):
+            users[clean].append(who)
+
+    sources: list[tuple[str, dict, str]] = [
+        (post.route, post.meta, post.body)
+        for post in load_blog_posts(name, include_drafts=True, include_archived=True, include_trashed=True)
+    ]
+    sources += _trashed_post_bodies(name)
+    for who, meta, body in sources:
+        add(str((meta or {}).get("cover", "") or ""), who)
+        for ref in _blog_body_media_refs(body or ""):
+            add(ref, who)
+    for node in load_public_library(name).nodes:
+        if node.type == "media" and node.ref:
+            add(node.ref, "公开目录")
+    return users
+
+
+def unused_blog_media(name: str) -> list[dict]:
+    """Image/video files under ``media/blog/`` that nothing references."""
+    profile_root = _profile_path(name)
+    media_root = profile_root / MEDIA_DIRNAME / BLOG_DIRNAME
+    if not media_root.is_dir():
+        return []
+    used = media_users(name)
+    rows = []
+    for path in sorted(media_root.rglob("*")):
+        if not path.is_file():
+            continue
+        ext = path.suffix.lower().lstrip(".")
+        if ext not in BLOG_IMAGE_EXTENSIONS and ext not in BLOG_VIDEO_EXTENSIONS:
+            continue
+        rel = path.relative_to(profile_root).as_posix()
+        if rel in used:
+            continue
+        stat = path.stat()
+        rows.append(
+            {
+                "path": rel,
+                "name": path.name,
+                "post": path.parent.relative_to(media_root).as_posix(),
+                "kind": "video" if ext in BLOG_VIDEO_EXTENSIONS else "image",
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+            }
+        )
+    return rows
+
+
+def delete_unused_blog_media(name: str, paths: list[str]) -> list[str]:
+    """Delete the given files if they are still unused; returns what was removed.
+
+    Re-checks under the blog lock, so a file that became referenced since the
+    list was shown is skipped rather than deleted.
+    """
+    profile_root = _profile_path(name)
+    removed: list[Path] = []
+    with locked_profile_write(profile_root, "blog"):
+        unused = {row["path"] for row in unused_blog_media(name)}
+        for rel in dict.fromkeys(str(p or "").strip().lstrip("/") for p in paths):
+            if rel not in unused:
+                continue
+            target = _local_media_target(profile_root, rel)
+            if target is None or not target.is_file():
+                continue
+            target.unlink()
+            removed.append(target)
+            try:
+                target.parent.rmdir()
+            except OSError:
+                pass
+    if removed:
+        git_backup.record_change(removed, action=f"clean {name} unused blog media")
+    return [p.relative_to(profile_root).as_posix() for p in removed]
 
 
 def _unique_transcoded_video_path(source: Path) -> Path:

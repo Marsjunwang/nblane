@@ -103,7 +103,9 @@ import type {
   StudioPostCreateRequest,
   ContentPostDeleteRequest,
   ContentPostDeleteResponse,
+  ContentMediaCleanupResponse,
   ContentTrashResponse,
+  ContentUnusedMediaResponse,
   ContentTrashRestoreResponse,
   StudioPostDetail,
   StudioPostMutationResponse,
@@ -2175,6 +2177,25 @@ export function useDeleteContentPost(profile: string) {
   });
 }
 
+export function useUnusedContentMedia(profile: string, enabled = true) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'content', 'unused-media'],
+    queryFn: () => apiGet<ContentUnusedMediaResponse>(`/profiles/${encodeURIComponent(profile)}/content/unused-media`),
+    enabled: enabled && profile.length > 0,
+  });
+}
+
+export function useDeleteUnusedContentMedia(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (paths: string[]) =>
+      apiPost<ContentMediaCleanupResponse>(`/profiles/${encodeURIComponent(profile)}/content/unused-media/delete`, { paths }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content'] });
+    },
+  });
+}
+
 export function useContentTrash(profile: string, enabled = true) {
   return useQuery({
     queryKey: ['profiles', profile, 'content', 'trash'],
@@ -2289,6 +2310,19 @@ export function useContentPostMedia(profile: string, slug: string) {
     queryKey: ['profiles', profile, 'content', 'media', slug],
     queryFn: () => apiGet<ContentMedia[]>(`${contentBlogPath(profile, slug)}/media`),
     enabled: profile.length > 0 && slug.length > 0,
+  });
+}
+
+/** Delete one of a post's media files (the server refuses files any post still uses). */
+export function useDeleteContentPostMedia(profile: string, slug: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (path: string) =>
+      apiDelete<Record<string, boolean>>(`${contentBlogPath(profile, slug)}/media/${path.split('/').map(encodeURIComponent).join('/')}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content', 'media', slug] });
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content', 'unused-media'] });
+    },
   });
 }
 

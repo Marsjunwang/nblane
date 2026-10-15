@@ -28,6 +28,7 @@ import { contentMediaUrl, useContentTrash, useContentWorkspace, useCreateContent
 import type { StudioPost } from '../../api/types';
 import { STATUS_COLORS, STATUS_LABELS, contentEditorPath } from './contentDraft';
 import { ContentTrashModal } from './ContentTrashModal';
+import { UnusedMediaModal } from './UnusedMediaModal';
 import { DeleteContentPostDialog } from './DeleteContentPostDialog';
 
 type SortKey = 'date' | 'title';
@@ -53,6 +54,7 @@ export function ContentLibrary({ profile }: { profile: string }) {
   const [newTitle, setNewTitle] = useState('');
   const [deleteSlug, setDeleteSlug] = useState<string | null>(null);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [mediaOpen, setMediaOpen] = useState(false);
   const trashCount = useContentTrash(profile).data?.items?.length ?? 0;
 
   const posts = useMemo(() => content.data?.data.posts ?? [], [content.data]);
@@ -115,6 +117,9 @@ export function ContentLibrary({ profile }: { profile: string }) {
           </Text>
         </div>
         <Group gap="xs">
+          <Button variant="default" leftSection={<IconPhoto size={15} />} onClick={() => setMediaOpen(true)} data-testid="content-unused-media-open">
+            清理图片
+          </Button>
           <Button variant="default" leftSection={<IconTrash size={15} />} onClick={() => setTrashOpen(true)} data-testid="content-trash-open">
             回收站{trashCount > 0 ? ` · ${trashCount}` : ''}
           </Button>
@@ -261,6 +266,7 @@ export function ContentLibrary({ profile }: { profile: string }) {
       {deleteSlug && <DeleteContentPostDialog profile={profile} slug={deleteSlug}
         onClose={() => setDeleteSlug(null)} onDeleted={() => setDeleteSlug(null)} />}
       {trashOpen && <ContentTrashModal profile={profile} onClose={() => setTrashOpen(false)} />}
+      {mediaOpen && <UnusedMediaModal profile={profile} onClose={() => setMediaOpen(false)} />}
 
       <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="新建文章" centered>
         <form
