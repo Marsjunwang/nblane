@@ -103,6 +103,8 @@ import type {
   StudioPostCreateRequest,
   ContentPostDeleteRequest,
   ContentPostDeleteResponse,
+  ContentTrashResponse,
+  ContentTrashRestoreResponse,
   StudioPostDetail,
   StudioPostMutationResponse,
   StudioPostResult,
@@ -2166,8 +2168,42 @@ export function useDeleteContentPost(profile: string) {
       queryClient.removeQueries({ queryKey: ['profiles', profile, 'content', 'media', slug] });
       queryClient.removeQueries({ queryKey: ['profiles', profile, 'content', 'social', slug] });
       void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content'], exact: true });
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content', 'trash'] });
       void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'public-site'] });
       void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'home'] });
+    },
+  });
+}
+
+export function useContentTrash(profile: string, enabled = true) {
+  return useQuery({
+    queryKey: ['profiles', profile, 'content', 'trash'],
+    queryFn: () => apiGet<ContentTrashResponse>(`/profiles/${encodeURIComponent(profile)}/content/trash`),
+    enabled: enabled && profile.length > 0,
+  });
+}
+
+export function useRestoreContentTrash(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (trashId: string) =>
+      apiPost<ContentTrashRestoreResponse>(
+        `/profiles/${encodeURIComponent(profile)}/content/trash/${encodeURIComponent(trashId)}/restore`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content'] });
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'public-site'] });
+    },
+  });
+}
+
+export function usePurgeContentTrash(profile: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (trashId: string) =>
+      apiDelete<{ ok: boolean }>(`/profiles/${encodeURIComponent(profile)}/content/trash/${encodeURIComponent(trashId)}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'content', 'trash'] });
     },
   });
 }

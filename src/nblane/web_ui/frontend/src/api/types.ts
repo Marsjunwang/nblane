@@ -338,6 +338,9 @@ export type StudioInitResponse = Schemas['StudioInitResponse'];
 export type StudioPostCreateRequest = Schemas['StudioPostCreateRequest'];
 export type ContentPostDeleteRequest = Schemas['ContentPostDeleteRequest'];
 export type ContentPostDeleteResponse = Schemas['ContentPostDeleteResponse'];
+export type ContentTrashItem = Schemas['ContentTrashItem'];
+export type ContentTrashResponse = Schemas['ContentTrashResponse'];
+export type ContentTrashRestoreResponse = Schemas['ContentTrashRestoreResponse'];
 
 /** StudioPostSaveRequest from web_api/schemas.py (None fields keep values). */
 export type StudioPostSaveRequest = Schemas['StudioPostSaveRequest'] & {

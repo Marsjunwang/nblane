@@ -24,9 +24,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import { contentMediaUrl, useContentWorkspace, useCreateContentPost } from '../../api/hooks';
+import { contentMediaUrl, useContentTrash, useContentWorkspace, useCreateContentPost } from '../../api/hooks';
 import type { StudioPost } from '../../api/types';
 import { STATUS_COLORS, STATUS_LABELS, contentEditorPath } from './contentDraft';
+import { ContentTrashModal } from './ContentTrashModal';
 import { DeleteContentPostDialog } from './DeleteContentPostDialog';
 
 type SortKey = 'date' | 'title';
@@ -51,6 +52,8 @@ export function ContentLibrary({ profile }: { profile: string }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [deleteSlug, setDeleteSlug] = useState<string | null>(null);
+  const [trashOpen, setTrashOpen] = useState(false);
+  const trashCount = useContentTrash(profile).data?.items?.length ?? 0;
 
   const posts = useMemo(() => content.data?.data.posts ?? [], [content.data]);
   const fixtureCount = useMemo(() => posts.filter(isFixture).length, [posts]);
@@ -112,6 +115,9 @@ export function ContentLibrary({ profile }: { profile: string }) {
           </Text>
         </div>
         <Group gap="xs">
+          <Button variant="default" leftSection={<IconTrash size={15} />} onClick={() => setTrashOpen(true)} data-testid="content-trash-open">
+            回收站{trashCount > 0 ? ` · ${trashCount}` : ''}
+          </Button>
           <Button
             component={Link}
             to={`/p/${encodeURIComponent(profile)}/public-build`}
@@ -254,6 +260,7 @@ export function ContentLibrary({ profile }: { profile: string }) {
 
       {deleteSlug && <DeleteContentPostDialog profile={profile} slug={deleteSlug}
         onClose={() => setDeleteSlug(null)} onDeleted={() => setDeleteSlug(null)} />}
+      {trashOpen && <ContentTrashModal profile={profile} onClose={() => setTrashOpen(false)} />}
 
       <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="新建文章" centered>
         <form

@@ -6968,10 +6968,13 @@ def delete_blog_post(
     expected_sidecar_snapshot: FileSnapshot,
     record_chronicle: bool = False,
 ) -> list[Path]:
-    """Delete a blog document and its library entries, retaining shared media.
+    """Move a blog document to the content trash and drop its library entries.
 
-    Use the same lock as saves and recheck both source files inside it. A
-    failed deletion restores the source documents and library index.
+    The Markdown and BlockNote files move to ``blog/.trash/<id>/`` (hidden from
+    listings and builds) with a manifest, so :func:`restore_trashed_blog_post`
+    can bring them back; media stays in place for other posts. The post's
+    share-card settings move into the manifest too. Uses the same lock as saves
+    and rechecks both source files inside it; a failure restores everything.
     """
     route = _resolve_blog_route(name, slug)
     path = _safe_blog_path(name, route)
@@ -6989,8 +6992,14 @@ def delete_blog_post(
             for node in library.nodes
             if node.type == "post" and _library_blog_route(node.ref) == route
         }
-        title = parse_blog_post(path).title
+        parsed = parse_blog_post(path if path.exists() else sidecar)
+        title = parsed.title
+        trash_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}-{uuid.uuid4().hex[:6]}"
+        trash_dir = _blog_trash_dir(name) / trash_id
+        cards_path = profile_root / SOCIAL_CARDS_FILENAME
         rollback_paths = [path, sidecar, library_path]
+        if cards_path.exists():
+            rollback_paths.append(cards_path)
         if record_chronicle:
             rollback_paths.append(profile_root / chronicle.CHRONICLE_FILENAME)
         filenames = tuple(
@@ -6998,32 +7007,216 @@ def delete_blog_post(
             for item in rollback_paths
         )
         changed: list[Path] = []
-        with rollback_profile_files(profile_root, filenames):
-            for item in (path, sidecar):
-                if item.exists():
+        moved: list[tuple[Path, Path]] = []
+        try:
+            with rollback_profile_files(profile_root, filenames):
+                trash_dir.mkdir(parents=True, exist_ok=False)
+                for item in (path, sidecar):
+                    if item.exists():
+                        target = trash_dir / item.name
+                        shutil.copy2(item, target)
+                        moved.append((item, target))
+                card_settings = _pop_social_card_settings(cards_path, route)
+                manifest = {
+                    "id": trash_id,
+                    "route": route,
+                    "title": title,
+                    "status": parsed.status,
+                    "deleted_at": _utc_now(),
+                    "files": [target.name for _, target in moved],
+                    "library_nodes": [
+                        node.to_dict() for node in library.nodes if node.id in removed
+                    ],
+                }
+                if card_settings is not None:
+                    manifest["social_card_settings"] = card_settings
+                    changed.append(cards_path)
+                atomic_write_text(
+                    trash_dir / BLOG_TRASH_MANIFEST,
+                    yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+                )
+                for item, _target in moved:
                     item.unlink()
                     changed.append(item)
-            if removed:
-                library.nodes = [node for node in library.nodes if node.id not in removed]
-                # Media entries survive with their files. Lift them out of
-                # the removed post, including any legacy nested post nodes.
-                for node in library.nodes:
-                    seen: set[str] = set()
-                    while node.parent_id in removed:
-                        if node.parent_id in seen:
-                            node.parent_id = "root"
-                            break
-                        seen.add(node.parent_id)
-                        node.parent_id = removed[node.parent_id]
+                changed.extend(target for _, target in moved)
+                changed.append(trash_dir / BLOG_TRASH_MANIFEST)
+                _delete_blog_post_library(name, library, removed, library_path, changed)
+                if record_chronicle:
+                    with git_backup.skip_changes():
+                        chronicle.append_chronicle(profile_root, "content.deleted", ref=route, note=title)
+                    changed.append(profile_root / chronicle.CHRONICLE_FILENAME)
+        except BaseException:
+            shutil.rmtree(trash_dir, ignore_errors=True)
+            raise
+    git_backup.record_change(changed, action=f"trash {name}/blog/{route}")
+    return changed
+
+
+def _delete_blog_post_library(
+    name: str,
+    library: "PublicLibrary",
+    removed: dict[str, str],
+    library_path: Path,
+    changed: list[Path],
+) -> None:
+    """Drop the post's library nodes, lifting surviving media to the parent."""
+    if not removed:
+        return
+    library.nodes = [node for node in library.nodes if node.id not in removed]
+    # Media entries survive with their files. Lift them out of the removed
+    # post, including any legacy nested post nodes.
+    for node in library.nodes:
+        seen: set[str] = set()
+        while node.parent_id in removed:
+            if node.parent_id in seen:
+                node.parent_id = "root"
+                break
+            seen.add(node.parent_id)
+            node.parent_id = removed[node.parent_id]
+    with git_backup.skip_changes():
+        save_public_library(name, library)
+    changed.append(library_path)
+
+
+# --- Content trash -----------------------------------------------------------
+
+BLOG_TRASH_DIRNAME = ".trash"
+BLOG_TRASH_MANIFEST = "trash.yaml"
+SOCIAL_CARDS_FILENAME = "social-cards.yaml"
+_TRASH_ID_RE = re.compile(r"^[0-9T]+-[0-9a-f]{6}$")
+
+
+def _blog_trash_dir(name: str) -> Path:
+    # Dot-prefixed, so listings, builds and the library skip it.
+    return _profile_path(name) / BLOG_DIRNAME / BLOG_TRASH_DIRNAME
+
+
+def _pop_social_card_settings(path: Path, route: str) -> dict | None:
+    """Remove and return one post's share-card settings (caller holds the lock)."""
+    if not path.exists():
+        return None
+    with locked_profile_write(path.parent, path.name):
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        posts = raw.get("posts") if isinstance(raw, dict) else None
+        if not isinstance(posts, dict) or route not in posts:
+            return None
+        value = posts.pop(route)
+        atomic_write_text(
+            path,
+            "# Share-card settings per blog post (Xiaohongshu / X export).\n"
+            + yaml.safe_dump(raw, allow_unicode=True, sort_keys=False),
+        )
+    return value if isinstance(value, dict) else {}
+
+
+def _trash_entry_dir(name: str, trash_id: str) -> Path:
+    if not _TRASH_ID_RE.match(str(trash_id or "")):
+        raise PublicSiteError(f"Unknown trash entry: {trash_id}")
+    folder = _blog_trash_dir(name) / trash_id
+    if not (folder / BLOG_TRASH_MANIFEST).is_file():
+        raise PublicSiteError(f"Unknown trash entry: {trash_id}")
+    return folder
+
+
+def _read_trash_manifest(folder: Path) -> dict:
+    raw = yaml.safe_load((folder / BLOG_TRASH_MANIFEST).read_text(encoding="utf-8"))
+    return raw if isinstance(raw, dict) else {}
+
+
+def list_trashed_blog_posts(name: str) -> list[dict]:
+    """Trashed posts, newest first: id, route, title, status, deleted_at."""
+    root = _blog_trash_dir(name)
+    if not root.is_dir():
+        return []
+    rows = []
+    for folder in root.iterdir():
+        if not folder.is_dir() or not _TRASH_ID_RE.match(folder.name):
+            continue
+        try:
+            manifest = _read_trash_manifest(folder)
+        except (OSError, yaml.YAMLError):
+            continue
+        rows.append(
+            {
+                "id": folder.name,
+                "route": str(manifest.get("route") or ""),
+                "title": str(manifest.get("title") or ""),
+                "status": str(manifest.get("status") or ""),
+                "deleted_at": str(manifest.get("deleted_at") or ""),
+            }
+        )
+    return sorted(rows, key=lambda row: row["deleted_at"], reverse=True)
+
+
+def restore_trashed_blog_post(name: str, trash_id: str) -> str:
+    """Move a trashed post back; returns its route. Refuses to overwrite a live post."""
+    profile_root = _profile_path(name)
+    folder = _trash_entry_dir(name, trash_id)
+    with locked_profile_write(profile_root, "blog"):
+        manifest = _read_trash_manifest(folder)
+        route = _slugify_route(str(manifest.get("route") or ""))
+        md_path = _blog_markdown_path_for_route(name, route)
+        sidecar = _blog_sidecar_path_for_markdown(md_path)
+        if md_path.exists() or sidecar.exists():
+            raise PublicSiteError(f"A post already exists at {route}; rename it before restoring.")
+        library_path = _public_library_path(name)
+        cards_path = profile_root / SOCIAL_CARDS_FILENAME
+        rollback = [md_path, sidecar, library_path] + ([cards_path] if cards_path.exists() else [])
+        filenames = tuple(item.relative_to(profile_root).as_posix() for item in rollback)
+        changed: list[Path] = []
+        with rollback_profile_files(profile_root, filenames):
+            md_path.parent.mkdir(parents=True, exist_ok=True)
+            for file_name in manifest.get("files") or []:
+                src = folder / str(file_name)
+                if not src.is_file():
+                    continue
+                dest = sidecar if src.name.endswith(".blocknote.json") else md_path
+                shutil.copy2(src, dest)
+                changed.append(dest)
+            nodes = [
+                node
+                for node in (_normalize_library_node(raw, i) for i, raw in enumerate(manifest.get("library_nodes") or []))
+                if node is not None
+            ]
+            if nodes:
+                library = load_public_library(name)
+                known = {node.id for node in library.nodes}
+                for node in nodes:
+                    if node.id in known:
+                        continue
+                    if node.parent_id and node.parent_id not in known:
+                        node.parent_id = "root"
+                    library.nodes.append(node)
                 with git_backup.skip_changes():
                     save_public_library(name, library)
                 changed.append(library_path)
-            if record_chronicle:
-                with git_backup.skip_changes():
-                    chronicle.append_chronicle(profile_root, "content.deleted", ref=route, note=title)
-                changed.append(profile_root / chronicle.CHRONICLE_FILENAME)
-    git_backup.record_change(changed, action=f"delete {name}/blog/{route}")
-    return changed
+            settings = manifest.get("social_card_settings")
+            if isinstance(settings, dict):
+                with locked_profile_write(cards_path.parent, cards_path.name):
+                    raw = (yaml.safe_load(cards_path.read_text(encoding="utf-8")) if cards_path.exists() else None) or {}
+                    posts = raw.get("posts") if isinstance(raw.get("posts"), dict) else {}
+                    posts.setdefault(route, settings)
+                    raw["posts"] = posts
+                    atomic_write_text(
+                        cards_path,
+                        "# Share-card settings per blog post (Xiaohongshu / X export).\n"
+                        + yaml.safe_dump(raw, allow_unicode=True, sort_keys=False),
+                    )
+                changed.append(cards_path)
+        trashed = [p for p in folder.iterdir() if p.is_file()]
+        shutil.rmtree(folder)
+        changed.extend(trashed)
+    git_backup.record_change(changed, action=f"restore {name}/blog/{route}")
+    return route
+
+
+def purge_trashed_blog_post(name: str, trash_id: str) -> None:
+    """Permanently delete one trash entry (still recoverable from Git history)."""
+    folder = _trash_entry_dir(name, trash_id)
+    with locked_profile_write(_profile_path(name), "blog"):
+        files = [p for p in folder.iterdir() if p.is_file()]
+        shutil.rmtree(folder)
+    git_backup.record_change(files, action=f"purge {name}/blog trash {trash_id}")
 
 
 def _blog_media_snippet(

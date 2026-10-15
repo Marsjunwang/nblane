@@ -2070,6 +2070,31 @@ class ContentPostDeleteResponse(BaseModel):
     ok: bool = True
     deleted_slug: str
     changed_paths: list[str] = Field(default_factory=list)
+    # The post was published: it stays online until the public site is rebuilt.
+    was_published: bool = False
+
+
+class ContentTrashItem(BaseModel):
+    """One post in the content trash."""
+
+    id: str
+    route: str
+    title: str = ""
+    status: str = ""
+    deleted_at: str = ""
+
+
+class ContentTrashResponse(BaseModel):
+    items: list[ContentTrashItem] = Field(default_factory=list)
+
+
+class ContentTrashRestoreResponse(BaseModel):
+    ok: bool = True
+    slug: str
+
+
+class ContentTrashPurgeResponse(BaseModel):
+    ok: bool = True
 
 
 class StudioPostSaveRequest(BaseModel):

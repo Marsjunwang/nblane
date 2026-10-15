@@ -372,6 +372,85 @@ class ContentWorkspaceApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertFalse((directory / f"{slug}.blocknote.json").exists())
 
+    def _trash(self) -> list[dict]:
+        response = self.client.get("/api/v1/profiles/alice/content/trash")
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["items"]
+
+    def test_delete_moves_post_to_trash_and_restore_brings_it_back(self) -> None:
+        from nblane.core import public_site, social_cards
+
+        slug, etag = self._create()
+        public_site.attach_existing_public_library_node("alice", None, f"blog/{slug}.md")
+        social_cards.save_settings("alice", slug, {"cover_title": "封面"})
+        original = (self.profile / "blog" / f"{slug}.md").read_bytes()
+        deleted = self._delete(slug, etag)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertFalse(deleted.json()["was_published"])
+        # Share-card settings leave with the post, so a new post at the same
+        # route starts clean.
+        self.assertEqual(social_cards.load_settings("alice", slug)["cover_title"], "")
+        items = self._trash()
+        self.assertEqual([(item["route"], item["title"]) for item in items], [(slug, "Hello")])
+        # Trash is hidden from listings.
+        posts = self.client.get("/api/v1/profiles/alice/content").json()["posts"]
+        self.assertNotIn(slug, [post["slug"] for post in posts])
+
+        restored = self.client.post(f"/api/v1/profiles/alice/content/trash/{items[0]['id']}/restore")
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(restored.json()["slug"], slug)
+        self.assertEqual((self.profile / "blog" / f"{slug}.md").read_bytes(), original)
+        self.assertEqual(self.client.get(f"/api/v1/profiles/alice/content/blog/{slug}").status_code, 200)
+        self.assertTrue(any(node.ref == f"blog/{slug}.md" for node in public_site.load_public_library("alice").nodes))
+        self.assertEqual(social_cards.load_settings("alice", slug)["cover_title"], "封面")
+        self.assertEqual(self._trash(), [])
+
+    def test_restore_refuses_to_overwrite_and_purge_removes_entry(self) -> None:
+        slug, etag = self._create()
+        self.assertEqual(self._delete(slug, etag).status_code, 200)
+        trash_id = self._trash()[0]["id"]
+        # A new post took the same route meanwhile.
+        again, _ = self._create()
+        self.assertEqual(again, slug)
+        conflict = self.client.post(f"/api/v1/profiles/alice/content/trash/{trash_id}/restore")
+        self.assertEqual(conflict.status_code, 409, conflict.text)
+        self.assertEqual(len(self._trash()), 1)
+        purged = self.client.delete(f"/api/v1/profiles/alice/content/trash/{trash_id}")
+        self.assertEqual(purged.status_code, 200, purged.text)
+        self.assertEqual(self._trash(), [])
+        self.assertFalse((self.profile / "blog" / ".trash" / trash_id).exists())
+        for bad in (trash_id, "nope"):
+            self.assertEqual(self.client.post(f"/api/v1/profiles/alice/content/trash/{bad}/restore").status_code, 404)
+            self.assertEqual(self.client.delete(f"/api/v1/profiles/alice/content/trash/{bad}").status_code, 404)
+
+    def test_trash_ids_cannot_escape_the_trash_folder(self) -> None:
+        from nblane.core import public_site
+        from nblane.core.public_site import PublicSiteError
+
+        for bad in ("..", "../x", "20260101T000000-abcdef/../..", ""):
+            with self.assertRaises(PublicSiteError):
+                public_site.restore_trashed_blog_post("alice", bad)
+            with self.assertRaises(PublicSiteError):
+                public_site.purge_trashed_blog_post("alice", bad)
+
+    def test_delete_reports_published_and_failed_delete_leaves_no_trash(self) -> None:
+        from nblane.core import public_site
+
+        slug, etag = self._create()
+        endpoint = f"/api/v1/profiles/alice/content/blog/{slug}"
+        published = self.client.post(endpoint + "/publish", json={"summary": "Summary"}, headers={"If-Match": etag})
+        self.assertEqual(published.status_code, 200, published.text)
+        public_site.attach_existing_public_library_node("alice", None, f"blog/{slug}.md")
+        with patch.object(public_site, "save_public_library", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self._delete(slug, published.headers["ETag"])
+        self.assertEqual(self._trash(), [])
+        self.assertTrue((self.profile / "blog" / f"{slug}.md").exists())
+        fresh = self.client.get(endpoint).headers["ETag"]
+        deleted = self._delete(slug, fresh)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertTrue(deleted.json()["was_published"])
+
 
 def test_skip_changes_suppresses_record_change(tmp_path: Path) -> None:
     """Inside skip_changes() the real hook neither commits nor queues."""

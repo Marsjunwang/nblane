@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { jsonResponse, renderWithProviders } from '../../test/render';
 import { ContentLibrary } from './ContentLibrary';
+import { ContentTrashModal } from './ContentTrashModal';
 import { DeleteContentPostDialog } from './DeleteContentPostDialog';
 import { localDraftKey } from './contentDraft';
 
@@ -102,5 +103,52 @@ describe('article deletion', () => {
     fireEvent.click(screen.getByTestId('content-delete-confirm'));
     expect(await screen.findByText('还没有文章。')).toBeVisible();
     await waitFor(() => expect(screen.queryByTestId('content-delete-dialog')).not.toBeInTheDocument());
+  });
+
+  it('reminds that a published post stays online after deletion', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method !== 'DELETE') return detail();
+      return jsonResponse(200, { ok: true, deleted_slug: POST.slug, was_published: true });
+    }));
+    renderWithProviders(<DeleteContentPostDialog profile="alice" slug={POST.slug} onClose={vi.fn()} onDeleted={vi.fn()} />);
+    fireEvent.change(await screen.findByTestId('content-delete-title'), { target: { value: POST.title } });
+    fireEvent.click(screen.getByTestId('content-delete-confirm'));
+    expect(await screen.findByText(/还在网站上，到「公开站点」重新发布才会下线/)).toBeVisible();
+  });
+});
+
+describe('content trash', () => {
+  const ITEM = { id: '20261015T010203000000-abcdef', route: POST.slug, title: POST.title, status: 'published', deleted_at: '2026-10-15T01:02:03+00:00' };
+
+  it('lists deleted posts and restores one', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      if (url.endsWith('/restore')) return jsonResponse(200, { ok: true, slug: POST.slug });
+      return jsonResponse(200, { items: [ITEM] });
+    }));
+    const close = vi.fn();
+    renderWithProviders(<ContentTrashModal profile="alice" onClose={close} />);
+    expect(await screen.findByText(POST.title)).toBeVisible();
+    fireEvent.click(screen.getByTestId('content-trash-restore'));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(calls.some((call) => call.startsWith('POST') && call.endsWith(`/content/trash/${ITEM.id}/restore`))).toBe(true);
+  });
+
+  it('asks again before deleting for good', async () => {
+    let purged = false;
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') {
+        purged = true;
+        return jsonResponse(200, { ok: true });
+      }
+      return jsonResponse(200, { items: purged ? [] : [ITEM] });
+    }));
+    renderWithProviders(<ContentTrashModal profile="alice" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByTestId('content-trash-purge'));
+    expect(purged).toBe(false);
+    fireEvent.click(await screen.findByTestId('content-trash-purge-confirm'));
+    expect(await screen.findByText('回收站是空的。')).toBeVisible();
+    expect(purged).toBe(true);
   });
 });

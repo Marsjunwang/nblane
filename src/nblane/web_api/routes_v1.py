@@ -373,6 +373,9 @@ from nblane.web_api.schemas import (
     ContentWorkspaceResponse,
     ContentPostDeleteRequest,
     ContentPostDeleteResponse,
+    ContentTrashPurgeResponse,
+    ContentTrashResponse,
+    ContentTrashRestoreResponse,
     StudioPostCreateRequest,
     StudioPostDetailModel,
     StudioPostModel,
@@ -7523,7 +7526,56 @@ def delete_profile_content_blog(
         return _studio_error(412, "etag_mismatch", "This post changed while deleting; reload before retrying.", _studio_post_etag(post))
     except PublicSiteError as exc:
         raise ApiError(422, "content_delete_failed", str(exc)) from exc
-    return ContentPostDeleteResponse(deleted_slug=post.slug, changed_paths=[str(path) for path in changed])
+    return ContentPostDeleteResponse(
+        deleted_slug=post.slug,
+        changed_paths=[str(path) for path in changed],
+        was_published=post.status == "published",
+    )
+
+
+@router.get(
+    "/profiles/{name}/content/trash",
+    response_model=ContentTrashResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def list_profile_content_trash(name: str) -> ContentTrashResponse:
+    """Deleted posts that can still be restored, newest first."""
+    pdir = _resolve_profile(name)
+    return ContentTrashResponse(items=public_site.list_trashed_blog_posts(pdir.name))
+
+
+@router.post(
+    "/profiles/{name}/content/trash/{trash_id}/restore",
+    response_model=ContentTrashRestoreResponse,
+    responses={**ERROR_RESPONSES, 409: {"model": ErrorResponse}},
+    dependencies=PROFILE_DEPENDENCY,
+)
+def restore_profile_content_trash(name: str, trash_id: str) -> ContentTrashRestoreResponse:
+    """Move a deleted post back into the workspace (as it was when deleted)."""
+    pdir = _resolve_profile(name)
+    if trash_id not in {item["id"] for item in public_site.list_trashed_blog_posts(pdir.name)}:
+        raise ApiError(404, "content_trash_not_found", "This item is no longer in the trash.")
+    try:
+        route = public_site.restore_trashed_blog_post(pdir.name, trash_id)
+    except PublicSiteError as exc:
+        raise ApiError(409, "content_trash_restore_conflict", str(exc)) from exc
+    return ContentTrashRestoreResponse(slug=route)
+
+
+@router.delete(
+    "/profiles/{name}/content/trash/{trash_id}",
+    response_model=ContentTrashPurgeResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def purge_profile_content_trash(name: str, trash_id: str) -> ContentTrashPurgeResponse:
+    """Permanently remove one trashed post (Git history still has it)."""
+    pdir = _resolve_profile(name)
+    if trash_id not in {item["id"] for item in public_site.list_trashed_blog_posts(pdir.name)}:
+        raise ApiError(404, "content_trash_not_found", "This item is no longer in the trash.")
+    public_site.purge_trashed_blog_post(pdir.name, trash_id)
+    return ContentTrashPurgeResponse()
 
 
 @router.post(

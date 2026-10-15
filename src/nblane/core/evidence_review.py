@@ -1254,6 +1254,9 @@ def _output_options(profile: str | Path) -> list[dict[str, object]]:
         blog_dir = pdir / "blog"
         if blog_dir.exists():
             for path in sorted(blog_dir.rglob("*.md")):
+                # Dot folders (the content trash) are not part of the profile.
+                if any(part.startswith(".") for part in path.relative_to(blog_dir).parts):
+                    continue
                 try:
                     post = public_site.parse_blog_post(path)
                 except Exception:

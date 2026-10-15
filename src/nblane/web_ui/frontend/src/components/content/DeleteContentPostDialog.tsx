@@ -1,4 +1,5 @@
 import { Alert, Button, Checkbox, Group, Loader, Modal, Stack, Text, TextInput } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { useEffect, useState } from 'react';
 
 import { ApiError } from '../../api/client';
@@ -37,8 +38,16 @@ export function DeleteContentPostDialog({ profile, slug, onClose, onDeleted }: {
   const confirm = () => {
     if (!source || confirmTitle !== source.post.title || remove.isPending || conflict) return;
     remove.mutate({ slug, etag: source.etag, body: { confirm_title: confirmTitle, record_chronicle: recordChronicle } }, {
-      onSuccess: () => {
+      onSuccess: (result) => {
         clearLocalDraft(window.localStorage, profile, slug);
+        notifications.show({
+          color: result.was_published ? 'yellow' : 'gray',
+          title: '已移到回收站',
+          message: result.was_published
+            ? `「${source.post.title}」还在网站上，到「公开站点」重新发布才会下线。可在文章库「回收站」里恢复。`
+            : `「${source.post.title}」可在文章库「回收站」里恢复。`,
+          autoClose: result.was_published ? false : 6000,
+        });
         onDeleted();
       },
     });
@@ -50,8 +59,8 @@ export function DeleteContentPostDialog({ profile, slug, onClose, onDeleted }: {
       data-testid="content-delete-dialog">
       <Stack>
         <Alert color="red" title="删除后会发生什么">
-          正文、编辑模型和公开目录中的文章条目会被删除，未保存的修改会丢弃。图片和视频保留。
-          删除后无法在工作台撤销；已有 Git 备份时可从备份找回。
+          文章会移到回收站，可以在文章库「回收站」里恢复；未保存的修改会丢弃。图片和视频保留，
+          分享卡片设置随文章一起进回收站。
           已上线的文章需要重新发布公开站点，才会从网站移除。
         </Alert>
         {!source && !loadError && <Loader size="sm" />}

@@ -2249,12 +2249,93 @@
       "default": true,
       "title": "Ok",
       "type": "boolean"
+     },
+     "was_published": {
+      "default": false,
+      "title": "Was Published",
+      "type": "boolean"
      }
     },
     "required": [
      "deleted_slug"
     ],
     "title": "ContentPostDeleteResponse",
+    "type": "object"
+   },
+   "ContentTrashItem": {
+    "description": "One post in the content trash.",
+    "properties": {
+     "deleted_at": {
+      "default": "",
+      "title": "Deleted At",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "route": {
+      "title": "Route",
+      "type": "string"
+     },
+     "status": {
+      "default": "",
+      "title": "Status",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "route"
+    ],
+    "title": "ContentTrashItem",
+    "type": "object"
+   },
+   "ContentTrashPurgeResponse": {
+    "properties": {
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "title": "ContentTrashPurgeResponse",
+    "type": "object"
+   },
+   "ContentTrashResponse": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/ContentTrashItem"
+      },
+      "title": "Items",
+      "type": "array"
+     }
+    },
+    "title": "ContentTrashResponse",
+    "type": "object"
+   },
+   "ContentTrashRestoreResponse": {
+    "properties": {
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "slug": {
+      "title": "Slug",
+      "type": "string"
+     }
+    },
+    "required": [
+     "slug"
+    ],
+    "title": "ContentTrashRestoreResponse",
     "type": "object"
    },
    "ContentWorkspaceResponse": {
@@ -17355,6 +17436,244 @@
      }
     },
     "summary": "Render Profile Content Social"
+   }
+  },
+  "/api/v1/profiles/{name}/content/trash": {
+   "get": {
+    "description": "Deleted posts that can still be restored, newest first.",
+    "operationId": "list_profile_content_trash_api_v1_profiles__name__content_trash_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentTrashResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "List Profile Content Trash"
+   }
+  },
+  "/api/v1/profiles/{name}/content/trash/{trash_id}": {
+   "delete": {
+    "description": "Permanently remove one trashed post (Git history still has it).",
+    "operationId": "purge_profile_content_trash_api_v1_profiles__name__content_trash__trash_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "trash_id",
+      "required": true,
+      "schema": {
+       "title": "Trash Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentTrashPurgeResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Purge Profile Content Trash"
+   }
+  },
+  "/api/v1/profiles/{name}/content/trash/{trash_id}/restore": {
+   "post": {
+    "description": "Move a deleted post back into the workspace (as it was when deleted).",
+    "operationId": "restore_profile_content_trash_api_v1_profiles__name__content_trash__trash_id__restore_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "trash_id",
+      "required": true,
+      "schema": {
+       "title": "Trash Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentTrashRestoreResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Conflict"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Restore Profile Content Trash"
    }
   },
   "/api/v1/profiles/{name}/crystallize/apply": {

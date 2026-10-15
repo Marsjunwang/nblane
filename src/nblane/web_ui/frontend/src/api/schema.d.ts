@@ -963,6 +963,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/content/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Profile Content Trash
+         * @description Deleted posts that can still be restored, newest first.
+         */
+        get: operations["list_profile_content_trash_api_v1_profiles__name__content_trash_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/content/trash/{trash_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Purge Profile Content Trash
+         * @description Permanently remove one trashed post (Git history still has it).
+         */
+        delete: operations["purge_profile_content_trash_api_v1_profiles__name__content_trash__trash_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/content/trash/{trash_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Profile Content Trash
+         * @description Move a deleted post back into the workspace (as it was when deleted).
+         */
+        post: operations["restore_profile_content_trash_api_v1_profiles__name__content_trash__trash_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/crystallize/apply": {
         parameters: {
             query?: never;
@@ -5106,6 +5166,59 @@ export interface components {
              * @default true
              */
             ok: boolean;
+            /**
+             * Was Published
+             * @default false
+             */
+            was_published: boolean;
+        };
+        /**
+         * ContentTrashItem
+         * @description One post in the content trash.
+         */
+        ContentTrashItem: {
+            /**
+             * Deleted At
+             * @default
+             */
+            deleted_at: string;
+            /** Id */
+            id: string;
+            /** Route */
+            route: string;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /** ContentTrashPurgeResponse */
+        ContentTrashPurgeResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+        };
+        /** ContentTrashResponse */
+        ContentTrashResponse: {
+            /** Items */
+            items?: components["schemas"]["ContentTrashItem"][];
+        };
+        /** ContentTrashRestoreResponse */
+        ContentTrashRestoreResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Slug */
+            slug: string;
         };
         /** ContentWorkspaceResponse */
         ContentWorkspaceResponse: {
@@ -15450,6 +15563,191 @@ export interface operations {
                 };
             };
             /** @description Draft post without allow_draft. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_profile_content_trash_api_v1_profiles__name__content_trash_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentTrashResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_profile_content_trash_api_v1_profiles__name__content_trash__trash_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                trash_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentTrashPurgeResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_profile_content_trash_api_v1_profiles__name__content_trash__trash_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                trash_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentTrashRestoreResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
