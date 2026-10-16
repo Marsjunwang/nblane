@@ -22,15 +22,37 @@ SCHEMA = {
     "domain": "Test Domain",
     "nodes": [
         {"id": "root_a", "label": "Root A", "level": 1, "category": "foundations"},
-        {"id": "child_a1", "label": "Child A1", "level": 2, "requires": ["root_a"]},
-        {"id": "child_a2", "label": "Child A2", "level": 2, "requires": ["root_a"]},
+        {
+            "id": "child_a1",
+            "label": "Child A1",
+            "level": 2,
+            "category": "foundations",
+            "requires": ["root_a"],
+        },
+        {
+            "id": "child_a2",
+            "label": "Child A2",
+            "level": 2,
+            "category": "foundations",
+            "requires": ["root_a"],
+        },
         {
             "id": "grand_a11",
             "label": "Grand A11",
             "level": 3,
+            "category": "foundations",
             "requires": ["child_a1", "child_a2"],
         },
         {"id": "root_b", "label": "Root B", "level": 1},
+        # Never listed in the overlay: implicitly locked. Its prerequisite
+        # lives in another category, so it must not nest under root_a.
+        {
+            "id": "unlisted_c",
+            "label": "Unlisted C",
+            "level": 2,
+            "category": "control",
+            "requires": ["root_a"],
+        },
     ],
 }
 
@@ -147,23 +169,35 @@ class TestSkillTreeRead(unittest.TestCase):
         self.assertEqual(payload["updated"], "2026-09-10")
         self.assertEqual(
             payload["status_counts"],
-            {"expert": 1, "solid": 1, "learning": 3, "locked": 1, "total": 6},
+            {"expert": 1, "solid": 1, "learning": 3, "locked": 2, "total": 7},
         )
 
         roots = payload["nodes"]
-        # Schema order: root_a, root_b, then the off-schema node last.
-        self.assertEqual([n["id"] for n in roots], ["root_a", "root_b", "off_schema"])
+        # Schema order: root_a, root_b, the unlisted schema node, then the
+        # off-schema node last.
+        self.assertEqual(
+            [n["id"] for n in roots], ["root_a", "root_b", "unlisted_c", "off_schema"]
+        )
         root_a = roots[0]
         self.assertEqual(root_a["title"], "Root A")
         self.assertEqual(root_a["status"], "solid")
         # Schema grouping flows through; off-schema nodes answer "".
         self.assertEqual(root_a["category"], "foundations")
-        self.assertEqual(roots[2]["category"], "")
+        self.assertEqual(roots[3]["category"], "")
         # ev_missing is not in the pool and ev_deprecated is deprecated:
         # only ev_one resolves.
         self.assertEqual(root_a["evidence_count"], 1)
         self.assertEqual(roots[1]["evidence_count"], 1)
-        self.assertEqual(roots[2]["title"], "off_schema")
+        self.assertEqual(roots[3]["title"], "off_schema")
+        # The schema node missing from the overlay is a locked root of its
+        # own category, with the cross-category prerequisite as advisory.
+        unlisted = roots[2]
+        self.assertEqual(unlisted["status"], "locked")
+        self.assertEqual(unlisted["title"], "Unlisted C")
+        self.assertEqual(unlisted["category"], "control")
+        self.assertEqual(unlisted["children"], [])
+        self.assertEqual(unlisted["evidence_count"], 0)
+        self.assertEqual(unlisted["unmet_requires"], [])  # root_a is solid
 
         children = root_a["children"]
         self.assertEqual([c["id"] for c in children], ["child_a1", "child_a2"])
@@ -249,7 +283,8 @@ class TestSkillTreeRead(unittest.TestCase):
             schemas = _write_schemas(base)
             client = self._client(root, schemas)
             missing = client.get("/api/v1/profiles/alice/skill-tree")
-            # Explicitly empty nodes list behaves the same.
+            # Explicitly empty nodes list with a schema: every schema node
+            # is implicitly locked.
             _write_profile(
                 root,
                 tree={
@@ -259,11 +294,15 @@ class TestSkillTreeRead(unittest.TestCase):
                 },
             )
             empty = client.get("/api/v1/profiles/alice/skill-tree")
-        for response in (missing, empty):
-            self.assertEqual(response.status_code, 200)
-            payload = response.json()
-            self.assertEqual(payload["nodes"], [])
-            self.assertEqual(payload["status_counts"]["total"], 0)
+        self.assertEqual(missing.status_code, 200)
+        self.assertEqual(missing.json()["nodes"], [])
+        self.assertEqual(missing.json()["status_counts"]["total"], 0)
+        # An empty overlay that names a schema shows the whole schema locked.
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(
+            empty.json()["status_counts"],
+            {"expert": 0, "solid": 0, "learning": 0, "locked": 6, "total": 6},
+        )
         self.assertEqual(missing.json()["schema_name"], "")
         self.assertEqual(empty.json()["schema_name"], "test-domain")
         self.assertEqual(empty.json()["updated"], "2026-09-11")
@@ -290,19 +329,23 @@ class TestSkillTreeRead(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         categories = response.json()["categories"]
         # Schema order: foundations (root_a) first, then the uncategorized
-        # bucket (schema nodes without category + off-schema nodes).
-        self.assertEqual([c["id"] for c in categories], ["foundations", ""])
+        # bucket (root_b + the off-schema node), then control (a category
+        # only the unlisted schema node uses).
+        self.assertEqual([c["id"] for c in categories], ["foundations", "", "control"])
         foundations = categories[0]
         self.assertEqual(foundations["name"], "基础")  # CATEGORY_ZH table
-        self.assertEqual(foundations["count"], 1)
+        self.assertEqual(foundations["count"], 4)
         self.assertEqual(foundations["lit_count"], 1)  # solid counts as lit
-        self.assertEqual(foundations["learning_count"], 0)
+        self.assertEqual(foundations["learning_count"], 2)  # grand_a11 locked
         misc = categories[1]
         self.assertEqual(misc["name"], "")
-        self.assertEqual(misc["count"], 5)
-        # root_b is expert (lit); child_a1/child_a2/off_schema are learning.
+        self.assertEqual(misc["count"], 2)
+        # root_b is expert (lit); off_schema is learning.
         self.assertEqual(misc["lit_count"], 1)
-        self.assertEqual(misc["learning_count"], 3)
+        self.assertEqual(misc["learning_count"], 1)
+        control = categories[2]
+        self.assertEqual(control["count"], 1)
+        self.assertEqual(control["lit_count"] + control["learning_count"], 0)
 
 
 SKILL_MD_WITH_BLOCK = """# SKILL — {name}
@@ -398,6 +441,41 @@ class TestSkillNodePatch(unittest.TestCase):
             response = client.patch(
                 "/api/v1/profiles/alice/skill-tree/nodes/root_a",
                 json={"status": "lit"},
+                headers={"If-Match": etag},
+            )
+            after = (pdir / "skill-tree.yaml").read_text(encoding="utf-8")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["changed"])
+        self.assertEqual(before, after)
+
+    def test_patch_unlisted_schema_node_appends_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client, pdir = self._setup(Path(tmp))
+            etag = client.get("/api/v1/profiles/alice/skill-tree").headers["ETag"]
+            response = client.patch(
+                "/api/v1/profiles/alice/skill-tree/nodes/unlisted_c",
+                json={"status": "learning"},
+                headers={"If-Match": etag},
+            )
+            raw = yaml.safe_load((pdir / "skill-tree.yaml").read_text(encoding="utf-8"))
+            tree = client.get("/api/v1/profiles/alice/skill-tree").json()
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["previous_status"], "locked")
+        self.assertEqual(payload["status"], "learning")
+        self.assertTrue(payload["changed"])
+        self.assertEqual(raw["nodes"][-1], {"id": "unlisted_c", "status": "learning"})
+        self.assertEqual(tree["status_counts"]["locked"], 1)
+        self.assertEqual(tree["status_counts"]["total"], 7)
+
+    def test_patch_unlisted_schema_node_to_locked_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client, pdir = self._setup(Path(tmp))
+            etag = client.get("/api/v1/profiles/alice/skill-tree").headers["ETag"]
+            before = (pdir / "skill-tree.yaml").read_text(encoding="utf-8")
+            response = client.patch(
+                "/api/v1/profiles/alice/skill-tree/nodes/unlisted_c",
+                json={"status": "locked"},
                 headers={"If-Match": etag},
             )
             after = (pdir / "skill-tree.yaml").read_text(encoding="utf-8")

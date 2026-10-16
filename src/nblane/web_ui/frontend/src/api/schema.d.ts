@@ -2895,12 +2895,14 @@ export interface paths {
          *
          *     The profile overlay (``skill-tree.yaml``) is a flat list of
          *     ``{id, status, note, evidence_refs}``; titles and hierarchy come from
-         *     the domain schema it references. ``title`` is the schema ``label``
-         *     (node id as fallback); ``children`` are derived from schema
-         *     ``requires`` edges restricted to overlay nodes (X is a child of Y when
-         *     X requires Y). Overlay nodes with no prerequisite inside the overlay
-         *     become roots; unknown-to-schema nodes keep overlay order at the end.
-         *     A profile without ``skill-tree.yaml`` answers 200 with empty nodes.
+         *     the domain schema it references. Every schema node is returned; nodes
+         *     the overlay does not list are ``locked``. ``title`` is the schema
+         *     ``label`` (node id as fallback); ``children`` are derived from schema
+         *     ``requires`` edges within one category (X is a child of Y when X
+         *     requires Y), so cross-category prerequisites never nest. Nodes with no
+         *     same-category prerequisite become roots; unknown-to-schema overlay
+         *     nodes keep overlay order at the end. A profile without
+         *     ``skill-tree.yaml`` answers 200 with empty nodes.
          */
         get: operations["get_profile_skill_tree_api_v1_profiles__name__skill_tree_get"];
         put?: never;
@@ -2934,7 +2936,9 @@ export interface paths {
          *     ETag from the tree read (412 on mismatch); the write goes through
          *     ``profile_io.update_skill_tree`` with an in-lock snapshot re-check, and
          *     the SKILL.md generated block is re-synced after a real change. A no-op
-         *     patch writes nothing (``changed=false``).
+         *     patch writes nothing (``changed=false``). A schema node missing from
+         *     the overlay counts as locked and is appended on its first real change;
+         *     ids unknown to both answer 404.
          */
         patch: operations["patch_profile_skill_node_api_v1_profiles__name__skill_tree_nodes__node_id__patch"];
         trace?: never;

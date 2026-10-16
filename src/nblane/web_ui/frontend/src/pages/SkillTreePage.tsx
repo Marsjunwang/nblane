@@ -1009,7 +1009,7 @@ export function SkillTreePage() {
           </Text>
           {visibleNodes.length === 0 ? (
             <Text c="dimmed" py="sm">
-              {filtering ? '没有符合筛选的技能节点。' : '技能树为空,先在 skill-tree.yaml 中添加节点。'}
+              {filtering ? '没有符合筛选的技能节点。' : '技能树为空,先在 skill-tree.yaml 里选好领域 schema。'}
             </Text>
           ) : (
             <Stack gap="sm">

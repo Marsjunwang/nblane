@@ -25553,7 +25553,7 @@
   },
   "/api/v1/profiles/{name}/skill-tree": {
    "get": {
-    "description": "Full skill tree: status counters plus the nested node tree.\n\nThe profile overlay (``skill-tree.yaml``) is a flat list of\n``{id, status, note, evidence_refs}``; titles and hierarchy come from\nthe domain schema it references. ``title`` is the schema ``label``\n(node id as fallback); ``children`` are derived from schema\n``requires`` edges restricted to overlay nodes (X is a child of Y when\nX requires Y). Overlay nodes with no prerequisite inside the overlay\nbecome roots; unknown-to-schema nodes keep overlay order at the end.\nA profile without ``skill-tree.yaml`` answers 200 with empty nodes.",
+    "description": "Full skill tree: status counters plus the nested node tree.\n\nThe profile overlay (``skill-tree.yaml``) is a flat list of\n``{id, status, note, evidence_refs}``; titles and hierarchy come from\nthe domain schema it references. Every schema node is returned; nodes\nthe overlay does not list are ``locked``. ``title`` is the schema\n``label`` (node id as fallback); ``children`` are derived from schema\n``requires`` edges within one category (X is a child of Y when X\nrequires Y), so cross-category prerequisites never nest. Nodes with no\nsame-category prerequisite become roots; unknown-to-schema overlay\nnodes keep overlay order at the end. A profile without\n``skill-tree.yaml`` answers 200 with empty nodes.",
     "operationId": "get_profile_skill_tree_api_v1_profiles__name__skill_tree_get",
     "parameters": [
      {
@@ -25623,7 +25623,7 @@
   },
   "/api/v1/profiles/{name}/skill-tree/nodes/{node_id}": {
    "patch": {
-    "description": "Set one skill node's 三态 status in skill-tree.yaml (G3 write).\n\nBody vocabulary is the UI 三态 (``locked`` / ``learning`` / ``lit``)\nplus ``expert``; ``lit`` lands as the YAML status ``solid`` (see\n``SKILL_NODE_EDIT_STATUSES``). ``If-Match`` carries the skill-tree.yaml\nETag from the tree read (412 on mismatch); the write goes through\n``profile_io.update_skill_tree`` with an in-lock snapshot re-check, and\nthe SKILL.md generated block is re-synced after a real change. A no-op\npatch writes nothing (``changed=false``).",
+    "description": "Set one skill node's 三态 status in skill-tree.yaml (G3 write).\n\nBody vocabulary is the UI 三态 (``locked`` / ``learning`` / ``lit``)\nplus ``expert``; ``lit`` lands as the YAML status ``solid`` (see\n``SKILL_NODE_EDIT_STATUSES``). ``If-Match`` carries the skill-tree.yaml\nETag from the tree read (412 on mismatch); the write goes through\n``profile_io.update_skill_tree`` with an in-lock snapshot re-check, and\nthe SKILL.md generated block is re-synced after a real change. A no-op\npatch writes nothing (``changed=false``). A schema node missing from\nthe overlay counts as locked and is appended on its first real change;\nids unknown to both answer 404.",
     "operationId": "patch_profile_skill_node_api_v1_profiles__name__skill_tree_nodes__node_id__patch",
     "parameters": [
      {

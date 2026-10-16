@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-09
+last_verified: 2026-10-16
 source_of_truth: true
 ---
 
@@ -66,7 +66,7 @@ nodes:
 ```
 
 - 新建档案（`nblane init`、设置页「新建用户」）会把所选领域的全部节点写进来，状态都是 `locked`，技能树页一进来就是完整的树。
-- 手写或旧档案可以只列要跟踪的节点，未列出的隐式为 `locked`，但只有列出的节点能在技能树页改状态。
+- 手写或旧档案可以只列要跟踪的节点，未列出的隐式为 `locked`。技能树页照样显示领域里的全部节点，第一次改状态时才把该节点写进文件。
 - 证据优先用 `evidence_refs` 引用证据池；节点上的内联 `evidence` 列表仍兼容。字段见 [证据参考](evidence.md)。
 - 写入顺序是证据池 → 技能树 → validate → sync。SPA 技能树页和 CLI 都走这条路径。
 

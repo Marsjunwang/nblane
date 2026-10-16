@@ -148,7 +148,7 @@ describe('SkillTreePage', () => {
     renderPage();
 
     expect(
-      await screen.findByText('技能树为空,先在 skill-tree.yaml 中添加节点。'),
+      await screen.findByText('技能树为空,先在 skill-tree.yaml 里选好领域 schema。'),
     ).toBeInTheDocument();
     expect(screen.getByTestId('status-chip-total')).toHaveTextContent('共 0 项');
   });

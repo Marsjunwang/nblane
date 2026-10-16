@@ -827,12 +827,14 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
 
     The profile overlay (``skill-tree.yaml``) is a flat list of
     ``{id, status, note, evidence_refs}``; titles and hierarchy come from
-    the domain schema it references. ``title`` is the schema ``label``
-    (node id as fallback); ``children`` are derived from schema
-    ``requires`` edges restricted to overlay nodes (X is a child of Y when
-    X requires Y). Overlay nodes with no prerequisite inside the overlay
-    become roots; unknown-to-schema nodes keep overlay order at the end.
-    A profile without ``skill-tree.yaml`` answers 200 with empty nodes.
+    the domain schema it references. Every schema node is returned; nodes
+    the overlay does not list are ``locked``. ``title`` is the schema
+    ``label`` (node id as fallback); ``children`` are derived from schema
+    ``requires`` edges within one category (X is a child of Y when X
+    requires Y), so cross-category prerequisites never nest. Nodes with no
+    same-category prerequisite become roots; unknown-to-schema overlay
+    nodes keep overlay order at the end. A profile without
+    ``skill-tree.yaml`` answers 200 with empty nodes.
     """
     pdir = _resolve_profile(name)
     raw = profile_io.load_skill_tree_raw(pdir) or {}
@@ -852,23 +854,41 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
         if nid not in order:
             order[nid] = len(schema_index) + i
 
-    children_of: dict[str, list[str]] = {nid: [] for nid in overlay}
+    # The overlay only stores nodes the user touched; every other schema
+    # node is implicitly locked and still belongs in the tree. A profile
+    # without skill-tree.yaml keeps answering empty nodes.
+    merged: dict[str, dict] = {}
+    if overlay or raw:
+        for sn in schema.nodes if schema else []:
+            merged[sn.id] = overlay.get(sn.id) or {"id": sn.id, "status": "locked"}
+        for nid, node in overlay.items():
+            merged.setdefault(nid, node)
+
+    category_of: dict[str, str] = {
+        nid: str(schema_index[nid].category or "") if nid in schema_index else ""
+        for nid in merged
+    }
+
+    # Nesting follows requires edges inside one category only, so every
+    # node renders under its own category banner; cross-category
+    # prerequisites surface as unmet_requires on the inscription card.
+    children_of: dict[str, list[str]] = {nid: [] for nid in merged}
     has_parent: set[str] = set()
-    for nid in overlay:
+    for nid in merged:
         reqs = schema_index[nid].requires if nid in schema_index else []
         for req in reqs:
-            if req in overlay and req != nid:
+            if req in merged and req != nid and category_of[req] == category_of[nid]:
                 children_of[req].append(nid)
                 has_parent.add(nid)
     for kids in children_of.values():
         kids.sort(key=lambda kid: order.get(kid, 0))
     roots = sorted(
-        (nid for nid in overlay if nid not in has_parent),
+        (nid for nid in merged if nid not in has_parent),
         key=lambda nid: order.get(nid, 0),
     )
 
     def build(nid: str, ancestors: frozenset[str]) -> SkillTreeNodeModel:
-        node = overlay[nid]
+        node = merged[nid]
         meta = schema_index.get(nid)
         title = (meta.label if meta else "") or nid
         placed.add(nid)
@@ -876,7 +896,7 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
             id=nid,
             title=title,
             status=str(node.get("status") or "locked"),
-            category=str(meta.category if meta else ""),
+            category=category_of[nid],
             evidence_count=len(resolve_node_evidence_dict(node, pool)),
             progress=SkillNodeProgressModel(
                 **skill_progression_core.node_progress(node, pool, rules).to_dict()
@@ -889,7 +909,7 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
                 )
                 for req in (meta.requires if meta else [])
                 if req != nid
-                and str((overlay.get(req) or {}).get("status") or "locked")
+                and str((merged.get(req) or {}).get("status") or "locked")
                 not in ("solid", "expert")
             ],
             children=[
@@ -899,13 +919,13 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
             ],
         )
 
-    # DAG diamonds (a node requiring two overlay parents) are rendered under
-    # the first parent in schema order; the ``placed`` guard keeps every
-    # node in the response exactly once.
+    # DAG diamonds (a node requiring two same-category parents) are rendered
+    # under the first parent in schema order; the ``placed`` guard keeps
+    # every node in the response exactly once.
     placed: set[str] = set()
     nodes: list[SkillTreeNodeModel] = []
     for nid in roots + [
-        n for n in sorted(overlay, key=lambda x: order.get(x, 0)) if n not in roots
+        n for n in sorted(merged, key=lambda x: order.get(x, 0)) if n not in roots
     ]:
         if nid not in placed:
             nodes.append(build(nid, frozenset({nid})))
@@ -914,19 +934,15 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
     # same CATEGORY_ZH table the starmap sector band uses (so the SPA's
     # 官名 lookup keys match), 点亮 = solid+expert (LIT_STATUSES), locked is
     # derived client-side as count − lit − learning.
-    category_of: dict[str, str] = {
-        nid: str(schema_index[nid].category or "") if nid in schema_index else ""
-        for nid in overlay
-    }
     cat_order: list[str] = []
-    for nid in sorted(overlay, key=lambda x: order.get(x, 0)):
+    for nid in sorted(merged, key=lambda x: order.get(x, 0)):
         cat = category_of[nid]
         if cat not in cat_order:
             cat_order.append(cat)
     categories: list[SkillTreeCategoryModel] = []
     for cat in cat_order:
-        members = [nid for nid in overlay if category_of[nid] == cat]
-        statuses = [str(overlay[nid].get("status") or "locked") for nid in members]
+        members = [nid for nid in merged if category_of[nid] == cat]
+        statuses = [str(merged[nid].get("status") or "locked") for nid in members]
         categories.append(
             SkillTreeCategoryModel(
                 id=cat,
@@ -942,7 +958,7 @@ def get_profile_skill_tree(name: str, response: Response) -> SkillTreeResponse:
         profile=pdir.name,
         schema_name=schema_name,
         updated=str(raw.get("updated") or ""),
-        status_counts=count_nodes(raw),
+        status_counts=count_nodes({"nodes": list(merged.values())}),
         nodes=nodes,
         categories=categories,
     )
@@ -1000,7 +1016,9 @@ def patch_profile_skill_node(
     ETag from the tree read (412 on mismatch); the write goes through
     ``profile_io.update_skill_tree`` with an in-lock snapshot re-check, and
     the SKILL.md generated block is re-synced after a real change. A no-op
-    patch writes nothing (``changed=false``).
+    patch writes nothing (``changed=false``). A schema node missing from
+    the overlay counts as locked and is appended on its first real change;
+    ids unknown to both answer 404.
     """
     pdir = _resolve_profile(name)
     etag = _skill_tree_etag(pdir)
@@ -1031,20 +1049,32 @@ def patch_profile_skill_node(
         None,
     )
     if node is None:
-        raise ApiError(
-            404, "skill_node_not_found", f"Unknown skill node: {nid}"
-        )
-    previous = str(node.get("status") or "locked")
+        # Schema nodes the overlay never listed are implicitly locked; the
+        # first write adds them to skill-tree.yaml.
+        schema_name = str(raw.get("schema") or "")
+        schema = schema_io.load_schema(schema_name) if schema_name else None
+        if schema is None or nid not in schema.node_index():
+            raise ApiError(
+                404, "skill_node_not_found", f"Unknown skill node: {nid}"
+            )
+    previous = str((node or {}).get("status") or "locked")
     changed = previous != yaml_status
     if changed:
 
         def _apply(doc: dict[str, Any]) -> None:
+            found = False
             for item in doc.get("nodes") or []:
                 if (
                     isinstance(item, dict)
                     and str(item.get("id", "") or "").strip() == nid
                 ):
                     item["status"] = yaml_status
+                    found = True
+            if not found:
+                doc.setdefault("nodes", [])
+                if doc["nodes"] is None:
+                    doc["nodes"] = []
+                doc["nodes"].append({"id": nid, "status": yaml_status})
             doc["profile"] = pdir.name
 
         try:
