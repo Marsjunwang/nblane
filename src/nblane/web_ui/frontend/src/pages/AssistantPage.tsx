@@ -32,6 +32,7 @@ import { Link as RouterLink } from 'react-router-dom';
 
 import { useAgentJournal, useAssistantStatus, useProfiles, useUndoAgentJournal } from '../api/hooks';
 import type { AgentJournalEntry, AssistantStatus } from '../api/types';
+import { BackToWorkButton } from '../components/BackToWork';
 
 /** Human-readable uptime from milliseconds. */
 export function formatUptime(uptimeMs: number | null): string {
@@ -262,7 +263,10 @@ export function AssistantPage() {
   return (
     <Stack gap="md">
       <Group justify="space-between">
-        <Title order={2}>助手</Title>
+        <Group gap="sm" align="center" wrap="nowrap">
+          <Title order={2}>助手</Title>
+          <BackToWorkButton />
+        </Group>
         <Button
           component="a"
           href={data.console_url}

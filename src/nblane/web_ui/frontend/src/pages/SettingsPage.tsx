@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { useMe, useProfiles } from '../api/hooks';
+import { BackToWorkButton } from '../components/BackToWork';
 import { AgentsAndBackupSection } from '../components/settings/AgentSetupSections';
 import { chrome } from '../theme';
 import { AccountsSection, MyAccountSection } from './settings/AccountSections';
@@ -127,7 +128,10 @@ export function SettingsPage() {
     <SettingsDirtyContext.Provider value={reportDirty}>
       <Stack gap="lg">
         <div>
-          <Title order={2}>设置</Title>
+          <Group gap="sm" align="center" wrap="nowrap">
+            <Title order={2}>设置</Title>
+            <BackToWorkButton confirmLeave={() => !dirty || window.confirm(LEAVE_PROMPT)} />
+          </Group>
           <Text c="dimmed" size="sm">{section.scope === 'profile' && profile ? `档案 ${profile} · ${section.label}` : `${section.scope === 'user' ? '账号' : '系统'} · ${section.label}`}</Text>
         </div>
         <Group align="flex-start" gap="lg" wrap="nowrap">

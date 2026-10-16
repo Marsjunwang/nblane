@@ -19,11 +19,13 @@ import {
   IconUser,
   IconWriting,
 } from '@tabler/icons-react';
+import { useEffect } from 'react';
 import { NavLink as RouterNavLink, Link as RouterLink, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom';
 
 import { useAIExceptions, useLogout, useMe } from '../api/hooks';
 import { SessionExpiredModal } from '../auth/SessionExpiredModal';
 import { AIExceptionDrawer } from './AIExceptionDrawer';
+import { isWorkPath, lastWorkHome, rememberWorkPath } from './BackToWork';
 import { chrome } from '../theme';
 
 const NAV_ITEMS = [
@@ -94,6 +96,13 @@ export function AppLayout() {
   // only while expanded.
   const showLabels = railExpanded || !isDesktop;
 
+  // Remember the last business page so settings / the assistant can send
+  // the user straight back to it.
+  useEffect(() => {
+    if (isWorkPath(location.pathname)) rememberWorkPath(`${location.pathname}${location.search}`);
+  }, [location.pathname, location.search]);
+  const homeHref = currentProfile ? `/p/${encodeURIComponent(currentProfile)}/home` : lastWorkHome();
+
   const renderNavLink = (item: { label: string; path: string; icon: typeof IconHome }) => {
     const basePath = item.path.startsWith('/')
       ? item.path
@@ -155,7 +164,16 @@ export function AppLayout() {
                 aria-label="切换导航"
               />
             )}
-            <Title order={3} visibleFrom="sm">nblane</Title>
+            <Box
+              component={RouterLink}
+              to={homeHref}
+              visibleFrom="sm"
+              aria-label="回到首页"
+              data-testid="brand-home"
+              style={{ color: 'inherit', textDecoration: 'none' }}
+            >
+              <Title order={3}>nblane</Title>
+            </Box>
             {currentProfile && (
               <Badge
                 color="brand"
