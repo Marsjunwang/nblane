@@ -156,7 +156,7 @@ export function InscriptionCard({ selection, snapshot, profile, onSaved }: Inscr
                 重刻
               </button>
             )}
-            <DetailLink kind={selection.kind} profile={profile} />
+            <DetailLink kind={selection.kind} profile={profile} selection={selection} />
           </div>
         </>
       )}
@@ -317,8 +317,16 @@ function EditActions({
 }
 
 /** 联动跳转 (design §5): 北极星无跳转(重刻即全部); 恒星跳项目泳道;
- * 行星跳 /projects; 客星跳证据页; 星官跳技能树(只读卡). */
-function DetailLink({ kind, profile }: { kind: StarmapSelection['kind']; profile: string }) {
+ * 行星跳 /projects; 客星跳证据页并定位; 星官跳技能树(只读卡). */
+function DetailLink({
+  kind,
+  profile,
+  selection,
+}: {
+  kind: StarmapSelection['kind'];
+  profile: string;
+  selection: StarmapSelection;
+}) {
   const base = `/p/${encodeURIComponent(profile)}`;
   const link =
     kind === 'goal'
@@ -326,7 +334,7 @@ function DetailLink({ kind, profile }: { kind: StarmapSelection['kind']; profile
       : kind === 'planet'
         ? { to: `${base}/projects`, label: '前往项目 →' }
         : kind === 'guest'
-          ? { to: `${base}/evidence`, label: '前往证据 →' }
+          ? { to: `${base}/evidence?focus=${encodeURIComponent(selection.id)}`, label: '前往证据 →' }
           : kind === 'skill'
             ? { to: `${base}/skill-tree`, label: '前往技能树 →' }
             : null;
