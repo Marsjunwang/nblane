@@ -1,5 +1,5 @@
-import { Alert, Box, Button, Group, Image, Loader, Paper, SimpleGrid, Stack, Text, TextInput } from '@mantine/core';
-import { IconCheck, IconPhotoAi, IconTrash } from '@tabler/icons-react';
+import { Alert, Box, Button, FileButton, Group, Image, Loader, Paper, SimpleGrid, Stack, Text, TextInput } from '@mantine/core';
+import { IconCheck, IconPhotoAi, IconTrash, IconX } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { contentCoverCandidateUrl, discardCoverCandidate, usePromoteCoverCandidate } from '../../api/hooks';
@@ -29,6 +29,8 @@ export function AICoverGenerator({
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [candidates, setCandidates] = useState<ContentCoverCandidate[]>([]);
+  const [referenceImage, setReferenceImage] = useState('');
+  const [referenceImageName, setReferenceImageName] = useState('');
   const jobRef = useRef<ContentJobHandle<ContentCoverResult> | null>(null);
   const promote = usePromoteCoverCandidate(profile);
 
@@ -42,7 +44,7 @@ export function AICoverGenerator({
     const job = runContentJob<ContentCoverResult>(
       profile,
       'content-cover',
-      { slug, brief, title: draft.title, summary: draft.summary, tags: draft.tags, body: draft.body },
+      { slug, brief, title: draft.title, summary: draft.summary, tags: draft.tags, body: draft.body, reference_image: referenceImage },
       setProgress,
     );
     jobRef.current = job;
@@ -69,6 +71,21 @@ export function AICoverGenerator({
     void discardCoverCandidate(profile, candidate.candidate_path).catch(() => undefined);
   };
 
+  const handleReferenceImageSelected = (file: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      setReferenceImage(dataUrl);
+      setReferenceImageName(file.name);
+      setError('');
+    };
+    reader.onerror = () => {
+      setError('上传参考图失败，请重试。');
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <Paper withBorder p="sm" radius="md" data-testid="content-ai-cover">
       <Stack gap="sm">
@@ -88,18 +105,52 @@ export function AICoverGenerator({
               value={brief}
               onChange={(event) => setBrief(event.currentTarget.value)}
             />
-            <Button
-              size="xs"
-              variant="light"
-              leftSection={running ? <Loader size={12} /> : <IconPhotoAi size={15} />}
-              onClick={generate}
-              disabled={running}
-              data-testid="content-ai-cover-run"
-            >
-              {running ? '生成中…' : '生成封面'}
-            </Button>
+            <Group gap="xs" grow>
+              <Button
+                size="xs"
+                variant="light"
+                leftSection={running ? <Loader size={12} /> : <IconPhotoAi size={15} />}
+                onClick={generate}
+                disabled={running}
+                data-testid="content-ai-cover-run"
+              >
+                {running ? '生成中…' : '生成封面'}
+              </Button>
+              <FileButton
+                accept="image/*"
+                onChange={handleReferenceImageSelected}
+                disabled={running}
+              >
+                {(props) => (
+                  <Button
+                    size="xs"
+                    variant="default"
+                    {...props}
+                    disabled={running}
+                    title="上传一张已生成的图，作为参考进行迭代修改"
+                  >
+                    {referenceImageName ? `已上传: ${referenceImageName}` : '参考图'}
+                  </Button>
+                )}
+              </FileButton>
+              {referenceImage && (
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  color="gray"
+                  leftSection={<IconX size={13} />}
+                  onClick={() => {
+                    setReferenceImage('');
+                    setReferenceImageName('');
+                  }}
+                  disabled={running}
+                >
+                  清除
+                </Button>
+              )}
+            </Group>
             <Text size="xs" c="dimmed">
-              {running ? progress || '约 30–90 秒' : '基于标题、摘要和标签生成，图中不含文字。'}
+              {running ? progress || '约 30–90 秒' : referenceImage ? '✓ 参考图已选择，基于此图迭代生成' : '基于标题、摘要和标签生成，图中不含文字。'}
             </Text>
           </>
         )}

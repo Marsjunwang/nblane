@@ -271,6 +271,7 @@ def generate_cover_candidates(
     summary: str | None = None,
     tags: list[str] | None = None,
     body: str | None = None,
+    reference_image: str = "",
 ) -> list[dict[str, Any]]:
     """Generate cover images into the candidate store (post untouched).
 
@@ -292,6 +293,7 @@ def generate_cover_candidates(
             summary=post.summary if summary is None else _clean(summary),
             tags=list(tags) if tags is not None else [str(t) for t in (post.meta.get("tags") or [])],
             body=post.body if body is None else str(body or ""),
+            reference_image=_clean(reference_image),
         )
     except visual_generation.VisualGenerationError as exc:
         raise ContentAIError("cover_generation_failed", str(exc)) from exc

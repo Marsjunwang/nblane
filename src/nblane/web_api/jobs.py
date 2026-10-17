@@ -696,6 +696,7 @@ def _validate_content_cover_input(job_input: dict[str, Any]) -> dict[str, Any]:
         "summary": _clean(job_input.get("summary"))[:1000] if "summary" in job_input else None,
         "tags": [_clean(tag)[:40] for tag in tags if _clean(tag)][:12] if tags is not None else None,
         "body": str(job_input.get("body") or "")[:200_000] if "body" in job_input else None,
+        "reference_image": _clean(job_input.get("reference_image"))[:2000] if "reference_image" in job_input else "",
     }
 
 
