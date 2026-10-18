@@ -44,7 +44,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 
 from nblane.core import agent_activity, agent_tasks, file_state
 from nblane.core import agent_journal, agent_policy
-from nblane.core import social_cards
+from nblane.core import social_cards, content_images
+from nblane.web_api.schemas import (ContentImageReferenceRequest, ContentImageReferenceResponse, ContentImageRunModel, ContentImageRunsResponse, ContentImageActionRequest)
 from nblane.core import career_ai, career_workspace, content_ai, content_workspace, git_backup, public_site, resume_doc, visual_candidate_store
 from nblane.core import public_console
 from nblane.core.file_lock import locked_profile_write
@@ -8801,3 +8802,43 @@ async def validation_error_handler(
     message = "; ".join(details) or "Request validation failed."
     body = ErrorResponse(code="validation_error", message=message)
     return JSONResponse(status_code=422, content=body.model_dump())
+
+
+@router.get("/profiles/{name}/content/images", response_model=ContentImageRunsResponse, dependencies=PROFILE_DEPENDENCY)
+def get_content_images(name: str, slug: str = Query(...)) -> ContentImageRunsResponse:
+    pdir = _resolve_profile(name)
+    _load_studio_post(pdir, slug)
+    return ContentImageRunsResponse(runs=[ContentImageRunModel(**row) for row in content_images.list_runs(pdir.name, slug)])
+
+
+@router.post("/profiles/{name}/content/images/reference", response_model=ContentImageReferenceResponse, dependencies=PROFILE_DEPENDENCY)
+def upload_content_image_reference(name: str, body: ContentImageReferenceRequest) -> ContentImageReferenceResponse:
+    pdir = _resolve_profile(name)
+    _load_studio_post(pdir, body.slug)
+    try:
+        path = content_images.upload_reference(pdir.name, body.slug, body.data_url)
+    except (ValueError, content_ai.ContentAIError) as exc:
+        raise ApiError(422, "invalid_reference_image", str(exc)) from exc
+    return ContentImageReferenceResponse(path=path)
+
+
+@router.post("/profiles/{name}/content/images/accept", response_model=ContentImageReferenceResponse, dependencies=PROFILE_DEPENDENCY)
+def accept_content_image(name: str, body: ContentImageActionRequest) -> ContentImageReferenceResponse:
+    pdir = _resolve_profile(name)
+    _load_studio_post(pdir, body.slug)
+    try:
+        path = content_images.accept(pdir.name, body.slug, body.run_id, body.candidate_path)
+    except (ValueError, OSError, public_site.PublicSiteError) as exc:
+        raise ApiError(422, "image_candidate_unavailable", str(exc)) from exc
+    return ContentImageReferenceResponse(path=path)
+
+
+@router.post("/profiles/{name}/content/images/discard", response_model=dict[str, bool], dependencies=PROFILE_DEPENDENCY)
+def discard_content_image(name: str, body: ContentImageActionRequest) -> dict[str, bool]:
+    pdir = _resolve_profile(name)
+    _load_studio_post(pdir, body.slug)
+    try:
+        content_images.discard(pdir.name, body.slug, body.run_id, body.candidate_path)
+    except (ValueError, OSError) as exc:
+        raise ApiError(422, "image_candidate_unavailable", str(exc)) from exc
+    return {"ok": True}

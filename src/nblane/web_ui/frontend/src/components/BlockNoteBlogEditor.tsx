@@ -1,4 +1,6 @@
-import { filterSuggestionItems } from '@blocknote/core';
+import { Fragment, Slice } from '@tiptap/pm/model';
+import type { Transaction } from '@tiptap/pm/state';
+import { blockToNode, contentNodeToInlineContent, filterSuggestionItems } from '@blocknote/core';
 import { zh } from '@blocknote/core/locales';
 import { BlockNoteView } from '@blocknote/mantine';
 import {
@@ -28,6 +30,8 @@ import {
 // and the dark BlockNote palette.
 import '../blogBlocks/blocks.css';
 import './blogEditor.css';
+import { selectedImages, containsMedia } from './content/imageSelection';
+import type { SelectedImage, ImageTarget } from './content/imageTypes';
 
 export type EditorBlocks = Array<Record<string, unknown>>;
 
@@ -49,7 +53,10 @@ export interface BlockNoteBlogEditorHandle {
    * *markdown*. Returns false when that text changed meanwhile (nothing is
    * written then).
    */
-  replaceCapturedSelection: (markdown: string) => boolean;
+  replaceCapturedSelection: (markdown: string, parts?: string[]) => boolean;
+  canReplaceImage: (target: ImageTarget) => boolean;
+  retargetImage: (target: ImageTarget, appliedPath: string) => ImageTarget | null;
+  replaceImage: (target: ImageTarget, path: string) => boolean;
 }
 
 /** One selection rewrite request raised from the formatting toolbar. */
@@ -59,6 +66,7 @@ export interface AIRewriteRequest {
   selection: string;
   /** Neighbouring paragraphs, for the model's context only. */
   context: string;
+  parts?: string[];
 }
 
 export const AI_REWRITE_MENU: Array<{ operation: string; label: string }> = [
@@ -88,6 +96,7 @@ export interface BlockNoteBlogEditorProps {
   onActiveHeadingChange?: (id: string) => void;
   /** Show the toolbar AI menu; called with the selected passage. */
   onAIRewrite?: (request: AIRewriteRequest) => void;
+  onAIImage?: (images: SelectedImage[]) => void;
 }
 
 const SLASH_LABELS = {
@@ -118,7 +127,7 @@ function topLevelBlockId(blocks: EditorBlocks, id: string): string {
 }
 
 /** "AI" dropdown appended to BlockNote's formatting toolbar. */
-function AIRewriteMenu({ onPick }: { onPick: (operation: string) => void }) {
+function AIRewriteMenu({ onPick, imagesOnly, mixed, textEnabled, imageEnabled }: { onPick: (operation: string) => void; imagesOnly: boolean; mixed: boolean; textEnabled: boolean; imageEnabled: boolean }) {
   const Components = useComponentsContext();
   if (!Components) return null;
   const { Menu, Toolbar } = Components.Generic;
@@ -126,7 +135,7 @@ function AIRewriteMenu({ onPick }: { onPick: (operation: string) => void }) {
     <Menu.Root position="bottom-start">
       <Menu.Trigger>
         <Toolbar.Button
-          mainTooltip="AI 改写选中内容"
+          mainTooltip={imagesOnly ? "AI 修改图片" : "AI 改写选中文字"}
           icon={<IconSparkles size={16} />}
           label="AI"
           className="nb-ai-toolbar-button"
@@ -135,11 +144,16 @@ function AIRewriteMenu({ onPick }: { onPick: (operation: string) => void }) {
         </Toolbar.Button>
       </Menu.Trigger>
       <Menu.Dropdown className="bn-menu-dropdown">
+        {imagesOnly ? <Menu.Item onClick={() => imageEnabled && onPick('image')}>
+          {imageEnabled ? '修改图片' : '修改图片（未配置图像服务）'}
+        </Menu.Item> : <>
+        {mixed && <Menu.Item>仅改写文字，保留图片</Menu.Item>}
+        {!textEnabled && <Menu.Item>未配置文字服务</Menu.Item>}
         {AI_REWRITE_MENU.map((item) => (
-          <Menu.Item key={item.operation} onClick={() => onPick(item.operation)}>
+          <Menu.Item key={item.operation} onClick={() => textEnabled && onPick(item.operation)}>
             {item.label}
           </Menu.Item>
-        ))}
+        ))}</>}
       </Menu.Dropdown>
     </Menu.Root>
   );
@@ -159,6 +173,7 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
       onOutlineChange,
       onActiveHeadingChange,
       onAIRewrite,
+      onAIImage,
     },
     ref,
   ) {
@@ -174,8 +189,11 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
     onActiveHeadingRef.current = onActiveHeadingChange;
     const onAIRewriteRef = useRef(onAIRewrite);
     onAIRewriteRef.current = onAIRewrite;
+    const onAIImageRef = useRef(onAIImage);
+    onAIImageRef.current = onAIImage;
+    const [selectionKind, setSelectionKind] = useState({ imagesOnly: false, mixed: false });
     // ProseMirror range + plain text of the selection sent to the AI.
-    const capturedRef = useRef<{ from: number; to: number; text: string } | null>(null);
+    const capturedRef = useRef<{ document: string; ranges: Array<{ from: number; to: number }> } | null>(null);
 
     const editor = useCreateBlockNote({
       schema: blogSchema as never,
@@ -268,14 +286,43 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
           if (first) editor.setTextCursorPosition(first, 'start');
           editor.focus();
         },
-        replaceCapturedSelection: (markdown: string) => {
+        canReplaceImage: (target: ImageTarget) => {
+          if (sourceMode || !target.block_id) return false;
+          const block = editor.getBlock(target.block_id);
+          return !!block && JSON.stringify(block.props) === target.fingerprint;
+        },
+        retargetImage: (target: ImageTarget, appliedPath: string) => {
+          if (sourceMode || !target.block_id || !target.fingerprint) return null;
+          const block = editor.getBlock(target.block_id);
+          if (!block) return null;
+          try {
+            const expected = { ...JSON.parse(target.fingerprint), [block.type === 'image' ? 'url' : 'src']: appliedPath };
+            if (JSON.stringify(block.props) !== JSON.stringify(expected)) return null;
+            return { ...target, source: appliedPath, fingerprint: JSON.stringify(block.props) };
+          } catch { return null; }
+        },
+        replaceImage: (target: ImageTarget, path: string) => {
+          if (sourceMode || !target.block_id) return false;
+          const block = editor.getBlock(target.block_id);
+          if (!block || JSON.stringify(block.props) !== target.fingerprint) return false;
+          editor.updateBlock(block, { props: { [block.type === 'image' ? 'url' : 'src']: path } } as never);
+          return true;
+        },
+        replaceCapturedSelection: (markdown: string, parts?: string[]) => {
           const captured = capturedRef.current;
-          if (!captured || sourceMode) return false;
-          const doc = editor.prosemirrorState.doc;
-          if (captured.to > doc.content.size) return false;
-          if (doc.textBetween(captured.from, captured.to, '\n\n') !== captured.text) return false;
-          editor._tiptapEditor.commands.setTextSelection({ from: captured.from, to: captured.to });
-          editor.pasteMarkdown(markdown.trim());
+          if (!captured || sourceMode || JSON.stringify(editor.prosemirrorState.doc.toJSON()) !== captured.document) return false;
+          const replacements = parts ?? [markdown];
+          if (replacements.length !== captured.ranges.length || replacements.some((text) => !text.trim())) return false;
+          if (replacements.some((text) => containsMedia(parseMarkdownToEditorBlocks(editor, text) as never))) return false;
+          const slices = replacements.map((text) => new Slice(Fragment.fromArray(
+            parseMarkdownToEditorBlocks(editor, text.trim()).map((block) => blockToNode(block as never, editor.pmSchema)),
+          ), 2, 2));
+          editor.transact((tr: Transaction) => {
+            for (let index = captured.ranges.length - 1; index >= 0; index--) {
+              const { from, to } = captured.ranges[index];
+              tr.replaceRange(from, to, slices[index]);
+            }
+          });
           capturedRef.current = null;
           return true;
         },
@@ -308,6 +355,10 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
     useEffect(() => {
       if (sourceMode) return undefined;
       return editor.onSelectionChange(() => {
+        const cut = editor.getSelectionCutBlocks();
+        const images = selectedImages(cut.blocks as never);
+        const text = editor.getSelectedText().trim();
+        setSelectionKind({ imagesOnly: images.length > 0 && !text, mixed: images.length > 0 && !!text });
         const cursorId = editor.getTextCursorPosition().block.id;
         const topLevel = topLevelBlockId(editor.document as unknown as EditorBlocks, cursorId);
         setCaretBlockId(topLevel);
@@ -325,9 +376,38 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
         const { from, to } = editor.prosemirrorState.selection;
         if (from === to) return;
         const cut = editor.getSelectionCutBlocks();
-        const selection = (editor.blocksToMarkdownLossy(cut.blocks as never) || editor.getSelectedText()).trim();
-        if (!selection) return;
-        capturedRef.current = { from, to, text: editor.prosemirrorState.doc.textBetween(from, to, '\n\n') };
+        const images = selectedImages(cut.blocks as never);
+        if (operation === 'image') {
+          if (images.length) onAIImageRef.current?.(images);
+          return;
+        }
+        const doc = editor.prosemirrorState.doc;
+        const ranges: Array<{ from: number; to: number }> = [];
+        const parts: string[] = [];
+        // With media in the selection, only textblock interiors are editable.
+        // Stable positional ranges preserve every non-text node and its props.
+        const hasMedia = containsMedia(cut.blocks as never);
+        if (hasMedia) {
+          doc.nodesBetween(from, to, (node: { isTextblock: boolean; inlineContent: boolean; textContent: string; nodeSize: number }, pos: number) => {
+            if (!node.isTextblock || !node.inlineContent || !node.textContent.trim()) return;
+            const start = Math.max(from, pos + 1);
+            const end = Math.min(to, pos + node.nodeSize - 1);
+            if (end <= start) return;
+            const text = doc.textBetween(start, end);
+            if (!text.trim()) return;
+            ranges.push({ from: start, to: end });
+            const contentNode = doc.nodeAt(pos)!;
+            const fragment = contentNode.cut(start - pos - 1, end - pos - 1);
+            const content = contentNodeToInlineContent(fragment, editor.schema.inlineContentSchema, editor.schema.styleSchema);
+            parts.push(editor.blocksToMarkdownLossy([{ type: 'paragraph', content }] as never).trim() || text);
+          });
+        } else {
+          ranges.push({ from, to });
+          parts.push((editor.blocksToMarkdownLossy(cut.blocks as never) || editor.getSelectedText()).trim());
+        }
+        if (!parts.length || !parts.some((text) => text.trim())) return;
+        const selection = parts.join('\n\n');
+        capturedRef.current = { document: JSON.stringify(doc.toJSON()), ranges };
         // Two top-level neighbours on each side give the model the local thread.
         const top = editor.document as unknown as EditorBlocks;
         const firstId = topLevelBlockId(top, String(cut.blocks[0]?.id ?? ''));
@@ -336,7 +416,7 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
         const endIndex = top.findIndex((block) => block.id === lastId);
         const end = endIndex < 0 ? start : Math.min(top.length, endIndex + 3);
         const context = editor.blocksToMarkdownLossy(top.slice(start, end) as never);
-        onAIRewriteRef.current?.({ operation, selection, context });
+        onAIRewriteRef.current?.({ operation, selection, context, parts: hasMedia ? parts : undefined });
       },
       [editor],
     );
@@ -344,10 +424,10 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
     const aiToolbar = useCallback(
       () => (
         <FormattingToolbar>
-          {[...getFormattingToolbarItems(), <AIRewriteMenu key="nb-ai" onPick={requestAIRewrite} />]}
+          {[...getFormattingToolbarItems(), <AIRewriteMenu key="nb-ai" onPick={requestAIRewrite} {...selectionKind} textEnabled={!!onAIRewrite} imageEnabled={!!onAIImage} />]}
         </FormattingToolbar>
       ),
-      [requestAIRewrite],
+      [requestAIRewrite, selectionKind, onAIRewrite, onAIImage],
     );
 
     const getSlashItems = useCallback(
@@ -399,7 +479,7 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
             editable={!readOnly}
             theme="dark"
             slashMenu={false}
-            formattingToolbar={!onAIRewrite}
+            formattingToolbar={!onAIRewrite && !onAIImage}
             onChange={() => {
               if (hydratingRef.current) return;
               onChangeRef.current({
@@ -409,7 +489,7 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
             }}
           >
             <SuggestionMenuController triggerCharacter="/" getItems={getSlashItems} />
-            {onAIRewrite && <FormattingToolbarController formattingToolbar={aiToolbar} />}
+            {(onAIRewrite || onAIImage) && <FormattingToolbarController formattingToolbar={aiToolbar} />}
           </BlockNoteView>
         )}
       </div>

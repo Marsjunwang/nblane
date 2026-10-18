@@ -138,19 +138,19 @@ test.describe("SPA content and career workspaces", () => {
       "content-meta": { titles: ["AI 标题一"], summaries: ["AI 摘要一。"], tags: ["机器人"] },
     };
     let coverCandidate = "";
+    let imageRuns: unknown[] = [];
+    await page.route("**/api/v1/profiles/*/content/images?*", route => route.fulfill({ json: { runs: imageRuns } }));
     await page.route("**/api/v1/profiles/*/content/ai/status", (route) =>
       route.fulfill({ json: { text: true, cover: true } }),
     );
     await page.route("**/api/v1/profiles/*/jobs", async (route) => {
       const body = route.request().postDataJSON() as { kind: string; input: Record<string, unknown> };
-      if (body.kind === "content-cover") {
+      if (body.kind === "content-image") {
         // Stage a real candidate file through the upload route is not possible;
         // reuse a 1x1 PNG served by the fulfill below instead.
         coverCandidate = "blog/.candidates/cover-e2e/generated-cover-e2e.png";
-        results["content-cover"] = {
-          slug: body.input.slug,
-          candidates: [{ candidate_path: coverCandidate, filename: "generated-cover-e2e.png", provider: "stub", model: "stub" }],
-        };
+        imageRuns = [{ id: 'image-e2e', slug: body.input.slug, request: body.input, status: 'done', created_at: Date.now() / 1000, reference: '', error: '',
+          candidates: [{ candidate_path: coverCandidate, filename: "generated-cover-e2e.png", applied_path: '' }] }];
       }
       await route.fulfill({ status: 202, json: { ok: true, job_id: `job-${body.kind}`, job: { job_id: `job-${body.kind}` } } });
     });
@@ -174,7 +174,7 @@ test.describe("SPA content and career workspaces", () => {
         ),
       }),
     );
-    await page.route("**/cover-candidates/promote", (route) =>
+    await page.route("**/content/images/accept", (route) =>
       route.fulfill({ json: { ok: true, path: "media/blog/e2e/generated-cover-e2e.png" } }),
     );
 
@@ -208,9 +208,12 @@ test.describe("SPA content and career workspaces", () => {
 
     // Cover: candidate shown; 用作封面 sets the draft cover.
     await page.getByTestId("content-ai-cover-run").click();
-    await expect(page.getByTestId("content-ai-cover-candidate")).toHaveCount(1);
-    await page.getByTestId("content-ai-cover-use").click();
-    await expect(page.getByTestId("content-ai-cover-candidate")).toHaveCount(0);
+    const workspace = page.getByTestId('image-workspace');
+    await workspace.getByRole('button', { name: '生成封面候选', exact: true }).click();
+    await expect(workspace.getByTestId('image-run')).toHaveCount(1);
+    await workspace.getByRole('button', { name: '用作封面', exact: true }).click();
+    await expect(workspace.getByText('已更新封面，正在自动保存。')).toBeVisible();
+    await workspace.getByRole('button', { name: '关闭图片工作台', exact: true }).click();
     await expect(page.getByAltText("封面预览")).toBeVisible();
   });
 

@@ -98,6 +98,9 @@ ROUTE_ACTIONS: dict[tuple[str, str], str] = {
     ("POST", f"{P}/agent/journal/{{entry_id}}/undo"): "journal.undo",
     # AI exception triage
     ("POST", f"{P}/ai-exceptions/dismiss"): "review.decide",
+    ("POST", f"{P}/content/images/reference"): "ai.draft",
+    ("POST", f"{P}/content/images/accept"): "ai.draft",
+    ("POST", f"{P}/content/images/discard"): "ai.draft",
     ("DELETE", f"{P}/content/blog/{{slug:path}}"): "public.publish",
 }
 

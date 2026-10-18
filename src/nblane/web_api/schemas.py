@@ -3325,3 +3325,39 @@ class AgentJournalUndoResponse(BaseModel):
 
     ok: bool = True
     entry: AgentJournalEntryModel
+
+
+class ContentImageReferenceRequest(BaseModel):
+    slug: str = Field(min_length=1, max_length=300)
+    data_url: str = Field(min_length=1, max_length=16 * 1024 * 1024)
+
+
+class ContentImageReferenceResponse(BaseModel):
+    path: str
+
+
+class ContentImageCandidateModel(BaseModel):
+    candidate_path: str
+    filename: str
+    applied_path: str = ""
+
+
+class ContentImageRunModel(BaseModel):
+    id: str
+    slug: str
+    request: dict[str, Any]
+    status: str
+    created_at: float
+    reference: str = ""
+    error: str = ""
+    candidates: list[ContentImageCandidateModel] = Field(default_factory=list)
+
+
+class ContentImageRunsResponse(BaseModel):
+    runs: list[ContentImageRunModel] = Field(default_factory=list)
+
+
+class ContentImageActionRequest(BaseModel):
+    slug: str = Field(min_length=1, max_length=300)
+    run_id: str = Field(min_length=1, max_length=80)
+    candidate_path: str = Field(default="", max_length=500)

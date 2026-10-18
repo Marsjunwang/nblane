@@ -19,6 +19,8 @@ Three capabilities:
 from __future__ import annotations
 
 import uuid
+import base64
+import binascii
 from typing import Any
 
 from nblane.core import llm as llm_client
@@ -89,6 +91,23 @@ def _chat(system: str, user: str, *, temperature: float, thinking: bool | None) 
     if raw.startswith(_LLM_ERROR_PREFIXES):
         raise ContentAIError("content_ai_failed", raw)
     return raw
+
+
+def validate_reference_image(value: object) -> str:
+    """Keep complete data URLs; never silently truncate image bytes."""
+    clean = _clean(value)
+    if len(clean) > 16 * 1024 * 1024:
+        raise ContentAIError("invalid_reference_image", "参考图过大，请使用 12 MB 以内的图片。")
+    if clean.startswith("data:"):
+        try:
+            header, encoded = clean.split(",", 1)
+            if header not in {"data:image/png;base64", "data:image/jpeg;base64", "data:image/webp;base64", "data:image/gif;base64"}:
+                raise ValueError("unsupported image")
+            if not base64.b64decode(encoded, validate=True):
+                raise ValueError("empty image")
+        except (ValueError, binascii.Error) as exc:
+            raise ContentAIError("invalid_reference_image", "参考图数据不完整或格式不支持。") from exc
+    return clean
 
 
 # --- Rewrite selection -------------------------------------------------------

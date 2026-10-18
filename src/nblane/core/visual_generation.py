@@ -281,9 +281,9 @@ def build_blog_visual_prompt(
 ) -> VisualPrompt:
     """Build a structured, privacy-aware prompt for a blog visual."""
     clean_type = str(asset_type or "").strip().lower() or "cover"
-    if clean_type not in {"flowchart", "cover", "example", "video_edit"}:
+    if clean_type not in {"flowchart", "cover", "example", "video_edit", "image_edit"}:
         raise VisualGenerationError(
-            "Visual asset_type must be flowchart, cover, example, or video_edit."
+            "Visual asset_type must be flowchart, cover, example, image_edit, or video_edit."
         )
     safe_prompt, notes = _strip_private_markers(prompt)
     safe_title, title_notes = _strip_private_markers(title)
@@ -293,7 +293,17 @@ def build_blog_visual_prompt(
     tags_text = ", ".join(str(tag).strip() for tag in (tags or []) if str(tag).strip())
     style_text = str(style or "").strip()
     config = current_config()
-    if clean_type == "cover":
+    if clean_type == "image_edit":
+        recommended = size or str(config["default_cover_size"])
+        positive = (
+            "Edit the supplied reference image according to the user's instructions. "
+            "Preserve all content, people, text, layout and details not explicitly requested to change. "
+            "Keep the original aspect ratio. Do not invent a cover illustration or remove existing text. "
+            f"User editing instructions: {safe_prompt}."
+        )
+        negative = "unrequested changes, distorted text, distorted faces"
+        rationale = "Modify only what the user requested in the reference image."
+    elif clean_type == "cover":
         recommended = size or str(config["default_cover_size"])
         # The title/summary describe the *topic*; image models tend to typeset
         # any quoted title verbatim, so frame them as subject matter and
@@ -1071,6 +1081,8 @@ def _prepare_dashscope_media_url(
     clean = str(value or "").strip()
     if not clean:
         return ""
+    if clean.startswith("data:image/"):
+        return clean
     parsed = urlparse(clean)
     if parsed.scheme in {"http", "https", "oss"}:
         return clean

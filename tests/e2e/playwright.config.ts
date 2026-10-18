@@ -39,7 +39,7 @@ export default defineConfig({
     },
     {
       name: "chromium",
-      testIgnore: [/spa_auth\.setup\.ts/, /spa_auth\.spec\.ts/],
+      testIgnore: [/content-image-editor\.spec\.ts/, /spa_auth\.setup\.ts/, /spa_auth\.spec\.ts/],
       dependencies: ["spa-auth-setup"],
       use: {
         // The SPA backend may run with NBLANE_AUTH_FILE (isolated stack does

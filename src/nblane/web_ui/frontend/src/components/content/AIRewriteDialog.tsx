@@ -40,6 +40,8 @@ export function InlineDiff({ before, after }: { before: string; after: string })
 }
 
 export interface RewriteState {
+  parts?: string[];
+  originals?: string[];
   operation: string;
   original: string;
   status: 'running' | 'done' | 'error';
@@ -58,6 +60,7 @@ export function AIRewriteDialog({
   view,
   onViewChange,
   onEditCandidate,
+  onEditPart,
   onAccept,
   onRetry,
   onClose,
@@ -66,6 +69,7 @@ export function AIRewriteDialog({
   view: 'diff' | 'edit';
   onViewChange: (view: 'diff' | 'edit') => void;
   onEditCandidate: (text: string) => void;
+  onEditPart?: (index: number, text: string) => void;
   onAccept: () => void;
   onRetry: () => void;
   onClose: () => void;
@@ -111,7 +115,13 @@ export function AIRewriteDialog({
                   ]}
                 />
               </Group>
-              {view === 'diff' ? (
+              {state.parts ? <Stack>
+                <Text size="xs" c="dimmed">仅改写文字；图片及顺序保持不变。各文字区域分别确认。</Text>
+                {state.parts.map((part, index) => <Box key={index}>
+                  <Text size="xs" c="dimmed">文字区域 {index + 1}</Text>
+                  {view === 'diff' ? <InlineDiff before={state.originals?.[index] ?? ''} after={part} /> : <Textarea aria-label={`AI 候选区域 ${index + 1}`} value={part} onChange={(event) => onEditPart?.(index, event.currentTarget.value)} autosize minRows={2} />}
+                </Box>)}
+              </Stack> : view === 'diff' ? (
                 <ScrollArea.Autosize mah="55vh">
                   <Box p="sm" style={{ border: '1px solid var(--mantine-color-dark-5)', borderRadius: 8 }}>
                     <InlineDiff before={state.original} after={state.text} />
@@ -145,7 +155,7 @@ export function AIRewriteDialog({
               <Button
                 leftSection={<IconCheck size={15} />}
                 onClick={onAccept}
-                disabled={state.status !== 'done' || !state.text?.trim()}
+                disabled={state.status !== 'done' || !state.text?.trim() || state.parts?.some((part) => !part.trim())}
                 data-testid="content-ai-accept"
               >
                 接受并替换

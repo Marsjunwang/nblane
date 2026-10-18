@@ -688,6 +688,10 @@ def _run_content_meta(profile: str, job_input: dict[str, Any], report: Callable[
 def _validate_content_cover_input(job_input: dict[str, Any]) -> dict[str, Any]:
     slug = _validate_content_slug(job_input)
     tags = job_input.get("tags") if isinstance(job_input.get("tags"), list) else None
+    try:
+        reference = content_ai.validate_reference_image(job_input.get("reference_image"))
+    except content_ai.ContentAIError as exc:
+        raise JobInputError(exc.code, exc.message) from exc
     return {
         "slug": slug,
         "brief": _clean(job_input.get("brief"))[:500],
@@ -696,7 +700,7 @@ def _validate_content_cover_input(job_input: dict[str, Any]) -> dict[str, Any]:
         "summary": _clean(job_input.get("summary"))[:1000] if "summary" in job_input else None,
         "tags": [_clean(tag)[:40] for tag in tags if _clean(tag)][:12] if tags is not None else None,
         "body": str(job_input.get("body") or "")[:200_000] if "body" in job_input else None,
-        "reference_image": _clean(job_input.get("reference_image"))[:2000] if "reference_image" in job_input else "",
+        "reference_image": reference,
     }
 
 
@@ -755,6 +759,43 @@ _KINDS[KIND_CONTENT_COVER] = JobKind(
     queued_message="Queued cover generation.",
     timeout_seconds=300,
     timeout_message="封面生成超时（5 分钟），请重试。",
+)
+
+
+def _validate_content_image_input(raw: dict[str, Any]) -> dict[str, Any]:
+    mode = _clean(raw.get("mode"))
+    instruction = _clean(raw.get("instruction"))
+    reference = _clean(raw.get("reference"))
+    if mode not in {"cover", "edit"}:
+        raise JobInputError("invalid_image_request", "请选择生成封面或修改图片。")
+    if len(instruction) > 4000 or (mode == "edit" and (not instruction or not reference)):
+        raise JobInputError("invalid_image_request", "请选择原图并填写修改要求（最多 4000 字）。")
+    if reference and (len(reference) > 500 or not reference.startswith(("media/", "blog/.candidates/"))):
+        raise JobInputError("invalid_image_request", "请使用媒体库图片或上传参考图。")
+    target = raw.get("target") or {}
+    if not isinstance(target, dict) or target.get("kind", "media") not in {"block", "cover", "media"}:
+        raise JobInputError("invalid_image_request", "无效的图片应用位置。")
+    target = {key: _clean(target.get(key)) for key in ("kind", "block_id", "source", "fingerprint")}
+    if any(len(value) > 10000 for value in target.values()):
+        raise JobInputError("invalid_image_request", "图片属性过长，请从媒体库选择参考图。")
+    target["kind"] = target["kind"] or "media"
+    return {
+        "slug": _validate_content_slug(raw), "mode": mode,
+        "instruction": instruction, "reference": reference, "target": target,
+        **_validate_content_meta_input(raw),
+    }
+
+
+def _run_content_image(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
+    from nblane.core import content_images
+    report(phase="generating", message="正在生成图片，关闭面板不影响任务。")
+    return content_images.generate(profile, job_input)
+
+
+_KINDS["content-image"] = JobKind(
+    name="content-image", validate=_validate_content_image_input, run=_run_content_image,
+    queued_message="Queued image generation.", timeout_seconds=360,
+    timeout_message="图片生成超时，请检查候选列表后重试。",
 )
 
 

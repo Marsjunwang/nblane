@@ -2139,6 +2139,156 @@
     "title": "ContentCoverPromoteResponse",
     "type": "object"
    },
+   "ContentImageActionRequest": {
+    "properties": {
+     "candidate_path": {
+      "default": "",
+      "maxLength": 500,
+      "title": "Candidate Path",
+      "type": "string"
+     },
+     "run_id": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+     },
+     "slug": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Slug",
+      "type": "string"
+     }
+    },
+    "required": [
+     "slug",
+     "run_id"
+    ],
+    "title": "ContentImageActionRequest",
+    "type": "object"
+   },
+   "ContentImageCandidateModel": {
+    "properties": {
+     "applied_path": {
+      "default": "",
+      "title": "Applied Path",
+      "type": "string"
+     },
+     "candidate_path": {
+      "title": "Candidate Path",
+      "type": "string"
+     },
+     "filename": {
+      "title": "Filename",
+      "type": "string"
+     }
+    },
+    "required": [
+     "candidate_path",
+     "filename"
+    ],
+    "title": "ContentImageCandidateModel",
+    "type": "object"
+   },
+   "ContentImageReferenceRequest": {
+    "properties": {
+     "data_url": {
+      "maxLength": 16777216,
+      "minLength": 1,
+      "title": "Data Url",
+      "type": "string"
+     },
+     "slug": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Slug",
+      "type": "string"
+     }
+    },
+    "required": [
+     "slug",
+     "data_url"
+    ],
+    "title": "ContentImageReferenceRequest",
+    "type": "object"
+   },
+   "ContentImageReferenceResponse": {
+    "properties": {
+     "path": {
+      "title": "Path",
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "title": "ContentImageReferenceResponse",
+    "type": "object"
+   },
+   "ContentImageRunModel": {
+    "properties": {
+     "candidates": {
+      "items": {
+       "$ref": "#/components/schemas/ContentImageCandidateModel"
+      },
+      "title": "Candidates",
+      "type": "array"
+     },
+     "created_at": {
+      "title": "Created At",
+      "type": "number"
+     },
+     "error": {
+      "default": "",
+      "title": "Error",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "reference": {
+      "default": "",
+      "title": "Reference",
+      "type": "string"
+     },
+     "request": {
+      "additionalProperties": true,
+      "title": "Request",
+      "type": "object"
+     },
+     "slug": {
+      "title": "Slug",
+      "type": "string"
+     },
+     "status": {
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "slug",
+     "request",
+     "status",
+     "created_at"
+    ],
+    "title": "ContentImageRunModel",
+    "type": "object"
+   },
+   "ContentImageRunsResponse": {
+    "properties": {
+     "runs": {
+      "items": {
+       "$ref": "#/components/schemas/ContentImageRunModel"
+      },
+      "title": "Runs",
+      "type": "array"
+     }
+    },
+    "title": "ContentImageRunsResponse",
+    "type": "object"
+   },
    "ContentMediaCleanupRequest": {
     "properties": {
      "paths": {
@@ -17103,6 +17253,205 @@
      }
     },
     "summary": "Get Profile Content Cover Candidate"
+   }
+  },
+  "/api/v1/profiles/{name}/content/images": {
+   "get": {
+    "operationId": "get_content_images_api_v1_profiles__name__content_images_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentImageRunsResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Content Images"
+   }
+  },
+  "/api/v1/profiles/{name}/content/images/accept": {
+   "post": {
+    "operationId": "accept_content_image_api_v1_profiles__name__content_images_accept_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ContentImageActionRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentImageReferenceResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Accept Content Image"
+   }
+  },
+  "/api/v1/profiles/{name}/content/images/discard": {
+   "post": {
+    "operationId": "discard_content_image_api_v1_profiles__name__content_images_discard_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ContentImageActionRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": {
+          "type": "boolean"
+         },
+         "title": "Response Discard Content Image Api V1 Profiles  Name  Content Images Discard Post",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Discard Content Image"
+   }
+  },
+  "/api/v1/profiles/{name}/content/images/reference": {
+   "post": {
+    "operationId": "upload_content_image_reference_api_v1_profiles__name__content_images_reference_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ContentImageReferenceRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContentImageReferenceResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Upload Content Image Reference"
    }
   },
   "/api/v1/profiles/{name}/content/media-file/{media_path}": {

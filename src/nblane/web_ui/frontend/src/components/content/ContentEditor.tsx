@@ -9,7 +9,6 @@ import {
   Drawer,
   FileButton,
   Group,
-  Image,
   Loader,
   Menu,
   Modal,
@@ -97,10 +96,14 @@ import {
   type PostDraft,
   wordCount,
 } from './contentDraft';
+import { ImageWorkspace } from './ImageWorkspace';
+import { ImagePreview } from './ImagePreview';
+import { useImageRuns } from './imageApi';
+import type { ImageEditRequest, SelectedImage } from './imageTypes';
 import { AICoverGenerator } from './AICoverGenerator';
 import { AIMetaSuggestions } from './AIMetaSuggestions';
 import { AIRewriteDialog, type RewriteState } from './AIRewriteDialog';
-import { runContentJob, type ContentJobHandle } from './contentJobs';
+import { runContentJob } from './contentJobs';
 import { OutlinePanel } from './OutlinePanel';
 import { PostSwitcher } from './PostSwitcher';
 import { SocialShareDrawer } from './SocialShareDrawer';
@@ -144,6 +147,7 @@ function MediaList({
   onDelete,
   deleting,
   bodyUses,
+  onImageEdit,
 }: {
   profile: string;
   media: ContentMedia[];
@@ -157,6 +161,7 @@ function MediaList({
   deleting?: string;
   /** True when the unsaved editor text already uses this file. */
   bodyUses?: (path: string) => boolean;
+  onImageEdit: (item: ContentMedia) => void;
 }) {
   return (
     <Stack gap="sm" data-testid="content-media">
@@ -174,15 +179,15 @@ function MediaList({
         <Loader size="xs" />
       ) : (
         media.map((item) => (
-          <Group key={item.path} gap="sm" wrap="nowrap">
+          <Group key={item.path} gap="xs" wrap="wrap">
             {item.kind === 'image' ? (
-              <Image src={contentMediaUrl(profile, item.path)} w={52} h={52} radius="sm" fit="cover" alt={item.name} />
+              <ImagePreview src={contentMediaUrl(profile, item.path)} width={88} height={66} alt={item.name} />
             ) : (
               <Center w={52} h={52} bg="dark.5" style={{ borderRadius: 4 }}>
                 <Text size="xs">视频</Text>
               </Center>
             )}
-            <Box style={{ flex: 1, minWidth: 0 }}>
+            <Box style={{ flex: 1, minWidth: 100 }}>
               <Text size="xs" truncate>
                 {item.name}
               </Text>
@@ -190,6 +195,7 @@ function MediaList({
                 {item.path === cover ? '封面' : item.referenced ? '正文已引用' : '未使用'}
               </Text>
             </Box>
+            {item.kind === 'image' && <Tooltip label="AI 修改图片"><ActionIcon size={44} variant="subtle" aria-label={`AI 修改 ${item.name}`} onClick={() => onImageEdit(item)}>AI</ActionIcon></Tooltip>}
             <Tooltip label="插入到光标处">
               <ActionIcon variant="subtle" aria-label={`插入 ${item.name}`} onClick={() => onInsert(item)}>
                 <IconRowInsertBottom size={16} />
@@ -230,6 +236,7 @@ function PostSettings({
   onEdit,
   onUpload,
   onInsert,
+  onImageOpen,
 }: {
   profile: string;
   slug: string;
@@ -242,6 +249,7 @@ function PostSettings({
   onEdit: (patch: Partial<PostDraft>) => void;
   onUpload: (file: File | null) => void;
   onInsert: (item: ContentMedia) => void;
+  onImageOpen: (request: ImageEditRequest | null) => void;
 }) {
   const removeMedia = useDeleteContentPostMedia(profile, slug);
   const deleteMedia = (item: ContentMedia) =>
@@ -289,17 +297,11 @@ function PostSettings({
           />
           {draft.cover && (
             <Box pos="relative">
-              <Image src={contentMediaUrl(profile, draft.cover)} radius="sm" mah={160} fit="cover" alt="封面预览" />
+              <ImagePreview src={contentMediaUrl(profile, draft.cover)} height={180} alt="封面预览" />
               <CloseButton size="sm" pos="absolute" top={6} right={6} aria-label="移除封面" onClick={() => onEdit({ cover: '' })} />
             </Box>
           )}
-          <AICoverGenerator
-            profile={profile}
-            slug={slug}
-            enabled={aiCover}
-            draft={draft}
-            onUseCover={(path) => onEdit({ cover: path })}
-          />
+          <AICoverGenerator enabled={aiCover} cover={draft.cover} onOpen={onImageOpen} />
           {!published && (
             <Select
               label="可见性"
@@ -340,6 +342,7 @@ function PostSettings({
           onDelete={deleteMedia}
           deleting={removeMedia.isPending ? removeMedia.variables : undefined}
           bodyUses={(path) => draft.body.includes(path)}
+          onImageEdit={(item) => onImageOpen({ mode: 'edit', reference: item.path, target: { kind: 'media', source: item.path } })}
         />
       </Tabs.Panel>
     </Tabs>
@@ -476,6 +479,16 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const aiStatus = useContentAIStatus(profile);
   const aiText = aiStatus.data?.text ?? false;
   const aiCover = aiStatus.data?.cover ?? false;
+  const imageRuns = useImageRuns(profile, slug);
+  const [imageOpen, setImageOpen] = useState(false);
+  const [imageRequest, setImageRequest] = useState<ImageEditRequest | null>(null);
+  const [imageChoices, setImageChoices] = useState<SelectedImage[]>([]);
+  const openImages = (request: ImageEditRequest | null) => { setImageRequest(request); setImageOpen(true); };
+  const editSelectedImages = (images: SelectedImage[]) => {
+    if (images.length > 1) { setImageChoices(images); return; }
+    const image = images[0];
+    if (image) openImages({ mode: 'edit', reference: image.source, target: { kind: 'block', source: image.source, block_id: image.id, fingerprint: image.fingerprint } });
+  };
   const save = useSaveContentPost(profile);
   const check = useCheckContentPost(profile);
   const publish = usePublishContentPost(profile);
@@ -503,7 +516,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [rewrite, setRewrite] = useState<(RewriteState & { request: AIRewriteRequest }) | null>(null);
   const [rewriteView, setRewriteView] = useState<'diff' | 'edit'>('diff');
-  const rewriteJobRef = useRef<ContentJobHandle<ContentRewriteResult> | null>(null);
+  const rewriteJobRef = useRef<{ cancel: () => void } | null>(null);
 
   // Refs mirror the latest state for timers, unload handlers and async saves.
   const draftRef = useRef<PostDraft | null>(null);
@@ -939,21 +952,17 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
       rewriteJobRef.current?.cancel();
       setRewriteView('diff');
       setRewrite({ request, operation: request.operation, original: request.selection, status: 'running' });
-      const job = runContentJob<ContentRewriteResult>(
-        profile,
-        'content-rewrite',
-        {
-          operation: request.operation,
-          selection: request.selection,
-          context: request.context,
-          title: draftRef.current?.title ?? '',
-        },
-        (message) => setRewrite((current) => (current ? { ...current, progress: message } : current)),
-      );
-      rewriteJobRef.current = job;
+      const selections = request.parts ?? [request.selection];
+      const jobs = selections.map((selection) => runContentJob<ContentRewriteResult>(
+        profile, 'content-rewrite',
+        { operation: request.operation, selection, context: request.context, title: draftRef.current?.title ?? '' },
+        (message) => setRewrite((current) => (current?.request === request ? { ...current, progress: message } : current)),
+      ));
+      rewriteJobRef.current = { cancel: () => jobs.forEach((job) => job.cancel()) };
+      const job = { result: Promise.all(jobs.map((item) => item.result)).then((results) => ({ text: results.map((item) => item.text).join('\n\n'), parts: request.parts ? results.map((item) => item.text) : undefined })) };
       job.result
         .then((result) =>
-          setRewrite((current) => (current?.request === request ? { ...current, status: 'done', text: result.text } : current)),
+          setRewrite((current) => (current?.request === request ? { ...current, status: 'done', text: result.text, parts: result.parts, originals: request.parts } : current)),
         )
         .catch((error: unknown) =>
           setRewrite((current) =>
@@ -972,7 +981,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
 
   const acceptRewrite = () => {
     if (!rewrite?.text) return;
-    const ok = editorRef.current?.replaceCapturedSelection(rewrite.text) ?? false;
+    const ok = editorRef.current?.replaceCapturedSelection(rewrite.text, rewrite.parts) ?? false;
     if (!ok) {
       notifications.show({
         color: 'yellow',
@@ -1052,6 +1061,9 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
 
   const settings = (
     <Stack>
+    <Button variant="light" onClick={() => openImages(null)}>
+      图片任务与候选{imageRuns.data?.runs.some((run) => run.status === 'running') ? ' · 生成中' : imageRuns.data?.runs.some((run) => run.candidates.some((candidate) => !candidate.applied_path)) ? ' · 待确认' : ''}
+    </Button>
     <PostSettings
       profile={profile}
       slug={slug}
@@ -1062,6 +1074,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
       aiText={aiText}
       aiCover={aiCover}
       onEdit={edit}
+      onImageOpen={openImages}
       onUpload={uploadFromPanel}
       onInsert={(item) => insertSnippet(mediaSnippet(item.kind, item.path, item.name))}
     />
@@ -1251,7 +1264,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   );
 
   const canvas = (
-    <Box style={{ flex: 1, minWidth: 0 }}>
+    <Box style={{ flex: 1, minWidth: 100 }}>
       {saveState === 'conflict' && (
         <Box maw={columnWidth} mx="auto" px="md" pt="md">
           <Alert color="yellow" title="文章已在别处被修改" data-testid="conflict-alert">
@@ -1390,6 +1403,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
             onOutlineChange={onOutlineChange}
             onActiveHeadingChange={setActiveHeading}
             onAIRewrite={aiText ? startRewrite : undefined}
+            onAIImage={aiCover ? editSelectedImages : undefined}
           />
         </Box>
       )}
@@ -1490,11 +1504,39 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
         state={rewrite}
         view={rewriteView}
         onViewChange={setRewriteView}
+        onEditPart={(index, text) => setRewrite((current) => {
+          if (!current?.parts) return current;
+          const parts = [...current.parts]; parts[index] = text;
+          return { ...current, parts, text: parts.join('\n\n') };
+        })}
         onEditCandidate={(text) => setRewrite((current) => (current ? { ...current, text } : current))}
         onAccept={acceptRewrite}
         onRetry={() => rewrite && startRewrite(rewrite.request)}
         onClose={closeRewrite}
       />
+
+      <ImageWorkspace profile={profile} slug={slug} opened={imageOpen} request={imageRequest} enabled={aiCover}
+        draft={draft} media={media.data ?? []} onClose={() => setImageOpen(false)}
+        retarget={(target, appliedPath) => {
+          if (target.kind === 'block') return editorRef.current?.retargetImage(target, appliedPath) ?? null;
+          if (target.kind === 'cover' && (draftRef.current?.cover ?? '') === appliedPath) return { ...target, source: appliedPath };
+          return target.kind === 'media' ? target : null;
+        }}
+        canApply={(target) => target.kind === 'block' ? !!editorRef.current?.canReplaceImage(target) : target.kind !== 'cover' || (draftRef.current?.cover ?? '') === (target.source ?? '')}
+        onApply={(target, path) => {
+          if (target.kind === 'block') return editorRef.current?.replaceImage(target, path) ?? false;
+          if (target.kind === 'cover') {
+            if ((draftRef.current?.cover ?? '') !== (target.source ?? '')) return false;
+            edit({ cover: path });
+          }
+          return true;
+        }} />
+      <Modal opened={imageChoices.length > 0} onClose={() => setImageChoices([])} title="选择一张图片修改">
+        <Stack>{imageChoices.map((image, index) => <Box key={image.id}>
+          <ImagePreview src={contentMediaUrl(profile, image.source)} alt={`选中图片 ${index + 1}`} />
+          <Button fullWidth onClick={() => { setImageChoices([]); editSelectedImages([image]); }}>修改这张图</Button>
+        </Box>)}</Stack>
+      </Modal>
 
       <SocialShareDrawer
         profile={profile}

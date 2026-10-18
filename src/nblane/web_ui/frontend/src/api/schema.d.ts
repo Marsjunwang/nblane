@@ -856,6 +856,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/content/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Content Images */
+        get: operations["get_content_images_api_v1_profiles__name__content_images_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/content/images/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept Content Image */
+        post: operations["accept_content_image_api_v1_profiles__name__content_images_accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/content/images/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discard Content Image */
+        post: operations["discard_content_image_api_v1_profiles__name__content_images_discard_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{name}/content/images/reference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Content Image Reference */
+        post: operations["upload_content_image_reference_api_v1_profiles__name__content_images_reference_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/content/media-file/{media_path}": {
         parameters: {
             query?: never;
@@ -5130,6 +5198,74 @@ export interface components {
             ok: boolean;
             /** Path */
             path: string;
+        };
+        /** ContentImageActionRequest */
+        ContentImageActionRequest: {
+            /**
+             * Candidate Path
+             * @default
+             */
+            candidate_path: string;
+            /** Run Id */
+            run_id: string;
+            /** Slug */
+            slug: string;
+        };
+        /** ContentImageCandidateModel */
+        ContentImageCandidateModel: {
+            /**
+             * Applied Path
+             * @default
+             */
+            applied_path: string;
+            /** Candidate Path */
+            candidate_path: string;
+            /** Filename */
+            filename: string;
+        };
+        /** ContentImageReferenceRequest */
+        ContentImageReferenceRequest: {
+            /** Data Url */
+            data_url: string;
+            /** Slug */
+            slug: string;
+        };
+        /** ContentImageReferenceResponse */
+        ContentImageReferenceResponse: {
+            /** Path */
+            path: string;
+        };
+        /** ContentImageRunModel */
+        ContentImageRunModel: {
+            /** Candidates */
+            candidates?: components["schemas"]["ContentImageCandidateModel"][];
+            /** Created At */
+            created_at: number;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /** Id */
+            id: string;
+            /**
+             * Reference
+             * @default
+             */
+            reference: string;
+            /** Request */
+            request: {
+                [key: string]: unknown;
+            };
+            /** Slug */
+            slug: string;
+            /** Status */
+            status: string;
+        };
+        /** ContentImageRunsResponse */
+        ContentImageRunsResponse: {
+            /** Runs */
+            runs?: components["schemas"]["ContentImageRunModel"][];
         };
         /** ContentMediaCleanupRequest */
         ContentMediaCleanupRequest: {
@@ -15360,6 +15496,146 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_content_images_api_v1_profiles__name__content_images_get: {
+        parameters: {
+            query: {
+                slug: string;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentImageRunsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_content_image_api_v1_profiles__name__content_images_accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentImageActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentImageReferenceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discard_content_image_api_v1_profiles__name__content_images_discard_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentImageActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_content_image_reference_api_v1_profiles__name__content_images_reference_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentImageReferenceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentImageReferenceResponse"];
                 };
             };
             /** @description Validation Error */
