@@ -772,6 +772,10 @@ def _validate_content_image_input(raw: dict[str, Any]) -> dict[str, Any]:
         raise JobInputError("invalid_image_request", "请选择原图并填写修改要求（最多 4000 字）。")
     if reference and (len(reference) > 500 or not reference.startswith(("media/", "blog/.candidates/"))):
         raise JobInputError("invalid_image_request", "请使用媒体库图片或上传参考图。")
+    quality = _clean(raw.get("quality")) or "standard"
+    aspect = _clean(raw.get("aspect")) or ("original" if mode == "edit" else "16:9")
+    if quality not in {"standard", "high", "ultra"} or aspect not in {"original", "16:9", "1:1", "4:3", "3:4", "9:16"}:
+        raise JobInputError("invalid_image_request", "请选择有效的清晰度和比例。")
     target = raw.get("target") or {}
     if not isinstance(target, dict) or target.get("kind", "media") not in {"block", "cover", "media"}:
         raise JobInputError("invalid_image_request", "无效的图片应用位置。")
@@ -782,6 +786,7 @@ def _validate_content_image_input(raw: dict[str, Any]) -> dict[str, Any]:
     return {
         "slug": _validate_content_slug(raw), "mode": mode,
         "instruction": instruction, "reference": reference, "target": target,
+        "quality": quality, "aspect": aspect,
         **_validate_content_meta_input(raw),
     }
 

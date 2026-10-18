@@ -2247,6 +2247,11 @@
       "title": "Id",
       "type": "string"
      },
+     "output_size": {
+      "default": "",
+      "title": "Output Size",
+      "type": "string"
+     },
      "reference": {
       "default": "",
       "title": "Reference",
@@ -17452,6 +17457,96 @@
      }
     },
     "summary": "Upload Content Image Reference"
+   }
+  },
+  "/api/v1/profiles/{name}/content/images/size": {
+   "get": {
+    "operationId": "preview_content_image_size_api_v1_profiles__name__content_images_size_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "mode",
+      "required": false,
+      "schema": {
+       "default": "cover",
+       "title": "Mode",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "reference",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Reference",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "quality",
+      "required": false,
+      "schema": {
+       "default": "standard",
+       "title": "Quality",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "aspect",
+      "required": false,
+      "schema": {
+       "default": "16:9",
+       "title": "Aspect",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Preview Content Image Size Api V1 Profiles  Name  Content Images Size Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Preview Content Image Size"
    }
   },
   "/api/v1/profiles/{name}/content/media-file/{media_path}": {

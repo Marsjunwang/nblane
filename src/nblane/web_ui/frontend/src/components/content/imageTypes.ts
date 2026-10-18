@@ -9,6 +9,8 @@ export interface ImageEditRequest {
   reference: string;
   target: ImageTarget;
   instruction?: string;
+  quality?: 'standard' | 'high' | 'ultra';
+  aspect?: 'original' | '16:9' | '1:1' | '4:3' | '3:4' | '9:16';
 }
 export interface ImageRun {
   id: string;
@@ -18,6 +20,7 @@ export interface ImageRun {
   created_at: number;
   reference: string;
   error: string;
+  output_size?: string;
   candidates: Array<{ candidate_path: string; filename: string; applied_path: string }>;
 }
 export interface SelectedImage { id: string; source: string; fingerprint: string }

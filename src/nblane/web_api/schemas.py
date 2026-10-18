@@ -3343,6 +3343,7 @@ class ContentImageCandidateModel(BaseModel):
 
 
 class ContentImageRunModel(BaseModel):
+    output_size: str = ""
     id: str
     slug: str
     request: dict[str, Any]

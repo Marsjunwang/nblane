@@ -298,7 +298,8 @@ def build_blog_visual_prompt(
         positive = (
             "Edit the supplied reference image according to the user's instructions. "
             "Preserve all content, people, text, layout and details not explicitly requested to change. "
-            "Keep the original aspect ratio. Do not invent a cover illustration or remove existing text. "
+            "Respect the requested output dimensions; adapt framing when the output aspect ratio "
+            "differs from the reference. Do not invent a cover illustration or remove existing text. "
             f"User editing instructions: {safe_prompt}."
         )
         negative = "unrequested changes, distorted text, distorted faces"

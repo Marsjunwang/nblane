@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import math
 import time
 import uuid
 from pathlib import Path
@@ -94,6 +95,32 @@ def reference_bytes(profile: str, slug: str, source: str) -> bytes:
     return data
 
 
+def output_size(profile: str, request: dict[str, Any]) -> dict[str, Any]:
+    """Resolve output dimensions identically for previews and generation."""
+    quality = request.get("quality", "standard")
+    aspect = request.get("aspect", "original" if request.get("mode") == "edit" else "16:9")
+    if quality not in {"standard", "high", "ultra"} or aspect not in {"original", "16:9", "1:1", "4:3", "3:4", "9:16"}:
+        raise ValueError("请选择有效的清晰度和比例。")
+    config = visual_generation.current_config()
+    supports_4k = config["image_model"] == visual_generation.DEFAULT_IMAGE_MODEL and not request.get("reference")
+    if quality == "ultra" and not supports_4k:
+        raise ValueError("当前生成方式不支持超清 4K，请选择标准或高清。")
+    if aspect == "original":
+        if not request.get("reference"):
+            raise ValueError("保持原图比例需要先选择参考图。")
+        _, (rw, rh) = image_info(reference_bytes(profile, request["slug"], request["reference"]))
+    else:
+        rw, rh = map(int, aspect.split(":"))
+    if max(rw, rh) / min(rw, rh) > 8:
+        raise ValueError("原图比例超出支持范围，请选择其他输出比例（最长边不能超过最短边的 8 倍）。")
+    budget = {"standard": 1024 ** 2, "high": 2048 ** 2, "ultra": 4096 ** 2}[quality]
+    width = max(1, math.floor(math.sqrt(budget * rw / rh)))
+    height = max(1, math.floor(math.sqrt(budget * rh / rw)))
+    size = f"{width}*{height}"
+    visual_generation._normalize_image_size(size, model=config["image_model"], has_reference_image=bool(request.get("reference")))
+    return {"size": size, "width": width, "height": height, "supports_4k": supports_4k}
+
+
 def generate(profile: str, request: dict[str, Any]) -> dict[str, Any]:
     post = public_site.load_blog_post(profile, request["slug"])
     row: dict[str, Any] = {
@@ -107,10 +134,12 @@ def generate(profile: str, request: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("未配置图像服务。")
         source = request.get("reference", "")
         reference = ""
-        size = ""
+        dimensions = output_size(profile, request)
+        row["output_size"] = dimensions["size"]
+        size = dimensions["size"]
         if source:
             data = reference_bytes(profile, post.slug, source)
-            mime, (width, height) = image_info(data)
+            mime, _ = image_info(data)
             snapshot = visual_candidate_store.write_candidate(
                 profile, post.slug, row["id"] + "-ref", data=data,
                 filename=f"reference.{mime.split('/')[1]}", kind="reference",
@@ -118,9 +147,6 @@ def generate(profile: str, request: dict[str, Any]) -> dict[str, Any]:
             row["reference"] = snapshot.relative_path
             _write(profile, row)
             reference = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
-            if request["mode"] == "edit":
-                # The provider normalizes the pixel budget while retaining this ratio.
-                size = f"{width}*{height}"
         if request["mode"] == "edit" and not reference:
             raise ValueError("请先选择要修改的图片。")
         assets = visual_generation.generate_visual_asset(

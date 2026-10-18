@@ -924,6 +924,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/content/images/size": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview Content Image Size */
+        get: operations["preview_content_image_size_api_v1_profiles__name__content_images_size_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/content/media-file/{media_path}": {
         parameters: {
             query?: never;
@@ -5248,6 +5265,11 @@ export interface components {
             error: string;
             /** Id */
             id: string;
+            /**
+             * Output Size
+             * @default
+             */
+            output_size: string;
             /**
              * Reference
              * @default
@@ -15636,6 +15658,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContentImageReferenceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_content_image_size_api_v1_profiles__name__content_images_size_get: {
+        parameters: {
+            query: {
+                slug: string;
+                mode?: string;
+                reference?: string;
+                quality?: string;
+                aspect?: string;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

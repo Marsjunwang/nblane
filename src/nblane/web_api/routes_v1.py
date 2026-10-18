@@ -42,7 +42,7 @@ from fastapi import APIRouter, Depends, File, Header, Query, Request, Response, 
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
-from nblane.core import agent_activity, agent_tasks, file_state
+from nblane.core import agent_activity, agent_tasks, file_state, visual_generation
 from nblane.core import agent_journal, agent_policy
 from nblane.core import social_cards, content_images
 from nblane.web_api.schemas import (ContentImageReferenceRequest, ContentImageReferenceResponse, ContentImageRunModel, ContentImageRunsResponse, ContentImageActionRequest)
@@ -8809,6 +8809,16 @@ def get_content_images(name: str, slug: str = Query(...)) -> ContentImageRunsRes
     pdir = _resolve_profile(name)
     _load_studio_post(pdir, slug)
     return ContentImageRunsResponse(runs=[ContentImageRunModel(**row) for row in content_images.list_runs(pdir.name, slug)])
+
+
+@router.get("/profiles/{name}/content/images/size", response_model=dict[str, Any], dependencies=PROFILE_DEPENDENCY)
+def preview_content_image_size(name: str, slug: str, mode: str = "cover", reference: str = "", quality: str = "standard", aspect: str = "16:9") -> dict[str, Any]:
+    pdir = _resolve_profile(name)
+    _load_studio_post(pdir, slug)
+    try:
+        return content_images.output_size(pdir.name, {"slug": slug, "mode": mode, "reference": reference, "quality": quality, "aspect": aspect})
+    except (ValueError, visual_generation.VisualGenerationError) as exc:
+        raise ApiError(422, "invalid_image_size", str(exc)) from exc
 
 
 @router.post("/profiles/{name}/content/images/reference", response_model=ContentImageReferenceResponse, dependencies=PROFILE_DEPENDENCY)

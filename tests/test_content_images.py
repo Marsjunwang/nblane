@@ -46,7 +46,8 @@ class TestContentImages(ContentAITestBase):
         result = self.run_image(slug, ref)
         self.assertEqual(result["status"], "done", result)
         self.assertEqual(provider.call_args.args[0], "image_edit")
-        self.assertEqual(provider.call_args.kwargs["size"], "640*360")
+        self.assertEqual(provider.call_args.kwargs["size"], "1365*768")
+        self.assertEqual(result["output_size"], "1365*768")
         self.assertEqual(base64.b64decode(provider.call_args.kwargs["reference_image"].split(",")[1]), png_bytes())
         restored = self.client.get("/api/v1/profiles/alice/content/images", params={"slug": slug}).json()["runs"]
         self.assertEqual(restored[0]["id"], result["id"])
@@ -137,3 +138,40 @@ class TestContentImages(ContentAITestBase):
                 "slug": "post", "mode": "cover",
                 "target": {"kind": "block", "fingerprint": "x" * 10001},
             })
+
+    def test_size_preview_and_job_use_identical_dimensions(self):
+        provider = self._cover_provider()
+        slug, _ = self._create_post()
+        ref = self.reference(slug)
+        for quality, expected in [("standard", "1365*768"), ("high", "2730*1536")]:
+            params = dict(slug=slug, mode="edit", reference=ref, quality=quality, aspect="original")
+            preview = self.client.get("/api/v1/profiles/alice/content/images/size", params=params)
+            self.assertEqual(preview.status_code, 200, preview.text)
+            self.assertEqual(preview.json()["size"], expected)
+            self.assertFalse(preview.json()["supports_4k"])
+            run = self.run_image(slug, ref, quality=quality, aspect="original")
+            self.assertEqual(run["status"], "done", run)
+            self.assertEqual(provider.call_args.kwargs["size"], expected)
+            restored = self.client.get("/api/v1/profiles/alice/content/images", params={"slug": slug}).json()["runs"]
+            self.assertTrue(any(row["output_size"] == expected for row in restored))
+
+    def test_quality_limits_and_large_original_are_normalized(self):
+        self._cover_provider()
+        slug, _ = self._create_post()
+        with patch.object(content_images, "reference_bytes", return_value=b"reference"), patch.object(content_images, "image_info", return_value=("image/png", (8000, 4000))):
+            result = content_images.output_size("alice", {"slug": slug, "mode": "edit", "reference": "media/test.png", "quality": "high", "aspect": "original"})
+            width, height = result["width"], result["height"]
+            self.assertLessEqual(width * height, 2048 ** 2)
+            self.assertAlmostEqual(width / height, 2, places=2)
+        with patch.object(visual_generation, "current_config", return_value={"image_model": "wan2.7-image-pro"}):
+            request = {"slug": slug, "mode": "cover", "quality": "ultra", "aspect": "1:1"}
+            self.assertEqual(content_images.output_size("alice", request)["size"], "4096*4096")
+            with self.assertRaises(ValueError):
+                content_images.output_size("alice", {**request, "reference": "media/test.png"})
+        with patch.object(visual_generation, "current_config", return_value={"image_model": "wan2.7-image"}):
+            with self.assertRaises(ValueError):
+                content_images.output_size("alice", request)
+        response = self.client.get("/api/v1/profiles/alice/content/images/size", params={"slug": slug, "aspect": "original"})
+        self.assertEqual(response.status_code, 422)
+        with self.assertRaises(jobs.JobInputError):
+            jobs._validate_content_image_input({"slug": slug, "mode": "cover", "quality": "unlimited"})

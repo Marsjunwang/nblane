@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test';
 test.beforeEach(async ({page}) => {
+  await page.route('**/api/v1/profiles/test/content/images/size?*', route => {
+    const params = new URL(route.request().url()).searchParams;
+    const high = params.get('quality') === 'high';
+    const square = params.get('aspect') === '1:1';
+    return route.fulfill({json:{width: square ? (high ? 2048 : 1024) : (high ? 2730 : 1365), height: square ? (high ? 2048 : 1024) : (high ? 1536 : 768), supports_4k: !params.get('reference')}});
+  });
   await page.route('**/api/v1/profiles/test/content/media-file/**', route => route.fulfill({contentType:'image/svg+xml', body:'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="gray"/><text x="30" y="80">Reference image</text></svg>'}));
   await page.route('**/api/v1/profiles/test/content/images?*', route => route.fulfill({ json: {runs: []} }));
   await page.goto('/tests/image-editor.html', { waitUntil: 'domcontentloaded' });
@@ -98,4 +104,28 @@ test('image replacement preserves metadata, supports iteration and refuses later
   expect(JSON.parse(result.updated.fingerprint).caption).toBe('原始图注');
   await page.evaluate(() => (window as any).harness.changeCaption());
   expect(await page.evaluate(target => (window as any).harness.ref.current.replaceImage(target,'media/new.png'), result.updated)).toBe(false);
+});
+
+test('resolution and aspect preview match submitted image settings on mobile', async ({page}) => {
+  await page.setViewportSize({width:390,height:844});
+  let submitted: any;
+  await page.route('**/api/v1/profiles/test/jobs', async route => {
+    submitted = route.request().postDataJSON();
+    await route.fulfill({json:{id:'job-image'}});
+  });
+  await page.getByRole('button',{name:'打开图片工作台'}).click();
+  await expect(page.getByText('输出尺寸：1365 × 768 像素', {exact:false})).toBeVisible();
+  await page.getByRole('textbox',{name:'清晰度',exact:true}).click();
+  await expect(page.getByRole('option',{name:/超清/})).toHaveCount(0);
+  await page.getByRole('option',{name:'高清 · 约 400 万像素'}).click();
+  await expect(page.getByText('输出尺寸：2730 × 1536 像素', {exact:false})).toBeVisible();
+  await page.getByRole('textbox',{name:'输出比例',exact:true}).click();
+  await page.getByRole('option',{name:'1:1',exact:true}).click();
+  await expect(page.getByText('输出尺寸：2048 × 2048 像素', {exact:false})).toBeVisible();
+  await page.getByRole('textbox',{name:'修改要求',exact:true}).fill('保留文字，调整背景');
+  await page.getByRole('button',{name:'生成修改图',exact:true}).click();
+  await expect.poll(() => submitted?.input?.quality).toBe('high');
+  expect(submitted.input.aspect).toBe('1:1');
+  expect(submitted.input.reference).toBe('media/blog/test/original.png');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
