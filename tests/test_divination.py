@@ -320,6 +320,26 @@ class TestPlayMode(DivinationTestBase):
         self.assertIn("Robot Arm", reading)
         self.assertIn("已连续钤印 3 日", reading)
 
+    def test_streak_survives_until_todays_checkin(self) -> None:
+        # Checked in today and the two days before; cast the next morning
+        # (no check-in yet) — the run is still alive, not 0.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root)
+            schemas = _write_schemas(base)
+            outcome = self._cast(root, schemas, today=TODAY + timedelta(days=1))
+        self.assertEqual(outcome["anchors"]["best_streak"], 3)
+
+    def test_streak_broken_after_a_missed_day(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root)
+            schemas = _write_schemas(base)
+            outcome = self._cast(root, schemas, today=TODAY + timedelta(days=2))
+        self.assertEqual(outcome["anchors"]["best_streak"], 0)
+
 
 class TestSeriousMode(DivinationTestBase):
     QUESTION = "grasp the cube with the arm"

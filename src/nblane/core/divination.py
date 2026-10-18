@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -165,6 +165,32 @@ _STATUS_ZH = {
 Runner = Callable[[str, dict[str, Any]], Any]
 
 
+def _board_today(board: Any) -> date:
+    try:
+        return date.fromisoformat(str(getattr(board, "today", "") or ""))
+    except ValueError:
+        return date.today()
+
+
+def _live_streak(habit: Any, today: date) -> int:
+    """Streak that is still alive: ending today, or yesterday if not yet checked today.
+
+    The board's ``streak`` only counts runs ending *today*, so a morning cast
+    (before the day's check-in) read every habit as 0. Falls back to the
+    heatmap window (``recent_days``) for the yesterday-anchored count.
+    """
+    streak = int(getattr(habit, "streak", 0) or 0)
+    if streak:
+        return streak
+    dates = {str(day.date) for day in getattr(habit, "recent_days", []) or []}
+    cursor = today - timedelta(days=1)
+    count = 0
+    while cursor.isoformat() in dates:
+        count += 1
+        cursor -= timedelta(days=1)
+    return count
+
+
 def build_anchors(snapshot: dict, board: Any) -> dict[str, Any]:
     """Distill the starmap snapshot + habits board into reading anchors.
 
@@ -175,8 +201,9 @@ def build_anchors(snapshot: dict, board: Any) -> dict[str, Any]:
     skills = snapshot.get("skills") or []
     projects = snapshot.get("projects") or []
     goals = snapshot.get("goals") or []
+    today = _board_today(board)
     habit_streaks = [
-        {"title": habit.title or habit.id, "streak": int(habit.streak)}
+        {"title": habit.title or habit.id, "streak": _live_streak(habit, today)}
         for habit in getattr(board, "habits", [])
     ]
     return {
@@ -436,7 +463,7 @@ def cast_divination(
     question = (question or "").strip()[:QUESTION_MAX_LENGTH]
 
     snapshot = starmap_snapshot_core.build_starmap_snapshot(pdir, today=today)
-    board = projects_board.build_projects_board(pdir)
+    board = projects_board.build_projects_board(pdir, today=today)
     anchors = build_anchors(snapshot, board)
     hexagram = pick_hexagram(
         hexagram_material(pdir.name, mode, question, anchors, today)
