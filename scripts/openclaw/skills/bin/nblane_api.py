@@ -56,6 +56,11 @@ COOKIE_JAR_ENV = "NBLANE_API_COOKIE_JAR"
 # confirmation.
 FORBIDDEN_SEGMENTS = {"delete", "discard", "del"}
 CONFIRM_HEADER = "X-Nblane-Confirm"
+DEFAULT_TIMEOUT_SECONDS = 30.0
+# Divination polishes the cast with the LLM server-side (observed 27–90s,
+# provider timeout 90s), so the default 30s read timeout gave up on casts
+# the server went on to answer with 200.
+DIVINE_TIMEOUT_SECONDS = 150.0
 EXIT_CONFIRMATION_REQUIRED = 3
 
 # DELETE routes the server gates with chat confirmation (428 handshake).
@@ -245,7 +250,10 @@ class Session:
         self._token = (token if token is not None else _read_token()).strip()
         headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
         self.client = httpx.Client(
-            base_url=self.base_url, timeout=30.0, transport=transport, headers=headers
+            base_url=self.base_url,
+            timeout=DEFAULT_TIMEOUT_SECONDS,
+            transport=transport,
+            headers=headers,
         )
         if not self._token:
             for name, value in load_cookies(self.jar_path, self.base_url).items():
@@ -283,12 +291,15 @@ class Session:
         body: object = None,
         headers: dict[str, str] | None = None,
         _reauth: bool = True,
+        timeout: float | None = None,
     ) -> httpx.Response:
         kwargs: dict = {}
         if body is not None:
             kwargs["json"] = body
         if headers:
             kwargs["headers"] = headers
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         response = self.client.request(method, f"{API_PREFIX}{path}", **kwargs)
         if response.status_code == 401 and self._token:
             raise ApiFailure(
@@ -298,7 +309,9 @@ class Session:
         if response.status_code == 401 and _reauth:
             # Expired/absent cookie (TTL 12h): re-login once and retry once.
             self.login()
-            response = self.request(method, path, body, headers, _reauth=False)
+            response = self.request(
+                method, path, body, headers, _reauth=False, timeout=timeout
+            )
         return response
 
     def refresh_etag(self, path: str) -> str:
@@ -323,13 +336,20 @@ class Session:
     def get(self, path: str) -> httpx.Response:
         return self.checked(self.request("GET", path))
 
-    def mutation(self, path: str, body: object = None, method: str = "POST") -> httpx.Response:
+    def mutation(
+        self,
+        path: str,
+        body: object = None,
+        method: str = "POST",
+        timeout: float | None = None,
+    ) -> httpx.Response:
         """POST/PATCH/DELETE without If-Match first; on 412 refetch the ETag and retry once.
 
         A 428 raises ``ConfirmationRequired`` (never retried automatically).
+        ``timeout`` overrides the client default for slow server-side work.
         """
         extra = {CONFIRM_HEADER: self.confirm} if self.confirm else None
-        response = self.request(method, path, body, extra)
+        response = self.request(method, path, body, extra, timeout=timeout)
         if response.status_code == 412:
             etag = response.headers.get("ETag", "").strip() or self.refresh_etag(path)
             if not etag:
@@ -337,7 +357,9 @@ class Session:
                     f"412 etag_mismatch on {path} and no fresh ETag available; "
                     "re-check the resource state before retrying"
                 )
-            response = self.request(method, path, body, {"If-Match": etag, **(extra or {})})
+            response = self.request(
+                method, path, body, {"If-Match": etag, **(extra or {})}, timeout=timeout
+            )
             if response.status_code == 412:
                 raise ApiFailure(
                     f"412 etag_mismatch persists on {path} after one ETag retry; "
@@ -464,7 +486,9 @@ def run(args: argparse.Namespace, session: Session) -> object:
         return session.get(profile_path(args, f"/chronicle?limit={args.limit}"))
     if command == "divine":
         body = {"mode": args.mode, "question": args.question or ""}
-        return session.mutation(profile_path(args, "/divination"), body)
+        return session.mutation(
+            profile_path(args, "/divination"), body, timeout=DIVINE_TIMEOUT_SECONDS
+        )
     if command == "health":
         return session.get(profile_path(args, "/health"))
     if command == "summary":

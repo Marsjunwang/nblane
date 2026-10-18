@@ -370,6 +370,18 @@ def test_semantic_commands_hit_expected_routes(authed, server):
     assert json.loads(patch_req.content) == {"project_id": "project:x"}
 
 
+def test_divine_uses_long_timeout_others_default(authed, server):
+    # The server LLM-polishes casts (27–90s); 30s made the client give up
+    # on casts that the server went on to answer with 200.
+    run = nblane_api.run
+    ns = nblane_api.build_parser().parse_args
+    run(ns(["divine"]), authed)
+    divine = [r for r in server.requests if r.url.path.endswith("/divination")][-1]
+    assert divine.extensions["timeout"]["read"] == nblane_api.DIVINE_TIMEOUT_SECONDS
+    run(ns(["health"]), authed)
+    assert server.requests[-1].extensions["timeout"]["read"] == nblane_api.DEFAULT_TIMEOUT_SECONDS
+
+
 def test_path_normalization():
     assert nblane_api.normalize_path("/api/v1/health") == "/health"
     assert nblane_api.normalize_path("/health") == "/health"
