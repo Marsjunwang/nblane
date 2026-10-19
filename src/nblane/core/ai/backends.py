@@ -200,6 +200,62 @@ class LocalTranslationBackend:
         )
 
 
+class VisualGenerationBackend:
+    """Image provider backend (``core/visual_generation``, DashScope Wan)."""
+
+    name = "visual"
+
+    def run(
+        self,
+        request: AIActionRequest,
+        spec: AIActionSpec,
+    ) -> AIActionResult:
+        """Generate images; bytes come back in ``artifacts``."""
+
+        from nblane.core import visual_generation
+
+        run_id = new_run_id(request.action)
+        payload = request.payload
+        tags = payload.get("tags")
+        try:
+            assets = visual_generation.generate_visual_asset(
+                str(payload.get("asset_type") or "cover"),
+                str(payload.get("prompt") or ""),
+                style=str(payload.get("style") or ""),
+                size=str(payload.get("size") or ""),
+                title=str(payload.get("title") or ""),
+                summary=str(payload.get("summary") or ""),
+                tags=[str(tag) for tag in tags] if isinstance(tags, list) else [],
+                body=str(payload.get("body") or ""),
+                reference_image=str(payload.get("reference_image") or ""),
+            )
+        except visual_generation.VisualGenerationError as exc:
+            return AIActionResult(
+                ok=False,
+                action=request.action,
+                backend=self.name,
+                run_id=run_id,
+                error=f"provider_error: {exc}",
+            )
+        if not assets:
+            return AIActionResult(
+                ok=False,
+                action=request.action,
+                backend=self.name,
+                run_id=run_id,
+                error="provider_error: 图像服务没有返回图片，请重试。",
+            )
+        first = assets[0]
+        return AIActionResult(
+            ok=True,
+            action=request.action,
+            backend=self.name,
+            run_id=run_id,
+            structured={"count": len(assets), "provider": first.provider, "model": first.model},
+            artifacts=list(assets),
+        )
+
+
 class RuleFallbackBackend:
     """Deterministic fallback backend for unconfigured AI or low-risk flows."""
 
@@ -923,6 +979,7 @@ def default_backends() -> dict[str, object]:
         WorkflowAgentBackend(),
         ExternalAgentBackend(),
         LocalReadonlyCodexBackend(),
+        VisualGenerationBackend(),
         RuleFallbackBackend(),
     ]
     return {backend.name: backend for backend in backends}

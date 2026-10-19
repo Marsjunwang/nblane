@@ -70,6 +70,9 @@ class AIActionResult:
     # ``primary_duration_ms`` is how long the failed first backend took.
     duration_ms: int = 0
     primary_duration_ms: int = 0
+    # Non-JSON outputs such as generated image bytes (visual backend). Kept
+    # in memory for the caller only; run logs never store them.
+    artifacts: list[Any] = field(default_factory=list)
 
 
 class AIBackend(Protocol):

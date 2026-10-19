@@ -73,6 +73,7 @@ class TestAIGateway(unittest.TestCase):
                 "content.rewrite",
                 "content.meta",
                 "content.social",
+                "content.image",
             },
         )
 

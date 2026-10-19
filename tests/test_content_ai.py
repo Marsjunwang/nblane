@@ -218,12 +218,55 @@ class TestGatewayRunLog(ContentAITestBase):
         items = [item for item in collect_profile_exceptions(self.profile) if item["action"] == "content.meta"]
         self.assertEqual(len(items), 1)
         self.assertTrue(items[0]["href"].endswith("/content"))
+        # Through the API the failed job and its run are one row, not two.
+        listed = self.client.get("/api/v1/profiles/alice/ai-exceptions").json()["items"]
+        self.assertEqual([item["id"] for item in listed if "meta" in item["action"]], [items[0]["id"]])
 
     def test_bad_json_is_a_format_error_not_a_raw_dump(self) -> None:
         self._llm("not json")
         with self.assertRaises(content_ai.ContentAIError) as ctx:
             content_ai.suggest_social_copy(title="随笔", body="正文" * 40, profile="alice")
         self.assertEqual(ctx.exception.message, "模型返回格式不正确，请重试。")
+
+
+class TestImageGatewayRunLog(ContentAITestBase):
+    """Cover / image generation goes through the gateway's visual backend."""
+
+    def _image_runs(self) -> list[dict]:
+        from nblane.core.ai.runs import load_ai_runs
+
+        return [run for run in load_ai_runs("alice").get("runs") or [] if run.get("action") == "content.image"]
+
+    def test_cover_job_records_a_metadata_only_run(self) -> None:
+        generate = self._cover_provider()
+        slug, _ = self._create_post()
+        payload = self._run_job("content-cover", {"slug": slug, "brief": "夜景"})
+        self.assertEqual(payload["job"]["status"], "done", payload)
+        self.assertEqual(generate.call_args.args[:2], ("cover", "夜景"))
+        runs = self._image_runs()
+        self.assertEqual(len(runs), 1)
+        self.assertTrue(runs[0]["ok"])
+        self.assertEqual(runs[0]["backend"], "visual")
+        # Image bytes never reach the run log.
+        raw = (self.profile / "ai-runs.yaml").read_text(encoding="utf-8")
+        self.assertNotIn("artifacts", raw)
+        self.assertLess(len(raw), 4000)
+
+    def test_provider_failure_keeps_message_and_shows_in_exceptions(self) -> None:
+        from nblane.core.ai.exceptions import collect_profile_exceptions
+
+        self._cover_provider()
+        slug, _ = self._create_post()
+        with patch(
+            "nblane.core.visual_generation.generate_visual_asset",
+            side_effect=visual_generation.VisualGenerationError("图像服务 240 秒内没有出图"),
+        ):
+            payload = self._run_job("content-cover", {"slug": slug})
+        self.assertEqual(payload["job"]["error"]["code"], "cover_generation_failed")
+        self.assertEqual(payload["job"]["error"]["message"], "图像服务 240 秒内没有出图")
+        items = [item for item in collect_profile_exceptions(self.profile) if item["action"] == "content.image"]
+        self.assertEqual(len(items), 1)
+        self.assertTrue(items[0]["href"].endswith("/content"))
 
 
 class TestMetaSuggestions(ContentAITestBase):

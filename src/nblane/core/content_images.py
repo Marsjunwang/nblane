@@ -149,8 +149,8 @@ def generate(profile: str, request: dict[str, Any]) -> dict[str, Any]:
             reference = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
         if request["mode"] == "edit" and not reference:
             raise ValueError("请先选择要修改的图片。")
-        assets = visual_generation.generate_visual_asset(
-            "image_edit" if request["mode"] == "edit" else "cover", request["instruction"],
+        assets = content_ai.generate_images(
+            profile, "image_edit" if request["mode"] == "edit" else "cover", request["instruction"],
             reference_image=reference, size=size,
             title=request.get("title", ""), summary=request.get("summary", ""),
             tags=request.get("tags", []), body=request.get("body", ""),

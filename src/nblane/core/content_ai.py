@@ -62,10 +62,13 @@ def target_language_name(text: str) -> str:
 class ContentAIError(RuntimeError):
     """Structured failure with a stable ``code`` for API error mapping."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, run_id: str = "") -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        # Gateway run behind the failure (ai-runs.yaml), so the AI exceptions
+        # panel can show one row instead of the run and its job.
+        self.run_id = run_id
 
 
 def _clean(value: object) -> str:
@@ -167,8 +170,38 @@ def _run(
         require_review=False,
     )
     if not result.ok:
-        raise ContentAIError("content_ai_failed", _friendly_error(result.error or result.content))
+        raise ContentAIError(
+            "content_ai_failed", _friendly_error(result.error or result.content), run_id=result.run_id
+        )
     return result
+
+
+_ERROR_PREFIX = re.compile(r"^[a-z_]+_error:\s*")
+
+
+def generate_images(profile: str, asset_type: str, prompt: str, **options: Any) -> list[Any]:
+    """Run one content image generation through the AI gateway.
+
+    Returns the provider's ``GeneratedVisualAsset`` list; raises
+    ``VisualGenerationError`` with the provider message on failure, so
+    callers keep their existing error handling. Each call lands in
+    ``ai-runs.yaml`` (metadata only) and failures in the AI exceptions panel.
+    """
+
+    from nblane.core.ai.gateway import run_ai_action
+
+    result = run_ai_action(
+        "content.image",
+        {"asset_type": asset_type, "prompt": prompt, **options},
+        profile=profile or None,
+        require_review=False,
+    )
+    if not result.ok:
+        message = _ERROR_PREFIX.sub("", result.error or "") or "图像生成失败，请重试。"
+        error = visual_generation.VisualGenerationError(message)
+        error.run_id = result.run_id  # type: ignore[attr-defined]
+        raise error
+    return list(result.artifacts)
 
 
 def validate_reference_image(value: object) -> str:
@@ -403,7 +436,8 @@ def generate_cover_candidates(
         )
     post = public_site.load_blog_post(profile, slug)
     try:
-        assets = visual_generation.generate_visual_asset(
+        assets = generate_images(
+            profile,
             "cover",
             _clean(brief),
             style=_clean(style),
@@ -414,7 +448,9 @@ def generate_cover_candidates(
             reference_image=_clean(reference_image),
         )
     except visual_generation.VisualGenerationError as exc:
-        raise ContentAIError("cover_generation_failed", str(exc)) from exc
+        raise ContentAIError(
+            "cover_generation_failed", str(exc), run_id=str(getattr(exc, "run_id", "") or "")
+        ) from exc
     patch_id = f"cover-{uuid.uuid4().hex[:10]}"
     rows: list[dict[str, Any]] = []
     for asset in assets:

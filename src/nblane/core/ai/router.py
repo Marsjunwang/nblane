@@ -685,6 +685,17 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
         temperature=0.6,
         schema={"type": "object"},
     ),
+    # Cover / in-article image generation and image edits for the content
+    # workspace. Bytes return in result.artifacts; no fallback (a template
+    # image would be a fake result).
+    "content.image": AIActionSpec(
+        name="content.image",
+        owner="content",
+        default_backend="visual",
+        fallback_backend="",
+        output_mode="image",
+        activity_policy="none",
+    ),
     "divination.cast": AIActionSpec(
         name="divination.cast",
         owner="starmap",
