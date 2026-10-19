@@ -1,5 +1,5 @@
 import { Alert, Box, Button, Group, Loader, Modal, ScrollArea, SegmentedControl, Stack, Text, Textarea } from '@mantine/core';
-import { IconCheck, IconRefresh } from '@tabler/icons-react';
+import { IconCheck, IconCopy, IconRefresh } from '@tabler/icons-react';
 import DiffMatchPatch from 'diff-match-patch';
 import { useMemo } from 'react';
 
@@ -48,6 +48,8 @@ export interface RewriteState {
   progress?: string;
   text?: string;
   error?: string;
+  /** Why the last 接受并替换 wrote nothing; the candidate stays for copy/retry. */
+  acceptError?: string;
 }
 
 /**
@@ -64,6 +66,7 @@ export function AIRewriteDialog({
   onAccept,
   onRetry,
   onClose,
+  onCopy,
 }: {
   state: RewriteState | null;
   view: 'diff' | 'edit';
@@ -73,6 +76,7 @@ export function AIRewriteDialog({
   onAccept: () => void;
   onRetry: () => void;
   onClose: () => void;
+  onCopy?: () => void;
 }) {
   const label = state ? REWRITE_LABELS[state.operation] ?? state.operation : '';
   return (
@@ -139,6 +143,11 @@ export function AIRewriteDialog({
               )}
             </>
           )}
+          {state.status === 'done' && state.acceptError && (
+            <Alert color="yellow" title="未替换，候选已保留" role="alert" data-testid="content-ai-accept-error">
+              {state.acceptError}
+            </Alert>
+          )}
           <Group justify="space-between">
             <Button
               variant="subtle"
@@ -149,6 +158,11 @@ export function AIRewriteDialog({
               重新生成
             </Button>
             <Group gap="xs">
+              {state.status === 'done' && onCopy && (
+                <Button variant="default" leftSection={<IconCopy size={14} />} onClick={onCopy} disabled={!state.text?.trim()}>
+                  复制候选
+                </Button>
+              )}
               <Button variant="default" onClick={onClose}>
                 {state.status === 'done' ? '拒绝' : '取消'}
               </Button>

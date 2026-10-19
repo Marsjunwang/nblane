@@ -72,6 +72,7 @@ import {
   BlockNoteBlogEditor,
   type AIRewriteRequest,
   type BlockNoteBlogEditorHandle,
+  type ReplaceOutcome,
   type EditorBlocks,
 } from '../BlockNoteBlogEditor';
 import { isConflictError } from '../ConflictAlert';
@@ -124,6 +125,14 @@ const COLUMN_WIDTH = { normal: 760, wide: 1080 } as const;
 const TOP_BAR_HEIGHT = 52;
 const SETTINGS_WIDTH = 340;
 const OUTLINE_WIDTH = 240;
+
+const REPLACE_FAILURE_TEXT: Record<Exclude<ReplaceOutcome, 'ok'>, string> = {
+  'no-selection': '找不到当时选中的位置。可以复制候选，或重新选中原文后再点「接受并替换」。',
+  'source-mode': '源码模式下无法按选区替换。切回可视模式后再点「接受并替换」，或复制候选手动粘贴。',
+  changed: '原文在 AI 处理期间被修改了，为免覆盖你的改动没有替换。可以复制候选，或重新选中后重新生成。',
+  empty: '候选里有空白区域，补上内容后再替换。',
+  media: '候选里出现了图片或视频，只能替换文字。请在「编辑候选」里删掉媒体后再替换，或复制候选手动粘贴。',
+};
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -981,15 +990,23 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
 
   const acceptRewrite = () => {
     if (!rewrite?.text) return;
-    const ok = editorRef.current?.replaceCapturedSelection(rewrite.text, rewrite.parts) ?? false;
-    if (!ok) {
-      notifications.show({
-        color: 'yellow',
-        title: '未替换',
-        message: '选中的原文在 AI 处理期间被修改了。请重新选中后再试。',
-      });
+    const outcome = editorRef.current?.replaceCapturedSelection(rewrite.text, rewrite.parts) ?? 'no-selection';
+    if (outcome === 'ok') {
+      closeRewrite();
+      notifications.show({ color: 'green', message: '已替换。可按 Ctrl+Z（⌘Z）撤销。' });
+      return;
     }
-    closeRewrite();
+    // Keep the dialog (and any hand edits to the candidate) so a 60s result
+    // is never thrown away; say why and how to recover.
+    setRewrite((current) => (current ? { ...current, acceptError: REPLACE_FAILURE_TEXT[outcome] } : current));
+  };
+
+  const copyRewrite = () => {
+    if (!rewrite?.text) return;
+    void navigator.clipboard
+      ?.writeText(rewrite.text)
+      .then(() => notifications.show({ color: 'green', message: '候选已复制，可粘贴到正文。' }))
+      .catch(() => notifications.show({ color: 'red', message: '复制失败，请在「编辑候选」里手动选中复制。' }));
   };
 
   useEffect(() => () => rewriteJobRef.current?.cancel(), []);
@@ -1507,10 +1524,11 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
         onEditPart={(index, text) => setRewrite((current) => {
           if (!current?.parts) return current;
           const parts = [...current.parts]; parts[index] = text;
-          return { ...current, parts, text: parts.join('\n\n') };
+          return { ...current, parts, text: parts.join('\n\n'), acceptError: undefined };
         })}
-        onEditCandidate={(text) => setRewrite((current) => (current ? { ...current, text } : current))}
+        onEditCandidate={(text) => setRewrite((current) => (current ? { ...current, text, acceptError: undefined } : current))}
         onAccept={acceptRewrite}
+        onCopy={copyRewrite}
         onRetry={() => rewrite && startRewrite(rewrite.request)}
         onClose={closeRewrite}
       />

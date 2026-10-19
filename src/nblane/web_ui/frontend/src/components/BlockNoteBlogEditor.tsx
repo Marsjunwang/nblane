@@ -41,6 +41,9 @@ export interface BlogEditorChange {
   blocksJson: EditorBlocks;
 }
 
+/** Result of an AI rewrite replacement; anything but 'ok' wrote nothing. */
+export type ReplaceOutcome = 'ok' | 'no-selection' | 'source-mode' | 'changed' | 'empty' | 'media';
+
 export interface BlockNoteBlogEditorHandle {
   /** Insert a Markdown snippet (image, ::video, …) after the cursor block. */
   insertMarkdown: (snippet: string) => void;
@@ -50,10 +53,10 @@ export interface BlockNoteBlogEditorHandle {
   scrollToBlock: (id: string) => void;
   /**
    * Replace the selection captured by the last AI rewrite request with
-   * *markdown*. Returns false when that text changed meanwhile (nothing is
-   * written then).
+   * *markdown*. Returns ``'ok'`` or why nothing was written, so the caller
+   * can keep the candidate and say what to do.
    */
-  replaceCapturedSelection: (markdown: string, parts?: string[]) => boolean;
+  replaceCapturedSelection: (markdown: string, parts?: string[]) => ReplaceOutcome;
   canReplaceImage: (target: ImageTarget) => boolean;
   retargetImage: (target: ImageTarget, appliedPath: string) => ImageTarget | null;
   replaceImage: (target: ImageTarget, path: string) => boolean;
@@ -310,10 +313,13 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
         },
         replaceCapturedSelection: (markdown: string, parts?: string[]) => {
           const captured = capturedRef.current;
-          if (!captured || sourceMode || JSON.stringify(editor.prosemirrorState.doc.toJSON()) !== captured.document) return false;
+          if (!captured) return 'no-selection';
+          if (sourceMode) return 'source-mode';
+          if (JSON.stringify(editor.prosemirrorState.doc.toJSON()) !== captured.document) return 'changed';
           const replacements = parts ?? [markdown];
-          if (replacements.length !== captured.ranges.length || replacements.some((text) => !text.trim())) return false;
-          if (replacements.some((text) => containsMedia(parseMarkdownToEditorBlocks(editor, text) as never))) return false;
+          if (replacements.length !== captured.ranges.length) return 'changed';
+          if (replacements.some((text) => !text.trim())) return 'empty';
+          if (replacements.some((text) => containsMedia(parseMarkdownToEditorBlocks(editor, text) as never))) return 'media';
           const slices = replacements.map((text) => new Slice(Fragment.fromArray(
             parseMarkdownToEditorBlocks(editor, text.trim()).map((block) => blockToNode(block as never, editor.pmSchema)),
           ), 2, 2));
@@ -324,7 +330,7 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
             }
           });
           capturedRef.current = null;
-          return true;
+          return 'ok';
         },
         scrollToBlock: (id: string) => {
           if (sourceMode || !id) return;
