@@ -19,12 +19,12 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCopy, IconDownload, IconPhoto, IconShare, IconSparkles } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { ApiError } from '../../api/client';
 import { useRenderSocialCards, useSocialCardSettings } from '../../api/hooks';
 import type { SocialCardRenderResponse, SocialCardSettings } from '../../api/types';
-import { runContentJob } from './contentJobs';
+import { runContentJob, type ContentJobHandle } from './contentJobs';
 
 interface SocialCopyResult {
   cover_titles: string[];
@@ -95,6 +95,10 @@ export function SocialShareDrawer({
   const [suggesting, setSuggesting] = useState(false);
   const [suggestions, setSuggestions] = useState<SocialCopyResult | null>(null);
   const [sharing, setSharing] = useState(false);
+  const suggestJob = useRef<ContentJobHandle<SocialCopyResult> | null>(null);
+
+  // A late result must not land after the drawer closed or unmounted.
+  useEffect(() => () => suggestJob.current?.cancel(), []);
 
   useEffect(() => {
     if (opened && info.data && !settings) setSettings(info.data.settings);
@@ -102,6 +106,9 @@ export function SocialShareDrawer({
 
   useEffect(() => {
     if (!opened) {
+      suggestJob.current?.cancel();
+      suggestJob.current = null;
+      setSuggesting(false);
       setSettings(null);
       setResult(null);
       setSuggestions(null);
@@ -129,9 +136,13 @@ export function SocialShareDrawer({
   };
 
   const suggest = () => {
+    suggestJob.current?.cancel();
     setSuggesting(true);
-    runContentJob<SocialCopyResult>(profile, 'content-social', { title, body })
-      .result.then((data) => {
+    const job = runContentJob<SocialCopyResult>(profile, 'content-social', { title, body });
+    suggestJob.current = job;
+    job.result
+      .then((data) => {
+        if (suggestJob.current !== job) return;
         setSuggestions(data);
         // Fill empty fields only; the owner's own text is never overwritten.
         setSettings((current) =>
@@ -147,8 +158,15 @@ export function SocialShareDrawer({
             : current,
         );
       })
-      .catch((error: unknown) => notifications.show({ color: 'red', title: 'AI 文案失败', message: errorText(error) }))
-      .finally(() => setSuggesting(false));
+      .catch((error: unknown) => {
+        if (suggestJob.current === job) notifications.show({ color: 'red', title: 'AI 文案失败', message: errorText(error) });
+      })
+      .finally(() => {
+        if (suggestJob.current === job) {
+          suggestJob.current = null;
+          setSuggesting(false);
+        }
+      });
   };
 
   const shareImages = async () => {

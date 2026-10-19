@@ -6,7 +6,10 @@ import type { ImageRun } from './imageTypes';
 export const imageApiPath = (profile: string) => `/profiles/${encodeURIComponent(profile)}/content/images`;
 export const imageQueryKey = (profile: string, slug: string) => ['profiles', profile, 'content', 'images', slug];
 export function useImageRuns(profile: string, slug: string) {
-  return useQuery({ queryKey: imageQueryKey(profile, slug), queryFn: () => apiGet<{ runs: ImageRun[] }>(`${imageApiPath(profile)}?${new URLSearchParams({ slug })}`), refetchInterval: 3000 });
+  return useQuery({ queryKey: imageQueryKey(profile, slug), queryFn: () => apiGet<{ runs: ImageRun[] }>(`${imageApiPath(profile)}?${new URLSearchParams({ slug })}`),
+    // Poll only while a run is in flight; generate() invalidates to start it.
+    refetchInterval: (query) => (query.state.data?.runs.some((run) => run.status === 'running') ? 3000 : false),
+  });
 }
 export function imageUrl(profile: string, path: string) {
   return path.startsWith('blog/.candidates/') ? contentCoverCandidateUrl(profile, path) : contentMediaUrl(profile, path);
