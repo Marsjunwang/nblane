@@ -23,6 +23,15 @@ from nblane.core.profile_io import profile_dir
 
 PROCESS_ID = uuid.uuid4().hex
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
+# Workspace runs expire (candidates + reference snapshot deleted) this long
+# after creation; images already accepted live on in media/blog/.
+RUN_TTL_SECONDS = 30 * 24 * 60 * 60
+# Candidate dirs no live run points at (old cover candidates, uploads never
+# used) are removed after this grace period, which also covers a run that is
+# still generating and has not recorded its files yet.
+ORPHAN_GRACE_SECONDS = 24 * 60 * 60
+_PRUNE_INTERVAL_SECONDS = 60 * 60
+_last_prune: dict[str, float] = {}
 
 
 def _root(profile: str) -> Path:
@@ -179,8 +188,60 @@ def _interrupted(row: dict[str, Any]) -> bool:
     )
 
 
+def _candidate_dir(path: str) -> str:
+    """``blog/.candidates/<dir>/<file>`` -> ``<dir>`` ('' for anything else)."""
+    parts = str(path or "").split("/")
+    return parts[2] if len(parts) >= 4 and parts[:2] == ["blog", ".candidates"] else ""
+
+
+def prune(profile: str, *, now: float | None = None) -> dict[str, int]:
+    """Expire old workspace runs and delete orphaned candidate directories.
+
+    Never touches ``media/``: accepted images are copies. Runs that are
+    still generating are left alone. Returns counts for logging/tests.
+    """
+    clock = time.time() if now is None else now
+    expired = 0
+    live_dirs: set[str] = set()
+    for path in _root(profile).glob("image-*.json"):
+        try:
+            row = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
+        if row.get("status") == "discarded":
+            continue
+        too_old = clock - float(row.get("created_at") or 0) > RUN_TTL_SECONDS
+        if too_old and not (row.get("status") == "running" and not _interrupted(row)):
+            try:
+                discard(profile, row["slug"], row["id"])
+                expired += 1
+                continue
+            except (KeyError, ValueError, OSError):
+                pass
+        for candidate in row.get("candidates") or []:
+            live_dirs.add(_candidate_dir(candidate.get("candidate_path", "")))
+        live_dirs.add(_candidate_dir(row.get("reference", "")))
+    orphans = visual_candidate_store.remove_unreferenced(
+        profile, keep=live_dirs - {""}, older_than=clock - ORPHAN_GRACE_SECONDS
+    )
+    return {"expired_runs": expired, "orphan_dirs": orphans}
+
+
+def _maybe_prune(profile: str) -> None:
+    """Run :func:`prune` at most hourly per profile; never fail the caller."""
+    now = time.time()
+    if now - _last_prune.get(profile, 0.0) < _PRUNE_INTERVAL_SECONDS:
+        return
+    _last_prune[profile] = now
+    try:
+        prune(profile, now=now)
+    except Exception:  # noqa: BLE001 - housekeeping must not break listing
+        pass
+
+
 def list_runs(profile: str, slug: str) -> list[dict[str, Any]]:
     post = public_site.load_blog_post(profile, slug)
+    _maybe_prune(profile)
     rows = []
     for path in _root(profile).glob("image-*.json"):
         try:

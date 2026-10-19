@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-10-18
+last_verified: 2026-10-19
 source_of_truth: true
 ---
 
@@ -100,6 +100,8 @@ AI 只给候选，你确认后才写入；正文从不被 AI 直接改写。没�
 ## 文件
 
 图片任务记录位于 `blog/.image-edits/`，参考图快照和候选位于 `blog/.candidates/`；只有接受后的图片进入 `media/blog/`。这些文件跟随当前 profile 保存，不需要数据库。
+
+图片任务保留 30 天，到期后连同候选和参考图快照一起删除；已经接受的图片在 `media/blog/` 另有一份，不受影响。`blog/.candidates/` 里没有被任何任务引用、超过一天的目录（例如旧版封面候选、上传后没用上的参考图）会自动清理。清理在打开图片工作台时顺带进行，每小时最多一次。
 
 - 正文：`profiles/<name>/blog/<slug>.md`（Markdown + front matter，公开构建的事实源）。
 - 编辑模型：同名 `.blocknote.json`，保存时与 Markdown 一起写入。用外部编辑器改了 Markdown 后，

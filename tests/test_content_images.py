@@ -18,7 +18,7 @@ def png_bytes() -> bytes:
     return stream.getvalue()
 
 
-class TestContentImages(ContentAITestBase):
+class ImageTestBase(ContentAITestBase):
     def _cover_provider(self, configured=True):
         from dataclasses import replace
         mock = super()._cover_provider(configured)
@@ -37,6 +37,9 @@ class TestContentImages(ContentAITestBase):
 
     def run_image(self, slug: str, reference: str, **extra):
         return self._run_job("content-image", {"slug": slug, "mode": "edit", "instruction": "只调整背景，保留文字", "reference": reference, "target": {"kind": "media"}, **extra})["result"]
+
+
+class TestContentImages(ImageTestBase):
 
     def test_reference_survives_full_job_and_reload(self):
         provider = self._cover_provider()
@@ -175,3 +178,84 @@ class TestContentImages(ContentAITestBase):
         self.assertEqual(response.status_code, 422)
         with self.assertRaises(jobs.JobInputError):
             jobs._validate_content_image_input({"slug": slug, "mode": "cover", "quality": "unlimited"})
+
+
+class TestCandidateCleanup(ImageTestBase):
+    """Orphaned candidates go after a day; workspace runs expire after 30 days."""
+
+    def _age(self, path, days: float) -> None:
+        import os
+        import time
+
+        stamp = time.time() - days * 86400
+        os.utime(path, (stamp, stamp))
+
+    def test_orphans_go_but_live_runs_and_media_stay(self):
+        import time
+
+        self._cover_provider()
+        slug, _ = self._create_post()
+        run = self.run_image(slug, self.reference(slug))
+        candidate = run["candidates"][0]["candidate_path"]
+        applied = content_images.accept("alice", slug, run["id"], candidate)
+        root = self.profile / "blog" / ".candidates"
+        orphan = root / "cover-0123456789"
+        orphan.mkdir(parents=True)
+        (orphan / "generated-cover.png").write_bytes(png_bytes())
+        fresh = root / "cover-fresh00000"
+        fresh.mkdir()
+        self._age(orphan, 3)
+        for child in root.iterdir():
+            if child.name.startswith("image-"):
+                self._age(child, 3)
+
+        counts = content_images.prune("alice", now=time.time())
+
+        self.assertEqual(counts, {"expired_runs": 0, "orphan_dirs": 1})
+        self.assertFalse(orphan.exists())
+        self.assertTrue(fresh.exists(), "recent dirs get a grace period")
+        self.assertTrue(visual_candidate_store.candidate_exists("alice", candidate))
+        self.assertEqual(len(content_images.list_runs("alice", slug)), 1)
+        self.assertTrue((self.profile / applied).exists())
+
+    def test_runs_expire_after_thirty_days_without_touching_media(self):
+        import time
+
+        self._cover_provider()
+        slug, _ = self._create_post()
+        run = self.run_image(slug, self.reference(slug))
+        candidate = run["candidates"][0]["candidate_path"]
+        applied = content_images.accept("alice", slug, run["id"], candidate)
+
+        later = time.time() + content_images.RUN_TTL_SECONDS + 60
+        counts = content_images.prune("alice", now=later)
+
+        self.assertEqual(counts["expired_runs"], 1)
+        self.assertEqual(content_images.list_runs("alice", slug), [])
+        self.assertFalse(visual_candidate_store.candidate_exists("alice", candidate))
+        self.assertTrue((self.profile / applied).exists())
+
+    def test_running_run_is_never_expired(self):
+        import json
+        import time
+
+        slug, _ = self._create_post()
+        row = {
+            "id": "image-" + "a" * 32, "slug": slug, "status": "running", "created_at": time.time(),
+            "process_id": content_images.PROCESS_ID, "candidates": [], "reference": "", "request": {},
+        }
+        path = self.profile / "blog" / ".image-edits" / f"{row['id']}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(row), encoding="utf-8")
+        with patch.object(content_images, "_interrupted", return_value=False):
+            counts = content_images.prune("alice", now=time.time() + content_images.RUN_TTL_SECONDS * 2)
+        self.assertEqual(counts["expired_runs"], 0)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["status"], "running")
+
+    def test_listing_prunes_at_most_hourly(self):
+        slug, _ = self._create_post()
+        content_images._last_prune.pop("alice", None)
+        with patch.object(content_images, "prune", return_value={}) as prune:
+            content_images.list_runs("alice", slug)
+            content_images.list_runs("alice", slug)
+        self.assertEqual(prune.call_count, 1)

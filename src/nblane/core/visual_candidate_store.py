@@ -281,6 +281,24 @@ def discard_patch(profile: str, patch_id: str) -> bool:
     return True
 
 
+def remove_unreferenced(profile: str, *, keep: set[str], older_than: float) -> int:
+    """Delete candidate dirs not in *keep* whose mtime is before *older_than*."""
+
+    root = _candidate_root(profile)
+    removed = 0
+    for child in root.iterdir():
+        if not child.is_dir() or child.name in keep:
+            continue
+        try:
+            mtime = child.stat().st_mtime
+        except OSError:
+            continue
+        if mtime < older_than:
+            shutil.rmtree(child, ignore_errors=True)
+            removed += 1
+    return removed
+
+
 def cleanup_expired(profile: str, *, now: float | None = None, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> int:
     """Remove candidate directories older than ``ttl_seconds``."""
 
