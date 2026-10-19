@@ -23,6 +23,11 @@ from nblane.core.yaml_io import _load_yaml_dict
 _T = TypeVar("_T")
 
 AGENT_ACTIVITY_FILENAME = "agent-activity.yaml"
+
+# Parsed queues keyed by path, valid while (inode, mtime_ns, size) match.
+# Every write goes through atomic_write_text (file replaced), so any write
+# changes the key. The AI-exceptions poll reads this file each time.
+_LOAD_CACHE: dict[Path, tuple[tuple[int, int, int], dict[str, Any]]] = {}
 AGENT_ACTIVITY_SCHEMA_VERSION = "1.0"
 ACTIVITY_KINDS = ("candidate", "patch", "writeback")
 ACTIVITY_STATUSES = ("pending", "applied", "failed", "dismissed", "superseded")
@@ -164,12 +169,30 @@ def normalize_agent_activity(raw: dict[str, Any] | None, *, profile: str = "") -
     }
 
 
+def _file_key(path: Path) -> tuple[int, int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_ino, stat.st_mtime_ns, stat.st_size)
+
+
 def load_agent_activity(profile: str | Path) -> dict[str, Any]:
-    """Load agent-activity.yaml; missing files read as an empty queue."""
+    """Load agent-activity.yaml; missing files read as an empty queue.
+
+    An unchanged file is served from a per-process cache; callers get a
+    deep copy and may mutate it.
+    """
     path = _activity_path(profile)
-    raw = _load_yaml_dict(path)
     profile_name = profile.name if isinstance(profile, Path) else str(profile)
-    return normalize_agent_activity(raw, profile=profile_name)
+    key = _file_key(path)
+    cached = _LOAD_CACHE.get(path)
+    if key is not None and cached is not None and cached[0] == key:
+        return copy.deepcopy(cached[1])
+    activity = normalize_agent_activity(_load_yaml_dict(path), profile=profile_name)
+    if key is not None:
+        _LOAD_CACHE[path] = (key, copy.deepcopy(activity))
+    return activity
 
 
 def _dump_agent_activity(profile: str, activity: dict[str, Any]) -> str:
