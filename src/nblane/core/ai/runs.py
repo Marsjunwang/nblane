@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,12 +18,21 @@ from nblane.core.ai.actions import (
     AIActionResult,
     AIActionSpec,
 )
+from nblane.core.file_lock import locked_profile_write
 from nblane.core.file_write import atomic_write_text
 from nblane.core.profile_io import profile_dir
 from nblane.core.yaml_io import _load_yaml_dict
 
 AI_RUNS_FILENAME = "ai-runs.yaml"
 AI_RUNS_SCHEMA_VERSION = "1.0"
+# Runs older than this are dropped on the next append. The file is re-read
+# whole on every AI call and every AI-exceptions poll, so it must not grow
+# forever; older rows stay recoverable from the data repo's git history.
+AI_RUNS_RETENTION_DAYS = 90
+
+# Parsed documents keyed by path, valid while (inode, mtime_ns, size) match.
+# atomic_write_text replaces the file, so any write changes the key.
+_LOAD_CACHE: dict[Path, tuple[tuple[int, int, int], dict[str, Any]]] = {}
 
 
 def now_iso() -> str:
@@ -117,13 +126,52 @@ def normalize_ai_runs(
     }
 
 
+def _file_key(path: Path) -> tuple[int, int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_ino, stat.st_mtime_ns, stat.st_size)
+
+
 def load_ai_runs(profile: str | Path) -> dict[str, Any]:
-    """Load ``ai-runs.yaml``; missing files read as an empty run list."""
+    """Load ``ai-runs.yaml``; missing files read as an empty run list.
+
+    Parsing dominates the AI-exceptions poll, so an unchanged file is served
+    from a per-process cache. Callers get a deep copy and may mutate it.
+    """
 
     path = _runs_path(profile)
-    raw = _load_yaml_dict(path)
     profile_name = profile.name if isinstance(profile, Path) else str(profile)
-    return normalize_ai_runs(raw, profile=profile_name)
+    key = _file_key(path)
+    cached = _LOAD_CACHE.get(path)
+    if key is not None and cached is not None and cached[0] == key:
+        return copy.deepcopy(cached[1])
+    doc = normalize_ai_runs(_load_yaml_dict(path), profile=profile_name)
+    if key is not None:
+        _LOAD_CACHE[path] = (key, copy.deepcopy(doc))
+    return doc
+
+
+def prune_old_runs(runs: list[dict[str, Any]], *, now: datetime | None = None) -> list[dict[str, Any]]:
+    """Drop runs created more than ``AI_RUNS_RETENTION_DAYS`` ago.
+
+    Rows with an unparseable ``created`` are kept (never delete on doubt).
+    """
+
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=AI_RUNS_RETENTION_DAYS)
+    kept: list[dict[str, Any]] = []
+    for run in runs:
+        try:
+            created = datetime.fromisoformat(str(run.get("created") or ""))
+        except ValueError:
+            kept.append(run)
+            continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if created >= cutoff:
+            kept.append(run)
+    return kept
 
 
 def save_ai_runs(profile: str, runs_doc: dict[str, Any]) -> Path:
@@ -175,11 +223,15 @@ def append_ai_run(
         item["duration_ms"] = int(result.duration_ms)
     if result.primary_duration_ms:
         item["primary_duration_ms"] = int(result.primary_duration_ms)
-    doc = load_ai_runs(profile)
-    runs = list(doc.get("runs") or [])
-    runs.append(item)
-    doc["runs"] = runs
-    save_ai_runs(profile, doc)
+    # Read-modify-write under the profile lock: two AI jobs finishing at once
+    # must not drop each other's row.
+    path = _runs_path(profile)
+    with locked_profile_write(path.parent, AI_RUNS_FILENAME):
+        doc = load_ai_runs(profile)
+        runs = list(doc.get("runs") or [])
+        runs.append(item)
+        doc["runs"] = prune_old_runs(runs)
+        save_ai_runs(profile, doc)
     return item
 
 
