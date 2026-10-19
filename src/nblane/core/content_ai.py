@@ -26,7 +26,6 @@ from typing import Any
 
 from nblane.core import llm as llm_client
 from nblane.core import public_site, visual_candidate_store, visual_generation
-from nblane.core.ai.structured import extract_json_value
 from nblane.core.ai_blog_prompts import get_prompt
 
 REWRITE_OPERATIONS = ("polish", "shorten", "expand", "tone", "translate")
@@ -37,7 +36,6 @@ SELECTION_MAX_CHARS = 6000
 _CONTEXT_CHARS = 1800
 _META_BODY_CHARS = 6000
 
-_LLM_ERROR_PREFIXES = ("LLM error:", "AI features not configured.")
 
 _LANG_NAMES = {"zh": "简体中文", "en": "English"}
 _CJK_CHAR = re.compile(r"[一-鿿]")
@@ -124,25 +122,53 @@ META_LLM_TIMEOUT_SECONDS = 105.0
 SOCIAL_LLM_TIMEOUT_SECONDS = 135.0
 
 
-def _chat(
+def _friendly_error(error: str) -> str:
+    """Map a gateway error onto a message the writer can act on."""
+
+    low = error.casefold()
+    if "timed out" in low or "timeout" in low:
+        return "AI 响应超时，请重试，或缩短选中的内容。"
+    if "401" in low or "403" in low or "auth" in low or "api key" in low:
+        return "模型服务鉴权失败，请到「设置 → AI 服务」检查 LLM 配置。"
+    if "429" in low or "rate limit" in low or "quota" in low:
+        return "模型服务繁忙（限流或额度不足），请稍后重试。"
+    if error.startswith("output_truncated"):
+        return error.split(":", 1)[1].strip()
+    if error.startswith("validation_error"):
+        return "模型返回格式不正确，请重试。"
+    if error.startswith("ai_not_configured"):
+        return "AI 功能需要配置 LLM（LLM_API_KEY / LLM_BASE_URL）。"
+    return "AI 调用失败，请重试。如持续失败，可在首页「AI 异常」查看详情。"
+
+
+def _run(
+    action: str,
     system: str,
     user: str,
     *,
-    temperature: float,
+    profile: str,
     thinking: bool | None,
     timeout: float,
-) -> str:
-    raw = llm_client.chat(
-        system,
-        user,
-        temperature=temperature,
-        enable_thinking=thinking,
-        timeout=timeout,
-        max_retries=0,
+):
+    """Run one content action through the AI gateway (run log + exceptions)."""
+
+    from nblane.core.ai.gateway import run_ai_action
+
+    result = run_ai_action(
+        action,
+        {
+            "system": system,
+            "user": user,
+            "llm_timeout_seconds": timeout,
+            "llm_max_retries": 0,
+            "enable_thinking": thinking,
+        },
+        profile=profile or None,
+        require_review=False,
     )
-    if raw.startswith(_LLM_ERROR_PREFIXES):
-        raise ContentAIError("content_ai_failed", raw)
-    return raw
+    if not result.ok:
+        raise ContentAIError("content_ai_failed", _friendly_error(result.error or result.content))
+    return result
 
 
 def validate_reference_image(value: object) -> str:
@@ -172,6 +198,7 @@ def rewrite_selection(
     title: str = "",
     context: str = "",
     instruction: str = "",
+    profile: str = "",
 ) -> dict[str, Any]:
     """Return ``{operation, original, text}`` for one selected passage."""
     op = _clean(operation).lower()
@@ -203,13 +230,14 @@ def rewrite_selection(
         if part
     )
     text = _strip_fence(
-        _chat(
+        _run(
+            "content.rewrite",
             system,
             user,
-            temperature=0.3,
+            profile=profile,
             thinking=False if op != "expand" else None,
             timeout=REWRITE_LLM_TIMEOUT_SECONDS,
-        ),
+        ).content,
         original=original,
     )
     if not text:
@@ -256,7 +284,9 @@ def _string_list(value: object, *, limit: int, max_len: int) -> list[str]:
     return out
 
 
-def suggest_meta(*, title: str, summary: str, tags: list[str], body: str) -> dict[str, Any]:
+def suggest_meta(
+    *, title: str, summary: str, tags: list[str], body: str, profile: str = ""
+) -> dict[str, Any]:
     """Return ``{titles, summaries, tags}`` candidate lists for the post."""
     text = _clean(body)
     if len(text) < 40:
@@ -276,7 +306,9 @@ def suggest_meta(*, title: str, summary: str, tags: list[str], body: str) -> dic
         )
         if part
     )
-    data = extract_json_value(_chat(system, user, temperature=0.5, thinking=False, timeout=META_LLM_TIMEOUT_SECONDS))
+    data = _run(
+        "content.meta", system, user, profile=profile, thinking=False, timeout=META_LLM_TIMEOUT_SECONDS
+    ).structured
     if not isinstance(data, dict):
         raise ContentAIError("content_ai_failed", "模型返回格式不正确，请重试。")
     result = {
@@ -307,7 +339,7 @@ _SOCIAL_TASK = (
 _SOCIAL_BODY_CHARS = 8000
 
 
-def suggest_social_copy(*, title: str, body: str) -> dict[str, Any]:
+def suggest_social_copy(*, title: str, body: str, profile: str = "") -> dict[str, Any]:
     """Return cover title/quote candidates plus Xiaohongshu and X copy."""
     text = _clean(body)
     if len(text) < 40:
@@ -322,9 +354,14 @@ def suggest_social_copy(*, title: str, body: str) -> dict[str, Any]:
         )
         if part
     )
-    data = extract_json_value(_chat(
-            _SOCIAL_SYSTEM, user, temperature=0.6, thinking=False, timeout=SOCIAL_LLM_TIMEOUT_SECONDS
-        ))
+    data = _run(
+        "content.social",
+        _SOCIAL_SYSTEM,
+        user,
+        profile=profile,
+        thinking=False,
+        timeout=SOCIAL_LLM_TIMEOUT_SECONDS,
+    ).structured
     if not isinstance(data, dict):
         raise ContentAIError("content_ai_failed", "模型返回格式不正确，请重试。")
     result = {

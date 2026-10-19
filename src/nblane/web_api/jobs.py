@@ -265,6 +265,8 @@ def failed_jobs(
                 or _clean(job.get("_profile_scope")) == clean_scope
             )
             and job.get("status") == "failed"
+            # A user cancel is not an AI failure; keep it out of the panel.
+            and (job.get("error") or {}).get("code") != "job_cancelled"
         ]
     rows.sort(key=lambda item: float(item.get("finished_at") or item.get("created_at") or 0), reverse=True)
     return rows[: max(1, min(int(limit), 200))]
@@ -690,7 +692,7 @@ def _validate_content_rewrite_input(job_input: dict[str, Any]) -> dict[str, Any]
 
 def _run_content_rewrite(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
     report(phase="generating", message="AI 正在改写选中内容。")
-    return _content_ai_call(lambda: content_ai.rewrite_selection(**job_input))
+    return _content_ai_call(lambda: content_ai.rewrite_selection(**job_input, profile=profile))
 
 
 def _validate_content_meta_input(job_input: dict[str, Any]) -> dict[str, Any]:
@@ -706,7 +708,7 @@ def _validate_content_meta_input(job_input: dict[str, Any]) -> dict[str, Any]:
 
 def _run_content_meta(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
     report(phase="generating", message="AI 正在阅读全文并生成建议。")
-    return _content_ai_call(lambda: content_ai.suggest_meta(**job_input))
+    return _content_ai_call(lambda: content_ai.suggest_meta(**job_input, profile=profile))
 
 
 def _validate_content_cover_input(job_input: dict[str, Any]) -> dict[str, Any]:
@@ -746,7 +748,7 @@ def _validate_content_social_input(job_input: dict[str, Any]) -> dict[str, Any]:
 
 def _run_content_social(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
     report(phase="generating", message="AI 正在读全文并写分享文案。")
-    return _content_ai_call(lambda: content_ai.suggest_social_copy(**job_input))
+    return _content_ai_call(lambda: content_ai.suggest_social_copy(**job_input, profile=profile))
 
 
 _KINDS[KIND_CONTENT_REWRITE] = JobKind(

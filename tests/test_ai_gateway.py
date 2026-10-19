@@ -70,6 +70,9 @@ class TestAIGateway(unittest.TestCase):
                 "output.visual_caption",
                 "dashboard.daily_brief",
                 "divination.cast",
+                "content.rewrite",
+                "content.meta",
+                "content.social",
             },
         )
 

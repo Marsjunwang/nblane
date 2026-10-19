@@ -187,6 +187,45 @@ class TestRewrite(ContentAITestBase):
         self.assertEqual(result["text"], code)
 
 
+class TestGatewayRunLog(ContentAITestBase):
+    """Content AI goes through the gateway: run log, exceptions, prompt passthrough."""
+
+    def _runs(self) -> list[dict]:
+        from nblane.core.ai.runs import load_ai_runs
+
+        return load_ai_runs("alice").get("runs") or []
+
+    def test_rewrite_job_records_a_run(self) -> None:
+        chat = self._llm("改后的段落。")
+        payload = self._run_job("content-rewrite", {"operation": "polish", "selection": "原始段落。"})
+        self.assertEqual(payload["job"]["status"], "done", payload)
+        runs = [run for run in self._runs() if run.get("action") == "content.rewrite"]
+        self.assertEqual(len(runs), 1)
+        self.assertTrue(runs[0]["ok"])
+        self.assertEqual(runs[0]["owner"], "content")
+        # The hand-tuned editor prompt reaches the provider unchanged.
+        self.assertIn("目标文本：\n原始段落。", chat.call_args.args[1])
+        self.assertIs(chat.call_args.kwargs["enable_thinking"], False)
+        self.assertEqual(chat.call_args.kwargs["max_retries"], 0)
+
+    def test_failed_call_shows_in_ai_exceptions_with_a_readable_message(self) -> None:
+        from nblane.core.ai.exceptions import collect_profile_exceptions
+
+        self._llm("LLM error: Request timed out.")
+        payload = self._run_job("content-meta", {"title": "t", "summary": "", "tags": [], "body": BODY})
+        self.assertEqual(payload["job"]["error"]["code"], "content_ai_failed")
+        self.assertEqual(payload["job"]["error"]["message"], "AI 响应超时，请重试，或缩短选中的内容。")
+        items = [item for item in collect_profile_exceptions(self.profile) if item["action"] == "content.meta"]
+        self.assertEqual(len(items), 1)
+        self.assertTrue(items[0]["href"].endswith("/content"))
+
+    def test_bad_json_is_a_format_error_not_a_raw_dump(self) -> None:
+        self._llm("not json")
+        with self.assertRaises(content_ai.ContentAIError) as ctx:
+            content_ai.suggest_social_copy(title="随笔", body="正文" * 40, profile="alice")
+        self.assertEqual(ctx.exception.message, "模型返回格式不正确，请重试。")
+
+
 class TestMetaSuggestions(ContentAITestBase):
     def test_parses_and_cleans_json(self) -> None:
         self._llm(

@@ -652,6 +652,39 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
         activity_policy="none",
         schema=schema_for_keys(["brief"]),
     ),
+    # Content workspace editor AI (core/content_ai.py). The caller builds the
+    # hand-tuned prompt itself (passthrough in prompts.py); the gateway adds
+    # the run log, timing and the AI exception panel. No rule fallback: a
+    # template rewrite would silently replace the writer's text.
+    "content.rewrite": AIActionSpec(
+        name="content.rewrite",
+        owner="content",
+        default_backend="direct_llm",
+        fallback_backend="",
+        output_mode="text",
+        activity_policy="none",
+        temperature=0.3,
+    ),
+    "content.meta": AIActionSpec(
+        name="content.meta",
+        owner="content",
+        default_backend="direct_llm",
+        fallback_backend="",
+        output_mode="json",
+        activity_policy="none",
+        temperature=0.5,
+        schema={"type": "object"},
+    ),
+    "content.social": AIActionSpec(
+        name="content.social",
+        owner="content",
+        default_backend="direct_llm",
+        fallback_backend="",
+        output_mode="json",
+        activity_policy="none",
+        temperature=0.6,
+        schema={"type": "object"},
+    ),
     "divination.cast": AIActionSpec(
         name="divination.cast",
         owner="starmap",

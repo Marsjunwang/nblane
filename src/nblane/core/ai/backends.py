@@ -82,6 +82,7 @@ class DirectLLMBackend:
                 "llm_max_retries",
                 "max_retries",
             ),
+            enable_thinking=_thinking_override(request.payload),
         )
         if raw.startswith("LLM error:") or raw.startswith(
             "AI features not configured"
@@ -799,6 +800,13 @@ def _codex_workdir(payload: dict[str, Any]) -> Path | None:
         return None
     path = Path(clean)
     return path if path.is_absolute() and path.is_dir() else None
+
+
+def _thinking_override(payload: dict[str, Any]) -> bool | None:
+    """Return an explicit ``enable_thinking`` bool, else the provider default."""
+
+    value = payload.get("enable_thinking")
+    return value if isinstance(value, bool) else None
 
 
 def _nonnegative_int_override(payload: dict[str, Any], *keys: str) -> int | None:

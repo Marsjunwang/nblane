@@ -243,6 +243,11 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
 }
 
 
+# Actions whose caller owns a hand-tuned prompt (ai_blog_prompts + editor
+# context). The gateway sends payload["system"] / payload["user"] unchanged.
+PASSTHROUGH_PROMPT_ACTIONS = frozenset({"content.rewrite", "content.meta", "content.social"})
+
+
 def prompt_for_action(
     request: AIActionRequest,
     spec: AIActionSpec,
@@ -254,6 +259,13 @@ def prompt_for_action(
         return _kanban_alignment_prompt(request, spec, prompt_id)
     if spec.name == "kanban.subtasks":
         return _kanban_subtasks_prompt(request, spec, prompt_id)
+    if spec.name in PASSTHROUGH_PROMPT_ACTIONS:
+        return PromptBundle(
+            system=str(request.payload.get("system") or ""),
+            user=str(request.payload.get("user") or ""),
+            prompt_id=prompt_id,
+            prompt_version=spec.prompt_version,
+        )
 
     reply_language = (
         request.payload.get("reply_language")

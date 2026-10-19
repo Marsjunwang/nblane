@@ -118,6 +118,8 @@ def _href(profile: str, action: str, source: str) -> str:
         return f"/p/{profile_path}/projects"
     if "evidence" in clean or "crystall" in clean:
         return f"/p/{profile_path}/evidence"
+    if "content" in clean:
+        return f"/p/{profile_path}/content"
     return f"/p/{profile_path}/home"
 
 
