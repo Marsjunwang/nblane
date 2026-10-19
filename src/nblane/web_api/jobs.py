@@ -81,12 +81,17 @@ class JobInputError(ValueError):
 
 
 class JobFailedError(RuntimeError):
-    """Structured job failure raised by runners; becomes the job error."""
+    """Structured job failure raised by runners; becomes the job error.
 
-    def __init__(self, code: str, message: str) -> None:
+    ``run_id`` names the AI gateway run that failed, when there is one; the
+    AI exceptions panel then lists that run once instead of run + job.
+    """
+
+    def __init__(self, code: str, message: str, *, run_id: str = "") -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        self.run_id = run_id
 
 
 @dataclass
@@ -347,6 +352,7 @@ def create_job(
                 error={"code": exc.code, "message": exc.message},
                 finished_at=time.time(),
                 _finished_monotonic=time.monotonic(),
+                **({"run_id": exc.run_id} if exc.run_id else {}),
             )
             return
         except Exception as exc:  # noqa: BLE001 - surface any runner failure
@@ -656,7 +662,7 @@ def _content_ai_call(fn: Callable[[], Any]) -> Any:
     try:
         return fn()
     except content_ai.ContentAIError as exc:
-        raise JobFailedError(exc.code, exc.message) from exc
+        raise JobFailedError(exc.code, exc.message, run_id=exc.run_id) from exc
 
 
 def _validate_content_slug(job_input: dict[str, Any]) -> str:

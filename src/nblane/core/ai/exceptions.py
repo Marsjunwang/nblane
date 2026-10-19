@@ -224,6 +224,7 @@ def collect_profile_exceptions(
         )
 
     runs = load_ai_runs(profile).get("runs") or []
+    listed_run_ids: set[str] = set()
     for run in runs:
         if not isinstance(run, dict):
             continue
@@ -253,6 +254,7 @@ def collect_profile_exceptions(
         if activity_id in failed_activity_ids or run_id in failed_activity_refs:
             continue
         action = _text(run.get("action"))
+        listed_run_ids.add(run_id)
         output.append(
             _base_item(
                 item_id=f"run:{run_id}",
@@ -292,6 +294,10 @@ def collect_profile_exceptions(
 
     for job in jobs:
         if not isinstance(job, dict) or _text(job.get("status")) != "failed":
+            continue
+        # The job only wraps a gateway run that is already listed (or was
+        # dismissed with it): one failure, one row.
+        if _text(job.get("run_id")) and _text(job.get("run_id")) in listed_run_ids:
             continue
         job_id = _text(job.get("job_id"))
         error = job.get("error") if isinstance(job.get("error"), dict) else {}

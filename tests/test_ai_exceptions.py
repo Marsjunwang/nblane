@@ -201,3 +201,23 @@ def test_dismissed_runs_jobs_and_tasks_are_hidden(tmp_path: Path) -> None:
     assert again == []
     assert after == []
     assert load_dismissed_ids(profile) == {"run:run-a", "run:run-b", "job:j1"}
+
+
+def test_job_wrapping_a_listed_run_is_shown_once(tmp_path: Path) -> None:
+    profile = tmp_path / "alice"
+    profile.mkdir()
+    _dump(
+        profile / "ai-runs.yaml",
+        {"profile": "alice", "runs": [{"id": "run-x", "action": "content.meta", "ok": False, "error": "timeout"}]},
+    )
+    jobs = [
+        {"job_id": "j-run", "kind": "content-meta", "status": "failed", "run_id": "run-x", "error": {"message": "超时"}},
+        {"job_id": "j-solo", "kind": "content-meta", "status": "failed", "error": {"message": "未配置"}},
+    ]
+    ids = {item["id"] for item in collect_profile_exceptions(profile, jobs=jobs)}
+    # The job behind run-x collapses into the run; a job without a run stays.
+    assert ids == {"run:run-x", "job:j-solo"}
+    # Dismissing the run hides both.
+    dismiss_exception_ids(profile, ["run:run-x"])
+    ids = {item["id"] for item in collect_profile_exceptions(profile, jobs=jobs)}
+    assert ids == {"job:j-solo"}
