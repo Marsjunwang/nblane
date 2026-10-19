@@ -9,6 +9,7 @@ import { AssistantPage } from './pages/AssistantPage';
 import { EvidencePage, EvidenceReviewRedirect, HealthRedirect } from './pages/EvidencePage';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
+import { MiniPage } from './pages/MiniPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { LegacyStreamlitRedirect } from './pages/LegacyStreamlitRedirect';
 import { ProfilesPage } from './pages/ProfilesPage';
@@ -45,6 +46,15 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        {/* Compact always-on-top view (小窗): auth but no app shell. */}
+        <Route
+          path="/p/:name/mini"
+          element={
+            <RequireAuth>
+              <MiniPage />
+            </RequireAuth>
+          }
+        />
         <Route
           element={
             <RequireAuth>

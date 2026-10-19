@@ -25,6 +25,7 @@ import { NavLink as RouterNavLink, Link as RouterLink, Outlet, useLocation, useM
 import { useAIExceptions, useLogout, useMe } from '../api/hooks';
 import { SessionExpiredModal } from '../auth/SessionExpiredModal';
 import { AIExceptionDrawer } from './AIExceptionDrawer';
+import { MiniWindowButton } from './MiniWindowButton';
 import { isWorkPath, lastWorkHome, rememberWorkPath } from './BackToWork';
 import { chrome } from '../theme';
 
@@ -213,6 +214,7 @@ export function AppLayout() {
             >
               <Box component="span" visibleFrom="sm">助手</Box>
             </Button>
+            {currentProfile && isDesktop && <MiniWindowButton profile={currentProfile} />}
             {currentProfile && hasExceptionSignal && (
               <Tooltip label="AI 异常" withArrow>
                 <Indicator
