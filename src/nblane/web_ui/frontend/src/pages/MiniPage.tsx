@@ -24,6 +24,8 @@ import { byDue, dueState, reapplyToggle, toggleAt, type MiniTodo } from './miniT
 
 /** How often the always-on-top window refreshes on its own. */
 export const MINI_REFRESH_MS = 60_000;
+/** AI exception badge poll in the 小窗: it stays open all day, so check less often. */
+export const MINI_EXCEPTIONS_POLL_MS = 120_000;
 /** Queue items shown in the 小窗; the rest stay on the projects page. */
 export const QUEUE_PREVIEW = 3;
 
@@ -53,8 +55,8 @@ export function MiniPage() {
   const moveCard = useMoveKanbanCard(name);
   const [queueOpen, setQueueOpen] = useLocalStorage<boolean>({ key: `nblane-mini-queue:${name}`, defaultValue: false });
   const [draft, setDraft] = useState('');
-  // Same query (and 30s poll) as the main window's top-bar badge.
-  const exceptions = useAIExceptions(name);
+  // Same query as the main window's top-bar badge, polled every 2 minutes.
+  const exceptions = useAIExceptions(name, MINI_EXCEPTIONS_POLL_MS);
   const exceptionCount = exceptions.data?.total ?? 0;
   const [exceptionsOpened, exceptionsDrawer] = useDisclosure(false);
 
@@ -477,6 +479,7 @@ export function MiniPage() {
         onClose={exceptionsDrawer.close}
         linkTarget="nblane-main"
         size="100%"
+        pollMs={MINI_EXCEPTIONS_POLL_MS}
       />
     </Stack>
   );

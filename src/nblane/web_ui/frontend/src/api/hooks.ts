@@ -1297,8 +1297,14 @@ export interface ActivityFilters {
   kind: string;
 }
 
-/** Unresolved failures from all profile-scoped AI surfaces. */
-export function useAIExceptions(profile: string) {
+/** Default poll for the AI exception badge (main window top bar). */
+export const AI_EXCEPTIONS_POLL_MS = 30_000;
+
+/**
+ * Unresolved failures from all profile-scoped AI surfaces.
+ * *pollMs* lets an always-open view (the 小窗) poll less often.
+ */
+export function useAIExceptions(profile: string, pollMs: number = AI_EXCEPTIONS_POLL_MS) {
   return useQuery({
     queryKey: ['profiles', profile, 'ai-exceptions'],
     queryFn: () =>
@@ -1307,7 +1313,7 @@ export function useAIExceptions(profile: string) {
       ),
     enabled: profile.length > 0,
     staleTime: 15_000,
-    refetchInterval: 30_000,
+    refetchInterval: pollMs,
   });
 }
 

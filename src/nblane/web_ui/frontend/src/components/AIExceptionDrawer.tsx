@@ -24,10 +24,12 @@ interface AIExceptionDrawerProps {
   /** Open 「打开来源」 in this named window (the 小窗 sends it to the main app). */
   linkTarget?: string;
   size?: string;
+  /** Poll interval for the list (the drawer stays mounted while closed). */
+  pollMs?: number;
 }
 
-export function AIExceptionDrawer({ profile, opened, onClose, linkTarget, size = 'md' }: AIExceptionDrawerProps) {
-  const exceptions = useAIExceptions(profile);
+export function AIExceptionDrawer({ profile, opened, onClose, linkTarget, size = 'md', pollMs }: AIExceptionDrawerProps) {
+  const exceptions = useAIExceptions(profile, pollMs);
   const items = exceptions.data?.items ?? [];
   const [selected, setSelected] = useState<string[]>([]);
   const dismiss = useDismissAIExceptions(profile);
