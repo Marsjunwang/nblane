@@ -502,6 +502,11 @@ def _build_user_prompt(
         payload["article_excerpt"] = markdown
     else:
         payload["target_text"] = _context_text(target, markdown)
+        if operation == "translate":
+            # The translate prompt names no language itself (see content_ai).
+            from nblane.core.content_ai import target_language_name
+
+            payload["目标语言"] = target_language_name(payload["target_text"])
         payload["surrounding_blocks"] = [
             {
                 "type": _clean_text(block.get("type")),

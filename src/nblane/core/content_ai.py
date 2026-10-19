@@ -21,6 +21,7 @@ from __future__ import annotations
 import uuid
 import base64
 import binascii
+import re
 from typing import Any
 
 from nblane.core import llm as llm_client
@@ -37,6 +38,27 @@ _CONTEXT_CHARS = 1800
 _META_BODY_CHARS = 6000
 
 _LLM_ERROR_PREFIXES = ("LLM error:", "AI features not configured.")
+
+_LANG_NAMES = {"zh": "简体中文", "en": "English"}
+_CJK_CHAR = re.compile(r"[一-鿿]")
+_LATIN_WORD = re.compile(r"[A-Za-z]+")
+
+
+def translation_target(text: str) -> str:
+    """Translate into the *other* language of the selection.
+
+    The reply-language setting cannot be the target: in ``auto`` mode it
+    follows the selection, so Chinese text was "translated" into Chinese.
+    The source is judged by script share, so a Chinese paragraph with a few
+    English terms (or vice versa) still counts as its main language.
+    """
+    cjk = len(_CJK_CHAR.findall(text))
+    latin = len(_LATIN_WORD.findall(text))
+    return "en" if cjk >= latin else "zh"
+
+
+def target_language_name(text: str) -> str:
+    return _LANG_NAMES[translation_target(text)]
 
 
 class ContentAIError(RuntimeError):
@@ -57,8 +79,15 @@ def _trim(text: str, limit: int) -> str:
     return clean if len(clean) <= limit else clean[:limit].rstrip() + "…"
 
 
-def _strip_fence(text: str) -> str:
+def _strip_fence(text: str, *, original: str = "") -> str:
+    """Drop a fence the model wrapped around its whole reply.
+
+    A selection that is itself a fenced block keeps its fence: the model
+    returning it intact is correct, and stripping would turn code into prose.
+    """
     raw = _clean(text)
+    if _clean(original).startswith(("```", "~~~")):
+        return raw
     if raw.startswith("```") and raw.endswith("```"):
         lines = raw.splitlines()
         if len(lines) >= 2:
@@ -86,8 +115,31 @@ def _require_llm() -> None:
         )
 
 
-def _chat(system: str, user: str, *, temperature: float, thinking: bool | None) -> str:
-    raw = llm_client.chat(system, user, temperature=temperature, enable_thinking=thinking)
+# One LLM call per content job, sized to finish inside that job's timeout in
+# web_api/jobs.py (job timeout minus ~15s). No SDK retries: the default two
+# silent retries could run up to 3x90s long after the job had already been
+# reported as timed out, still billing.
+REWRITE_LLM_TIMEOUT_SECONDS = 135.0
+META_LLM_TIMEOUT_SECONDS = 105.0
+SOCIAL_LLM_TIMEOUT_SECONDS = 135.0
+
+
+def _chat(
+    system: str,
+    user: str,
+    *,
+    temperature: float,
+    thinking: bool | None,
+    timeout: float,
+) -> str:
+    raw = llm_client.chat(
+        system,
+        user,
+        temperature=temperature,
+        enable_thinking=thinking,
+        timeout=timeout,
+        max_retries=0,
+    )
     if raw.startswith(_LLM_ERROR_PREFIXES):
         raise ContentAIError("content_ai_failed", raw)
     return raw
@@ -142,6 +194,7 @@ def rewrite_selection(
         part
         for part in (
             task,
+            f"目标语言：{target_language_name(original)}" if op == "translate" else "",
             f"用户补充要求：{extra}" if extra else "",
             f"文章标题：{_clean(title)}" if _clean(title) else "",
             f"上下文（仅供参考，不要改写）：\n{_trim(context, _CONTEXT_CHARS)}" if _clean(context) else "",
@@ -150,7 +203,14 @@ def rewrite_selection(
         if part
     )
     text = _strip_fence(
-        _chat(system, user, temperature=0.3, thinking=False if op != "expand" else None)
+        _chat(
+            system,
+            user,
+            temperature=0.3,
+            thinking=False if op != "expand" else None,
+            timeout=REWRITE_LLM_TIMEOUT_SECONDS,
+        ),
+        original=original,
     )
     if not text:
         raise ContentAIError("content_ai_failed", "模型没有返回内容，请重试。")
@@ -216,7 +276,7 @@ def suggest_meta(*, title: str, summary: str, tags: list[str], body: str) -> dic
         )
         if part
     )
-    data = extract_json_value(_chat(system, user, temperature=0.5, thinking=False))
+    data = extract_json_value(_chat(system, user, temperature=0.5, thinking=False, timeout=META_LLM_TIMEOUT_SECONDS))
     if not isinstance(data, dict):
         raise ContentAIError("content_ai_failed", "模型返回格式不正确，请重试。")
     result = {
@@ -262,7 +322,9 @@ def suggest_social_copy(*, title: str, body: str) -> dict[str, Any]:
         )
         if part
     )
-    data = extract_json_value(_chat(_SOCIAL_SYSTEM, user, temperature=0.6, thinking=False))
+    data = extract_json_value(_chat(
+            _SOCIAL_SYSTEM, user, temperature=0.6, thinking=False, timeout=SOCIAL_LLM_TIMEOUT_SECONDS
+        ))
     if not isinstance(data, dict):
         raise ContentAIError("content_ai_failed", "模型返回格式不正确，请重试。")
     result = {

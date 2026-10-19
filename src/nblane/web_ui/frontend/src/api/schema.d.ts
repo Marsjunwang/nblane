@@ -1833,7 +1833,15 @@ export interface paths {
         get: operations["get_profile_job_api_v1_profiles__name__jobs__job_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Cancel Profile Job
+         * @description Cancel a queued/running job: it ends as ``failed`` / ``job_cancelled``.
+         *
+         *     Idempotent: a job that already finished is returned unchanged. The
+         *     in-flight provider call cannot be interrupted, but its result is dropped
+         *     so nothing is applied after the user cancelled.
+         */
+        delete: operations["cancel_profile_job_api_v1_profiles__name__jobs__job_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -18211,6 +18219,65 @@ export interface operations {
         };
     };
     get_profile_job_api_v1_profiles__name__jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStatusResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Job not found for this profile. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown job kind or invalid job input. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_profile_job_api_v1_profiles__name__jobs__job_id__delete: {
         parameters: {
             query?: never;
             header?: never;

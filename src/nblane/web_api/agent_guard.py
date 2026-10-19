@@ -90,6 +90,7 @@ ROUTE_ACTIONS: dict[tuple[str, str], str] = {
     # read-like: casts, AI drafts, the undo endpoint itself
     ("POST", f"{P}/divination"): "divination.cast",
     ("POST", f"{P}/jobs"): "ai.draft",
+    ("DELETE", f"{P}/jobs/{{job_id}}"): "ai.draft",
     ("POST", f"{P}/crystallize/draft"): "ai.draft",
     ("POST", f"{P}/project-board/cases/{{case_id}}/suggest-refs"): "ai.draft",
     ("POST", f"{P}/research/connectors/manual/preview"): "ai.draft",

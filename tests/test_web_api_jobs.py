@@ -900,3 +900,79 @@ class TestCrystallizeJobKind(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestJobCancel(JobsTestBase):
+    """DELETE /profiles/{name}/jobs/{job_id} ends a job and drops its late result."""
+
+    def _register_slow(self, gate: "threading.Event") -> None:
+        def runner(profile, job_input, report):
+            gate.wait(5)
+            return {"too": "late"}
+
+        spec = jobs_module.JobKind(name="test-slow", validate=lambda job_input: dict(job_input), run=runner)
+        patcher = patch.dict(jobs_module._KINDS, {"test-slow": spec})
+        self.addCleanup(patcher.stop)
+        patcher.start()
+
+    def test_cancel_running_job_is_terminal_and_drops_result(self) -> None:
+        import threading
+
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        self._register_slow(gate)
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root, tree=SKILL_TREE)
+            schemas = _write_schemas(base)
+            client = self._client(root, schemas)
+            job_id = client.post("/api/v1/profiles/alice/jobs", json={"kind": "test-slow", "input": {}}).json()["job_id"]
+            cancelled = client.delete(f"/api/v1/profiles/alice/jobs/{job_id}")
+            self.assertEqual(cancelled.status_code, 200)
+            self.assertEqual(cancelled.json()["job"]["status"], "failed")
+            self.assertEqual(cancelled.json()["job"]["error"]["code"], "job_cancelled")
+            gate.set()
+            time.sleep(0.2)
+            final = client.get(f"/api/v1/profiles/alice/jobs/{job_id}").json()
+            # Idempotent: cancelling a finished job changes nothing.
+            again = client.delete(f"/api/v1/profiles/alice/jobs/{job_id}")
+        self.assertEqual(final["job"]["error"]["code"], "job_cancelled")
+        self.assertIsNone(final["result"])
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(again.json()["job"]["error"]["code"], "job_cancelled")
+
+    def test_cancel_unknown_job_404(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root, tree=SKILL_TREE)
+            schemas = _write_schemas(base)
+            client = self._client(root, schemas)
+            response = client.delete("/api/v1/profiles/alice/jobs/job-missing")
+        self.assertEqual(response.status_code, 404)
+
+
+class TestContentJobTimeoutBudget(unittest.TestCase):
+    """Each content LLM call must give up before its job's watchdog fires."""
+
+    def test_llm_timeouts_fit_inside_job_timeouts(self) -> None:
+        from nblane.core import content_ai
+
+        pairs = {
+            "content-rewrite": content_ai.REWRITE_LLM_TIMEOUT_SECONDS,
+            "content-meta": content_ai.META_LLM_TIMEOUT_SECONDS,
+            "content-social": content_ai.SOCIAL_LLM_TIMEOUT_SECONDS,
+        }
+        for kind, llm_timeout in pairs.items():
+            self.assertLess(llm_timeout, jobs_module._KINDS[kind].timeout_seconds, kind)
+
+    def test_content_calls_disable_sdk_retries(self) -> None:
+        from nblane.core import content_ai
+
+        with patch("nblane.core.llm.is_configured", return_value=True), patch(
+            "nblane.core.llm.chat", return_value="ok"
+        ) as chat:
+            content_ai.rewrite_selection(operation="polish", selection="原文。")
+        self.assertEqual(chat.call_args.kwargs["max_retries"], 0)
+        self.assertEqual(chat.call_args.kwargs["timeout"], content_ai.REWRITE_LLM_TIMEOUT_SECONDS)

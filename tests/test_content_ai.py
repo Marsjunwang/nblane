@@ -165,6 +165,27 @@ class TestRewrite(ContentAITestBase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["code"], "invalid_content_ai_request")
 
+    def test_translate_targets_the_other_language(self) -> None:
+        # In auto reply-language mode the old prompt asked to translate Chinese
+        # into Chinese; the target must be explicit and opposite the source.
+        chat = self._llm("Translated.")
+        content_ai.rewrite_selection(operation="translate", selection="机器人用 VLA 模型抓取物体。")
+        self.assertIn("目标语言：English", chat.call_args.args[1])
+        chat = self._llm("翻译。")
+        content_ai.rewrite_selection(operation="translate", selection="The robot grasps a cube with 机械臂.")
+        self.assertIn("目标语言：简体中文", chat.call_args.args[1])
+
+    def test_only_translate_gets_a_target_language(self) -> None:
+        chat = self._llm("润色。")
+        content_ai.rewrite_selection(operation="polish", selection="原始段落。")
+        self.assertNotIn("目标语言", chat.call_args.args[1])
+
+    def test_fenced_selection_keeps_its_fence(self) -> None:
+        code = "```python\nprint('hi')\n```"
+        self._llm(code)
+        result = content_ai.rewrite_selection(operation="polish", selection=code)
+        self.assertEqual(result["text"], code)
+
 
 class TestMetaSuggestions(ContentAITestBase):
     def test_parses_and_cleans_json(self) -> None:
@@ -289,3 +310,32 @@ def test_suggest_social_copy_parses_json_reply() -> None:
     assert result["cover_titles"] == ["30岁，\n失业了"]
     assert result["xhs_title"] == "30岁失业"
     assert result["x_text"] == "一句话"
+
+
+class TestVisualTaskPolling(unittest.TestCase):
+    """DashScope tasks may run for minutes; polling must follow a time budget."""
+
+    def _fake_clock(self):
+        state = {"now": 0.0}
+        return state, (lambda: state["now"]), (lambda s: state.__setitem__("now", state["now"] + s))
+
+    def test_waits_past_the_old_sixty_second_cap(self) -> None:
+        state, clock, sleep = self._fake_clock()
+        replies = iter([{"output": {"task_status": "RUNNING"}}] * 40 + [{"output": {"task_status": "SUCCEEDED"}}])
+        with patch.object(visual_generation, "_get_json", side_effect=lambda *_: next(replies)):
+            data = visual_generation._poll_task("t1", "k", sleep=sleep, clock=clock)
+        self.assertEqual(data["output"]["task_status"], "SUCCEEDED")
+        self.assertGreater(state["now"], 60)
+        self.assertLessEqual(state["now"], visual_generation.DASHSCOPE_TASK_WAIT_SECONDS)
+
+    def test_gives_up_at_the_budget_with_a_readable_error(self) -> None:
+        state, clock, sleep = self._fake_clock()
+        with patch.object(visual_generation, "_get_json", return_value={"output": {"task_status": "RUNNING"}}):
+            with self.assertRaises(visual_generation.VisualGenerationError) as ctx:
+                visual_generation._poll_task("t2", "k", wait_seconds=30, sleep=sleep, clock=clock)
+        self.assertLessEqual(state["now"], 30)
+        self.assertIn("30 秒内没有出图", str(ctx.exception))
+
+    def test_budget_fits_inside_image_job_timeouts(self) -> None:
+        self.assertLess(visual_generation.DASHSCOPE_TASK_WAIT_SECONDS, jobs_module._KINDS["content-cover"].timeout_seconds)
+        self.assertLess(visual_generation.DASHSCOPE_TASK_WAIT_SECONDS, jobs_module._KINDS["content-image"].timeout_seconds)

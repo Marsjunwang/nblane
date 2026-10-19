@@ -386,6 +386,30 @@ def create_job(
     return initial
 
 
+CANCELLED_MESSAGE = "已取消。"
+
+
+def cancel_job(job_id: str) -> bool:
+    """Mark a queued/running job failed with ``job_cancelled``.
+
+    The worker thread cannot be interrupted mid-call, but its late result is
+    discarded (same rule as the watchdog), so the stream ends now and nothing
+    is applied. Returns False when the job is unknown or already final.
+    """
+    clean_id = _clean(job_id)
+    with _LOCK:
+        job = _JOBS.get(clean_id)
+        if not job or job.get("status") in FINAL_STATUSES:
+            return False
+        job["status"] = "failed"
+        job["phase"] = "failed"
+        job["message"] = CANCELLED_MESSAGE
+        job["error"] = {"code": "job_cancelled", "message": CANCELLED_MESSAGE}
+        job["finished_at"] = time.time()
+        job["_finished_monotonic"] = time.monotonic()
+    return True
+
+
 def _prune_jobs() -> None:
     cutoff = time.time() - _JOB_TTL_SECONDS
     with _LOCK:
@@ -730,8 +754,10 @@ _KINDS[KIND_CONTENT_REWRITE] = JobKind(
     validate=_validate_content_rewrite_input,
     run=_run_content_rewrite,
     queued_message="Queued selection rewrite.",
-    timeout_seconds=120,
-    timeout_message="AI 改写超时（120 秒），请重试或缩短选中内容。",
+    # Expand runs with thinking on; content_ai.REWRITE_LLM_TIMEOUT_SECONDS
+    # (135s) must stay below this.
+    timeout_seconds=150,
+    timeout_message="AI 改写超时（150 秒），请重试或缩短选中内容。",
 )
 
 _KINDS[KIND_CONTENT_META] = JobKind(

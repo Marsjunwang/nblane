@@ -649,8 +649,27 @@ def _get_json(url: str, api_key: str) -> dict[str, Any]:
     return loaded
 
 
-def _poll_task(task_id: str, api_key: str, *, attempts: int = 30) -> dict[str, Any]:
-    for _index in range(attempts):
+# Wait budget for one DashScope task. The old fixed 30 polls x 2s (~60s) gave
+# up on HD / edit tasks the provider was still running (and billing), well
+# inside the 300-360s content job timeouts. Kept below those so the job can
+# still report a clean error instead of hitting its watchdog.
+DASHSCOPE_TASK_WAIT_SECONDS = 240.0
+_POLL_INTERVAL_START = 2.0
+_POLL_INTERVAL_MAX = 6.0
+
+
+def _poll_task(
+    task_id: str,
+    api_key: str,
+    *,
+    wait_seconds: float | None = None,
+    sleep: Any = time.sleep,
+    clock: Any = time.monotonic,
+) -> dict[str, Any]:
+    budget = DASHSCOPE_TASK_WAIT_SECONDS if wait_seconds is None else wait_seconds
+    deadline = clock() + budget
+    interval = _POLL_INTERVAL_START
+    while True:
         data = _get_json(DASHSCOPE_TASK_URL.format(task_id=task_id), api_key)
         status = str(data.get("output", {}).get("task_status", "") or "").upper()
         if status in {"SUCCEEDED", "FAILED", "CANCELED", "UNKNOWN"}:
@@ -658,8 +677,14 @@ def _poll_task(task_id: str, api_key: str, *, attempts: int = 30) -> dict[str, A
                 message = data.get("message") or data.get("output", {}).get("message") or status
                 raise VisualGenerationError(f"DashScope visual task failed: {message}")
             return data
-        time.sleep(2)
-    raise VisualGenerationError("DashScope visual task did not finish in time")
+        remaining = deadline - clock()
+        if remaining <= 0:
+            break
+        sleep(min(interval, remaining))
+        interval = min(interval * 1.5, _POLL_INTERVAL_MAX)
+    raise VisualGenerationError(
+        f"图像服务 {int(budget)} 秒内没有出图（DashScope task {task_id} 仍在处理），请稍后重试。"
+    )
 
 
 def _walk(value: Any):

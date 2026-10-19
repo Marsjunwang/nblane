@@ -3935,6 +3935,28 @@ def get_profile_job(name: str, job_id: str) -> JobStatusResponse:
     )
 
 
+@router.delete(
+    "/profiles/{name}/jobs/{job_id}",
+    response_model=JobStatusResponse,
+    responses=JOB_RESPONSES,
+    dependencies=PROFILE_DEPENDENCY,
+)
+def cancel_profile_job(name: str, job_id: str) -> JobStatusResponse:
+    """Cancel a queued/running job: it ends as ``failed`` / ``job_cancelled``.
+
+    Idempotent: a job that already finished is returned unchanged. The
+    in-flight provider call cannot be interrupted, but its result is dropped
+    so nothing is applied after the user cancelled.
+    """
+    _resolve_profile_job(name, job_id)
+    jobs.cancel_job(job_id)
+    _, bundle = _resolve_profile_job(name, job_id)
+    return JobStatusResponse(
+        job=JobModel(**bundle["snapshot"]),
+        result=bundle["result"],
+    )
+
+
 @router.get(
     "/profiles/{name}/jobs/{job_id}/stream",
     responses=JOB_RESPONSES,
