@@ -21,9 +21,12 @@ interface AIExceptionDrawerProps {
   profile: string;
   opened: boolean;
   onClose: () => void;
+  /** Open 「打开来源」 in this named window (the 小窗 sends it to the main app). */
+  linkTarget?: string;
+  size?: string;
 }
 
-export function AIExceptionDrawer({ profile, opened, onClose }: AIExceptionDrawerProps) {
+export function AIExceptionDrawer({ profile, opened, onClose, linkTarget, size = 'md' }: AIExceptionDrawerProps) {
   const exceptions = useAIExceptions(profile);
   const items = exceptions.data?.items ?? [];
   const [selected, setSelected] = useState<string[]>([]);
@@ -55,7 +58,7 @@ export function AIExceptionDrawer({ profile, opened, onClose }: AIExceptionDrawe
       opened={opened}
       onClose={onClose}
       position="right"
-      size="md"
+      size={size}
       title="AI 异常"
       overlayProps={{ backgroundOpacity: 0.35, blur: 2 }}
     >
@@ -152,18 +155,31 @@ export function AIExceptionDrawer({ profile, opened, onClose }: AIExceptionDrawe
                   >
                     忽略
                   </Button>
-                  {item.href && (
-                    <Button
-                      component={RouterLink}
-                      to={item.href}
-                      variant="light"
-                      size="compact-sm"
-                      leftSection={<IconExternalLink size={14} />}
-                      onClick={onClose}
-                    >
-                      打开来源
-                    </Button>
-                  )}
+                  {item.href &&
+                    (linkTarget ? (
+                      <Button
+                        component="a"
+                        href={item.href}
+                        target={linkTarget}
+                        variant="light"
+                        size="compact-sm"
+                        leftSection={<IconExternalLink size={14} />}
+                        onClick={onClose}
+                      >
+                        打开来源
+                      </Button>
+                    ) : (
+                      <Button
+                        component={RouterLink}
+                        to={item.href}
+                        variant="light"
+                        size="compact-sm"
+                        leftSection={<IconExternalLink size={14} />}
+                        onClick={onClose}
+                      >
+                        打开来源
+                      </Button>
+                    ))}
                 </Group>
               </Stack>
             </Paper>

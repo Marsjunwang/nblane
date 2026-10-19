@@ -9,6 +9,7 @@ import '@mantine/dates/styles.css';
 import '@mantine/notifications/styles.css';
 
 import { installUnauthorizedHandler } from './api/client';
+import { installCrossWindowSync } from './api/crossWindowSync';
 import { App } from './App';
 import { theme } from './theme';
 
@@ -21,6 +22,8 @@ const queryClient = new QueryClient({
 // A 401 on any request means the session died behind the cached `me` query:
 // reset it so RequireAuth refetches, sees the 401, and redirects to /login.
 installUnauthorizedHandler(queryClient);
+// The 小窗 and the main window refetch each other's changes immediately.
+installCrossWindowSync(queryClient);
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
