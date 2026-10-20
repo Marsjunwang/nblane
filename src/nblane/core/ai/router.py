@@ -685,6 +685,38 @@ ACTION_SPECS: dict[str, AIActionSpec] = {
         temperature=0.6,
         schema={"type": "object"},
     ),
+    # Career workspace (core/career_ai.py): hand-tuned prompts pass through;
+    # the gateway adds the run log and the AI exceptions panel. No rule
+    # fallback: a template match or resume would be fake.
+    "career.match": AIActionSpec(
+        name="career.match",
+        owner="career",
+        default_backend="direct_llm",
+        fallback_backend="",
+        output_mode="json",
+        activity_policy="none",
+        temperature=0.2,
+        schema={"type": "object"},
+    ),
+    "career.tailor": AIActionSpec(
+        name="career.tailor",
+        owner="career",
+        default_backend="direct_llm",
+        fallback_backend="",
+        output_mode="text",
+        activity_policy="none",
+        temperature=0.3,
+    ),
+    "career.structure": AIActionSpec(
+        name="career.structure",
+        owner="career",
+        default_backend="direct_llm",
+        fallback_backend="",
+        output_mode="json",
+        activity_policy="none",
+        temperature=0.0,
+        schema={"type": "object"},
+    ),
     # Cover / in-article image generation and image edits for the content
     # workspace. Bytes return in result.artifacts; no fallback (a template
     # image would be a fake result).

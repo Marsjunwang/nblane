@@ -110,6 +110,8 @@ def _href(profile: str, action: str, source: str) -> str:
 
     clean = f"{action} {source}".casefold()
     profile_path = quote(profile, safe="")
+    if "career" in clean:
+        return f"/p/{profile_path}/career"
     if "research" in clean or "paper" in clean:
         return f"/p/{profile_path}/research"
     if "studio" in clean or "output" in clean or "resume" in clean:

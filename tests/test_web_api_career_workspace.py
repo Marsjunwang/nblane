@@ -286,6 +286,47 @@ class CareerAITest(unittest.TestCase):
         failed = self._run_job("career-match", {"resume_md": "a", "jd_text": "b"})
         self.assertEqual(failed["job"]["error"]["code"], "career_ai_unavailable")
 
+    def test_career_calls_go_through_the_gateway(self) -> None:
+        from nblane.core.ai.runs import load_ai_runs
+
+        chat = self._llm('{"score": 10, "requirements": [{"requirement": "x", "verdict": "missing"}]}')
+        payload = self._run_job("career-match", {"resume_md": "a", "jd_text": "b", "use_evidence": False})
+        self.assertEqual(payload["job"]["status"], "done", payload)
+        runs = [run for run in load_ai_runs("alice").get("runs") or [] if run.get("action") == "career.match"]
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["owner"], "career")
+        self.assertEqual(chat.call_args.kwargs["max_retries"], 0)
+        self.assertEqual(chat.call_args.kwargs["timeout"], career_ai.MATCH_LLM_TIMEOUT_SECONDS)
+        self.assertIs(chat.call_args.kwargs["enable_thinking"], False)
+
+    def test_failure_is_readable_and_listed_once_in_ai_exceptions(self) -> None:
+        self._llm("LLM error: Request timed out.")
+        failed = self._run_job("career-match", {"resume_md": "a", "jd_text": "b", "use_evidence": False})
+        self.assertEqual(failed["job"]["error"]["code"], "career_ai_failed")
+        self.assertEqual(failed["job"]["error"]["message"], "AI 响应超时，请重试，或缩短选中的内容。")
+        items = self.client.get("/api/v1/profiles/alice/ai-exceptions").json()["items"]
+        career = [item for item in items if "career" in item["action"]]
+        self.assertEqual(len(career), 1)
+        self.assertTrue(career[0]["href"].endswith("/career"))
+
+    def test_truncated_tailor_is_refused(self) -> None:
+        def fake_chat(*args, **kwargs):
+            kwargs["meta_out"]["finish_reason"] = "length"
+            return "# 张三 | 工程师\n\n## 工作经历\n- 写到一半"
+
+        with patch("nblane.core.llm.is_configured", return_value=True), patch("nblane.core.llm.chat", side_effect=fake_chat):
+            failed = self._run_job("career-tailor", {"resume_md": RESUME_MD, "jd_text": "VLA"})
+        self.assertEqual(failed["job"]["error"]["code"], "career_ai_output_truncated")
+
+    def test_llm_timeouts_fit_inside_job_timeouts(self) -> None:
+        pairs = {
+            "career-match": career_ai.MATCH_LLM_TIMEOUT_SECONDS,
+            "career-tailor": career_ai.TAILOR_LLM_TIMEOUT_SECONDS,
+            "career-structure": career_ai.STRUCTURE_LLM_TIMEOUT_SECONDS,
+        }
+        for kind, timeout in pairs.items():
+            self.assertLess(timeout, jobs_module._KINDS[kind].timeout_seconds, kind)
+
     def test_rejects_empty_pair(self) -> None:
         response = self.client.post(
             "/api/v1/profiles/alice/jobs", json={"kind": "career-match", "input": {"resume_md": " ", "jd_text": "x"}}

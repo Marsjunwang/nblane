@@ -13,7 +13,7 @@ from typing import Any
 
 from nblane.core import llm as llm_client
 from nblane.core import profile_io, resume_doc
-from nblane.core.ai.structured import extract_json_value
+from nblane.core.ai.messages import friendly_error
 
 RESUME_MAX_CHARS = 12_000
 JD_MAX_CHARS = 12_000
@@ -21,16 +21,24 @@ NOTES_MAX_CHARS = 2_000
 EVIDENCE_MAX_ITEMS = 25
 EVIDENCE_SUMMARY_CHARS = 220
 
-_LLM_ERROR_PREFIXES = ("LLM error:", "AI features not configured.")
+# One LLM call per career job, below that job's timeout in web_api/jobs.py
+# (180 / 240 / 180 s) and without SDK retries, so a timed-out job does not
+# keep running and billing in the background.
+MATCH_LLM_TIMEOUT_SECONDS = 165.0
+TAILOR_LLM_TIMEOUT_SECONDS = 225.0
+STRUCTURE_LLM_TIMEOUT_SECONDS = 165.0
 _VERDICTS = ("match", "partial", "missing")
 _STRENGTH_RANK = {"high_trust": 0, "strong": 1, "medium": 2, "weak": 3}
 
 
 class CareerAIError(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, run_id: str = "") -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        # Gateway run behind the failure, so the AI exceptions panel shows
+        # one row instead of the run and its job.
+        self.run_id = run_id
 
 
 def llm_available() -> bool:
@@ -42,11 +50,28 @@ def _require_llm() -> None:
         raise CareerAIError("career_ai_unavailable", "未配置 LLM（LLM_API_KEY），AI 功能不可用。")
 
 
-def _chat(system: str, user: str, *, temperature: float) -> str:
-    raw = llm_client.chat(system, user, temperature=temperature, enable_thinking=False)
-    if raw.startswith(_LLM_ERROR_PREFIXES):
-        raise CareerAIError("career_ai_failed", raw)
-    return raw
+def _run(action: str, system: str, user: str, *, profile: str, timeout: float):
+    """Run one career action through the AI gateway (run log + exceptions)."""
+
+    from nblane.core.ai.gateway import run_ai_action
+
+    result = run_ai_action(
+        action,
+        {
+            "system": system,
+            "user": user,
+            "llm_timeout_seconds": timeout,
+            "llm_max_retries": 0,
+            "enable_thinking": False,
+        },
+        profile=profile or None,
+        require_review=False,
+    )
+    if not result.ok:
+        raise CareerAIError(
+            "career_ai_failed", friendly_error(result.error or result.content), run_id=result.run_id
+        )
+    return result
 
 
 def _clip(text: str, limit: int) -> str:
@@ -176,7 +201,8 @@ def analyze_match(
         parts.append(f"# 工作证据\n{_evidence_block(evidence)}")
     if str(notes or "").strip():
         parts.append(f"# 候选人补充说明\n{_clip(notes, NOTES_MAX_CHARS)}")
-    data = extract_json_value(_chat(_MATCH_SYSTEM, "\n\n".join(parts), temperature=0.2))
+    result = _run("career.match", _MATCH_SYSTEM, "\n\n".join(parts), profile=name, timeout=MATCH_LLM_TIMEOUT_SECONDS)
+    data = result.structured
     if not isinstance(data, dict):
         raise CareerAIError("career_ai_failed", "模型返回格式不正确，请重试。")
     requirements = []
@@ -278,7 +304,15 @@ def tailor_resume(
         parts.append(
             "# 当前定制稿（候选人可能手改过，保留其有意的改动）\n" + _clip(current_draft, RESUME_MAX_CHARS)
         )
-    markdown = _strip_fence(_chat(_TAILOR_SYSTEM, "\n\n".join(parts), temperature=0.3))
+    result = _run("career.tailor", _TAILOR_SYSTEM, "\n\n".join(parts), profile=name, timeout=TAILOR_LLM_TIMEOUT_SECONDS)
+    if any(warning.startswith("output_truncated") for warning in result.warnings):
+        # A cut-off resume would silently drop its last sections.
+        raise CareerAIError(
+            "career_ai_output_truncated",
+            "AI 输出被截断，定制简历不完整，没有采用。可在「设置 → AI 服务」调高输出上限后重试。",
+            run_id=result.run_id,
+        )
+    markdown = _strip_fence(result.content)
     if not markdown.lstrip().startswith("#"):
         raise CareerAIError("career_ai_failed", "模型没有返回简历正文，请重试。")
     return {"markdown": markdown.rstrip() + "\n"}
@@ -310,7 +344,10 @@ def structure_resume(name: str, text: str) -> dict[str, Any]:
     if len(clean) < 40:
         raise CareerAIError("invalid_import", "简历文本太短，无法识别。")
     _require_llm()
-    data = extract_json_value(_chat(_STRUCTURE_SYSTEM, _clip(clean, 20_000), temperature=0.0))
+    result = _run(
+        "career.structure", _STRUCTURE_SYSTEM, _clip(clean, 20_000), profile=name, timeout=STRUCTURE_LLM_TIMEOUT_SECONDS
+    )
+    data = result.structured
     if not isinstance(data, dict):
         raise CareerAIError("career_ai_failed", "模型返回格式不正确，请重试。")
     resume = resume_doc.normalize_resume(data, profile=name)

@@ -245,7 +245,16 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
 
 # Actions whose caller owns a hand-tuned prompt (ai_blog_prompts + editor
 # context). The gateway sends payload["system"] / payload["user"] unchanged.
-PASSTHROUGH_PROMPT_ACTIONS = frozenset({"content.rewrite", "content.meta", "content.social"})
+PASSTHROUGH_PROMPT_ACTIONS = frozenset(
+    {
+        "content.rewrite",
+        "content.meta",
+        "content.social",
+        "career.match",
+        "career.tailor",
+        "career.structure",
+    }
+)
 
 
 def prompt_for_action(

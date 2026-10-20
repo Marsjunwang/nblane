@@ -852,7 +852,7 @@ def _career_ai_call(fn: Callable[[], Any]) -> Any:
     try:
         return fn()
     except career_ai.CareerAIError as exc:
-        raise JobFailedError(exc.code, exc.message) from exc
+        raise JobFailedError(exc.code, exc.message, run_id=exc.run_id) from exc
 
 
 def _validate_career_pair(job_input: dict[str, Any]) -> dict[str, Any]:

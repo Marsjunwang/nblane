@@ -74,6 +74,9 @@ class TestAIGateway(unittest.TestCase):
                 "content.meta",
                 "content.social",
                 "content.image",
+                "career.match",
+                "career.tailor",
+                "career.structure",
             },
         )
 
