@@ -140,8 +140,16 @@ describe('MiniPage', () => {
     const titles = screen.getAllByRole('button', { name: /^标记完成：/ }).map((el) => el.getAttribute('aria-label'));
     expect(titles).toEqual(['标记完成：逾期的任务', '标记完成：写 VLA 复现']);
     expect(screen.getByTitle('已逾期')).toHaveTextContent('逾期');
-    expect(screen.getByText('已打卡')).toBeInTheDocument();
-    expect(screen.getByLabelText('连续 5 天')).toBeInTheDocument();
+    // Habits are icons in the header: done ones are marked, the rest check in.
+    expect(screen.getByRole('button', { name: '已打卡：Exercise' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打卡：Learning' })).toBeInTheDocument();
+  });
+
+  it('shows streak, plan and today tasks in the habit tooltip', async () => {
+    renderMini([], { todos: [] });
+    fireEvent.mouseEnter(await screen.findByRole('button', { name: '打卡：Learning' }));
+    expect(await screen.findByText('连续 5 天')).toBeInTheDocument();
+    expect(screen.getByText('今日：读一篇论文')).toBeInTheDocument();
   });
 
   it('expands a task and ticks a todo, keeping the expansion across reloads', async () => {
@@ -187,8 +195,7 @@ describe('MiniPage', () => {
   it('checks in against the single in-window plan and shows today tasks', async () => {
     const calls: Call[] = [];
     renderMini(calls, { todos: [] });
-    expect(await screen.findByText('今日：读一篇论文')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '打卡：Learning' }));
+    fireEvent.click(await screen.findByRole('button', { name: '打卡：Learning' }));
     await waitFor(() => expect(calls.some((call) => call.method === 'POST' && call.url.endsWith('/checkins'))).toBe(true));
     const post = calls.find((call) => call.method === 'POST' && call.url.endsWith('/checkins'));
     expect(post?.body).toMatchObject({ habit: 'study', plan_id: 'p_study' });
@@ -257,14 +264,6 @@ describe('MiniPage', () => {
     expect(screen.getByText('写 VLA 复现')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /已隐藏/ })).toBeNull();
     expect(JSON.parse(window.localStorage.getItem('nblane-mini-hidden:alice') ?? '[]')).toEqual([]);
-  });
-
-  it('collapses the habits section and remembers it', async () => {
-    renderMini([], { todos: [] });
-    expect(await screen.findByRole('button', { name: '打卡：Learning' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /日课 · 3/ }));
-    expect(screen.queryByRole('button', { name: '打卡：Learning' })).toBeNull();
-    expect(JSON.parse(window.localStorage.getItem('nblane-mini-habits:alice') ?? 'true')).toBe(false);
   });
 
   it('marks a Doing task done', async () => {

@@ -1,7 +1,7 @@
 import { ActionIcon, Anchor, Box, Button, Center, Checkbox, Group, Indicator, Loader, Menu, ScrollArea, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconAlertTriangle, IconCheck, IconChevronDown, IconChevronRight, IconExternalLink, IconEye, IconEyeOff, IconPlayerPlay, IconRefresh } from '@tabler/icons-react';
+import { IconAlertTriangle, IconBarbell, IconBook, IconCheck, IconChevronDown, IconChevronRight, IconExternalLink, IconEye, IconEyeOff, IconPlayerPlay, IconRefresh } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -59,7 +59,6 @@ export function MiniPage() {
   const [hidden, setHidden] = useLocalStorage<string[]>({ key: `nblane-mini-hidden:${name}`, defaultValue: [] });
   const [showHidden, setShowHidden] = useState(false);
   const [doingOpen, setDoingOpen] = useLocalStorage<boolean>({ key: `nblane-mini-doing:${name}`, defaultValue: true });
-  const [habitsOpen, setHabitsOpen] = useLocalStorage<boolean>({ key: `nblane-mini-habits:${name}`, defaultValue: true });
   // Same query as the main window's top-bar badge, polled every 2 minutes.
   const exceptions = useAIExceptions(name, MINI_EXCEPTIONS_POLL_MS);
   const exceptionCount = exceptions.data?.total ?? 0;
@@ -217,9 +216,86 @@ export function MiniPage() {
   return (
     <Stack gap={6} p={8} h="100vh" data-testid="mini-page">
       <Group justify="space-between" wrap="nowrap" gap={4}>
-        <Text size="xs" fw={600} truncate>
-          {name} · 今日
-        </Text>
+        <Group gap={4} wrap="nowrap" miw={0}>
+          <Text size="xs" fw={600} truncate>
+            {name}
+          </Text>
+          {board.isError ? (
+            <Tooltip label={`日课加载失败：${errorText(board.error)}`} withArrow>
+              <Text size="xs" c="red">日课!</Text>
+            </Tooltip>
+          ) : (
+            habits.map((habit) => {
+              const title = habit.title || habit.id;
+              const doneToday = (habit.week ?? []).some((day) => day.done && day.date === today);
+              const eligible = checkinPlansForHabit(activePlans, habit.id, today);
+              const dailyPlan = eligible.find(planHasDaily);
+              const todayTasks = dailyPlan ? planTodayTasks(dailyPlan) : null;
+              const pending = checkin.isPending && checkin.variables?.habit === habit.id;
+              const details = [
+                doneToday ? `${title} · 今日已打卡` : `${title} · 点击打卡`,
+                habit.streak > 0 ? `连续 ${habit.streak} 天` : '',
+                eligible.length === 1 ? planBadgeLabel(eligible[0]) : eligible.length > 1 ? '点击选择计入哪个计划' : '',
+                todayTasks ? (todayTasks.restDay ? '今日休息 / 自由安排' : `今日：${todayTasks.tasks.join('、')}`) : '',
+              ].filter(Boolean);
+              const icon = <HabitGlyph kind={habit.kind} title={title} />;
+              const tip = (
+                <Stack gap={0}>
+                  {details.map((line) => (
+                    <Text key={line} size="xs">
+                      {line}
+                    </Text>
+                  ))}
+                </Stack>
+              );
+              if (doneToday) {
+                return (
+                  <Tooltip key={habit.id} label={tip} withArrow>
+                    <ActionIcon variant="filled" color="teal" size="md" aria-label={`已打卡：${title}`} aria-disabled style={{ cursor: 'default' }}>
+                      {icon}
+                    </ActionIcon>
+                  </Tooltip>
+                );
+              }
+              if (eligible.length > 1) {
+                return (
+                  <Menu key={habit.id} position="bottom-start" withinPortal={false}>
+                    <Menu.Target>
+                      <Tooltip label={tip} withArrow>
+                        <ActionIcon variant="light" color="gray" size="md" loading={pending} aria-label={`打卡：${title}`}>
+                          {icon}
+                        </ActionIcon>
+                      </Tooltip>
+                    </Menu.Target>
+                    <Menu.Dropdown>
+                      <Menu.Label>{title} 计入哪个计划</Menu.Label>
+                      {eligible.map((plan) => (
+                        <Menu.Item key={plan.id} onClick={() => checkIn(habit.id, title, plan)}>
+                          {plan.title}
+                        </Menu.Item>
+                      ))}
+                      <Menu.Item onClick={() => checkIn(habit.id, title)}>不计入计划</Menu.Item>
+                    </Menu.Dropdown>
+                  </Menu>
+                );
+              }
+              return (
+                <Tooltip key={habit.id} label={tip} withArrow>
+                  <ActionIcon
+                    variant="light"
+                    color="gray"
+                    size="md"
+                    loading={pending}
+                    aria-label={`打卡：${title}`}
+                    onClick={() => checkIn(habit.id, title, eligible[0])}
+                  >
+                    {icon}
+                  </ActionIcon>
+                </Tooltip>
+              );
+            })
+          )}
+        </Group>
         <Group gap={2} wrap="nowrap">
           {(exceptionCount > 0 || exceptions.isError) && (
             <Tooltip label="AI 异常" withArrow>
@@ -256,7 +332,7 @@ export function MiniPage() {
       </Group>
 
 
-      <ScrollArea style={{ flex: 1 }} offsetScrollbars>
+      <ScrollArea style={{ flex: 1 }} type="never">
         <Stack gap={8}>
           <Box component="section" aria-labelledby="mini-doing">
             <SectionHeader id="mini-doing" open={doingOpen} onToggle={() => setDoingOpen(!doingOpen)}>
@@ -404,84 +480,6 @@ export function MiniPage() {
             </UnstyledButton>
           )}
 
-          <Box component="section" aria-labelledby="mini-habits">
-            <SectionHeader id="mini-habits" open={habitsOpen} onToggle={() => setHabitsOpen(!habitsOpen)}>
-              日课 · {habits.length}
-            </SectionHeader>
-            {habitsOpen &&
-              (board.isError ? (
-                <Text size="xs" c="red">日课加载失败：{errorText(board.error)}</Text>
-              ) : habits.length === 0 ? (
-                <Text size="xs" c="dimmed" mt={2}>还没有日课。</Text>
-              ) : (
-                <Stack gap={2} mt={2}>
-                  {habits.map((habit) => {
-                    const title = habit.title || habit.id;
-                    const doneToday = (habit.week ?? []).some((day) => day.done && day.date === today);
-                    const eligible = checkinPlansForHabit(activePlans, habit.id, today);
-                    const dailyPlan = eligible.find(planHasDaily);
-                    const todayTasks = dailyPlan ? planTodayTasks(dailyPlan) : null;
-                    const pending = checkin.isPending && checkin.variables?.habit === habit.id;
-                    return (
-                      <Box key={habit.id}>
-                        <Group gap={4} wrap="nowrap" justify="space-between" className="mini-row" pl={16}>
-                          <Group gap={4} wrap="nowrap" miw={0} style={{ flex: 1 }}>
-                            <Text size="xs" truncate style={{ flexShrink: 0, maxWidth: '45%' }}>
-                              {title}
-                            </Text>
-                            {habit.streak > 0 && (
-                              <Text size="xs" c="teal.4" aria-label={`连续 ${habit.streak} 天`} style={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
-                                {habit.streak} 天
-                              </Text>
-                            )}
-                            {eligible.length === 1 && (
-                              <Text size="xs" c="dimmed" truncate style={{ minWidth: 0 }}>
-                                {planBadgeLabel(eligible[0])}
-                              </Text>
-                            )}
-                          </Group>
-                          {doneToday ? (
-                            <Text size="xs" c="green" style={{ flexShrink: 0 }}>已打卡</Text>
-                          ) : eligible.length > 1 ? (
-                            <Menu position="bottom-end" withinPortal={false}>
-                              <Menu.Target>
-                                <Button size="compact-sm" variant="light" loading={pending} aria-label={`打卡：${title}`} rightSection={<IconChevronDown size={12} />}>
-                                  打卡
-                                </Button>
-                              </Menu.Target>
-                              <Menu.Dropdown>
-                                <Menu.Label>计入哪个计划</Menu.Label>
-                                {eligible.map((plan) => (
-                                  <Menu.Item key={plan.id} onClick={() => checkIn(habit.id, title, plan)}>
-                                    {plan.title}
-                                  </Menu.Item>
-                                ))}
-                                <Menu.Item onClick={() => checkIn(habit.id, title)}>不计入计划</Menu.Item>
-                              </Menu.Dropdown>
-                            </Menu>
-                          ) : (
-                            <Button
-                              size="compact-sm"
-                              variant="light"
-                              aria-label={`打卡：${title}`}
-                              loading={pending}
-                              onClick={() => checkIn(habit.id, title, eligible[0])}
-                            >
-                              打卡
-                            </Button>
-                          )}
-                        </Group>
-                        {todayTasks && (
-                          <Text size="xs" c="dimmed" truncate pl={16}>
-                            {todayTasks.restDay ? '今日休息 / 自由安排' : `今日：${todayTasks.tasks.join('、')}`}
-                          </Text>
-                        )}
-                      </Box>
-                    );
-                  })}
-                </Stack>
-              ))}
-          </Box>
         </Stack>
       </ScrollArea>
 
@@ -494,6 +492,18 @@ export function MiniPage() {
         pollMs={MINI_EXCEPTIONS_POLL_MS}
       />
     </Stack>
+  );
+}
+
+/** Small habit icon: by kind, else the habit's first character. */
+function HabitGlyph({ kind, title }: { kind?: string; title: string }) {
+  const clean = (kind ?? '').toLowerCase();
+  if (['health', 'exercise', 'fitness', 'sport'].includes(clean)) return <IconBarbell size={15} />;
+  if (['study', 'learning', 'reading', 'read'].includes(clean)) return <IconBook size={15} />;
+  return (
+    <Text size="xs" fw={700} lh={1}>
+      {[...title][0] ?? '?'}
+    </Text>
   );
 }
 
