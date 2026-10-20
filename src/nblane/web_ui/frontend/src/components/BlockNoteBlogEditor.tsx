@@ -9,13 +9,11 @@ import {
   getDefaultReactSlashMenuItems,
   getFormattingToolbarItems,
   SuggestionMenuController,
-  useComponentsContext,
   useCreateBlockNote,
 } from '@blocknote/react';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import { Alert, Textarea } from '@mantine/core';
-import { IconSparkles } from '@tabler/icons-react';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 
 import {
@@ -32,6 +30,8 @@ import '../blogBlocks/blocks.css';
 import './blogEditor.css';
 import { selectedImages, containsMedia } from './content/imageSelection';
 import type { SelectedImage, ImageTarget } from './content/imageTypes';
+import { AI_REWRITE_MENU } from './rewriteOperations';
+import { AIRewriteMenu } from './AIRewriteMenu';
 
 export type EditorBlocks = Array<Record<string, unknown>>;
 
@@ -72,13 +72,7 @@ export interface AIRewriteRequest {
   parts?: string[];
 }
 
-export const AI_REWRITE_MENU: Array<{ operation: string; label: string }> = [
-  { operation: 'polish', label: '润色' },
-  { operation: 'shorten', label: '精简' },
-  { operation: 'expand', label: '扩写' },
-  { operation: 'tone', label: '调整为专业语气' },
-  { operation: 'translate', label: '翻译' },
-];
+export { AI_REWRITE_MENU };
 
 export interface BlockNoteBlogEditorProps {
   /** Initial content. The editor is uncontrolled: remount (key) to reload. */
@@ -129,38 +123,6 @@ function topLevelBlockId(blocks: EditorBlocks, id: string): string {
   return hit ? String(hit.id) : id;
 }
 
-/** "AI" dropdown appended to BlockNote's formatting toolbar. */
-function AIRewriteMenu({ onPick, imagesOnly, mixed, textEnabled, imageEnabled }: { onPick: (operation: string) => void; imagesOnly: boolean; mixed: boolean; textEnabled: boolean; imageEnabled: boolean }) {
-  const Components = useComponentsContext();
-  if (!Components) return null;
-  const { Menu, Toolbar } = Components.Generic;
-  return (
-    <Menu.Root position="bottom-start">
-      <Menu.Trigger>
-        <Toolbar.Button
-          mainTooltip={imagesOnly ? "AI 修改图片" : "AI 改写选中文字"}
-          icon={<IconSparkles size={16} />}
-          label="AI"
-          className="nb-ai-toolbar-button"
-        >
-          AI
-        </Toolbar.Button>
-      </Menu.Trigger>
-      <Menu.Dropdown className="bn-menu-dropdown">
-        {imagesOnly ? <Menu.Item onClick={() => imageEnabled && onPick('image')}>
-          {imageEnabled ? '修改图片' : '修改图片（未配置图像服务）'}
-        </Menu.Item> : <>
-        {mixed && <Menu.Item>仅改写文字，保留图片</Menu.Item>}
-        {!textEnabled && <Menu.Item>未配置文字服务</Menu.Item>}
-        {AI_REWRITE_MENU.map((item) => (
-          <Menu.Item key={item.operation} onClick={() => textEnabled && onPick(item.operation)}>
-            {item.label}
-          </Menu.Item>
-        ))}</>}
-      </Menu.Dropdown>
-    </Menu.Root>
-  );
-}
 
 export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNoteBlogEditorProps>(
   function BlockNoteBlogEditor(

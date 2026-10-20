@@ -19,6 +19,17 @@ describe('AIMetaSuggestions', () => {
     expect(await screen.findByText('文章较长，建议依据提纲、开头和结尾生成。')).toBeInTheDocument();
   });
 
+  it('offers tag suggestions as keyboard-reachable buttons', async () => {
+    result.current = { titles: [], summaries: [], tags: ['VLA'], truncated: false };
+    const onApply = vi.fn();
+    renderWithProviders(<AIMetaSuggestions profile="alice" enabled draft={draft} onApply={onApply} />);
+    fireEvent.click(screen.getByRole('button', { name: '生成' }));
+    const tag = await screen.findByRole('button', { name: '添加标签 VLA' });
+    expect(tag.tagName).toBe('BUTTON');
+    fireEvent.click(tag);
+    expect(onApply).toHaveBeenCalledWith({ tags: ['VLA'] });
+  });
+
   it('passes a picked summary to onApply and shows no hint for short posts', async () => {
     result.current = { titles: [], summaries: ['新摘要'], tags: [], truncated: false };
     const onApply = vi.fn();

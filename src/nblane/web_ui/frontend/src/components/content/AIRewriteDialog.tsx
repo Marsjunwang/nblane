@@ -1,15 +1,15 @@
-import { Alert, Box, Button, Group, Loader, Modal, ScrollArea, SegmentedControl, Stack, Text, Textarea } from '@mantine/core';
+import { Alert, Box, Button, Group, Loader, Modal, ScrollArea, SegmentedControl, Stack, Text, Textarea, VisuallyHidden } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { IconCheck, IconCopy, IconRefresh } from '@tabler/icons-react';
 import DiffMatchPatch from 'diff-match-patch';
 import { useMemo } from 'react';
 
-export const REWRITE_LABELS: Record<string, string> = {
-  polish: '润色',
-  shorten: '精简',
-  expand: '扩写',
-  tone: '调整语气',
-  translate: '翻译',
-};
+import { AI_REWRITE_MENU } from '../rewriteOperations';
+
+/** Dialog titles follow the toolbar menu, so the two never disagree. */
+export const REWRITE_LABELS: Record<string, string> = Object.fromEntries(
+  AI_REWRITE_MENU.map((item) => [item.operation, item.label]),
+);
 
 const dmp = new DiffMatchPatch();
 
@@ -26,13 +26,18 @@ export function InlineDiff({ before, after }: { before: string; after: string })
         op === 0 ? (
           <span key={index}>{text}</span>
         ) : op < 0 ? (
-          <span key={index} style={{ color: 'var(--mantine-color-red-4)', textDecoration: 'line-through', opacity: 0.75 }}>
+          <del key={index} style={{ color: 'var(--mantine-color-red-4)', textDecoration: 'line-through', opacity: 0.75 }}>
+            <VisuallyHidden>删除：</VisuallyHidden>
             {text}
-          </span>
+          </del>
         ) : (
-          <span key={index} style={{ background: 'rgba(64, 192, 87, 0.18)', color: 'var(--mantine-color-green-3)' }}>
+          <ins
+            key={index}
+            style={{ background: 'rgba(64, 192, 87, 0.18)', color: 'var(--mantine-color-green-3)', textDecoration: 'underline' }}
+          >
+            <VisuallyHidden>新增：</VisuallyHidden>
             {text}
-          </span>
+          </ins>
         ),
       )}
     </Text>
@@ -79,19 +84,23 @@ export function AIRewriteDialog({
   onCopy?: () => void;
 }) {
   const label = state ? REWRITE_LABELS[state.operation] ?? state.operation : '';
+  // On a phone the xl dialog pushed 接受并替换 off screen: go full screen with
+  // a scrolling body and a footer that stays put.
+  const mobile = useMediaQuery('(max-width: 48em)') ?? false;
   return (
     <Modal
       opened={state !== null}
       onClose={onClose}
       title={`AI ${label}`}
       size="xl"
-      centered
+      centered={!mobile}
+      fullScreen={mobile}
       data-testid="content-ai-rewrite"
     >
       {state && (
         <Stack gap="md">
           {state.status === 'running' && (
-            <Group gap="xs" py="lg" justify="center">
+            <Group gap="xs" py="lg" justify="center" role="status" aria-live="polite">
               <Loader size="sm" />
               <Text size="sm" c="dimmed">
                 {state.progress || 'AI 正在处理…'}
@@ -119,14 +128,14 @@ export function AIRewriteDialog({
                   ]}
                 />
               </Group>
-              {state.parts ? <Stack>
+              {state.parts ? <ScrollArea.Autosize mah={mobile ? 'calc(100dvh - 220px)' : '55vh'}><Stack>
                 <Text size="xs" c="dimmed">仅改写文字；图片及顺序保持不变。各文字区域分别确认。</Text>
                 {state.parts.map((part, index) => <Box key={index}>
                   <Text size="xs" c="dimmed">文字区域 {index + 1}</Text>
                   {view === 'diff' ? <InlineDiff before={state.originals?.[index] ?? ''} after={part} /> : <Textarea aria-label={`AI 候选区域 ${index + 1}`} value={part} onChange={(event) => onEditPart?.(index, event.currentTarget.value)} autosize minRows={2} />}
                 </Box>)}
-              </Stack> : view === 'diff' ? (
-                <ScrollArea.Autosize mah="55vh">
+              </Stack></ScrollArea.Autosize> : view === 'diff' ? (
+                <ScrollArea.Autosize mah={mobile ? 'calc(100dvh - 220px)' : '55vh'}>
                   <Box p="sm" style={{ border: '1px solid var(--mantine-color-dark-5)', borderRadius: 8 }}>
                     <InlineDiff before={state.original} after={state.text} />
                   </Box>
@@ -148,7 +157,15 @@ export function AIRewriteDialog({
               {state.acceptError}
             </Alert>
           )}
-          <Group justify="space-between">
+          <Group
+            justify="space-between"
+            gap="xs"
+            style={
+              mobile
+                ? { position: 'sticky', bottom: 0, background: 'var(--mantine-color-body)', paddingBlock: 8, zIndex: 1 }
+                : undefined
+            }
+          >
             <Button
               variant="subtle"
               leftSection={<IconRefresh size={14} />}
@@ -157,7 +174,7 @@ export function AIRewriteDialog({
             >
               重新生成
             </Button>
-            <Group gap="xs">
+            <Group gap="xs" wrap="wrap" justify="flex-end">
               {state.status === 'done' && onCopy && (
                 <Button variant="default" leftSection={<IconCopy size={14} />} onClick={onCopy} disabled={!state.text?.trim()}>
                   复制候选

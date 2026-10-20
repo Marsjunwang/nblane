@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Group, Loader, Paper, Stack, Text, UnstyledButton } from '@mantine/core';
+import { Alert, Button, Group, Loader, Paper, Stack, Text, UnstyledButton } from '@mantine/core';
 import { IconSparkles } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -118,15 +118,17 @@ export function AIMetaSuggestions({
                 </Text>
                 <Group gap={6}>
                   {newTags.map((tag) => (
-                    <Badge
+                    <Button
                       key={tag}
+                      size="compact-xs"
                       variant="outline"
-                      style={{ cursor: 'pointer', textTransform: 'none' }}
+                      radius="xl"
+                      aria-label={`添加标签 ${tag}`}
                       onClick={() => onApply({ tags: [...draft.tags, tag] })}
                       data-testid="content-ai-tag"
                     >
                       + {tag}
-                    </Badge>
+                    </Button>
                   ))}
                 </Group>
               </Stack>
