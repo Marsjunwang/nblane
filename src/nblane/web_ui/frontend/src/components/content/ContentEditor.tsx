@@ -102,6 +102,8 @@ import { ImagePreview } from './ImagePreview';
 import { useImageRuns } from './imageApi';
 import type { ImageEditRequest, SelectedImage } from './imageTypes';
 import { AICoverGenerator } from './AICoverGenerator';
+import { changedFields, previousOf, undoPatch, type AIPatch } from './aiUndo';
+import { showAIUndo } from './aiUndoNotice';
 import { AIMetaSuggestions } from './AIMetaSuggestions';
 import { AIRewriteDialog, type RewriteState } from './AIRewriteDialog';
 import { runContentJob } from './contentJobs';
@@ -243,6 +245,7 @@ function PostSettings({
   aiText,
   aiCover,
   onEdit,
+  onApplyAI,
   onUpload,
   onInsert,
   onImageOpen,
@@ -256,6 +259,8 @@ function PostSettings({
   aiText: boolean;
   aiCover: boolean;
   onEdit: (patch: Partial<PostDraft>) => void;
+  /** AI-suggested field values: applied with an undo notification. */
+  onApplyAI: (patch: AIPatch) => void;
   onUpload: (file: File | null) => void;
   onInsert: (item: ContentMedia) => void;
   onImageOpen: (request: ImageEditRequest | null) => void;
@@ -282,7 +287,7 @@ function PostSettings({
       </Tabs.List>
       <Tabs.Panel value="post" pt="md">
         <Stack gap="md">
-          <AIMetaSuggestions profile={profile} enabled={aiText} draft={draft} onApply={onEdit} />
+          <AIMetaSuggestions profile={profile} enabled={aiText} draft={draft} onApply={onApplyAI} />
           <Textarea
             label="摘要"
             description="发布必填；显示在博客列表和分享卡片上"
@@ -373,6 +378,7 @@ function PublishDialog({
   onClose,
   onRecheck,
   onEditSummary,
+  onApplySummary,
   onConfirm,
 }: {
   opened: boolean;
@@ -387,6 +393,7 @@ function PublishDialog({
   onClose: () => void;
   onRecheck: () => void;
   onEditSummary: (value: string) => void;
+  onApplySummary: (value: string) => void;
   onConfirm: () => void;
 }) {
   const errors = result?.errors ?? [];
@@ -445,7 +452,7 @@ function PublishDialog({
             enabled={aiText}
             draft={draft}
             compact
-            onApply={(patch) => patch.summary && onEditSummary(patch.summary)}
+            onApply={(patch) => patch.summary && onApplySummary(patch.summary)}
           />
         )}
         <Group justify="space-between">
@@ -731,6 +738,27 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [profile, runSave, slug],
+  );
+
+  // AI suggestions and AI covers overwrite fields the writer may have typed;
+  // apply at once, but offer 撤销 (restores only fields still holding the AI
+  // value, so later hand edits survive).
+  const applyAI = useCallback(
+    (patch: AIPatch) => {
+      const current = draftRef.current;
+      if (!current) return;
+      const fields = changedFields(patch, current);
+      if (fields.length === 0) return;
+      const previous = previousOf(patch, current);
+      edit(patch);
+      showAIUndo(fields, () => {
+        const now = draftRef.current;
+        if (!now) return;
+        const restore = undoPatch(previous, patch, now);
+        if (Object.keys(restore).length > 0) edit(restore);
+      });
+    },
+    [edit],
   );
 
   // Last-chance save when the tab closes or the user navigates elsewhere in
@@ -1091,6 +1119,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
       aiText={aiText}
       aiCover={aiCover}
       onEdit={edit}
+      onApplyAI={applyAI}
       onImageOpen={openImages}
       onUpload={uploadFromPanel}
       onInsert={(item) => insertSnippet(mediaSnippet(item.kind, item.path, item.name))}
@@ -1514,6 +1543,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
         onClose={() => setPublishOpen(false)}
         onRecheck={runCheck}
         onEditSummary={(value) => edit({ summary: value })}
+        onApplySummary={(value) => applyAI({ summary: value })}
         onConfirm={() => void confirmPublish()}
       />
 
@@ -1545,7 +1575,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
           if (target.kind === 'block') return editorRef.current?.replaceImage(target, path) ?? false;
           if (target.kind === 'cover') {
             if ((draftRef.current?.cover ?? '') !== (target.source ?? '')) return false;
-            edit({ cover: path });
+            applyAI({ cover: path });
           }
           return true;
         }} />

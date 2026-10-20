@@ -74,6 +74,9 @@ export function ImageWorkspace({ profile, slug, opened, request, enabled, media,
     } catch (err) { fail(err); } finally { setBusy(false); }
   };
   const discard = async (run: ImageRun, candidatePath = '') => {
+    // A discarded candidate is deleted from disk; a misclick would lose a
+    // paid generation. Failed-run records carry no image, so no prompt.
+    if (candidatePath && !window.confirm('丢弃这张候选图？丢弃后无法找回（已保存到媒体库的不受影响）。')) return;
     setBusy(true); setError('');
     try { await apiPost(`${imageApiPath(profile)}/discard`, { slug, run_id: run.id, candidate_path: candidatePath }); await refresh(); }
     catch (err) { fail(err); } finally { setBusy(false); }
