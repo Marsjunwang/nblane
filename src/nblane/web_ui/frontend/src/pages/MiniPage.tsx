@@ -1,7 +1,7 @@
 import { ActionIcon, Anchor, Badge, Box, Button, Center, Checkbox, Group, Indicator, Loader, Menu, ScrollArea, Stack, Text, TextInput, Tooltip, UnstyledButton } from '@mantine/core';
 import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconAlertTriangle, IconCheck, IconChevronDown, IconChevronRight, IconExternalLink, IconPlayerPlay, IconPlus, IconRefresh } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCheck, IconChevronDown, IconChevronRight, IconExternalLink, IconEye, IconEyeOff, IconPlayerPlay, IconPlus, IconRefresh } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -55,6 +55,12 @@ export function MiniPage() {
   const moveCard = useMoveKanbanCard(name);
   const [queueOpen, setQueueOpen] = useLocalStorage<boolean>({ key: `nblane-mini-queue:${name}`, defaultValue: false });
   const [draft, setDraft] = useState('');
+  // Hiding is local to this window (kept per profile in the browser); the
+  // card stays on the kanban untouched.
+  const [hidden, setHidden] = useLocalStorage<string[]>({ key: `nblane-mini-hidden:${name}`, defaultValue: [] });
+  const [showHidden, setShowHidden] = useState(false);
+  const [doingOpen, setDoingOpen] = useLocalStorage<boolean>({ key: `nblane-mini-doing:${name}`, defaultValue: true });
+  const [habitsOpen, setHabitsOpen] = useLocalStorage<boolean>({ key: `nblane-mini-habits:${name}`, defaultValue: true });
   // Same query as the main window's top-bar badge, polled every 2 minutes.
   const exceptions = useAIExceptions(name, MINI_EXCEPTIONS_POLL_MS);
   const exceptionCount = exceptions.data?.total ?? 0;
@@ -189,13 +195,40 @@ export function MiniPage() {
       },
     );
 
+  const isHidden = (cardRef: string) => hidden.includes(cardRef);
+  const toggleHidden = (cardRef: string) =>
+    setHidden((current) => (current.includes(cardRef) ? current.filter((ref) => ref !== cardRef) : [...current, cardRef]));
+  const hiddenCount = [...doing, ...queue].filter((task) => isHidden(cardRefOf(task))).length;
+  const shownDoing = doing.filter((task) => showHidden || !isHidden(cardRefOf(task)));
+  const shownQueue = queue.filter((task) => showHidden || !isHidden(cardRefOf(task)));
+
+  const hideButton = (cardRef: string, title: string) => {
+    const off = isHidden(cardRef);
+    return (
+      <Tooltip label={off ? '在小窗显示' : '在小窗隐藏（看板不受影响）'} withArrow>
+        <ActionIcon variant="subtle" color="gray" size="xs" aria-label={`${off ? '取消隐藏' : '隐藏'}：${title}`} onClick={() => toggleHidden(cardRef)}>
+          {off ? <IconEye size={12} /> : <IconEyeOff size={12} />}
+        </ActionIcon>
+      </Tooltip>
+    );
+  };
+
+  const dueBadge = (plannedEnd: string | null | undefined) => {
+    const due = dueState(plannedEnd, today);
+    return due ? (
+      <Badge size="xs" color={due === 'overdue' ? 'red' : 'orange'} variant="light" style={{ flexShrink: 0 }}>
+        {DUE_LABEL[due]}
+      </Badge>
+    ) : null;
+  };
+
   return (
-    <Stack gap="sm" p="sm" h="100vh" data-testid="mini-page">
-      <Group justify="space-between" wrap="nowrap">
-        <Text size="sm" fw={600} truncate>
+    <Stack gap={6} p={8} h="100vh" data-testid="mini-page">
+      <Group justify="space-between" wrap="nowrap" gap={4}>
+        <Text size="xs" fw={600} truncate>
           {name} · 今日
         </Text>
-        <Group gap={4} wrap="nowrap">
+        <Group gap={2} wrap="nowrap">
           {(exceptionCount > 0 || exceptions.isError) && (
             <Tooltip label="AI 异常" withArrow>
               <Indicator
@@ -222,7 +255,7 @@ export function MiniPage() {
               <IconRefresh size={14} />
             </ActionIcon>
           </Tooltip>
-          <Tooltip label="在完整页面打开" withArrow>
+          <Tooltip label="在完整页面打开（编辑任务、增删清单、拖动排序）" withArrow>
             <ActionIcon component="a" href={fullHref} target="nblane-main" variant="subtle" size="sm" aria-label="在完整页面打开">
               <IconExternalLink size={14} />
             </ActionIcon>
@@ -247,127 +280,116 @@ export function MiniPage() {
       />
 
       <ScrollArea style={{ flex: 1 }} offsetScrollbars>
-        <Stack gap="md">
+        <Stack gap={8}>
           <Box component="section" aria-labelledby="mini-doing">
-            <Text id="mini-doing" size="xs" c="dimmed" mb={6}>
-              进行中 {doing.length > 0 && `· ${doing.length}`}
-            </Text>
-            {kanban.isError ? (
-              <Text size="xs" c="red">看板加载失败：{errorText(kanban.error)}</Text>
-            ) : doing.length === 0 ? (
-              <Text size="xs" c="dimmed">Doing 里没有任务。</Text>
-            ) : (
-              <Stack gap={8}>
-                {doing.map((task) => {
-                  const cardRef = cardRefOf(task);
-                  const todos = todosOf(cardRef);
-                  const doneCount = todos.filter((todo) => todo.done).length;
-                  const allDone = todos.length > 0 && doneCount === todos.length;
-                  const open = expanded.includes(cardRef);
-                  const due = dueState(task.planned_end, today);
-                  const subtasks = task.subtasks ?? [];
-                  return (
-                    <Box key={cardRef}>
-                      <Group gap="xs" wrap="nowrap" justify="space-between" align="flex-start">
-                        <UnstyledButton
-                          onClick={() => toggleExpanded(cardRef)}
-                          aria-expanded={todos.length > 0 || subtasks.length > 0 ? open : undefined}
-                          aria-label={`${open ? '收起' : '展开'}清单：${task.title}`}
-                          style={{ flex: 1, minWidth: 0 }}
-                        >
-                          <Group gap={4} wrap="nowrap" align="flex-start">
-                            {todos.length > 0 || subtasks.length > 0 ? (
-                              open ? <IconChevronDown size={14} style={{ marginTop: 3, flexShrink: 0 }} /> : <IconChevronRight size={14} style={{ marginTop: 3, flexShrink: 0 }} />
-                            ) : (
-                              <Box w={14} style={{ flexShrink: 0 }} />
-                            )}
-                            <Text size="sm" lineClamp={2}>
-                              {task.title}
-                            </Text>
-                          </Group>
-                          <Group gap={4} pl={18} mt={2}>
-                            {due && (
-                              <Badge size="xs" color={due === 'overdue' ? 'red' : 'orange'} variant="light">
-                                {DUE_LABEL[due]}
-                              </Badge>
-                            )}
-                            {todos.length > 0 && (
-                              <Text size="xs" c={allDone ? 'green' : 'dimmed'}>
-                                清单 {doneCount}/{todos.length}
-                              </Text>
-                            )}
-                          </Group>
-                        </UnstyledButton>
-                        <Tooltip label={allDone ? '清单已完成，标记任务完成' : '标记完成'} withArrow>
-                          <ActionIcon
-                            variant={allDone ? 'filled' : 'light'}
-                            color="green"
-                            size="sm"
-                            aria-label={`标记完成：${task.title}`}
-                            loading={done.isPending && done.variables?.cardRef === cardRef}
-                            onClick={() => markDone(cardRef, task.title)}
+            <SectionHeader id="mini-doing" open={doingOpen} onToggle={() => setDoingOpen(!doingOpen)}>
+              进行中 · {shownDoing.length}
+            </SectionHeader>
+            {doingOpen &&
+              (kanban.isError ? (
+                <Text size="xs" c="red">看板加载失败：{errorText(kanban.error)}</Text>
+              ) : shownDoing.length === 0 ? (
+                <Text size="xs" c="dimmed" mt={2}>
+                  {doing.length ? '进行中的任务都已隐藏。' : 'Doing 里没有任务。'}
+                </Text>
+              ) : (
+                <Stack gap={2} mt={2}>
+                  {shownDoing.map((task) => {
+                    const cardRef = cardRefOf(task);
+                    const todos = todosOf(cardRef);
+                    const doneCount = todos.filter((todo) => todo.done).length;
+                    const allDone = todos.length > 0 && doneCount === todos.length;
+                    const open = expanded.includes(cardRef);
+                    const subtasks = task.subtasks ?? [];
+                    const expandable = todos.length > 0 || subtasks.length > 0;
+                    return (
+                      <Box key={cardRef} style={{ opacity: isHidden(cardRef) ? 0.5 : 1 }}>
+                        <Group gap={2} wrap="nowrap">
+                          <UnstyledButton
+                            onClick={() => toggleExpanded(cardRef)}
+                            aria-expanded={expandable ? open : undefined}
+                            aria-label={`${open ? '收起' : '展开'}清单：${task.title}`}
+                            style={{ flex: 1, minWidth: 0 }}
                           >
-                            <IconCheck size={14} />
-                          </ActionIcon>
-                        </Tooltip>
-                      </Group>
-                      {open && (
-                        <Stack gap={4} pl={18} mt={6}>
-                          {todos.map((todo, index) => (
-                            <Checkbox
-                              key={`${index}-${todo.text}`}
+                            <Group gap={4} wrap="nowrap">
+                              {expandable ? (
+                                open ? <IconChevronDown size={12} style={{ flexShrink: 0 }} /> : <IconChevronRight size={12} style={{ flexShrink: 0 }} />
+                              ) : (
+                                <Box w={12} style={{ flexShrink: 0 }} />
+                              )}
+                              <Text size="xs" truncate title={task.title} style={{ flex: 1, minWidth: 0 }}>
+                                {task.title}
+                              </Text>
+                              {dueBadge(task.planned_end)}
+                              {todos.length > 0 && (
+                                <Text size="xs" c={allDone ? 'green' : 'dimmed'} style={{ flexShrink: 0 }}>
+                                  清单 {doneCount}/{todos.length}
+                                </Text>
+                              )}
+                            </Group>
+                          </UnstyledButton>
+                          {hideButton(cardRef, task.title)}
+                          <Tooltip label={allDone ? '清单已完成，标记任务完成' : '标记完成'} withArrow>
+                            <ActionIcon
+                              variant={allDone ? 'filled' : 'light'}
+                              color="green"
                               size="xs"
-                              label={todo.text}
-                              checked={todo.done}
-                              onChange={() => void toggleTodo(cardRef, index)}
-                              styles={{ label: { textDecoration: todo.done ? 'line-through' : undefined, opacity: todo.done ? 0.6 : 1 } }}
-                            />
-                          ))}
-                          {subtasks.map((subtask, index) => (
-                            <Text key={`sub-${index}`} size="xs" c="dimmed" td={subtask.done ? 'line-through' : undefined}>
-                              子任务：{subtask.title}
-                            </Text>
-                          ))}
-                        </Stack>
-                      )}
-                    </Box>
-                  );
-                })}
-              </Stack>
-            )}
+                              aria-label={`标记完成：${task.title}`}
+                              loading={done.isPending && done.variables?.cardRef === cardRef}
+                              onClick={() => markDone(cardRef, task.title)}
+                            >
+                              <IconCheck size={12} />
+                            </ActionIcon>
+                          </Tooltip>
+                        </Group>
+                        {open && (
+                          <Stack gap={2} pl={16} mt={2} mb={4}>
+                            {todos.map((todo, index) => (
+                              <Checkbox
+                                key={`${index}-${todo.text}`}
+                                size="xs"
+                                label={todo.text}
+                                checked={todo.done}
+                                onChange={() => void toggleTodo(cardRef, index)}
+                                styles={{ label: { textDecoration: todo.done ? 'line-through' : undefined, opacity: todo.done ? 0.6 : 1 } }}
+                              />
+                            ))}
+                            {subtasks.map((subtask, index) => (
+                              <Text key={`sub-${index}`} size="xs" c="dimmed" td={subtask.done ? 'line-through' : undefined}>
+                                子任务：{subtask.title}
+                              </Text>
+                            ))}
+                          </Stack>
+                        )}
+                      </Box>
+                    );
+                  })}
+                </Stack>
+              ))}
           </Box>
 
           <Box component="section" aria-labelledby="mini-queue">
-            <UnstyledButton id="mini-queue" onClick={() => setQueueOpen(!queueOpen)} aria-expanded={queueOpen}>
-              <Group gap={4} wrap="nowrap">
-                {queueOpen ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
-                <Text size="xs" c="dimmed">
-                  接下来 · Queue {queue.length}
-                </Text>
-              </Group>
-            </UnstyledButton>
+            <SectionHeader id="mini-queue" open={queueOpen} onToggle={() => setQueueOpen(!queueOpen)}>
+              接下来 · Queue {shownQueue.length}
+            </SectionHeader>
             {queueOpen &&
-              (queue.length === 0 ? (
-                <Text size="xs" c="dimmed" mt={6}>
-                  Queue 里没有任务。
+              (shownQueue.length === 0 ? (
+                <Text size="xs" c="dimmed" mt={2}>
+                  {queue.length ? 'Queue 里的任务都已隐藏。' : 'Queue 里没有任务。'}
                 </Text>
               ) : (
-                <Stack gap={6} mt={6}>
-                  {queue.slice(0, QUEUE_PREVIEW).map((task) => {
+                <Stack gap={2} mt={2}>
+                  {shownQueue.slice(0, QUEUE_PREVIEW).map((task) => {
                     const cardRef = cardRefOf(task);
-                    const due = dueState(task.planned_end, today);
                     return (
-                      <Group key={cardRef} gap="xs" wrap="nowrap" justify="space-between">
-                        <Group gap={6} wrap="nowrap" miw={0} style={{ flex: 1 }}>
-                          <Text size="sm" truncate>
+                      <Group key={cardRef} gap={2} wrap="nowrap" style={{ opacity: isHidden(cardRef) ? 0.5 : 1 }}>
+                        <Group gap={4} wrap="nowrap" miw={0} pl={16} style={{ flex: 1 }}>
+                          <Text size="xs" truncate title={task.title} style={{ flex: 1, minWidth: 0 }}>
                             {task.title}
                           </Text>
-                          {due && (
-                            <Badge size="xs" color={due === 'overdue' ? 'red' : 'orange'} variant="light">
-                              {DUE_LABEL[due]}
-                            </Badge>
-                          )}
+                          {dueBadge(task.planned_end)}
                         </Group>
+                        {hideButton(cardRef, task.title)}
                         <Button
                           size="compact-xs"
                           variant="light"
@@ -381,98 +403,104 @@ export function MiniPage() {
                       </Group>
                     );
                   })}
-                  {queue.length > QUEUE_PREVIEW && (
-                    <Anchor href={fullHref} target="nblane-main" size="xs" c="dimmed">
-                      还有 {queue.length - QUEUE_PREVIEW} 条，在项目页查看
+                  {shownQueue.length > QUEUE_PREVIEW && (
+                    <Anchor href={fullHref} target="nblane-main" size="xs" c="dimmed" pl={16}>
+                      还有 {shownQueue.length - QUEUE_PREVIEW} 条，在项目页查看
                     </Anchor>
                   )}
                 </Stack>
               ))}
           </Box>
 
+          {hiddenCount > 0 && (
+            <UnstyledButton onClick={() => setShowHidden(!showHidden)} aria-pressed={showHidden}>
+              <Text size="xs" c="dimmed">
+                已隐藏 {hiddenCount} 条 · {showHidden ? '收起' : '显示'}
+              </Text>
+            </UnstyledButton>
+          )}
+
           <Box component="section" aria-labelledby="mini-habits">
-            <Text id="mini-habits" size="xs" c="dimmed" mb={6}>
-              日课
-            </Text>
-            {board.isError ? (
-              <Text size="xs" c="red">日课加载失败：{errorText(board.error)}</Text>
-            ) : habits.length === 0 ? (
-              <Text size="xs" c="dimmed">还没有日课。</Text>
-            ) : (
-              <Stack gap={8}>
-                {habits.map((habit) => {
-                  const title = habit.title || habit.id;
-                  const doneToday = (habit.week ?? []).some((day) => day.done && day.date === today);
-                  const eligible = checkinPlansForHabit(activePlans, habit.id, today);
-                  const dailyPlan = eligible.find(planHasDaily);
-                  const todayTasks = dailyPlan ? planTodayTasks(dailyPlan) : null;
-                  const pending = checkin.isPending && checkin.variables?.habit === habit.id;
-                  return (
-                    <Box key={habit.id}>
-                      <Group gap="xs" wrap="nowrap" justify="space-between">
-                        <Group gap={6} wrap="nowrap" miw={0}>
-                          <Text size="sm" truncate>
-                            {title}
-                          </Text>
-                          {habit.streak > 0 && (
-                            <Badge size="xs" variant="light" aria-label={`连续 ${habit.streak} 天`}>
-                              {habit.streak} 天
-                            </Badge>
+            <SectionHeader id="mini-habits" open={habitsOpen} onToggle={() => setHabitsOpen(!habitsOpen)}>
+              日课 · {habits.length}
+            </SectionHeader>
+            {habitsOpen &&
+              (board.isError ? (
+                <Text size="xs" c="red">日课加载失败：{errorText(board.error)}</Text>
+              ) : habits.length === 0 ? (
+                <Text size="xs" c="dimmed" mt={2}>还没有日课。</Text>
+              ) : (
+                <Stack gap={2} mt={2}>
+                  {habits.map((habit) => {
+                    const title = habit.title || habit.id;
+                    const doneToday = (habit.week ?? []).some((day) => day.done && day.date === today);
+                    const eligible = checkinPlansForHabit(activePlans, habit.id, today);
+                    const dailyPlan = eligible.find(planHasDaily);
+                    const todayTasks = dailyPlan ? planTodayTasks(dailyPlan) : null;
+                    const pending = checkin.isPending && checkin.variables?.habit === habit.id;
+                    return (
+                      <Box key={habit.id} pl={16}>
+                        <Group gap={4} wrap="nowrap" justify="space-between">
+                          <Group gap={4} wrap="nowrap" miw={0} style={{ flex: 1 }}>
+                            <Text size="xs" truncate style={{ flexShrink: 0, maxWidth: '45%' }}>
+                              {title}
+                            </Text>
+                            {habit.streak > 0 && (
+                              <Badge size="xs" variant="light" aria-label={`连续 ${habit.streak} 天`} style={{ flexShrink: 0 }}>
+                                {habit.streak} 天
+                              </Badge>
+                            )}
+                            {eligible.length === 1 && (
+                              <Text size="xs" c="dimmed" truncate style={{ minWidth: 0 }}>
+                                {planBadgeLabel(eligible[0])}
+                              </Text>
+                            )}
+                          </Group>
+                          {doneToday ? (
+                            <Text size="xs" c="green" style={{ flexShrink: 0 }}>已打卡</Text>
+                          ) : eligible.length > 1 ? (
+                            <Menu position="bottom-end" withinPortal={false}>
+                              <Menu.Target>
+                                <Button size="compact-xs" variant="light" loading={pending} aria-label={`打卡：${title}`} rightSection={<IconChevronDown size={12} />}>
+                                  打卡
+                                </Button>
+                              </Menu.Target>
+                              <Menu.Dropdown>
+                                <Menu.Label>计入哪个计划</Menu.Label>
+                                {eligible.map((plan) => (
+                                  <Menu.Item key={plan.id} onClick={() => checkIn(habit.id, title, plan)}>
+                                    {plan.title}
+                                  </Menu.Item>
+                                ))}
+                                <Menu.Item onClick={() => checkIn(habit.id, title)}>不计入计划</Menu.Item>
+                              </Menu.Dropdown>
+                            </Menu>
+                          ) : (
+                            <Button
+                              size="compact-xs"
+                              variant="light"
+                              aria-label={`打卡：${title}`}
+                              loading={pending}
+                              onClick={() => checkIn(habit.id, title, eligible[0])}
+                            >
+                              打卡
+                            </Button>
                           )}
                         </Group>
-                        {doneToday ? (
-                          <Text size="xs" c="green">已打卡</Text>
-                        ) : eligible.length > 1 ? (
-                          <Menu position="bottom-end" withinPortal={false}>
-                            <Menu.Target>
-                              <Button size="compact-xs" variant="light" loading={pending} aria-label={`打卡：${title}`} rightSection={<IconChevronDown size={12} />}>
-                                打卡
-                              </Button>
-                            </Menu.Target>
-                            <Menu.Dropdown>
-                              <Menu.Label>计入哪个计划</Menu.Label>
-                              {eligible.map((plan) => (
-                                <Menu.Item key={plan.id} onClick={() => checkIn(habit.id, title, plan)}>
-                                  {plan.title}
-                                </Menu.Item>
-                              ))}
-                              <Menu.Item onClick={() => checkIn(habit.id, title)}>不计入计划</Menu.Item>
-                            </Menu.Dropdown>
-                          </Menu>
-                        ) : (
-                          <Button
-                            size="compact-xs"
-                            variant="light"
-                            aria-label={`打卡：${title}`}
-                            loading={pending}
-                            onClick={() => checkIn(habit.id, title, eligible[0])}
-                          >
-                            打卡
-                          </Button>
+                        {todayTasks && (
+                          <Text size="xs" c="dimmed" truncate>
+                            {todayTasks.restDay ? '今日休息 / 自由安排' : `今日：${todayTasks.tasks.join('、')}`}
+                          </Text>
                         )}
-                      </Group>
-                      {eligible.length === 1 && (
-                        <Text size="xs" c="dimmed" mt={2}>
-                          {planBadgeLabel(eligible[0])}
-                        </Text>
-                      )}
-                      {todayTasks && (
-                        <Text size="xs" c="dimmed" mt={2}>
-                          {todayTasks.restDay ? '今日休息 / 自由安排' : `今日：${todayTasks.tasks.join('、')}`}
-                        </Text>
-                      )}
-                    </Box>
-                  );
-                })}
-              </Stack>
-            )}
+                      </Box>
+                    );
+                  })}
+                </Stack>
+              ))}
           </Box>
         </Stack>
       </ScrollArea>
 
-      <Anchor href={fullHref} target="nblane-main" size="xs" c="dimmed">
-        编辑任务、增删清单、拖动排序请在项目页进行
-      </Anchor>
       <AIExceptionDrawer
         profile={name}
         opened={exceptionsOpened}
@@ -482,6 +510,20 @@ export function MiniPage() {
         pollMs={MINI_EXCEPTIONS_POLL_MS}
       />
     </Stack>
+  );
+}
+
+/** Collapsible section title; the open state is remembered per profile. */
+function SectionHeader({ id, open, onToggle, children }: { id: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return (
+    <UnstyledButton id={id} onClick={onToggle} aria-expanded={open}>
+      <Group gap={4} wrap="nowrap">
+        {open ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+        <Text size="xs" c="dimmed" fw={600}>
+          {children}
+        </Text>
+      </Group>
+    </UnstyledButton>
   );
 }
 

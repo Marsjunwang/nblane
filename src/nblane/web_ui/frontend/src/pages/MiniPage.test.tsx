@@ -271,6 +271,31 @@ describe('MiniPage', () => {
     expect(link).toHaveAttribute('target', 'nblane-main');
   });
 
+  it('hides a task in the mini window only, and can show it again', async () => {
+    const calls: Call[] = [];
+    renderMini(calls, { todos: [] });
+    fireEvent.click(await screen.findByRole('button', { name: '隐藏：写 VLA 复现' }));
+    expect(screen.queryByText('写 VLA 复现')).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem('nblane-mini-hidden:alice') ?? '[]')).toEqual(['kb_1']);
+    // Hiding is local: nothing is written to the kanban.
+    expect(calls.some((call) => call.method !== 'GET')).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: /已隐藏 1 条/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '取消隐藏：写 VLA 复现' }));
+    // Nothing hidden any more: the task is back and the toggle disappears.
+    expect(screen.getByText('写 VLA 复现')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /已隐藏/ })).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem('nblane-mini-hidden:alice') ?? '[]')).toEqual([]);
+  });
+
+  it('collapses the habits section and remembers it', async () => {
+    renderMini([], { todos: [] });
+    expect(await screen.findByRole('button', { name: '打卡：Learning' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /日课 · 3/ }));
+    expect(screen.queryByRole('button', { name: '打卡：Learning' })).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem('nblane-mini-habits:alice') ?? 'true')).toBe(false);
+  });
+
   it('marks a Doing task done', async () => {
     const calls: Call[] = [];
     renderMini(calls, { todos: [] });
