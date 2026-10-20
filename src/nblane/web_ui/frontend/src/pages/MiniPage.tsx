@@ -1,9 +1,11 @@
-import { ActionIcon, Anchor, Badge, Box, Button, Center, Checkbox, Group, Indicator, Loader, Menu, ScrollArea, Stack, Text, TextInput, Tooltip, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Anchor, Box, Button, Center, Checkbox, Group, Indicator, Loader, Menu, ScrollArea, Stack, Text, TextInput, Tooltip, UnstyledButton } from '@mantine/core';
 import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { IconAlertTriangle, IconCheck, IconChevronDown, IconChevronRight, IconExternalLink, IconEye, IconEyeOff, IconPlayerPlay, IconPlus, IconRefresh } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+
+import './MiniPage.css';
 
 import { ApiError } from '../api/client';
 import {
@@ -33,7 +35,7 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-const DUE_LABEL = { overdue: '已逾期', today: '今天到期' } as const;
+const DUE_LABEL = { overdue: '逾期', today: '今天' } as const;
 
 /**
  * Compact view for the always-on-top 小窗 (MiniWindowButton): Doing tasks
@@ -206,8 +208,16 @@ export function MiniPage() {
     const off = isHidden(cardRef);
     return (
       <Tooltip label={off ? '在小窗显示' : '在小窗隐藏（看板不受影响）'} withArrow>
-        <ActionIcon variant="subtle" color="gray" size="xs" aria-label={`${off ? '取消隐藏' : '隐藏'}：${title}`} onClick={() => toggleHidden(cardRef)}>
-          {off ? <IconEye size={12} /> : <IconEyeOff size={12} />}
+        <ActionIcon
+          className="mini-row-hide"
+          data-off={off}
+          variant="subtle"
+          color="gray"
+          size="md"
+          aria-label={`${off ? '取消隐藏' : '隐藏'}：${title}`}
+          onClick={() => toggleHidden(cardRef)}
+        >
+          {off ? <IconEye size={14} /> : <IconEyeOff size={14} />}
         </ActionIcon>
       </Tooltip>
     );
@@ -216,9 +226,9 @@ export function MiniPage() {
   const dueBadge = (plannedEnd: string | null | undefined) => {
     const due = dueState(plannedEnd, today);
     return due ? (
-      <Badge size="xs" color={due === 'overdue' ? 'red' : 'orange'} variant="light" style={{ flexShrink: 0 }}>
+      <Text size="xs" fw={600} c={due === 'overdue' ? 'red.5' : 'orange.5'} style={{ flexShrink: 0 }} title={due === 'overdue' ? '已逾期' : '今天到期'}>
         {DUE_LABEL[due]}
-      </Badge>
+      </Text>
     ) : null;
   };
 
@@ -241,7 +251,7 @@ export function MiniPage() {
                 <ActionIcon
                   variant="subtle"
                   color="red"
-                  size="sm"
+                  size="md"
                   aria-label={exceptions.isError ? 'AI 异常列表加载失败' : `AI 异常 ${exceptionCount} 条`}
                   onClick={exceptionsDrawer.open}
                 >
@@ -251,13 +261,13 @@ export function MiniPage() {
             </Tooltip>
           )}
           <Tooltip label="刷新" withArrow>
-            <ActionIcon variant="subtle" size="sm" aria-label="刷新" onClick={refresh}>
-              <IconRefresh size={14} />
+            <ActionIcon variant="subtle" size="md" aria-label="刷新" onClick={refresh}>
+              <IconRefresh size={15} />
             </ActionIcon>
           </Tooltip>
           <Tooltip label="在完整页面打开（编辑任务、增删清单、拖动排序）" withArrow>
-            <ActionIcon component="a" href={fullHref} target="nblane-main" variant="subtle" size="sm" aria-label="在完整页面打开">
-              <IconExternalLink size={14} />
+            <ActionIcon component="a" href={fullHref} target="nblane-main" variant="subtle" size="md" aria-label="在完整页面打开">
+              <IconExternalLink size={15} />
             </ActionIcon>
           </Tooltip>
         </Group>
@@ -304,7 +314,7 @@ export function MiniPage() {
                     const expandable = todos.length > 0 || subtasks.length > 0;
                     return (
                       <Box key={cardRef} style={{ opacity: isHidden(cardRef) ? 0.5 : 1 }}>
-                        <Group gap={2} wrap="nowrap">
+                        <Group gap={2} wrap="nowrap" className="mini-row">
                           <UnstyledButton
                             onClick={() => toggleExpanded(cardRef)}
                             aria-expanded={expandable ? open : undefined}
@@ -322,8 +332,13 @@ export function MiniPage() {
                               </Text>
                               {dueBadge(task.planned_end)}
                               {todos.length > 0 && (
-                                <Text size="xs" c={allDone ? 'green' : 'dimmed'} style={{ flexShrink: 0 }}>
-                                  清单 {doneCount}/{todos.length}
+                                <Text
+                                  size="xs"
+                                  c={allDone ? 'green' : 'dimmed'}
+                                  style={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}
+                                  aria-label={`清单 ${doneCount}/${todos.length}`}
+                                >
+                                  {doneCount}/{todos.length}
                                 </Text>
                               )}
                             </Group>
@@ -333,25 +348,27 @@ export function MiniPage() {
                             <ActionIcon
                               variant={allDone ? 'filled' : 'light'}
                               color="green"
-                              size="xs"
+                              size="md"
                               aria-label={`标记完成：${task.title}`}
                               loading={done.isPending && done.variables?.cardRef === cardRef}
                               onClick={() => markDone(cardRef, task.title)}
                             >
-                              <IconCheck size={12} />
+                              <IconCheck size={14} />
                             </ActionIcon>
                           </Tooltip>
                         </Group>
                         {open && (
-                          <Stack gap={2} pl={16} mt={2} mb={4}>
+                          <Stack gap={6} pl={18} mt={4} mb={6}>
                             {todos.map((todo, index) => (
                               <Checkbox
                                 key={`${index}-${todo.text}`}
-                                size="xs"
+                                size="sm"
                                 label={todo.text}
                                 checked={todo.done}
                                 onChange={() => void toggleTodo(cardRef, index)}
-                                styles={{ label: { textDecoration: todo.done ? 'line-through' : undefined, opacity: todo.done ? 0.6 : 1 } }}
+                                styles={{
+                                  label: { fontSize: 'var(--mantine-font-size-xs)', textDecoration: todo.done ? 'line-through' : undefined, opacity: todo.done ? 0.6 : 1 },
+                                }}
                               />
                             ))}
                             {subtasks.map((subtask, index) => (
@@ -382,7 +399,7 @@ export function MiniPage() {
                   {shownQueue.slice(0, QUEUE_PREVIEW).map((task) => {
                     const cardRef = cardRefOf(task);
                     return (
-                      <Group key={cardRef} gap={2} wrap="nowrap" style={{ opacity: isHidden(cardRef) ? 0.5 : 1 }}>
+                      <Group key={cardRef} gap={2} wrap="nowrap" className="mini-row" style={{ opacity: isHidden(cardRef) ? 0.5 : 1 }}>
                         <Group gap={4} wrap="nowrap" miw={0} pl={16} style={{ flex: 1 }}>
                           <Text size="xs" truncate title={task.title} style={{ flex: 1, minWidth: 0 }}>
                             {task.title}
@@ -391,7 +408,7 @@ export function MiniPage() {
                         </Group>
                         {hideButton(cardRef, task.title)}
                         <Button
-                          size="compact-xs"
+                          size="compact-sm"
                           variant="light"
                           leftSection={<IconPlayerPlay size={12} />}
                           aria-label={`开始：${task.title}`}
@@ -439,16 +456,16 @@ export function MiniPage() {
                     const todayTasks = dailyPlan ? planTodayTasks(dailyPlan) : null;
                     const pending = checkin.isPending && checkin.variables?.habit === habit.id;
                     return (
-                      <Box key={habit.id} pl={16}>
-                        <Group gap={4} wrap="nowrap" justify="space-between">
+                      <Box key={habit.id}>
+                        <Group gap={4} wrap="nowrap" justify="space-between" className="mini-row" pl={16}>
                           <Group gap={4} wrap="nowrap" miw={0} style={{ flex: 1 }}>
                             <Text size="xs" truncate style={{ flexShrink: 0, maxWidth: '45%' }}>
                               {title}
                             </Text>
                             {habit.streak > 0 && (
-                              <Badge size="xs" variant="light" aria-label={`连续 ${habit.streak} 天`} style={{ flexShrink: 0 }}>
+                              <Text size="xs" c="teal.4" aria-label={`连续 ${habit.streak} 天`} style={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
                                 {habit.streak} 天
-                              </Badge>
+                              </Text>
                             )}
                             {eligible.length === 1 && (
                               <Text size="xs" c="dimmed" truncate style={{ minWidth: 0 }}>
@@ -461,7 +478,7 @@ export function MiniPage() {
                           ) : eligible.length > 1 ? (
                             <Menu position="bottom-end" withinPortal={false}>
                               <Menu.Target>
-                                <Button size="compact-xs" variant="light" loading={pending} aria-label={`打卡：${title}`} rightSection={<IconChevronDown size={12} />}>
+                                <Button size="compact-sm" variant="light" loading={pending} aria-label={`打卡：${title}`} rightSection={<IconChevronDown size={12} />}>
                                   打卡
                                 </Button>
                               </Menu.Target>
@@ -477,7 +494,7 @@ export function MiniPage() {
                             </Menu>
                           ) : (
                             <Button
-                              size="compact-xs"
+                              size="compact-sm"
                               variant="light"
                               aria-label={`打卡：${title}`}
                               loading={pending}
@@ -488,7 +505,7 @@ export function MiniPage() {
                           )}
                         </Group>
                         {todayTasks && (
-                          <Text size="xs" c="dimmed" truncate>
+                          <Text size="xs" c="dimmed" truncate pl={16}>
                             {todayTasks.restDay ? '今日休息 / 自由安排' : `今日：${todayTasks.tasks.join('、')}`}
                           </Text>
                         )}

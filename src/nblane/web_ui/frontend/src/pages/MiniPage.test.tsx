@@ -144,7 +144,7 @@ describe('MiniPage', () => {
     expect(screen.queryByText('排队中的任务')).toBeNull();
     const titles = screen.getAllByRole('button', { name: /^标记完成：/ }).map((el) => el.getAttribute('aria-label'));
     expect(titles).toEqual(['标记完成：逾期的任务', '标记完成：写 VLA 复现']);
-    expect(screen.getByText('已逾期')).toBeInTheDocument();
+    expect(screen.getByTitle('已逾期')).toHaveTextContent('逾期');
     expect(screen.getByText('已打卡')).toBeInTheDocument();
     expect(screen.getByLabelText('连续 5 天')).toBeInTheDocument();
   });
@@ -153,13 +153,13 @@ describe('MiniPage', () => {
     const calls: Call[] = [];
     const server: Server = { todos: [{ text: '跑基线', done: false }, { text: '写记录', done: false }] };
     renderMini(calls, server);
-    expect(await screen.findByText('清单 0/2')).toBeInTheDocument();
+    expect(await screen.findByLabelText('清单 0/2')).toHaveTextContent('0/2');
     fireEvent.click(screen.getByRole('button', { name: '展开清单：写 VLA 复现' }));
     fireEvent.click(screen.getByRole('checkbox', { name: '跑基线' }));
     await waitFor(() => expect(patches(calls)).toHaveLength(1));
     expect(patches(calls)[0].body).toEqual({ todos: [{ text: '跑基线', done: true }, { text: '写记录', done: false }] });
     expect(patches(calls)[0].ifMatch).toBe('"v1"');
-    expect(await screen.findByText('清单 1/2')).toBeInTheDocument();
+    expect(await screen.findByLabelText('清单 1/2')).toHaveTextContent('1/2');
     expect(JSON.parse(window.localStorage.getItem('nblane-mini-open:alice') ?? '[]')).toEqual(['kb_1']);
   });
 

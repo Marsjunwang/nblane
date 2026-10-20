@@ -1,0 +1,24 @@
+/* 小窗 rows: hover tint for scanning; the hide button only shows on hover or
+   keyboard focus so it does not cost every row a column. */
+.mini-row {
+  border-radius: 4px;
+  padding: 2px 2px 2px 0;
+}
+.mini-row:hover,
+.mini-row:focus-within {
+  background: var(--mantine-color-dark-6);
+}
+.mini-row .mini-row-hide {
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.mini-row:hover .mini-row-hide,
+.mini-row:focus-within .mini-row-hide,
+.mini-row .mini-row-hide[data-off='true'] {
+  opacity: 1;
+}
+@media (hover: none) {
+  .mini-row .mini-row-hide {
+    opacity: 1;
+  }
+}
