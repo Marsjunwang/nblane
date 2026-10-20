@@ -54,11 +54,29 @@ const END_OPTIONS = [
   { value: 'none', label: '不要末页' },
 ];
 
-/** X counts CJK characters double; 280 weighted ≈ 140 汉字. */
+const isWide = (ch: string) => /[ᄀ-￿]/.test(ch) && !/[ -⁯]/.test(ch);
+const URL_RE = /https?:\/\/\S+/g;
+/** X shortens every link to t.co, which counts as 23 regardless of length. */
+const X_URL_WEIGHT = 23;
+
+/** X counts CJK characters double and any URL as 23; the limit is 280. */
 export function xWeightedLength(text: string): number {
   let total = 0;
-  for (const ch of text) total += /[ᄀ-￿]/.test(ch) && !/[ -⁯]/.test(ch) ? 2 : 1;
+  const withoutUrls = text.replace(URL_RE, () => {
+    total += X_URL_WEIGHT;
+    return '';
+  });
+  for (const ch of withoutUrls) total += isWide(ch) ? 2 : 1;
   return total;
+}
+
+/** Counter hint: name the CJK rule only when the text has CJK characters. */
+export function xLengthHint(text: string, length: number, withLink: boolean): string {
+  const notes = [
+    [...text.replace(URL_RE, '')].some(isWide) ? '汉字算 2' : '',
+    withLink ? '含文章链接（按 23 计）' : '',
+  ].filter(Boolean);
+  return `${length} / 280${notes.length ? `（${notes.join('，')}）` : ''}`;
 }
 
 function errorText(error: unknown): string {
@@ -184,11 +202,9 @@ export function SocialShareDrawer({
     }
   };
 
-  const xLength = xWeightedLength(
-    settings?.end_card === 'thanks_url' && info.data?.post_url
-      ? `${settings.x_text}\n${info.data.post_url}`
-      : settings?.x_text ?? '',
-  );
+  const xWithLink = settings?.end_card === 'thanks_url' && Boolean(info.data?.post_url);
+  const xFull = xWithLink ? `${settings?.x_text ?? ''}\n${info.data?.post_url}` : settings?.x_text ?? '';
+  const xLength = xWeightedLength(xFull);
 
   return (
     <Drawer
@@ -377,7 +393,7 @@ export function SocialShareDrawer({
             maxLength={1000}
             value={settings.x_text}
             onChange={(e) => set({ x_text: e.currentTarget.value })}
-            description={`${xLength} / 280（汉字算 2）${settings.end_card === 'thanks_url' && info.data?.post_url ? '，含文章链接' : ''}`}
+            description={xLengthHint(xFull, xLength, xWithLink)}
             error={xLength > 280 ? '超过 X 单条推文上限' : undefined}
           />
           <CopyButton
