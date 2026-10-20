@@ -80,6 +80,59 @@ def _trim(text: str, limit: int) -> str:
     return clean if len(clean) <= limit else clean[:limit].rstrip() + "…"
 
 
+_OMITTED = "\n\n[……中间省略……]\n\n"
+
+
+def _excerpt(text: str, limit: int) -> tuple[str, bool]:
+    """Fit a long body into *limit* chars without losing its ending.
+
+    Keeps the heading outline, the opening (~60%) and the closing (~40%),
+    cut at paragraph breaks where possible. Returns ``(text, truncated)``.
+    """
+    clean = _clean(text)
+    if len(clean) <= limit:
+        return clean, False
+    headings = [line.strip() for line in clean.splitlines() if re.match(r"^#{1,3}\s+\S", line.strip())]
+    outline = ""
+    if len(headings) > 1:
+        outline = "全文提纲：\n" + "\n".join(headings)
+        if len(outline) > limit // 5:
+            outline = ""
+    budget = max(limit - len(outline) - len(_OMITTED) * 2, limit // 2)
+    head_len = int(budget * 0.6)
+    tail_len = budget - head_len
+    head = clean[:head_len]
+    cut = head.rfind("\n\n")
+    if cut > head_len // 2:
+        head = head[:cut]
+    tail = clean[-tail_len:]
+    cut = tail.find("\n\n")
+    if 0 <= cut < tail_len // 2:
+        tail = tail[cut + 2 :]
+    body = head.rstrip() + _OMITTED + tail.lstrip()
+    return (f"{outline}\n\n{body}" if outline else body), True
+
+
+def _context_window(context: str, selection: str, limit: int) -> str:
+    """Keep the paragraphs around the selection, not just the head.
+
+    The editor sends neighbouring blocks *including* the selection; the
+    selection itself is sent separately, so it is replaced by a marker here.
+    """
+    clean = _clean(context)
+    target = _clean(selection)
+    index = clean.find(target) if target else -1
+    if index < 0:
+        if len(clean) <= limit:
+            return clean
+        half = limit // 2
+        return clean[:half].rstrip() + _OMITTED + clean[-half:].lstrip()
+    half = limit // 2
+    before = clean[:index][-half:]
+    after = clean[index + len(target) :][:half]
+    return (before.rstrip() + "\n\n[目标文本位置]\n\n" + after.lstrip()).strip()
+
+
 def _strip_fence(text: str, *, original: str = "") -> str:
     """Drop a fence the model wrapped around its whole reply.
 
@@ -257,22 +310,29 @@ def rewrite_selection(
             f"目标语言：{target_language_name(original)}" if op == "translate" else "",
             f"用户补充要求：{extra}" if extra else "",
             f"文章标题：{_clean(title)}" if _clean(title) else "",
-            f"上下文（仅供参考，不要改写）：\n{_trim(context, _CONTEXT_CHARS)}" if _clean(context) else "",
+            f"上下文（仅供参考，不要改写）：\n{_context_window(context, original, _CONTEXT_CHARS)}" if _clean(context) else "",
             f"目标文本：\n{original}",
         )
         if part
     )
-    text = _strip_fence(
-        _run(
-            "content.rewrite",
-            system,
-            user,
-            profile=profile,
-            thinking=False if op != "expand" else None,
-            timeout=REWRITE_LLM_TIMEOUT_SECONDS,
-        ).content,
-        original=original,
+    result = _run(
+        "content.rewrite",
+        system,
+        user,
+        profile=profile,
+        thinking=False if op != "expand" else None,
+        timeout=REWRITE_LLM_TIMEOUT_SECONDS,
     )
+    truncated = next((w for w in result.warnings if w.startswith("output_truncated")), "")
+    if truncated:
+        # A cut-off rewrite would replace the writer's text with half of it.
+        raise ContentAIError(
+            "content_ai_output_truncated",
+            "AI 输出被截断，结果不完整，没有采用。请缩短选中的内容后重试；"
+            + truncated.split(":", 1)[1].split("；", 1)[-1].strip(),
+            run_id=result.run_id,
+        )
+    text = _strip_fence(result.content, original=original)
     if not text:
         raise ContentAIError("content_ai_failed", "模型没有返回内容，请重试。")
     return {"operation": op, "original": original, "text": text}
@@ -328,6 +388,7 @@ def suggest_meta(
     lang = llm_client.reply_language(text=text)
     system = _META_SYSTEM_ZH if lang == "zh" else _META_SYSTEM_EN
     task = _META_TASK_ZH if lang == "zh" else _META_TASK_EN
+    excerpt, truncated = _excerpt(text, _META_BODY_CHARS)
     user = "\n\n".join(
         part
         for part in (
@@ -335,7 +396,7 @@ def suggest_meta(
             f"当前标题：{_clean(title)}" if _clean(title) else "",
             f"当前摘要：{_clean(summary)}" if _clean(summary) else "",
             f"当前标签：{', '.join(tags)}" if tags else "",
-            f"正文：\n{_trim(text, _META_BODY_CHARS)}",
+            f"正文{'（较长，已省略中间部分）' if truncated else ''}：\n{excerpt}",
         )
         if part
     )
@@ -348,8 +409,9 @@ def suggest_meta(
         "titles": _string_list(data.get("titles"), limit=3, max_len=120),
         "summaries": _string_list(data.get("summaries"), limit=3, max_len=400),
         "tags": _string_list(data.get("tags"), limit=6, max_len=30),
+        "truncated": truncated,
     }
-    if not any(result.values()):
+    if not (result["titles"] or result["summaries"] or result["tags"]):
         raise ContentAIError("content_ai_failed", "模型没有给出可用的建议，请重试。")
     return result
 
@@ -378,12 +440,13 @@ def suggest_social_copy(*, title: str, body: str, profile: str = "") -> dict[str
     if len(text) < 40:
         raise ContentAIError("invalid_content_ai_request", "正文太短，先写一些内容再生成文案。")
     _require_llm()
+    excerpt, truncated = _excerpt(text, _SOCIAL_BODY_CHARS)
     user = "\n\n".join(
         part
         for part in (
             _SOCIAL_TASK,
             f"文章标题：{_clean(title)}" if _clean(title) else "",
-            f"正文：\n{_trim(text, _SOCIAL_BODY_CHARS)}",
+            f"正文{'（较长，已省略中间部分）' if truncated else ''}：\n{excerpt}",
         )
         if part
     )
@@ -403,6 +466,7 @@ def suggest_social_copy(*, title: str, body: str, profile: str = "") -> dict[str
         "xhs_title": _trim(_clean(data.get("xhs_title")), 40),
         "xhs_body": _trim(_clean(data.get("xhs_body")), 2000),
         "x_text": _trim(_clean(data.get("x_text")), 1000),
+        "truncated": truncated,
     }
     if not (result["cover_titles"] or result["xhs_body"] or result["x_text"]):
         raise ContentAIError("content_ai_failed", "模型没有给出可用的文案，请重试。")

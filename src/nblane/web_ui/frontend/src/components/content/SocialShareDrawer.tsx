@@ -32,6 +32,7 @@ interface SocialCopyResult {
   xhs_title: string;
   xhs_body: string;
   x_text: string;
+  truncated?: boolean;
 }
 
 const THEME_OPTIONS = [
@@ -250,6 +251,11 @@ export function SocialShareDrawer({
             placeholder={title}
             onChange={(e) => set({ cover_title: e.currentTarget.value })}
           />
+          {suggestions?.truncated && (
+            <Text size="xs" c="dimmed">
+              文章较长，文案依据提纲、开头和结尾生成。
+            </Text>
+          )}
           {suggestions && suggestions.cover_titles.length > 0 && (
             <Group gap={6}>
               {suggestions.cover_titles.map((item) => (

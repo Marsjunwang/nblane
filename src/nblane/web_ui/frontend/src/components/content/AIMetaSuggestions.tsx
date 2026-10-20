@@ -104,6 +104,11 @@ export function AIMetaSuggestions({
         )}
         {result && (
           <>
+            {result.truncated && (
+              <Text size="xs" c="dimmed">
+                文章较长，建议依据提纲、开头和结尾生成。
+              </Text>
+            )}
             {pick('点选替换摘要', result.summaries, (summary) => onApply({ summary }), 'content-ai-summary')}
             {!compact && pick('点选替换标题', result.titles, (title) => onApply({ title }), 'content-ai-title')}
             {!compact && newTags.length > 0 && (

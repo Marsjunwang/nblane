@@ -137,12 +137,20 @@ class DirectLLMBackend:
                 structured=validation.data,
                 warnings=warnings,
             )
+        warnings = []
+        if meta.get("finish_reason") == "length":
+            limit = max_tokens or llm.max_tokens_default()
+            warnings.append(
+                f"output_truncated: 模型输出达到 {limit} token 上限被截断，内容不完整；"
+                "可在「设置 → AI 服务」调高输出上限"
+            )
         return AIActionResult(
             ok=True,
             action=request.action,
             backend=self.name,
             run_id=run_id,
             content=raw,
+            warnings=warnings,
         )
 
 

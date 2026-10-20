@@ -269,6 +269,53 @@ class TestImageGatewayRunLog(ContentAITestBase):
         self.assertTrue(items[0]["href"].endswith("/content"))
 
 
+class TestLongArticles(ContentAITestBase):
+    """Long posts keep their ending; truncated rewrites are refused."""
+
+    def test_excerpt_keeps_outline_head_and_ending(self) -> None:
+        paras = [f"## 第{i}节\n\n" + ("段落内容。" * 80) for i in range(1, 21)]
+        body = "\n\n".join(paras) + "\n\n## 结论\n\n这是最后的结论段落。"
+        excerpt, truncated = content_ai._excerpt(body, 6000)
+        self.assertTrue(truncated)
+        self.assertLessEqual(len(excerpt), 6000)
+        self.assertIn("全文提纲", excerpt)
+        self.assertIn("## 结论", excerpt)
+        self.assertIn("这是最后的结论段落。", excerpt)
+        self.assertIn("## 第1节", excerpt)
+        self.assertIn("中间省略", excerpt)
+
+    def test_short_body_is_untouched(self) -> None:
+        self.assertEqual(content_ai._excerpt(BODY, 6000), (BODY.strip(), False))
+
+    def test_meta_sees_the_ending_and_reports_truncation(self) -> None:
+        chat = self._llm('{"titles": ["T"], "summaries": ["S"], "tags": ["x"]}')
+        body = ("开头段落。" * 400) + "\n\n" + ("中间段落。" * 900) + "\n\n结尾结论：VLA 复现成功。"
+        result = content_ai.suggest_meta(title="", summary="", tags=[], body=body)
+        self.assertTrue(result["truncated"])
+        self.assertIn("结尾结论：VLA 复现成功。", chat.call_args.args[1])
+        self.assertIn("已省略中间部分", chat.call_args.args[1])
+
+    def test_context_window_centres_on_the_selection(self) -> None:
+        before = "前文。" * 2000
+        after = "后文紧邻。" + "后文。" * 2000
+        window = content_ai._context_window(before + "目标段落" + after, "目标段落", 1800)
+        self.assertIn("[目标文本位置]", window)
+        self.assertIn("后文紧邻。", window)
+        self.assertNotIn("目标段落", window)
+        self.assertLessEqual(len(window), 1800 + 40)
+
+    def test_truncated_rewrite_is_refused(self) -> None:
+        def fake_chat(*args, **kwargs):
+            kwargs["meta_out"]["finish_reason"] = "length"
+            return "扩写了一半"
+
+        with patch("nblane.core.llm.is_configured", return_value=True), patch("nblane.core.llm.chat", side_effect=fake_chat):
+            with self.assertRaises(content_ai.ContentAIError) as ctx:
+                content_ai.rewrite_selection(operation="expand", selection="原始段落。")
+        self.assertEqual(ctx.exception.code, "content_ai_output_truncated")
+        self.assertIn("输出被截断", ctx.exception.message)
+
+
 class TestMetaSuggestions(ContentAITestBase):
     def test_parses_and_cleans_json(self) -> None:
         self._llm(

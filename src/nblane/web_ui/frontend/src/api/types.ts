@@ -380,6 +380,8 @@ export interface ContentMetaResult {
   titles: string[];
   summaries: string[];
   tags: string[];
+  /** The post was long: the model saw the outline, opening and ending only. */
+  truncated?: boolean;
 }
 export interface ContentCoverCandidate {
   candidate_path: string;

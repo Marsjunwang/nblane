@@ -691,7 +691,9 @@ def _validate_content_rewrite_input(job_input: dict[str, Any]) -> dict[str, Any]
         "operation": operation,
         "selection": selection,
         "title": _clean(job_input.get("title"))[:300],
-        "context": str(job_input.get("context") or "")[:4000],
+        # content_ai windows this around the selection; cutting the head here
+        # would drop the paragraphs after it.
+        "context": str(job_input.get("context") or "")[:20_000],
         "instruction": _clean(job_input.get("instruction"))[:500],
     }
 
