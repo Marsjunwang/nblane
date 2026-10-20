@@ -22,3 +22,21 @@
     opacity: 1;
   }
 }
+
+/* Quiet task area: row actions stay faint until the row is hovered or
+   focused, so the list reads as text first. A finished checklist keeps its
+   highlighted 完成 button (data-loud). Touch screens get full opacity. */
+.mini-row .mini-quiet {
+  opacity: 0.45;
+  transition: opacity 120ms;
+}
+.mini-row:hover .mini-quiet,
+.mini-row:focus-within .mini-quiet,
+.mini-row .mini-quiet[data-loud='true'] {
+  opacity: 1;
+}
+@media (hover: none) {
+  .mini-row .mini-quiet {
+    opacity: 1;
+  }
+}

@@ -370,7 +370,7 @@ export function MiniPage() {
                               ) : (
                                 <Box w={12} style={{ flexShrink: 0 }} />
                               )}
-                              <Text size="xs" truncate title={task.title} style={{ flex: 1, minWidth: 0 }}>
+                              <Text size="xs" c="gray.4" truncate title={task.title} style={{ flex: 1, minWidth: 0 }}>
                                 {task.title}
                               </Text>
                               {dueBadge(task.planned_end)}
@@ -389,8 +389,10 @@ export function MiniPage() {
                           {hideButton(cardRef, task.title)}
                           <Tooltip label={allDone ? '清单已完成，标记任务完成' : '标记完成'} withArrow>
                             <ActionIcon
-                              variant={allDone ? 'filled' : 'light'}
-                              color="green"
+                              className="mini-quiet"
+                              data-loud={allDone}
+                              variant={allDone ? 'filled' : 'subtle'}
+                              color={allDone ? 'green' : 'gray'}
                               size="md"
                               aria-label={`标记完成：${task.title}`}
                               loading={done.isPending && done.variables?.cardRef === cardRef}
@@ -444,15 +446,17 @@ export function MiniPage() {
                     return (
                       <Group key={cardRef} gap={2} wrap="nowrap" className="mini-row" style={{ opacity: isHidden(cardRef) ? 0.5 : 1 }}>
                         <Group gap={4} wrap="nowrap" miw={0} pl={16} style={{ flex: 1 }}>
-                          <Text size="xs" truncate title={task.title} style={{ flex: 1, minWidth: 0 }}>
+                          <Text size="xs" c="gray.4" truncate title={task.title} style={{ flex: 1, minWidth: 0 }}>
                             {task.title}
                           </Text>
                           {dueBadge(task.planned_end)}
                         </Group>
                         {hideButton(cardRef, task.title)}
                         <Button
+                          className="mini-quiet"
                           size="compact-sm"
-                          variant="light"
+                          variant="subtle"
+                          color="gray"
                           leftSection={<IconPlayerPlay size={12} />}
                           aria-label={`开始：${task.title}`}
                           loading={moveCard.isPending && moveCard.variables?.cardRef === cardRef}
