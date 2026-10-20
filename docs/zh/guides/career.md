@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-10-14
+last_verified: 2026-10-20
 source_of_truth: true
 ---
 
@@ -52,6 +52,8 @@ source_of_truth: true
 定制稿和 JD、补充说明、分析结果存在 `profiles/<name>/resumes/generated/` 下（Markdown + 同名 `.meta.yaml`）。
 
 需要配置 LLM（`LLM_API_KEY`），没配置时 AI 识别、匹配和定制不可用，其他功能照常。
+
+「设置 → 工作流 AI」里可以给 JD 匹配、定制简历、简历识别分别指定模型（只走兼容 API，不支持 Codex），留空用 AI 连接的默认模型。每次调用记在 `ai-runs.yaml`，失败出现在首页「AI 异常」。定制简历被模型输出上限截断时不给候选，提示调高输出上限。
 
 ## 导出
 

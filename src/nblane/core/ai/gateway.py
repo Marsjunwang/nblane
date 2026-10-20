@@ -725,6 +725,19 @@ def _with_action_ai_preferences(
     return body, preferred_backend
 
 
+def llm_model_preference(profile: str, action_name: str) -> str:
+    """The OpenAI-compatible model chosen in Settings for *action_name*, or "".
+
+    For actions that only run on the direct LLM backend (no Codex route):
+    a Codex choice is ignored rather than routed somewhere unsupported.
+    """
+
+    config = _action_ai_config(profile, action_name)
+    if (config.get("backend") or "llm") != "llm":
+        return ""
+    return str(config.get("model") or "").strip()
+
+
 def _local_translation_route(profile: str, scope: str) -> str:
     """Return ``local`` or ``ai`` for one translation scope of a profile."""
 

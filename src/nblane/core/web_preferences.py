@@ -59,6 +59,11 @@ AI_ACTION_DEFAULT_BACKENDS: dict[str, str] = {
     "kanban.subtasks": "llm",
     "evidence.crystallize": "llm",
     "project.suggest_refs": "llm",
+    # Career workspace: OpenAI-compatible only (tailor returns Markdown, which
+    # the read-only Codex backend cannot produce); only the model is chosen.
+    "career.match": "llm",
+    "career.tailor": "llm",
+    "career.structure": "llm",
 }
 
 

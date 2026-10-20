@@ -318,6 +318,25 @@ class CareerAITest(unittest.TestCase):
             failed = self._run_job("career-tailor", {"resume_md": RESUME_MD, "jd_text": "VLA"})
         self.assertEqual(failed["job"]["error"]["code"], "career_ai_output_truncated")
 
+    def test_settings_model_preference_reaches_the_call(self) -> None:
+        from nblane.core.web_preferences import update_web_preferences
+
+        update_web_preferences("alice", {"ai": {"actions": {"career.match": {"llm_model": "qwen-max-latest"}}}})
+        chat = self._llm('{"score": 10, "requirements": [{"requirement": "x", "verdict": "missing"}]}')
+        self._run_job("career-match", {"resume_md": "a", "jd_text": "b", "use_evidence": False})
+        self.assertEqual(chat.call_args.kwargs["model"], "qwen-max-latest")
+
+    def test_codex_choice_is_ignored_for_llm_only_actions(self) -> None:
+        from nblane.core.web_preferences import update_web_preferences
+
+        update_web_preferences(
+            "alice", {"ai": {"actions": {"career.tailor": {"backend": "codex", "codex_model": "gpt-5.5"}}}}
+        )
+        chat = self._llm("# 张三 | 工程师\n")
+        payload = self._run_job("career-tailor", {"resume_md": RESUME_MD, "jd_text": "VLA"})
+        self.assertEqual(payload["job"]["status"], "done", payload)
+        self.assertFalse(chat.call_args.kwargs.get("model"))
+
     def test_llm_timeouts_fit_inside_job_timeouts(self) -> None:
         pairs = {
             "career-match": career_ai.MATCH_LLM_TIMEOUT_SECONDS,

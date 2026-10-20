@@ -53,17 +53,22 @@ def _require_llm() -> None:
 def _run(action: str, system: str, user: str, *, profile: str, timeout: float):
     """Run one career action through the AI gateway (run log + exceptions)."""
 
-    from nblane.core.ai.gateway import run_ai_action
+    from nblane.core.ai.gateway import llm_model_preference, run_ai_action
 
+    payload: dict[str, Any] = {
+        "system": system,
+        "user": user,
+        "llm_timeout_seconds": timeout,
+        "llm_max_retries": 0,
+        "enable_thinking": False,
+    }
+    # 「设置 → 工作流 AI」 may pick a model per action; empty = AI 连接默认模型.
+    model = llm_model_preference(profile, action) if profile else ""
+    if model:
+        payload["ai_model"] = model
     result = run_ai_action(
         action,
-        {
-            "system": system,
-            "user": user,
-            "llm_timeout_seconds": timeout,
-            "llm_max_retries": 0,
-            "enable_thinking": False,
-        },
+        payload,
         profile=profile or None,
         require_review=False,
     )

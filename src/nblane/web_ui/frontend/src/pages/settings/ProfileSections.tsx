@@ -13,7 +13,8 @@ import { ErrorAlert, SaveBar, SettingsCard, preferenceString, settingString, use
 
 type Preferences = Record<string, unknown> | undefined;
 type ActionDraft = { backend: string; llm_model: string; codex_model: string; codex_effort: string };
-type ActionMeta = { key: string; label: string; description: string };
+/** llmOnly: the action only runs on the OpenAI-compatible API, so only a model is chosen. */
+type ActionMeta = { key: string; label: string; description: string; llmOnly?: boolean };
 
 /** Mirrors core/web_preferences.py AI_ACTION_DEFAULT_BACKENDS. */
 const DEFAULT_BACKEND: Record<string, 'llm' | 'codex'> = {
@@ -51,6 +52,9 @@ export const OTHER_ACTIONS: ActionMeta[] = [
   { key: 'dashboard.goal_skill_match', label: '目标与技能匹配', description: '分析目标与技能树的相关性。' },
   { key: 'dashboard.daily_brief', label: '每日简报', description: '生成当天的工作摘要。' },
   { key: 'evidence.crystallize', label: '证据结晶', description: '把完成的任务整理成证据草稿。' },
+  { key: 'career.match', label: 'JD 匹配', description: '求职工作台：对照简历分析岗位要求。', llmOnly: true },
+  { key: 'career.tailor', label: '定制简历', description: '求职工作台：按岗位生成定制简历。', llmOnly: true },
+  { key: 'career.structure', label: '简历识别', description: '求职工作台：把导入的文字整理成简历字段。', llmOnly: true },
 ];
 
 function actionDrafts(preferences: Preferences, actions: ActionMeta[]): Record<string, ActionDraft> {
@@ -100,12 +104,15 @@ function ActionTable({ profile, actions, saved, value, onChange }: { profile: st
             {rows.map((action) => {
               const draft = { ...EMPTY_DRAFT, ...value[action.key] };
               const fallback = DEFAULT_BACKEND[action.key] ?? 'llm';
-              const effective = draft.backend || fallback;
+              const effective = action.llmOnly ? 'llm' : draft.backend || fallback;
               const modelKey = effective === 'codex' ? 'codex_model' : 'llm_model';
               return (
                 <Table.Tr key={action.key}>
                   <Table.Td><Text size="sm" fw={600}>{action.label}</Text><Text size="xs" c="dimmed">{action.description}</Text></Table.Td>
                   <Table.Td>
+                    {action.llmOnly ? (
+                      <Text size="xs" c="dimmed">兼容 API</Text>
+                    ) : (
                     <Select
                       aria-label={`${action.label}执行方式`}
                       size="xs"
@@ -114,6 +121,7 @@ function ActionTable({ profile, actions, saved, value, onChange }: { profile: st
                       onChange={(next) => onChange(action.key, { ...draft, backend: next ?? '' })}
                       data={[{ value: '', label: `默认（${backendLabel(fallback)}）` }, { value: 'llm', label: '兼容 API' }, { value: 'codex', label: 'Codex' }]}
                     />
+                    )}
                   </Table.Td>
                   <Table.Td>
                     {effective === 'codex' ? (
@@ -337,7 +345,7 @@ export function ProfileAIRoutingSection({ profile }: { profile: string }) {
   const setCodex = (key: keyof typeof c, next: string) => codexDraft.setDraft({ ...c, [key]: next });
   return (
     <Stack gap="lg">
-      <SettingsCard icon={<IconSettings size={22} />} title="工作流 AI" description="看板、项目、首页和证据中的 AI 动作用什么执行、用哪个模型；研究相关的在「研究与阅读」。">
+      <SettingsCard icon={<IconSettings size={22} />} title="工作流 AI" description="看板、项目、首页、证据和求职工作台中的 AI 动作用什么执行、用哪个模型；研究相关的在「研究与阅读」。">
         <ActionTable profile={profile} actions={OTHER_ACTIONS} saved={actionsSource} value={actions.draft} onChange={(key, next) => actions.setDraft({ ...actions.draft, [key]: next })} />
       </SettingsCard>
       <SettingsCard icon={<IconTerminal2 size={22} />} title="Codex 运行参数" description="选了 Codex 的动作使用这些参数；留空跟随 Codex CLI 默认。认证仍由 Codex CLI 管理。">
