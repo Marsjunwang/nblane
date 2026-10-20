@@ -122,7 +122,7 @@ export function useUpsertResearchConnector(profile: string) {
   });
 }
 
-/** Starts the dry-run discovery job (202); stream it with `streamJob`. */
+/** Starts the dry-run discovery job (202); follow it with `followJob`. */
 export function usePreviewResearchConnector(profile: string) {
   return useMutation({
     mutationFn: (connectorId: string) =>

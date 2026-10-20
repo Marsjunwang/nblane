@@ -1,18 +1,18 @@
-// Run one content-AI job (POST .../jobs) and resolve with its result.
+// Follow async jobs (GET .../jobs/{id}/stream) robustly, and run content-AI
+// jobs on top of that.
 //
-// The content AI kinds (content-rewrite / content-meta / content-cover) are
-// long LLM or image calls, so they go through the shared async-job registry
-// and its SSE stream instead of a blocking request.
+// followJob: a dropped stream (phone backgrounded, flaky network) is not a
+// failed job — the server keeps running it, so we poll GET .../jobs/{id} and
+// re-subscribe with backoff instead of reporting 「连接中断」 and losing the
+// result. cancel() also asks the server to end the job (DELETE) so it is not
+// applied or kept billing; detach() only stops listening, for jobs whose
+// result the server persists and a later visit can re-attach to.
 //
-// A dropped stream (phone backgrounded, flaky network) is not a failed job:
-// the server keeps running it, so we poll GET .../jobs/{id} and re-subscribe
-// with backoff instead of reporting 「连接中断」 and losing a 30-90s result.
-// cancel() also asks the server to end the job (DELETE .../jobs/{id}) so a
-// cancelled run is not applied or kept billing in the background.
+// runContentJob: POST .../jobs, then followJob.
 
 import { ApiError, apiDelete, apiGet, apiPost } from '../../api/client';
 import { streamJob } from '../../api/jobs';
-import type { JobCreateResponse, JobStatusResponse } from '../../api/types';
+import type { JobCreateResponse, JobModel, JobStatusResponse } from '../../api/types';
 
 export type ContentJobKind =
   | 'content-rewrite'
@@ -27,6 +27,18 @@ export type ContentJobKind =
 export interface ContentJobHandle<T> {
   result: Promise<T>;
   cancel: () => void;
+}
+
+export interface FollowedJob<T> extends ContentJobHandle<T> {
+  /** Stop listening without ending the server-side job. */
+  detach: () => void;
+}
+
+export interface FollowJobHandlers {
+  /** One call per progress event (message may be empty, phase may not). */
+  onProgress?: (message: string, phase: string) => void;
+  /** Initial job snapshot from the stream (also on every reconnect). */
+  onSnapshot?: (job: JobModel) => void;
 }
 
 export class ContentJobError extends Error {
@@ -46,22 +58,29 @@ export const RECONNECT_GIVE_UP_MS = 120_000;
 
 const DISCONNECTED_MESSAGE = '与服务器的连接中断，任务可能仍在后台运行，请稍后重试。';
 
-export function runContentJob<T>(
-  profile: string,
-  kind: ContentJobKind,
-  input: Record<string, unknown>,
-  onProgress?: (message: string) => void,
-): ContentJobHandle<T> {
-  const base = `/profiles/${encodeURIComponent(profile)}/jobs`;
+const jobsBase = (profile: string) => `/profiles/${encodeURIComponent(profile)}/jobs`;
+
+function deleteJob(profile: string, jobId: string): void {
+  void apiDelete(`${jobsBase(profile)}/${encodeURIComponent(jobId)}`).catch(() => undefined);
+}
+
+/** Follow an existing job until it is done or failed. */
+export function followJob<T>(profile: string, jobId: string, handlers: FollowJobHandlers = {}): FollowedJob<T> {
+  const base = jobsBase(profile);
   let unsubscribe: (() => void) | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let jobId = '';
   let settled = false;
-  let cancelled = false;
+  let stopped = false;
+
+  const stop = () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    unsubscribe?.();
+  };
 
   const result = new Promise<T>((resolve, reject) => {
     const finish = (fn: () => void) => {
-      if (settled || cancelled) return;
+      if (settled || stopped) return;
       settled = true;
       if (timer) clearTimeout(timer);
       unsubscribe?.();
@@ -73,7 +92,7 @@ export function runContentJob<T>(
     let lostAt = 0;
 
     const reconnect = () => {
-      if (settled || cancelled) return;
+      if (settled || stopped) return;
       if (!lostAt) lostAt = Date.now();
       if (Date.now() - lostAt > RECONNECT_GIVE_UP_MS) {
         fail('job_stream_error', DISCONNECTED_MESSAGE);
@@ -87,7 +106,7 @@ export function runContentJob<T>(
         // while we were offline, or may be gone (process restart / GC).
         apiGet<JobStatusResponse>(`${base}/${encodeURIComponent(jobId)}`)
           .then((status) => {
-            if (settled || cancelled) return;
+            if (settled || stopped) return;
             if (status.job.status === 'done') {
               finish(() => resolve((status.result ?? {}) as T));
             } else if (status.job.status === 'failed') {
@@ -112,12 +131,15 @@ export function runContentJob<T>(
     const subscribe = () => {
       unsubscribe?.();
       unsubscribe = streamJob(profile, jobId, {
-        onJob: () => {
+        onJob: (frame) => {
           attempt = 0;
           lostAt = 0;
+          if (frame.job) handlers.onSnapshot?.(frame.job);
         },
         onProgress: (frame) => {
-          if (frame.event?.message) onProgress?.(frame.event.message);
+          const message = frame.event?.message ?? '';
+          const phase = frame.event?.phase ?? frame.job?.phase ?? '';
+          if (message || phase) handlers.onProgress?.(message, phase);
         },
         onDone: (frame) => finish(() => resolve((frame.result ?? {}) as T)),
         onError: (frame) => {
@@ -132,26 +154,51 @@ export function runContentJob<T>(
       });
     };
 
-    apiPost<JobCreateResponse>(base, { kind, input })
-      .then((created) => {
-        jobId = created.job_id;
-        if (cancelled) {
-          void apiDelete(`${base}/${encodeURIComponent(jobId)}`).catch(() => undefined);
-          return;
-        }
-        subscribe();
-      })
-      .catch((error: unknown) => finish(() => reject(error)));
+    subscribe();
+  });
+
+  return {
+    result,
+    detach: () => {
+      if (settled || stopped) return;
+      stop();
+    },
+    cancel: () => {
+      if (settled || stopped) return;
+      stop();
+      deleteJob(profile, jobId);
+    },
+  };
+}
+
+export function runContentJob<T>(
+  profile: string,
+  kind: ContentJobKind,
+  input: Record<string, unknown>,
+  onProgress?: (message: string) => void,
+): ContentJobHandle<T> {
+  let followed: FollowedJob<T> | null = null;
+  let cancelled = false;
+
+  const result = apiPost<JobCreateResponse>(jobsBase(profile), { kind, input }).then((created) => {
+    if (cancelled) {
+      deleteJob(profile, created.job_id);
+      return new Promise<T>(() => undefined);
+    }
+    followed = followJob<T>(profile, created.job_id, {
+      onProgress: (message) => {
+        if (message) onProgress?.(message);
+      },
+    });
+    return followed.result;
   });
 
   return {
     result,
     cancel: () => {
-      if (cancelled || settled) return;
+      if (cancelled) return;
       cancelled = true;
-      if (timer) clearTimeout(timer);
-      unsubscribe?.();
-      if (jobId) void apiDelete(`${base}/${encodeURIComponent(jobId)}`).catch(() => undefined);
+      followed?.cancel();
     },
   };
 }

@@ -46,7 +46,7 @@ import {
   useSaveProjectMilestone,
 } from '../../api/hooks';
 import { ApiError } from '../../api/client';
-import { streamJob } from '../../api/jobs';
+import { ContentJobError, followJob } from '../content/contentJobs';
 import type {
   ProjectBoard,
   ProjectBoardOptions,
@@ -429,6 +429,7 @@ function BasicsTab({
   const projectBoardQuery = useProjectBoard(profile);
   const createJob = useCreateJob(profile);
   const refreshBoard = useRefreshBoards(profile);
+  // Suggestions are not persisted: closing the drawer cancels the job.
   const stopStreamRef = useRef<(() => void) | null>(null);
 
   // `baseline` = the server state the draft was last reconciled with. Fresh
@@ -560,41 +561,36 @@ function BasicsTab({
         onSuccess: (created) => {
           const jobId = created.job_id;
           setSuggestJob({ jobId, phase: created.job.phase || 'queued', message: '' });
-          stopStreamRef.current = streamJob(profile, jobId, {
-            onProgress: (frame) => {
+          const followed = followJob<ProjectSuggestRefsResponse | null>(profile, jobId, {
+            onProgress: (message, phase) =>
               setSuggestJob((prev) =>
                 prev && prev.jobId === jobId
-                  ? {
-                      jobId,
-                      phase: frame.event?.phase || frame.job?.phase || prev.phase,
-                      message: frame.event?.message || prev.message,
-                    }
+                  ? { jobId, phase: phase || prev.phase, message: message || prev.message }
                   : prev,
-              );
-            },
-            onDone: (frame) => {
-              stopStream();
+              ),
+          });
+          stopStreamRef.current = followed.cancel;
+          followed.result
+            .then((result) => {
+              if (stopStreamRef.current !== followed.cancel) return;
+              stopStreamRef.current = null;
               setSuggestJob(null);
-              if (frame.result) {
-                setSuggestions(frame.result as unknown as ProjectSuggestRefsResponse);
+              if (result && Object.keys(result).length > 0) {
+                setSuggestions(result);
               } else {
-                setSuggestError({
-                  code: 'empty_result',
-                  message: '任务完成但未返回结果,请重试。',
-                });
+                setSuggestError({ code: 'empty_result', message: '任务完成但未返回结果,请重试。' });
               }
-            },
-            onError: (frame) => {
-              stopStream();
+            })
+            .catch((error: unknown) => {
+              if (stopStreamRef.current !== followed.cancel) return;
+              stopStreamRef.current = null;
               setSuggestJob(null);
               setSuggestError(
-                frame?.error ?? {
-                  code: 'stream_error',
-                  message: '进度流中断,请稍后重试。',
-                },
+                error instanceof ContentJobError
+                  ? { code: error.code, message: error.message }
+                  : { code: 'stream_error', message: '进度流中断,请稍后重试。' },
               );
-            },
-          });
+            });
         },
       },
     );

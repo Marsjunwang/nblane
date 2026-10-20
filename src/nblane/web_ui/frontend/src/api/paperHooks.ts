@@ -7,9 +7,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { apiGet, apiPost } from './client';
-import { streamJob } from './jobs';
 import type { components } from './schema';
 import type { JobCreateResponse } from './types';
+import { ContentJobError, followJob, type FollowedJob } from '../components/content/contentJobs';
 
 type Schemas = components['schemas'];
 
@@ -138,39 +138,46 @@ export function usePaperJob(
   const queryClient = useQueryClient();
   const start = useStartPaperJob(profile, sourceId);
   const [state, setState] = useState<PaperJobState>(IDLE);
-  const stopRef = useRef<(() => void) | null>(null);
+  // Leaving the page only detaches: the analysis result is saved server-side
+  // and the overview re-attaches to a still-running job on the next visit.
+  const stopRef = useRef<FollowedJob<unknown> | null>(null);
   const followedRef = useRef('');
 
   const follow = useCallback(
     (jobId: string) => {
       if (followedRef.current === jobId) return;
-      stopRef.current?.();
+      stopRef.current?.detach();
       followedRef.current = jobId;
       setState({ status: 'running', message: '已开始…', error: null });
-      stopRef.current = streamJob(profile, jobId, {
-        onJob: (frame) => {
-          if (frame.job?.message) setState((prev) => ({ ...prev, message: frame.job?.message ?? prev.message }));
+      const followed = followJob<unknown>(profile, jobId, {
+        onSnapshot: (job) => {
+          if (job.message) setState((prev) => ({ ...prev, message: job.message ?? prev.message }));
         },
-        onProgress: (frame) => {
-          const message = frame.event?.message;
+        onProgress: (message) => {
           if (message) setState((prev) => ({ ...prev, message }));
         },
-        onDone: () => {
+      });
+      stopRef.current = followed;
+      followed.result
+        .then(() => {
+          if (stopRef.current !== followed) return;
           stopRef.current = null;
           setState({ status: 'done', message: '', error: null });
           void queryClient.invalidateQueries({ queryKey: paperOverviewKey(profile, sourceId) });
           void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'research'], exact: true });
-        },
-        onError: (frame) => {
+        })
+        .catch((error: unknown) => {
+          if (stopRef.current !== followed) return;
           stopRef.current = null;
-          const error = frame?.error ?? frame?.job?.error ?? null;
           setState({
             status: 'failed',
             message: '',
-            error: error ?? { code: 'job_stream_error', message: '与任务的连接中断，请重试。' },
+            error:
+              error instanceof ContentJobError
+                ? { code: error.code, message: error.message }
+                : { code: 'job_stream_error', message: error instanceof Error ? error.message : String(error) },
           });
-        },
-      });
+        });
     },
     [profile, sourceId, queryClient],
   );
@@ -181,7 +188,7 @@ export function usePaperJob(
 
   useEffect(
     () => () => {
-      stopRef.current?.();
+      stopRef.current?.detach();
       stopRef.current = null;
     },
     [],

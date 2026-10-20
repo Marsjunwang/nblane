@@ -49,7 +49,7 @@ import {
   useSetEvidenceSkillLinks,
   useSkillTreeFlat,
 } from '../api/hooks';
-import { streamJob } from '../api/jobs';
+import { followJob } from '../components/content/contentJobs';
 import { MutationErrorAlert } from '../components/ConflictAlert';
 import { InscriptionCard, InscriptionRow } from '../components/InscriptionCard';
 import { inscription, chrome } from '../theme';
@@ -995,30 +995,34 @@ function CrystallizeWizard({
             failJob('AI 草稿任务创建失败;可改用规则草稿。');
             return;
           }
-          // Client-side last-resort watchdog: the backend caps the job at
-          // 120s, so a silent stream past 130s means the SSE connection
-          // broke — fail loud instead of spinning forever.
+          const followed = followJob<CrystallizeDraftResponse | null>(profile, job, {
+            onProgress: (message, phase) => setJobPhase(message || phase || '生成中…'),
+          });
+          // The draft is not persisted: closing the wizard cancels the job.
+          stopStreamRef.current = followed.cancel;
+          // Last-resort watchdog: the backend caps the job at 120s and
+          // followJob re-attaches after a dropped stream, so only a stream
+          // that stays silent past 130s lands here.
           watchdogRef.current = window.setTimeout(() => {
             failJob('AI 草稿等待超时;请重试,或改用规则草稿(立等可取)。');
           }, 130_000);
-          stopStreamRef.current = streamJob(profile, job, {
-            onProgress: (frame) => {
-              setJobPhase(frame.event?.message || frame.event?.phase || '生成中…');
-            },
-            onDone: (frame) => {
+          followed.result
+            .then((result) => {
+              if (stopStreamRef.current !== followed.cancel) return;
+              stopStreamRef.current = null;
               clearPending();
-              if (frame.result) {
-                adoptDraft(frame.result as unknown as CrystallizeDraftResponse);
+              if (result && Object.keys(result).length > 0) {
+                adoptDraft(result);
               } else {
                 failJob('AI 草稿没有返回结果;可改用规则草稿。');
               }
-            },
-            onError: (frame) => {
-              failJob(
-                frame?.error?.message ?? 'AI 草稿失败(连接中断);可改用规则草稿。',
-              );
-            },
-          });
+            })
+            .catch((error: unknown) => {
+              if (stopStreamRef.current !== followed.cancel) return;
+              stopStreamRef.current = null;
+              const message = error instanceof Error ? error.message : String(error);
+              failJob(`AI 草稿失败:${message};可改用规则草稿。`);
+            });
         },
         onError: (error) => {
           failJob(`AI 草稿任务创建失败:${error.message};可改用规则草稿。`);

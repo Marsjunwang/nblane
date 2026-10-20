@@ -45,7 +45,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import { ApiError } from '../api/client';
-import { streamJob } from '../api/jobs';
+import { followJob } from '../components/content/contentJobs';
 import {
   useCreateResearchSource,
   useCreateResearchSourceTask,
@@ -496,20 +496,26 @@ function useConnectorJob(profile: string) {
     stop();
     const jobId = created.job_id;
     setJob({ label: jobLabel, phase: created.job.phase || 'queued', message: created.job.message || '' });
-    stopRef.current = streamJob(profile, jobId, {
-      onProgress: (frame) =>
-        setJob((prev) => (prev ? { ...prev, phase: frame.event?.phase || prev.phase, message: frame.event?.message || prev.message } : prev)),
-      onDone: (frame) => {
-        stop();
-        setJob(null);
-        handlers.onDone(frame.result);
-      },
-      onError: (frame) => {
-        stop();
-        setJob(null);
-        handlers.onError(frame?.error?.message || '进度流中断，请稍后重试。');
-      },
+    // Only detach on unmount: an import writes as it goes and cannot be
+    // interrupted server-side, so a cancel would mislabel a finished import.
+    const followed = followJob<Record<string, unknown> | null>(profile, jobId, {
+      onProgress: (message, phase) =>
+        setJob((prev) => (prev ? { ...prev, phase: phase || prev.phase, message: message || prev.message } : prev)),
     });
+    stopRef.current = followed.detach;
+    followed.result
+      .then((result) => {
+        if (stopRef.current !== followed.detach) return;
+        stop();
+        setJob(null);
+        handlers.onDone(result);
+      })
+      .catch((error: unknown) => {
+        if (stopRef.current !== followed.detach) return;
+        stop();
+        setJob(null);
+        handlers.onError(error instanceof Error ? error.message : '进度流中断，请稍后重试。');
+      });
   }
 
   return { job, follow };

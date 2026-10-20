@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { jsonResponse } from '../../test/render';
-import { ContentJobError, RECONNECT_GIVE_UP_MS, runContentJob } from './contentJobs';
+import { ContentJobError, RECONNECT_GIVE_UP_MS, followJob, runContentJob } from './contentJobs';
 
 type Listener = (event: Event) => void;
 
@@ -145,5 +145,44 @@ describe('runContentJob', () => {
     await flush();
     expect(MockEventSource.instances).toHaveLength(0);
     expect(calls.some((call) => call.method === 'DELETE')).toBe(true);
+  });
+});
+
+describe('followJob', () => {
+  it('follows an existing job and reports message and phase', async () => {
+    const calls = mockFetch([]);
+    const onProgress = vi.fn();
+    const job = followJob<{ ok: boolean }>('alice', 'job-9', { onProgress });
+    expect(MockEventSource.instances[0].url).toContain('/jobs/job-9/stream');
+    MockEventSource.instances[0].emit('progress', { ok: true, event: { message: '正在分析', phase: 'suggesting' } });
+    expect(onProgress).toHaveBeenCalledWith('正在分析', 'suggesting');
+    MockEventSource.instances[0].emit('done', { ok: true, result: { ok: true } });
+    await expect(job.result).resolves.toEqual({ ok: true });
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('detach stops listening without deleting the server job', async () => {
+    const calls = mockFetch([]);
+    const job = followJob('alice', 'job-9');
+    job.detach();
+    await flush();
+    expect(MockEventSource.instances[0].closed).toBe(true);
+    expect(calls.some((call) => call.method === 'DELETE')).toBe(false);
+  });
+
+  it('cancel deletes the server job', async () => {
+    const calls = mockFetch([]);
+    const job = followJob('alice', 'job-9');
+    job.cancel();
+    await flush();
+    expect(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/jobs/job-9'))).toBe(true);
+  });
+
+  it('re-attaches after a dropped stream like runContentJob', async () => {
+    mockFetch([() => jsonResponse(200, { job: { job_id: 'job-9', status: 'done' }, result: { text: '离线完成' } })]);
+    const job = followJob<{ text: string }>('alice', 'job-9');
+    MockEventSource.instances[0].emit('error');
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(job.result).resolves.toEqual({ text: '离线完成' });
   });
 });

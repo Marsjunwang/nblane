@@ -1838,7 +1838,7 @@ export function useCrystallizeCandidates(profile: string) {
 
 /**
  * Crystallize draft: rule mode answers 200 with the draft; `use_llm: true`
- * answers 202 with a job handle (subscribe via streamJob for the same
+ * answers 202 with a job handle (follow it with followJob for the same
  * CrystallizeDraftResponse payload in the job result).
  */
 export function useCrystallizeDraft(profile: string) {

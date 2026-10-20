@@ -425,14 +425,24 @@ describe('EvidencePage', () => {
   });
 
   it('AI draft failure shows a friendly error and degrades to rule draft', async () => {
-    // Fake EventSource that fails the job stream immediately (error frame
-    // without data -> parseFrame yields null -> generic failure path).
+    // Fake EventSource that fails the job with a server error frame. (A bare
+    // transport error is a dropped connection: followJob re-attaches instead
+    // of failing, see contentJobs.test.ts.)
     class FailingEventSource {
       static instance: FailingEventSource;
       listeners: Record<string, ((event: Event) => void)[]> = {};
       constructor(public url: string) {
         FailingEventSource.instance = this;
-        setTimeout(() => this.emit('error', new Event('error')), 0);
+        setTimeout(
+          () =>
+            this.emit(
+              'error',
+              new MessageEvent('error', {
+                data: JSON.stringify({ ok: false, error: { code: 'job_failed', message: '模型超时' } }),
+              }),
+            ),
+          0,
+        );
       }
       addEventListener(type: string, listener: (event: Event) => void) {
         (this.listeners[type] ??= []).push(listener);
