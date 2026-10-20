@@ -65,7 +65,6 @@ interface Server {
   todos: Array<{ text: string; done: boolean }>;
   /** Make the next PATCH fail with 412 after swapping in this list. */
   conflictWith?: Array<{ text: string; done: boolean }>;
-  failAdd?: boolean;
   exceptions?: Array<Record<string, unknown>>;
 }
 
@@ -90,10 +89,6 @@ function mockFetch(calls: Call[], server: Server) {
     if (url.endsWith('/checkins') && method === 'POST') return jsonResponse(201, { ok: true });
     if (url.includes('/kanban/cards/') && url.endsWith('/done')) return jsonResponse(200, { ok: true });
     if (url.includes('/kanban/cards/') && url.endsWith('/move')) return jsonResponse(200, { ok: true });
-    if (url.endsWith('/kanban/cards') && method === 'POST') {
-      if (server.failAdd) return jsonResponse(500, { code: 'boom', message: '服务暂时不可用' });
-      return jsonResponse(201, { ok: true });
-    }
     if (url.endsWith('/kanban/cards/kb_1') && method === 'PATCH') {
       if (server.conflictWith) {
         server.todos = server.conflictWith;
@@ -223,30 +218,6 @@ describe('MiniPage', () => {
     const move = calls.find((call) => call.url.endsWith('/kanban/cards/kb_3/move'));
     expect(move?.body).toEqual({ target_section: 'Doing' });
     expect(JSON.parse(window.localStorage.getItem('nblane-mini-queue:alice') ?? 'false')).toBe(true);
-  });
-
-  it('quick-adds a task to Queue on Enter and clears the input', async () => {
-    const calls: Call[] = [];
-    renderMini(calls, { todos: [] });
-    const input = await screen.findByRole('textbox', { name: '添加任务到 Queue' });
-    fireEvent.change(input, { target: { value: '  回复评审意见  ' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(calls.some((call) => call.method === 'POST' && call.url.endsWith('/kanban/cards'))).toBe(true));
-    const post = calls.find((call) => call.method === 'POST' && call.url.endsWith('/kanban/cards'));
-    expect(post?.body).toEqual({ title: '回复评审意见', section: 'Queue', context: '' });
-    await waitFor(() => expect(input).toHaveValue(''));
-  });
-
-  it('ignores Enter while an IME is composing and keeps the text on failure', async () => {
-    const calls: Call[] = [];
-    renderMini(calls, { todos: [], failAdd: true });
-    const input = await screen.findByRole('textbox', { name: '添加任务到 Queue' });
-    fireEvent.change(input, { target: { value: '拼音输入中' } });
-    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
-    expect(calls.some((call) => call.method === 'POST' && call.url.endsWith('/kanban/cards'))).toBe(false);
-    fireEvent.keyDown(input, { key: 'Enter' });
-    expect(await screen.findByText('服务暂时不可用')).toBeInTheDocument();
-    expect(input).toHaveValue('拼音输入中');
   });
 
   it('shows no AI exception badge when nothing failed', async () => {

@@ -1,7 +1,7 @@
-import { ActionIcon, Anchor, Box, Button, Center, Checkbox, Group, Indicator, Loader, Menu, ScrollArea, Stack, Text, TextInput, Tooltip, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Anchor, Box, Button, Center, Checkbox, Group, Indicator, Loader, Menu, ScrollArea, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconAlertTriangle, IconCheck, IconChevronDown, IconChevronRight, IconExternalLink, IconEye, IconEyeOff, IconPlayerPlay, IconPlus, IconRefresh } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCheck, IconChevronDown, IconChevronRight, IconExternalLink, IconEye, IconEyeOff, IconPlayerPlay, IconRefresh } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -12,7 +12,6 @@ import {
   useActiveHabitPlans,
   useAIExceptions,
   useAddCheckin,
-  useAddKanbanCard,
   useDoneKanbanCard,
   useKanbanBoard,
   useMoveKanbanCard,
@@ -53,10 +52,8 @@ export function MiniPage() {
   const [expanded, setExpanded] = useLocalStorage<string[]>({ key: `nblane-mini-open:${name}`, defaultValue: [] });
   // Optimistic todo lists per card while a save is in flight.
   const [pendingTodos, setPendingTodos] = useState<Record<string, MiniTodo[]>>({});
-  const addCard = useAddKanbanCard(name);
   const moveCard = useMoveKanbanCard(name);
   const [queueOpen, setQueueOpen] = useLocalStorage<boolean>({ key: `nblane-mini-queue:${name}`, defaultValue: false });
-  const [draft, setDraft] = useState('');
   // Hiding is local to this window (kept per profile in the browser); the
   // card stays on the kanban untouched.
   const [hidden, setHidden] = useLocalStorage<string[]>({ key: `nblane-mini-hidden:${name}`, defaultValue: [] });
@@ -168,21 +165,6 @@ export function MiniPage() {
       },
     );
 
-  const quickAdd = () => {
-    const title = draft.trim();
-    if (!title || addCard.isPending) return;
-    addCard.mutate(
-      { body: { title, section: 'Queue', context: '' }, etag: kanban.data?.etag ?? '' },
-      {
-        onSuccess: () => {
-          setDraft('');
-          notifications.show({ color: 'green', message: `「${title}」已加入 Queue。` });
-        },
-        // Keep the typed title so a retry needs no retyping.
-        onError: (error) => notifications.show({ color: 'red', title: '添加失败', message: errorText(error) }),
-      },
-    );
-  };
 
   const checkIn = (habitId: string, title: string, plan?: HabitPlan) =>
     checkin.mutate(
@@ -273,21 +255,6 @@ export function MiniPage() {
         </Group>
       </Group>
 
-      <TextInput
-        size="xs"
-        placeholder="添加任务到 Queue，回车保存"
-        aria-label="添加任务到 Queue"
-        value={draft}
-        onChange={(event) => setDraft(event.currentTarget.value)}
-        onKeyDown={(event) => {
-          // Enter while an IME is composing (pinyin) only confirms the word.
-          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            quickAdd();
-          }
-        }}
-        rightSection={addCard.isPending ? <Loader size={12} /> : <IconPlus size={14} />}
-      />
 
       <ScrollArea style={{ flex: 1 }} offsetScrollbars>
         <Stack gap={8}>
