@@ -39,8 +39,27 @@ _META_BODY_CHARS = 6000
 
 
 _LANG_NAMES = {"zh": "简体中文", "en": "English"}
+_LANG_NAMES_EN = {"zh": "Simplified Chinese", "en": "English"}
 _CJK_CHAR = re.compile(r"[一-鿿]")
 _LATIN_WORD = re.compile(r"[A-Za-z]+")
+
+
+def script_language(text: str) -> str:
+    """Main language of *text* by script share ('zh' or 'en').
+
+    Unlike ``llm.reply_language`` (any CJK character means Chinese), an
+    English post that mentions one Chinese term stays English, and a Chinese
+    paragraph full of English acronyms stays Chinese.
+    """
+    cjk = len(_CJK_CHAR.findall(text))
+    latin = len(_LATIN_WORD.findall(text))
+    return "zh" if cjk >= latin else "en"
+
+
+def article_language(text: str) -> str:
+    """Prompt language for content AI: a fixed LLM_REPLY_LANG wins, else the text's."""
+    mode = llm_client.reply_language_mode()
+    return mode if mode in ("zh", "en") else script_language(text)
 
 
 def translation_target(text: str) -> str:
@@ -48,16 +67,55 @@ def translation_target(text: str) -> str:
 
     The reply-language setting cannot be the target: in ``auto`` mode it
     follows the selection, so Chinese text was "translated" into Chinese.
-    The source is judged by script share, so a Chinese paragraph with a few
-    English terms (or vice versa) still counts as its main language.
     """
-    cjk = len(_CJK_CHAR.findall(text))
-    latin = len(_LATIN_WORD.findall(text))
-    return "en" if cjk >= latin else "zh"
+    return "en" if script_language(text) == "zh" else "zh"
 
 
-def target_language_name(text: str) -> str:
-    return _LANG_NAMES[translation_target(text)]
+def target_language_name(text: str, *, prompt_lang: str = "zh") -> str:
+    names = _LANG_NAMES_EN if prompt_lang == "en" else _LANG_NAMES
+    return names[translation_target(text)]
+
+
+# Field labels inside the user prompt, in the prompt's language: English
+# posts used to get Chinese labels and the model then drifted into Chinese.
+_LABELS = {
+    "zh": {
+        "target_lang": "目标语言",
+        "extra": "用户补充要求",
+        "title": "文章标题",
+        "context": "上下文（仅供参考，不要改写）",
+        "target": "目标文本",
+        "cur_title": "当前标题",
+        "cur_summary": "当前摘要",
+        "cur_tags": "当前标签",
+        "body": "正文",
+        "body_cut": "正文（较长，已省略中间部分）",
+        "outline": "全文提纲",
+        "omitted": "[……中间省略……]",
+        "here": "[目标文本位置]",
+    },
+    "en": {
+        "target_lang": "Target language",
+        "extra": "Additional instructions",
+        "title": "Article title",
+        "context": "Context (for reference only; do not rewrite)",
+        "target": "Target text",
+        "cur_title": "Current title",
+        "cur_summary": "Current summary",
+        "cur_tags": "Current tags",
+        "body": "Article",
+        "body_cut": "Article (long; the middle is omitted)",
+        "outline": "Outline",
+        "omitted": "[... middle omitted ...]",
+        "here": "[target text goes here]",
+    },
+}
+
+
+def _label(lang: str, key: str) -> str:
+    """``标签：`` / ``Label: `` for one prompt field."""
+    labels = _LABELS["en" if lang == "en" else "zh"]
+    return labels[key] + ("：" if lang != "en" else ": ")
 
 
 class ContentAIError(RuntimeError):
@@ -81,10 +139,11 @@ def _trim(text: str, limit: int) -> str:
     return clean if len(clean) <= limit else clean[:limit].rstrip() + "…"
 
 
-_OMITTED = "\n\n[……中间省略……]\n\n"
+def _omitted(lang: str) -> str:
+    return "\n\n" + _LABELS["en" if lang == "en" else "zh"]["omitted"] + "\n\n"
 
 
-def _excerpt(text: str, limit: int) -> tuple[str, bool]:
+def _excerpt(text: str, limit: int, *, lang: str = "zh") -> tuple[str, bool]:
     """Fit a long body into *limit* chars without losing its ending.
 
     Keeps the heading outline, the opening (~60%) and the closing (~40%),
@@ -96,10 +155,11 @@ def _excerpt(text: str, limit: int) -> tuple[str, bool]:
     headings = [line.strip() for line in clean.splitlines() if re.match(r"^#{1,3}\s+\S", line.strip())]
     outline = ""
     if len(headings) > 1:
-        outline = "全文提纲：\n" + "\n".join(headings)
+        outline = _label(lang, "outline").rstrip() + "\n" + "\n".join(headings)
         if len(outline) > limit // 5:
             outline = ""
-    budget = max(limit - len(outline) - len(_OMITTED) * 2, limit // 2)
+    marker = _omitted(lang)
+    budget = max(limit - len(outline) - len(marker) * 2, limit // 2)
     head_len = int(budget * 0.6)
     tail_len = budget - head_len
     head = clean[:head_len]
@@ -110,11 +170,11 @@ def _excerpt(text: str, limit: int) -> tuple[str, bool]:
     cut = tail.find("\n\n")
     if 0 <= cut < tail_len // 2:
         tail = tail[cut + 2 :]
-    body = head.rstrip() + _OMITTED + tail.lstrip()
+    body = head.rstrip() + marker + tail.lstrip()
     return (f"{outline}\n\n{body}" if outline else body), True
 
 
-def _context_window(context: str, selection: str, limit: int) -> str:
+def _context_window(context: str, selection: str, limit: int, *, lang: str = "zh") -> str:
     """Keep the paragraphs around the selection, not just the head.
 
     The editor sends neighbouring blocks *including* the selection; the
@@ -127,11 +187,12 @@ def _context_window(context: str, selection: str, limit: int) -> str:
         if len(clean) <= limit:
             return clean
         half = limit // 2
-        return clean[:half].rstrip() + _OMITTED + clean[-half:].lstrip()
+        return clean[:half].rstrip() + _omitted(lang) + clean[-half:].lstrip()
     half = limit // 2
     before = clean[:index][-half:]
     after = clean[index + len(target) :][:half]
-    return (before.rstrip() + "\n\n[目标文本位置]\n\n" + after.lstrip()).strip()
+    here = _LABELS["en" if lang == "en" else "zh"]["here"]
+    return (before.rstrip() + f"\n\n{here}\n\n" + after.lstrip()).strip()
 
 
 def _strip_fence(text: str, *, original: str = "") -> str:
@@ -281,19 +342,20 @@ def rewrite_selection(
             f"选中内容过长（上限 {SELECTION_MAX_CHARS} 字），请分段改写。",
         )
     _require_llm()
-    lang = llm_client.reply_language(text=original)
+    lang = article_language(original)
     system = get_prompt("inline_system", lang)
     task = get_prompt(op, lang)
     extra = _clean(instruction)
+    window = _context_window(context, original, _CONTEXT_CHARS, lang=lang) if _clean(context) else ""
     user = "\n\n".join(
         part
         for part in (
             task,
-            f"目标语言：{target_language_name(original)}" if op == "translate" else "",
-            f"用户补充要求：{extra}" if extra else "",
-            f"文章标题：{_clean(title)}" if _clean(title) else "",
-            f"上下文（仅供参考，不要改写）：\n{_context_window(context, original, _CONTEXT_CHARS)}" if _clean(context) else "",
-            f"目标文本：\n{original}",
+            _label(lang, "target_lang") + target_language_name(original, prompt_lang=lang) if op == "translate" else "",
+            _label(lang, "extra") + extra if extra else "",
+            _label(lang, "title") + _clean(title) if _clean(title) else "",
+            _label(lang, "context").rstrip() + "\n" + window if window else "",
+            _label(lang, "target").rstrip() + "\n" + original,
         )
         if part
     )
@@ -367,18 +429,18 @@ def suggest_meta(
     if len(text) < 40:
         raise ContentAIError("invalid_content_ai_request", "正文太短，先写一些内容再生成建议。")
     _require_llm()
-    lang = llm_client.reply_language(text=text)
+    lang = article_language(text)
     system = _META_SYSTEM_ZH if lang == "zh" else _META_SYSTEM_EN
     task = _META_TASK_ZH if lang == "zh" else _META_TASK_EN
-    excerpt, truncated = _excerpt(text, _META_BODY_CHARS)
+    excerpt, truncated = _excerpt(text, _META_BODY_CHARS, lang=lang)
     user = "\n\n".join(
         part
         for part in (
             task,
-            f"当前标题：{_clean(title)}" if _clean(title) else "",
-            f"当前摘要：{_clean(summary)}" if _clean(summary) else "",
-            f"当前标签：{', '.join(tags)}" if tags else "",
-            f"正文{'（较长，已省略中间部分）' if truncated else ''}：\n{excerpt}",
+            _label(lang, "cur_title") + _clean(title) if _clean(title) else "",
+            _label(lang, "cur_summary") + _clean(summary) if _clean(summary) else "",
+            _label(lang, "cur_tags") + ", ".join(tags) if tags else "",
+            _label(lang, "body_cut" if truncated else "body").rstrip() + "\n" + excerpt,
         )
         if part
     )
@@ -404,16 +466,63 @@ _SOCIAL_SYSTEM = (
     "你是社交平台文案助手。只依据给定的文章内容写文案，不编造文中没有的事实、数字或经历，"
     "保持作者原本的语气，不要营销腔、不要堆砌感叹号和表情。只返回一个 JSON 对象，不要任何解释。"
 )
+_SOCIAL_SYSTEM_EN = (
+    "You write share copy for social platforms. Use only the given article; never invent facts, "
+    "numbers or experiences. Keep the author's voice: no marketing tone, no piles of exclamation "
+    "marks or emoji. Return a single JSON object and nothing else."
+)
 _SOCIAL_TASK = (
     "为这篇文章准备分享文案：\n"
     '- "cover_titles"：3 个封面大标题备选，每个不超过 16 字，可用 \\n 分成 2–3 行；\n'
-    '- "cover_subtitles"：3 句封面引文备选，优先摘取原文里最打动人的一句，不超过 40 字；\n'
+    '- "cover_subtitles"：3 句封面引文，从原文中逐字摘取（原样复制，不改写），每句不超过 40 字；\n'
     '- "xhs_title"：小红书笔记标题，不超过 20 字；\n'
-    '- "xhs_body"：小红书正文，200–500 字，分 2–4 段，结尾附 3–5 个话题标签（#标签）；\n'
+    '- "xhs_body"：小红书正文，{xhs_length}，分 2–4 段，结尾附 3–5 个话题标签（#标签）；\n'
     '- "x_text"：X（Twitter）单条推文，不超过 120 个汉字，不带链接和话题标签。\n'
-    '输出格式：{"cover_titles": [...], "cover_subtitles": [...], "xhs_title": "", "xhs_body": "", "x_text": ""}'
+    '输出格式：{{"cover_titles": [...], "cover_subtitles": [...], "xhs_title": "", "xhs_body": "", "x_text": ""}}'
+)
+# English posts: the cover card and X follow the article; Xiaohongshu is a
+# Chinese-language platform, so its title and body stay in Simplified Chinese.
+_SOCIAL_TASK_EN = (
+    "Prepare share copy for this article:\n"
+    '- "cover_titles": 3 cover headline options in English, max 40 characters each; you may use \\n for 2-3 lines;\n'
+    '- "cover_subtitles": 3 quotes copied word for word from the article (do not paraphrase), max 120 characters each;\n'
+    '- "xhs_title": a Xiaohongshu note title in Simplified Chinese, max 20 Chinese characters;\n'
+    '- "xhs_body": the Xiaohongshu note body in Simplified Chinese, {xhs_length}, 2-4 paragraphs, '
+    "ending with 3-5 topic tags (#tag);\n"
+    '- "x_text": one X (Twitter) post in English, max 260 characters, no links or hashtags.\n'
+    'Output: {{"cover_titles": [...], "cover_subtitles": [...], "xhs_title": "", "xhs_body": "", "x_text": ""}}'
 )
 _SOCIAL_BODY_CHARS = 8000
+# Below this the article is too short for a 200-500 字 note: asking for one
+# made the model pad it with things the post never said.
+_XHS_FULL_BODY_MIN_CHARS = 600
+_QUOTE_NOISE = re.compile(r"[\W_]+", re.UNICODE)
+
+
+def _xhs_length(text: str, lang: str) -> str:
+    if len(text) >= _XHS_FULL_BODY_MIN_CHARS:
+        return "200–500 字" if lang == "zh" else "200-500 Chinese characters"
+    cap = max(60, len(text) // 2) if lang == "zh" else max(60, len(text) // 4)
+    return (
+        f"不超过 {cap} 字，只复述原文已有的内容"
+        if lang == "zh"
+        else f"at most {cap} Chinese characters, restating only what the article says"
+    )
+
+
+def _verbatim_quotes(quotes: list[str], source: str) -> list[str]:
+    """Keep only quotes that really appear in the article.
+
+    Compared without whitespace and punctuation, so a quote whose comma or
+    full stop the model changed still counts; reworded ones are dropped.
+    """
+    haystack = _QUOTE_NOISE.sub("", source).casefold()
+    kept: list[str] = []
+    for quote in quotes:
+        needle = _QUOTE_NOISE.sub("", quote).casefold()
+        if len(needle) >= 4 and needle in haystack:
+            kept.append(quote)
+    return kept
 
 
 def suggest_social_copy(*, title: str, body: str, profile: str = "") -> dict[str, Any]:
@@ -422,19 +531,21 @@ def suggest_social_copy(*, title: str, body: str, profile: str = "") -> dict[str
     if len(text) < 40:
         raise ContentAIError("invalid_content_ai_request", "正文太短，先写一些内容再生成文案。")
     _require_llm()
-    excerpt, truncated = _excerpt(text, _SOCIAL_BODY_CHARS)
+    lang = article_language(text)
+    excerpt, truncated = _excerpt(text, _SOCIAL_BODY_CHARS, lang=lang)
+    task = (_SOCIAL_TASK if lang == "zh" else _SOCIAL_TASK_EN).format(xhs_length=_xhs_length(text, lang))
     user = "\n\n".join(
         part
         for part in (
-            _SOCIAL_TASK,
-            f"文章标题：{_clean(title)}" if _clean(title) else "",
-            f"正文{'（较长，已省略中间部分）' if truncated else ''}：\n{excerpt}",
+            task,
+            _label(lang, "title") + _clean(title) if _clean(title) else "",
+            _label(lang, "body_cut" if truncated else "body").rstrip() + "\n" + excerpt,
         )
         if part
     )
     data = _run(
         "content.social",
-        _SOCIAL_SYSTEM,
+        _SOCIAL_SYSTEM if lang == "zh" else _SOCIAL_SYSTEM_EN,
         user,
         profile=profile,
         thinking=False,
@@ -443,12 +554,15 @@ def suggest_social_copy(*, title: str, body: str, profile: str = "") -> dict[str
     if not isinstance(data, dict):
         raise ContentAIError("content_ai_failed", "模型返回格式不正确，请重试。")
     result = {
-        "cover_titles": _string_list(data.get("cover_titles"), limit=3, max_len=60),
-        "cover_subtitles": _string_list(data.get("cover_subtitles"), limit=3, max_len=120),
+        "cover_titles": _string_list(data.get("cover_titles"), limit=3, max_len=60 if lang == "zh" else 80),
+        "cover_subtitles": _verbatim_quotes(
+            _string_list(data.get("cover_subtitles"), limit=3, max_len=120 if lang == "zh" else 200), text
+        ),
         "xhs_title": _trim(_clean(data.get("xhs_title")), 40),
         "xhs_body": _trim(_clean(data.get("xhs_body")), 2000),
         "x_text": _trim(_clean(data.get("x_text")), 1000),
         "truncated": truncated,
+        "lang": lang,
     }
     if not (result["cover_titles"] or result["xhs_body"] or result["x_text"]):
         raise ContentAIError("content_ai_failed", "模型没有给出可用的文案，请重试。")

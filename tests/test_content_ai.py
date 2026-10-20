@@ -8,6 +8,7 @@ candidate routes (path guard, promote leaves the post file untouched).
 
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 import time
@@ -173,7 +174,8 @@ class TestRewrite(ContentAITestBase):
         self.assertIn("目标语言：English", chat.call_args.args[1])
         chat = self._llm("翻译。")
         content_ai.rewrite_selection(operation="translate", selection="The robot grasps a cube with 机械臂.")
-        self.assertIn("目标语言：简体中文", chat.call_args.args[1])
+        # Mostly English with one Chinese term: an English prompt, Chinese target.
+        self.assertIn("Target language: Simplified Chinese", chat.call_args.args[1])
 
     def test_only_translate_gets_a_target_language(self) -> None:
         chat = self._llm("润色。")
@@ -314,6 +316,76 @@ class TestLongArticles(ContentAITestBase):
                 content_ai.rewrite_selection(operation="expand", selection="原始段落。")
         self.assertEqual(ctx.exception.code, "content_ai_output_truncated")
         self.assertIn("输出被截断", ctx.exception.message)
+
+
+EN_BODY = (
+    "This post walks through reproducing a VLA training pipeline on a home robot arm, "
+    "covering data collection, labelling and evaluation. "
+) * 3
+
+
+class TestEnglishArticles(ContentAITestBase):
+    """English posts get English prompts; share copy quotes are verbatim."""
+
+    def test_script_language_ignores_a_few_foreign_words(self) -> None:
+        self.assertEqual(content_ai.script_language("We used 机械臂 for the demo."), "en")
+        self.assertEqual(content_ai.script_language("我们用 VLA 和 RT-2 做了对比实验。"), "zh")
+
+    def test_fixed_reply_language_wins(self) -> None:
+        with patch("nblane.core.content_ai.llm_client.reply_language_mode", return_value="zh"):
+            self.assertEqual(content_ai.article_language(EN_BODY), "zh")
+        with patch("nblane.core.content_ai.llm_client.reply_language_mode", return_value="auto"):
+            self.assertEqual(content_ai.article_language(EN_BODY), "en")
+
+    def test_rewrite_of_english_text_uses_english_labels(self) -> None:
+        chat = self._llm("Polished.")
+        content_ai.rewrite_selection(operation="polish", selection="The arm grasp the cube.", title="VLA notes", context="Earlier text.")
+        prompt = chat.call_args.args[1]
+        self.assertIn("Target text:\nThe arm grasp the cube.", prompt)
+        self.assertIn("Article title: VLA notes", prompt)
+        self.assertNotIn("目标文本", prompt)
+        self.assertNotIn("文章标题", prompt)
+
+    def test_meta_for_english_post_is_fully_english(self) -> None:
+        chat = self._llm('{"titles": ["T"], "summaries": ["S"], "tags": ["vla"]}')
+        content_ai.suggest_meta(title="Old", summary="", tags=["robot"], body=EN_BODY)
+        system, user = chat.call_args.args[0], chat.call_args.args[1]
+        self.assertIn("blog editing assistant", system)
+        self.assertIn("Current title: Old", user)
+        self.assertIn("Article:\n", user)
+        self.assertNotIn("正文", user)
+
+    def test_social_for_english_post(self) -> None:
+        quote = "covering data collection, labelling and evaluation"
+        reply = json.dumps(
+            {
+                "cover_titles": ["VLA at home"],
+                "cover_subtitles": [quote, "A quote the article never said"],
+                "xhs_title": "在家复现 VLA",
+                "xhs_body": "正文",
+                "x_text": "Reproducing VLA on a home arm.",
+            }
+        )
+        chat = self._llm(reply)
+        result = content_ai.suggest_social_copy(title="VLA at home", body=EN_BODY)
+        system, user = chat.call_args.args[0], chat.call_args.args[1]
+        self.assertIn("share copy", system)
+        self.assertIn("in English", user)
+        self.assertIn("Simplified Chinese", user)  # Xiaohongshu stays Chinese
+        self.assertEqual(result["lang"], "en")
+        self.assertEqual(result["cover_subtitles"], [quote])
+
+    def test_quotes_must_come_from_the_article(self) -> None:
+        source = "做有价值的事，比做有意思的事更难。我们最后还是选了前者。"
+        kept = content_ai._verbatim_quotes(["做有价值的事，比做有意思的事更难", "人生就是要勇敢", "我们最后还是选了前者！"], source)
+        self.assertEqual(kept, ["做有价值的事，比做有意思的事更难", "我们最后还是选了前者！"])
+
+    def test_short_post_does_not_ask_for_a_long_note(self) -> None:
+        chat = self._llm('{"cover_titles": ["T"], "xhs_body": "短", "x_text": "x"}')
+        content_ai.suggest_social_copy(title="随笔", body="正文" * 40)
+        user = chat.call_args.args[1]
+        self.assertNotIn("200–500 字", user)
+        self.assertIn("只复述原文已有的内容", user)
 
 
 class TestMetaSuggestions(ContentAITestBase):
