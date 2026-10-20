@@ -19,12 +19,13 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCopy, IconDownload, IconPhoto, IconShare, IconSparkles } from '@tabler/icons-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { ApiError } from '../../api/client';
 import { useRenderSocialCards, useSocialCardSettings } from '../../api/hooks';
 import type { SocialCardRenderResponse, SocialCardSettings } from '../../api/types';
-import { runContentJob, type ContentJobHandle } from './contentJobs';
+import { runContentJob } from './contentJobs';
+import { useContentJob } from './useContentJob';
 
 interface SocialCopyResult {
   cover_titles: string[];
@@ -93,13 +94,10 @@ export function SocialShareDrawer({
   const [settings, setSettings] = useState<SocialCardSettings | null>(null);
   const [result, setResult] = useState<SocialCardRenderResponse | null>(null);
   const [allowDraft, setAllowDraft] = useState(false);
-  const [suggesting, setSuggesting] = useState(false);
   const [suggestions, setSuggestions] = useState<SocialCopyResult | null>(null);
   const [sharing, setSharing] = useState(false);
-  const suggestJob = useRef<ContentJobHandle<SocialCopyResult> | null>(null);
-
-  // A late result must not land after the drawer closed or unmounted.
-  useEffect(() => () => suggestJob.current?.cancel(), []);
+  const suggestJob = useContentJob<SocialCopyResult>();
+  const suggesting = suggestJob.running;
 
   useEffect(() => {
     if (opened && info.data && !settings) setSettings(info.data.settings);
@@ -107,9 +105,7 @@ export function SocialShareDrawer({
 
   useEffect(() => {
     if (!opened) {
-      suggestJob.current?.cancel();
-      suggestJob.current = null;
-      setSuggesting(false);
+      suggestJob.cancel();
       setSettings(null);
       setResult(null);
       setSuggestions(null);
@@ -136,38 +132,30 @@ export function SocialShareDrawer({
     );
   };
 
-  const suggest = () => {
-    suggestJob.current?.cancel();
-    setSuggesting(true);
-    const job = runContentJob<SocialCopyResult>(profile, 'content-social', { title, body });
-    suggestJob.current = job;
-    job.result
-      .then((data) => {
-        if (suggestJob.current !== job) return;
-        setSuggestions(data);
-        // Fill empty fields only; the owner's own text is never overwritten.
-        setSettings((current) =>
-          current
-            ? {
-                ...current,
-                cover_title: current.cover_title || data.cover_titles[0] || '',
-                cover_subtitle: current.cover_subtitle || data.cover_subtitles[0] || '',
-                xhs_title: current.xhs_title || data.xhs_title,
-                xhs_body: current.xhs_body || data.xhs_body,
-                x_text: current.x_text || data.x_text,
-              }
-            : current,
-        );
-      })
-      .catch((error: unknown) => {
-        if (suggestJob.current === job) notifications.show({ color: 'red', title: 'AI 文案失败', message: errorText(error) });
-      })
-      .finally(() => {
-        if (suggestJob.current === job) {
-          suggestJob.current = null;
-          setSuggesting(false);
-        }
-      });
+  const suggest = async () => {
+    const outcome = await suggestJob.start((onProgress) =>
+      runContentJob<SocialCopyResult>(profile, 'content-social', { title, body }, onProgress),
+    );
+    if (outcome.status === 'error') {
+      notifications.show({ color: 'red', title: 'AI 文案失败', message: outcome.error });
+      return;
+    }
+    if (outcome.status !== 'done') return;
+    const data = outcome.value;
+    setSuggestions(data);
+    // Fill empty fields only; the owner's own text is never overwritten.
+    setSettings((current) =>
+      current
+        ? {
+            ...current,
+            cover_title: current.cover_title || data.cover_titles[0] || '',
+            cover_subtitle: current.cover_subtitle || data.cover_subtitles[0] || '',
+            xhs_title: current.xhs_title || data.xhs_title,
+            xhs_body: current.xhs_body || data.xhs_body,
+            x_text: current.x_text || data.x_text,
+          }
+        : current,
+    );
   };
 
   const shareImages = async () => {
@@ -236,11 +224,16 @@ export function SocialShareDrawer({
               封面
             </Text>
             {aiText && (
-              <Button size="compact-sm" variant="light" leftSection={<IconSparkles size={14} />} loading={suggesting} onClick={suggest}>
+              <Button size="compact-sm" variant="light" leftSection={<IconSparkles size={14} />} loading={suggesting} onClick={() => void suggest()}>
                 AI 写标题和文案
               </Button>
             )}
           </Group>
+          {suggesting && (
+            <Text size="xs" c="dimmed" role="status" aria-live="polite">
+              {suggestJob.progress || 'AI 正在读全文并写分享文案…'}
+            </Text>
+          )}
           <Textarea
             label="封面大标题"
             description="留空用文章标题；回车换行"

@@ -1,9 +1,10 @@
 import { Alert, Button, Group, Loader, Paper, Stack, Text, UnstyledButton } from '@mantine/core';
 import { IconSparkles } from '@tabler/icons-react';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 
 import type { ContentMetaResult } from '../../api/types';
-import { runContentJob, type ContentJobHandle } from './contentJobs';
+import { runContentJob } from './contentJobs';
+import { useContentJob } from './useContentJob';
 
 /**
  * AI title / summary / tag candidates. Each candidate is a click-to-apply
@@ -24,27 +25,19 @@ export function AIMetaSuggestions({
   compact?: boolean;
 }) {
   const [result, setResult] = useState<ContentMetaResult | null>(null);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState('');
-  const jobRef = useRef<ContentJobHandle<ContentMetaResult> | null>(null);
+  const job = useContentJob<ContentMetaResult>();
+  const { running, error, progress } = job;
 
-  useEffect(() => () => jobRef.current?.cancel(), []);
-
-  const run = () => {
-    jobRef.current?.cancel();
-    setRunning(true);
-    setError('');
-    const job = runContentJob<ContentMetaResult>(profile, 'content-meta', {
-      title: draft.title,
-      summary: draft.summary,
-      tags: draft.tags,
-      body: draft.body,
-    });
-    jobRef.current = job;
-    job.result
-      .then(setResult)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setRunning(false));
+  const run = async () => {
+    const outcome = await job.start((onProgress) =>
+      runContentJob<ContentMetaResult>(
+        profile,
+        'content-meta',
+        { title: draft.title, summary: draft.summary, tags: draft.tags, body: draft.body },
+        onProgress,
+      ),
+    );
+    if (outcome.status === 'done') setResult(outcome.value);
   };
 
   const pick = (label: string, values: string[], apply: (value: string) => void, testid: string) =>
@@ -85,7 +78,7 @@ export function AIMetaSuggestions({
             size="compact-xs"
             variant="light"
             leftSection={running ? <Loader size={10} /> : <IconSparkles size={13} />}
-            onClick={run}
+            onClick={() => void run()}
             disabled={!enabled || running}
             data-testid="content-ai-meta-run"
           >
@@ -95,6 +88,11 @@ export function AIMetaSuggestions({
         {!enabled && (
           <Text size="xs" c="dimmed">
             未配置 LLM，AI 建议不可用。
+          </Text>
+        )}
+        {running && (
+          <Text size="xs" c="dimmed" role="status" aria-live="polite">
+            {progress || 'AI 正在读全文…'}
           </Text>
         )}
         {error && (

@@ -107,6 +107,7 @@ import { showAIUndo } from './aiUndoNotice';
 import { AIMetaSuggestions } from './AIMetaSuggestions';
 import { AIRewriteDialog, type RewriteState } from './AIRewriteDialog';
 import { runContentJob } from './contentJobs';
+import { combineJobs, useContentJob } from './useContentJob';
 import { OutlinePanel } from './OutlinePanel';
 import { PostSwitcher } from './PostSwitcher';
 import { SocialShareDrawer } from './SocialShareDrawer';
@@ -532,7 +533,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [rewrite, setRewrite] = useState<(RewriteState & { request: AIRewriteRequest }) | null>(null);
   const [rewriteView, setRewriteView] = useState<'diff' | 'edit'>('diff');
-  const rewriteJobRef = useRef<{ cancel: () => void } | null>(null);
+  const rewriteJob = useContentJob<ContentRewriteResult[]>();
 
   // Refs mirror the latest state for timers, unload handlers and async saves.
   const draftRef = useRef<PostDraft | null>(null);
@@ -949,7 +950,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const onDeleted = () => {
     window.clearTimeout(timerRef.current);
     window.clearTimeout(localTimerRef.current);
-    rewriteJobRef.current?.cancel();
+    rewriteJob.cancel();
     clearLocalDraft(window.localStorage, profile, slug);
     // Keep deletingRef set through unmount so exit flushing cannot recreate
     // the deleted document or its browser draft.
@@ -985,34 +986,37 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const onOutlineChange = useCallback((blocks: EditorBlocks) => setOutline(outlineFromBlocks(blocks)), []);
 
   const startRewrite = useCallback(
-    (request: AIRewriteRequest) => {
-      rewriteJobRef.current?.cancel();
+    async (request: AIRewriteRequest) => {
       setRewriteView('diff');
       setRewrite({ request, operation: request.operation, original: request.selection, status: 'running' });
       const selections = request.parts ?? [request.selection];
-      const jobs = selections.map((selection) => runContentJob<ContentRewriteResult>(
-        profile, 'content-rewrite',
-        { operation: request.operation, selection, context: request.context, title: draftRef.current?.title ?? '' },
-        (message) => setRewrite((current) => (current?.request === request ? { ...current, progress: message } : current)),
-      ));
-      rewriteJobRef.current = { cancel: () => jobs.forEach((job) => job.cancel()) };
-      const job = { result: Promise.all(jobs.map((item) => item.result)).then((results) => ({ text: results.map((item) => item.text).join('\n\n'), parts: request.parts ? results.map((item) => item.text) : undefined })) };
-      job.result
-        .then((result) =>
-          setRewrite((current) => (current?.request === request ? { ...current, status: 'done', text: result.text, parts: result.parts, originals: request.parts } : current)),
-        )
-        .catch((error: unknown) =>
-          setRewrite((current) =>
-            current?.request === request ? { ...current, status: 'error', error: errorText(error) } : current,
+      const total = selections.length;
+      const outcome = await rewriteJob.start((onProgress) =>
+        combineJobs(
+          selections.map((selection, index) =>
+            runContentJob<ContentRewriteResult>(
+              profile,
+              'content-rewrite',
+              { operation: request.operation, selection, context: request.context, title: draftRef.current?.title ?? '' },
+              (message) => onProgress(total > 1 ? `文字区域 ${index + 1}/${total}：${message}` : message),
+            ),
           ),
-        );
+        ),
+      );
+      if (outcome.status === 'stale') return;
+      setRewrite((current) => {
+        if (current?.request !== request) return current;
+        if (outcome.status === 'error') return { ...current, status: 'error', error: outcome.error };
+        const texts = outcome.value.map((item) => item.text);
+        return { ...current, status: 'done', text: texts.join('\n\n'), parts: request.parts ? texts : undefined, originals: request.parts };
+      });
     },
-    [profile],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [profile, rewriteJob.start],
   );
 
   const closeRewrite = () => {
-    rewriteJobRef.current?.cancel();
-    rewriteJobRef.current = null;
+    rewriteJob.cancel();
     setRewrite(null);
   };
 
@@ -1036,8 +1040,6 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
       .then(() => notifications.show({ color: 'green', message: '候选已复制，可粘贴到正文。' }))
       .catch(() => notifications.show({ color: 'red', message: '复制失败，请在「编辑候选」里手动选中复制。' }));
   };
-
-  useEffect(() => () => rewriteJobRef.current?.cancel(), []);
 
   const jumpToHeading = (id: string) => {
     if (mode !== 'visual') setMode('visual');
@@ -1548,7 +1550,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
       />
 
       <AIRewriteDialog
-        state={rewrite}
+        state={rewrite && rewrite.status === 'running' ? { ...rewrite, progress: rewriteJob.progress } : rewrite}
         view={rewriteView}
         onViewChange={setRewriteView}
         onEditPart={(index, text) => setRewrite((current) => {

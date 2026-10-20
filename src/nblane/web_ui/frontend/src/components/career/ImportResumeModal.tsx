@@ -1,10 +1,11 @@
 import { Alert, Badge, Button, FileButton, Group, Loader, Modal, SegmentedControl, Stack, Text, Textarea } from '@mantine/core';
 import { IconFileImport, IconSparkles, IconUpload } from '@tabler/icons-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { importCareerFile, importCareerText } from '../../api/hooks';
 import type { CareerImportPreview, CareerStructureResult, ResumeDoc } from '../../api/types';
-import { runContentJob, type ContentJobHandle } from '../content/contentJobs';
+import { runContentJob } from '../content/contentJobs';
+import { useContentJob } from '../content/useContentJob';
 import { ResumePreview } from './CareerShared';
 import { resumeStats } from './resumeModel';
 
@@ -36,22 +37,26 @@ export function ImportResumeModal({
 }) {
   const [mode, setMode] = useState<'file' | 'paste'>('file');
   const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState('');
-  const [error, setError] = useState('');
+  // File / paste parsing is a plain request; AI field recognition is a job.
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState('');
+  const aiJob = useContentJob<CareerStructureResult>();
+  const busy = importing || aiJob.running;
+  const progress = aiJob.progress;
+  const error = importError || aiJob.error;
   const [preview, setPreview] = useState<CareerImportPreview | null>(null);
   const [resume, setResume] = useState<ResumeDoc | null>(null);
   const [method, setMethod] = useState('');
-  const jobRef = useRef<ContentJobHandle<CareerStructureResult> | null>(null);
 
   useEffect(() => {
     if (!opened) {
-      jobRef.current?.cancel();
+      aiJob.cancel();
+      aiJob.setError('');
       setPreview(null);
       setResume(null);
-      setError('');
+      setImportError('');
       setText('');
-      setBusy(false);
+      setImporting(false);
     }
   }, [opened]);
 
@@ -59,31 +64,29 @@ export function ImportResumeModal({
     setPreview(result);
     setResume(result.resume ?? null);
     setMethod(result.method);
-    setError(result.error && !result.text ? result.error : '');
+    setImportError(result.error && !result.text ? result.error : '');
   };
 
   const run = (task: Promise<CareerImportPreview>) => {
-    setBusy(true);
-    setError('');
+    setImporting(true);
+    setImportError('');
+    aiJob.setError('');
     task
       .then(accept)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setBusy(false));
+      .catch((err: unknown) => setImportError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setImporting(false));
   };
 
-  const recognize = () => {
+  const recognize = async () => {
     if (!preview?.text) return;
-    setBusy(true);
-    setError('');
-    const job = runContentJob<CareerStructureResult>(profile, 'career-structure', { text: preview.text }, setProgress);
-    jobRef.current = job;
-    job.result
-      .then((result) => {
-        setResume(result.resume);
-        setMethod('llm');
-      })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setBusy(false));
+    setImportError('');
+    const text = preview.text;
+    const outcome = await aiJob.start((onProgress) =>
+      runContentJob<CareerStructureResult>(profile, 'career-structure', { text }, onProgress),
+    );
+    if (outcome.status !== 'done') return;
+    setResume(outcome.value.resume);
+    setMethod('llm');
   };
 
   return (
@@ -165,7 +168,7 @@ export function ImportResumeModal({
                 {aiAvailable && (
                   <Button
                     leftSection={busy ? <Loader size={14} /> : <IconSparkles size={16} />}
-                    onClick={recognize}
+                    onClick={() => void recognize()}
                     disabled={busy}
                     variant="light"
                     data-testid="career-import-ai"

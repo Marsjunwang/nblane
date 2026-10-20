@@ -23,14 +23,15 @@ import {
 import { useHotkeys, useMediaQuery } from '@mantine/hooks';
 import { IconArrowLeft, IconCheck, IconRefresh, IconSparkles, IconTarget, IconTrash } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { apiBase } from '../../api/client';
 import { deleteCareerDraft, updateCareerDraft, useCareerWorkspace } from '../../api/hooks';
 import type { CareerDraft, CareerMatchResult, CareerTailorResult, CareerWorkspaceResponse } from '../../api/types';
 import { InlineDiff } from '../content/AIRewriteDialog';
-import { runContentJob, type ContentJobHandle } from '../content/contentJobs';
+import { runContentJob } from '../content/contentJobs';
+import { useContentJob } from '../content/useContentJob';
 import { ExportMenu, ResumePreview, SaveBadge } from './CareerShared';
 import { careerHomePath } from './resumeModel';
 import { useAutosave } from './useAutosave';
@@ -162,16 +163,12 @@ function TargetInner({ profile, draft, data }: { profile: string; draft: CareerD
   const [pane, setPane] = useState<'jd' | 'resume'>('jd');
   const [draftView, setDraftView] = useState<'edit' | 'preview' | 'diff'>('preview');
   const [useEvidence, setUseEvidence] = useState(true);
-  const [matching, setMatching] = useState(false);
-  const [matchProgress, setMatchProgress] = useState('');
-  const [matchError, setMatchError] = useState('');
-  const [tailoring, setTailoring] = useState(false);
-  const [tailorProgress, setTailorProgress] = useState('');
-  const [tailorError, setTailorError] = useState('');
+  const matchJob = useContentJob<CareerMatchResult>();
+  const tailorJob = useContentJob<CareerTailorResult>();
+  const { running: matching, progress: matchProgress, error: matchError } = matchJob;
+  const { running: tailoring, progress: tailorProgress, error: tailorError } = tailorJob;
   const [candidate, setCandidate] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const matchJob = useRef<ContentJobHandle<CareerMatchResult> | null>(null);
-  const tailorJob = useRef<ContentJobHandle<CareerTailorResult> | null>(null);
 
   const draftUrl = `${apiBase()}/profiles/${encodeURIComponent(profile)}/career/drafts/${encodeURIComponent(draft.id)}`;
   const autosave = useAutosave<TargetState>({
@@ -197,13 +194,6 @@ function TargetInner({ profile, draft, data }: { profile: string; draft: CareerD
   const state = autosave.value;
   const set = (patch: Partial<TargetState>) => autosave.edit((previous) => ({ ...previous, ...patch }));
 
-  useEffect(
-    () => () => {
-      matchJob.current?.cancel();
-      tailorJob.current?.cancel();
-    },
-    [],
-  );
   useHotkeys([['mod+S', () => void autosave.flush()]], []);
 
   const jobInput = () => ({
@@ -213,34 +203,24 @@ function TargetInner({ profile, draft, data }: { profile: string; draft: CareerD
     use_evidence: useEvidence,
   });
 
-  const runMatch = () => {
-    matchJob.current?.cancel();
-    setMatching(true);
-    setMatchError('');
-    const job = runContentJob<CareerMatchResult>(profile, 'career-match', jobInput(), setMatchProgress);
-    matchJob.current = job;
-    job.result
-      .then((analysis) => set({ analysis }))
-      .catch((err: unknown) => setMatchError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setMatching(false));
+  const runMatch = async () => {
+    const outcome = await matchJob.start((onProgress) =>
+      runContentJob<CareerMatchResult>(profile, 'career-match', jobInput(), onProgress),
+    );
+    if (outcome.status === 'done') set({ analysis: outcome.value });
   };
 
-  const runTailor = () => {
-    tailorJob.current?.cancel();
-    setTailoring(true);
-    setTailorError('');
+  const runTailor = async () => {
     const edited = state.markdown.trim() && state.markdown.trim() !== data.resume_markdown.trim();
-    const job = runContentJob<CareerTailorResult>(
-      profile,
-      'career-tailor',
-      { ...jobInput(), analysis: state.analysis, current_draft: edited ? state.markdown : '' },
-      setTailorProgress,
+    const outcome = await tailorJob.start((onProgress) =>
+      runContentJob<CareerTailorResult>(
+        profile,
+        'career-tailor',
+        { ...jobInput(), analysis: state.analysis, current_draft: edited ? state.markdown : '' },
+        onProgress,
+      ),
     );
-    tailorJob.current = job;
-    job.result
-      .then((result) => setCandidate(result.markdown))
-      .catch((err: unknown) => setTailorError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setTailoring(false));
+    if (outcome.status === 'done') setCandidate(outcome.value.markdown);
   };
 
   const back = async () => {
@@ -285,7 +265,7 @@ function TargetInner({ profile, draft, data }: { profile: string; draft: CareerD
         </Tooltip>
         <Button
           leftSection={matching ? <Loader size={14} /> : <IconTarget size={16} />}
-          onClick={runMatch}
+          onClick={() => void runMatch()}
           disabled={!state.jd_text.trim() || matching || !data.ai_available}
           data-testid="career-match"
         >
@@ -323,7 +303,7 @@ function TargetInner({ profile, draft, data }: { profile: string; draft: CareerD
           size="xs"
           variant="light"
           leftSection={tailoring ? <Loader size={12} /> : <IconSparkles size={15} />}
-          onClick={runTailor}
+          onClick={() => void runTailor()}
           disabled={!state.jd_text.trim() || tailoring || !data.ai_available}
           data-testid="career-tailor"
         >
@@ -448,7 +428,7 @@ function TargetInner({ profile, draft, data }: { profile: string; draft: CareerD
               </Paper>
             </ScrollArea.Autosize>
             <Group justify="space-between">
-              <Button variant="subtle" leftSection={<IconRefresh size={14} />} onClick={runTailor} disabled={tailoring}>
+              <Button variant="subtle" leftSection={<IconRefresh size={14} />} onClick={() => void runTailor()} disabled={tailoring}>
                 重新生成
               </Button>
               <Group gap="xs">
