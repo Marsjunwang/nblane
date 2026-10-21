@@ -62,15 +62,19 @@ THEME = {
 # Defaults chosen from the 2026-09 phone trials (phase0.5-remote-terminal.md)
 # and the 2026-10 column measurements: on a 412px phone font 24 leaves only
 # 25 columns (Claude Code's layout breaks), 16 gives ~37 and stays legible;
-# canvas renderer + glyph rescale fixed the garbled CJK glyphs on Android GPUs;
 # mouse off + no alternate screen is the only combination where touch
 # scrolling reaches history. escape_time 10ms: tmux's 500ms default makes Esc
 # lag in Claude Code / Codex.
+# Renderer: dom. The 2026-09 trials picked canvas + glyph rescale for Android
+# CJK, but ttyd's canvas renderer mis-scales glyphs by devicePixelRatio (DPR 3
+# phones draw every cell 3x too large — a dozen columns per screen, verified
+# 2026-10-21). The dom renderer lays text out in the browser, so DPR and CJK
+# are both handled natively.
 DEFAULTS: dict[str, Any] = {
     "font_size_mobile": 16,
     "font_size_desktop": 15,
     "scrollback": 10000,
-    "renderer": "canvas",
+    "renderer": "dom",
     "rescale_glyphs": True,
     "history_limit": 50000,
     "mouse": False,

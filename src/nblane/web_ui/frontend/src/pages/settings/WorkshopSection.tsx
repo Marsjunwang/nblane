@@ -149,7 +149,7 @@ function SettingsFormCard({ data }: { data: WorkshopServiceStatus }) {
       },
     });
   return (
-    <SettingsCard icon={<IconDeviceMobile size={22} />} title="终端显示与输入" description="默认值来自手机实测：Canvas 渲染 + 字形缩放修复安卓上汉字糊字；关掉 tmux 备用屏幕后，手机才能上下滑动翻历史。">
+    <SettingsCard icon={<IconDeviceMobile size={22} />} title="终端显示与输入" description="默认值来自手机实测：DOM 渲染在高分屏手机上字号准确、汉字清晰；关掉 tmux 备用屏幕后，手机才能上下滑动翻历史。">
       <SimpleGrid cols={{ base: 1, sm: 2 }}>
         <NumberInput label="手机字号" description="触屏设备打开车间时使用" min={10} max={40} value={draft.font_size_mobile} onChange={num('font_size_mobile')} />
         <NumberInput label="电脑字号" min={10} max={40} value={draft.font_size_desktop} onChange={num('font_size_desktop')} />
@@ -157,7 +157,7 @@ function SettingsFormCard({ data }: { data: WorkshopServiceStatus }) {
       <Stack gap={4}>
         <Text size="sm" fw={500}>渲染方式</Text>
         <SegmentedControl w="fit-content" aria-label="渲染方式" value={draft.renderer} onChange={(value) => set('renderer', value)} data={RENDERERS} />
-        <Text size="xs" c="dimmed">Canvas 最稳；WebGL 滚动最快，但部分安卓 GPU 会糊字；DOM 最慢、兼容性最好。</Text>
+        <Text size="xs" c="dimmed">DOM 最稳：高像素密度手机上字号准确、中文清晰。Canvas 在手机上会把字形放大数倍（ttyd 的 DPR bug）；WebGL 滚动最快，但部分安卓 GPU 会糊字。</Text>
       </Stack>
       <Switch label="超宽字形缩放回格子（修复中文/符号叠字）" checked={draft.rescale_glyphs} onChange={(event) => set('rescale_glyphs', event.currentTarget.checked)} />
       <Divider />

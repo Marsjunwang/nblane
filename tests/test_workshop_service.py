@@ -98,7 +98,7 @@ class TestGeneratedFiles(_TempServiceMixin, unittest.TestCase):
         command = ws.ttyd_command({**ws.DEFAULTS, "cwd": "/tmp"}, binary="/x/ttyd")
         self.assertEqual(command[0], "/x/ttyd")
         self.assertIn("127.0.0.1", command)
-        self.assertIn("rendererType=canvas", command)
+        self.assertIn("rendererType=dom", command)
         tail = command[command.index("--") + 1:]
         self.assertEqual(tail[1:3], ["-L", ws.tmux_socket()])
         self.assertEqual(tail[3], "-f")
