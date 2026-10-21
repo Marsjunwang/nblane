@@ -17,12 +17,16 @@ import { SidecarFrame } from '../components/SidecarFrame';
  * active tmux pane server-side (tmux send-keys / paste-buffer), independent of
  * ttyd's frontend. The bar is on by default for touch devices, keeps Enter and
  * the arrow keys always visible, and the input box sends on Enter (Shift+Enter
- * inserts a newline) so the phone IME works end to end.
+ * inserts a newline) so the phone IME works end to end. History is scrolled by
+ * swiping inside the terminal (tmux mouse off + no alternate screen); ⇊ snaps
+ * back to the latest output, as does sending any key or text.
  */
 
 // Key bar groups: `main` and `nav` stay visible at all times — Enter and the
 // arrow keys must be reachable on a phone without horizontal scrolling. The
-// rarer `extra` keys sit behind the 更多 toggle.
+// rarer `extra` keys sit behind the 更多 toggle. Terminal history itself is
+// scrolled by swiping inside the terminal (native xterm scroll), so PgUp/PgDn
+// are only in-app paging keys (less / man / vim) and live in `extra`.
 const KEY_BAR: Array<{ key: string; label: string; hint: string; group: 'main' | 'nav' | 'extra' }> = [
   { key: 'esc', label: 'Esc', hint: '中断 / 关闭菜单', group: 'main' },
   { key: 'ctrl_c', label: '^C', hint: 'Ctrl-C', group: 'main' },
@@ -33,8 +37,6 @@ const KEY_BAR: Array<{ key: string; label: string; hint: string; group: 'main' |
   { key: 'up', label: '↑', hint: '上', group: 'nav' },
   { key: 'down', label: '↓', hint: '下', group: 'nav' },
   { key: 'right', label: '→', hint: '右', group: 'nav' },
-  { key: 'page_up', label: 'PgUp', hint: '上翻页', group: 'nav' },
-  { key: 'page_down', label: 'PgDn', hint: '下翻页', group: 'nav' },
   { key: 'esc2', label: 'Esc×2', hint: '回退到上一条消息（Claude Code）', group: 'extra' },
   { key: 'ctrl_o', label: '^O', hint: 'Ctrl-O：展开完整记录（Claude Code）', group: 'extra' },
   { key: 'ctrl_r', label: '^R', hint: 'Ctrl-R：搜索历史', group: 'extra' },
@@ -42,6 +44,8 @@ const KEY_BAR: Array<{ key: string; label: string; hint: string; group: 'main' |
   { key: 'ctrl_l', label: '^L', hint: 'Ctrl-L：清屏 / 重绘', group: 'extra' },
   { key: 'ctrl_d', label: '^D', hint: 'Ctrl-D：退出', group: 'extra' },
   { key: 'ctrl_z', label: '^Z', hint: 'Ctrl-Z：挂起', group: 'extra' },
+  { key: 'page_up', label: 'PgUp', hint: '程序内上翻页（less / man）', group: 'extra' },
+  { key: 'page_down', label: 'PgDn', hint: '程序内下翻页（less / man）', group: 'extra' },
 ];
 
 // Keep focus where it is (the terminal or the input box) so tapping a key
@@ -75,6 +79,17 @@ export function terminalUrl(url: string, fontSize: number): string {
   }
 }
 
+/** Snap the embedded xterm viewport to the latest output (same-origin iframe). */
+function scrollTerminalToBottom() {
+  try {
+    const frame = document.querySelector<HTMLIFrameElement>('[data-testid="sidecar-frame"]');
+    const viewport = frame?.contentDocument?.querySelector('.xterm-viewport');
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
+  } catch {
+    // Terminal not ready or cross-origin: nothing to scroll.
+  }
+}
+
 function KeyBar() {
   const send = useWorkshopKeys();
   const [pressed, setPressed] = useState<string | null>(null);
@@ -85,7 +100,11 @@ function KeyBar() {
     setPressed(key);
     window.setTimeout(() => setPressed((current) => (current === key ? null : current)), 180);
     navigator.vibrate?.(10);
-    send.mutate([key], { onError: (error) => notifications.show({ title: '按键发送失败', message: error.message, color: 'red' }) });
+    // Typing snaps a real terminal to the prompt; mirror that here.
+    send.mutate([key], {
+      onSuccess: scrollTerminalToBottom,
+      onError: (error) => notifications.show({ title: '按键发送失败', message: error.message, color: 'red' }),
+    });
   };
   const renderKey = (item: (typeof KEY_BAR)[number]) => (
     <Tooltip key={item.key} label={item.hint} openDelay={400} events={{ hover: true, focus: false, touch: true }}>
@@ -121,6 +140,19 @@ function KeyBar() {
       </Group>
       <Group gap={6} wrap="wrap">
         {KEY_BAR.filter((item) => item.group === 'nav').map(renderKey)}
+        <Tooltip label="滚动到最新输出" openDelay={400} events={{ hover: true, focus: false, touch: true }}>
+          <Button
+            size="compact-md"
+            variant="default"
+            ff="monospace"
+            aria-label="滚动到最新输出"
+            onMouseDown={keepFocus}
+            onClick={scrollTerminalToBottom}
+            style={{ flexShrink: 0, minWidth: 48, minHeight: 44 }}
+          >
+            ⇊
+          </Button>
+        </Tooltip>
       </Group>
       {showExtra && (
         <Group gap={6} wrap="wrap">
@@ -138,7 +170,10 @@ function InputBox() {
     send.mutate(
       { text, submit: withEnter },
       {
-        onSuccess: () => setText(''),
+        onSuccess: () => {
+          setText('');
+          scrollTerminalToBottom();
+        },
         onError: (error) => notifications.show({ title: '发送失败', message: error.message, color: 'red' }),
       },
     );

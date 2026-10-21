@@ -83,13 +83,24 @@ describe('WorkshopPage', () => {
     renderWithProviders(<WorkshopPage />, '/workshop');
 
     fireEvent.click(await screen.findByRole('button', { name: '快捷输入' }));
-    // Enter and the arrows are always visible; Ctrl-R is not.
+    // Enter and the arrows are always visible; Ctrl-R and PgUp are not.
     expect(screen.getByRole('button', { name: '回车' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '上' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Ctrl-R：搜索历史' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '程序内上翻页（less / man）' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '显示更多按键' }));
     expect(screen.getByRole('button', { name: 'Ctrl-R：搜索历史' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '程序内上翻页（less / man）' })).toBeInTheDocument();
+  });
+
+  it('offers a scroll-to-bottom button that sends no key', async () => {
+    const calls = stubFetch(REACHABLE_PAYLOAD);
+    renderWithProviders(<WorkshopPage />, '/workshop');
+
+    fireEvent.click(await screen.findByRole('button', { name: '快捷输入' }));
+    fireEvent.click(screen.getByRole('button', { name: '滚动到最新输出' }));
+    expect(calls.some((call) => call.url.endsWith('/system/workshop/keys'))).toBe(false);
   });
 
   it('flashes a pressed state when a key is tapped', async () => {
