@@ -404,12 +404,12 @@ def main() -> None:
 
     p_agent_harness = sub.add_parser(
         "sync-agent-harness",
-        help="Print or write Codex/OpenCode/OpenClaw harness config snippets",
+        help="Print or write Codex/OpenCode harness config snippets",
     )
     p_agent_harness.add_argument(
         "--target",
         required=True,
-        choices=["codex", "opencode", "openclaw"],
+        choices=["codex", "opencode"],
         help="External agent harness target",
     )
     p_agent_harness.add_argument(
@@ -946,17 +946,9 @@ def main() -> None:
         "doctor",
         help="Read-only OpenClaw host/gateway health checks",
     )
-    p_oc_doctor.add_argument(
-        "--profile",
-        default=None,
-        help="Profile name; also reconciles its declared automations",
-    )
     p_oc_daily = openclaw_sub.add_parser(
         "sync",
-        help=(
-            "Render memory corpus, sync skills into the workspace, "
-            "and report automations drift (--check: report only)"
-        ),
+        help="Render memory corpus and sync skills into the workspace (--check: report only)",
     )
     p_oc_daily.add_argument(
         "--profile",
@@ -966,13 +958,13 @@ def main() -> None:
     p_oc_daily.add_argument(
         "--check",
         action="store_true",
-        help="Write nothing; exit 1 if corpus/skills/automations drifted",
+        help="Write nothing; exit 1 if corpus or skills drifted",
     )
     p_oc_install = openclaw_sub.add_parser(
         "install",
         help=(
             "One-command idempotent OpenClaw setup: skills+corpus, plugin, "
-            "config overlay with MCP injection, automations (dry-run default)"
+            "config overlay, automations (dry-run default)"
         ),
     )
     p_oc_install.add_argument(
@@ -1119,7 +1111,6 @@ def main() -> None:
         cmd_sync_agent_harness(
             args.target,
             out_path=args.out,
-            profile=args.profile,
         )
     elif args.command == "agent":
         if args.agent_command == "handoff":
@@ -1300,7 +1291,7 @@ def main() -> None:
                 )
     elif args.command == "openclaw":
         if args.openclaw_command == "doctor":
-            cmd_openclaw_doctor(profile=args.profile)
+            cmd_openclaw_doctor()
         elif args.openclaw_command == "sync":
             cmd_openclaw_sync(
                 profile=args.profile,

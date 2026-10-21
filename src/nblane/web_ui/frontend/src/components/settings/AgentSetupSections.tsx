@@ -325,7 +325,7 @@ export function AgentSection() {
   const start = (kind: 'install' | 'connect' | 'migrate' | 'weixin') => job.mutate({ kind, profile: chosen, reuseLlm }, errorToast('无法开始'));
   const ready = data.installed && data.configured;
   return (
-    <SettingsCard icon={<IconRobot size={22} />} title="个人 Agent" description="nblane 是 agent 背后的成长档案：agent 通过 MCP 读写，结构化改动进入审批。目前适配 OpenClaw，其它支持 MCP 的 agent 可用下方配置片段接入。">
+    <SettingsCard icon={<IconRobot size={22} />} title="个人 Agent" description="nblane 是 agent 背后的成长档案：OpenClaw 助手通过 HTTP 接口读写，写入分级授权、重要操作在微信里确认、全部可撤销。其它本地 agent（Cursor、Claude Code 等）可用下方 MCP 配置片段接入。">
         <Group gap="xs">
           <Badge color={ready ? 'green' : 'gray'} variant="light">{ready ? `OpenClaw ${data.version}` : data.installed ? '已安装，未初始化' : '未安装'}</Badge>
           {data.profile && <Badge color="violet" variant="outline">隔离 profile：{data.profile}</Badge>}

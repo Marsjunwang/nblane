@@ -8,6 +8,8 @@
 ```text
 scripts/openclaw/
 ├── skills/                    # 同步到 ~/.openclaw/workspace/skills/
+│   ├── nblane/SKILL.md        # 助手的规则手册（HTTP 通道、三类写入、
+│   │                          #   确认与撤销；同步由 openclaw connect 维护）
 │   ├── codex-dev/SKILL.md     # Codex 委派 Skill
 │   ├── kimi-dev/SKILL.md      # Kimi 委派 Skill
 │   └── bin/                   # 两个 Skill 共用的 wrapper（dev-delegate.sh、
@@ -18,10 +20,14 @@ scripts/openclaw/
 │   └── weixin-task-bridge/    # 微信任务桥插件源码（package.json、
 │                              #   openclaw.plugin.json、dist/index.js），
 │                              #   提供 /taskctl 命令与 [后台任务] 进度镜像
-└── install.sh                 # 幂等安装脚本（见下）
+└── install.sh                 # 早期的手工安装脚本（见下）
 ```
 
-## install.sh
+## install.sh（已被替代，保留给旧部署）
+
+> 新装请用 设置 → 系统 → 助手与备份 的一键接入，或
+> `nblane openclaw install`（见 docs/zh/guides/openclaw-ops.md）；
+> 本脚本仅为旧部署保留。
 
 在目标机器上执行一次即可完成两件事：
 

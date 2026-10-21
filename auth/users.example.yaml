@@ -16,3 +16,14 @@ users:
     password_hash: "<pbkdf2_sha256$...>"
     role: member
     profile: 王军
+
+  # Service account for the OpenClaw assistant (HTTP channel). Its writes are
+  # journaled and important ones need chat confirmation. Prefer an nbl_… API
+  # token (minted from 设置 → 系统 → 助手与备份) over password login.
+  openclaw:
+    display_name: OpenClaw 助手
+    password_hash: "<pbkdf2_sha256$...>"
+    role: member
+    agent: true
+    profiles:
+      - 王军

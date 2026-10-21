@@ -807,17 +807,6 @@
        }
       ]
      },
-     "mcp_nblane_registered": {
-      "anyOf": [
-       {
-        "type": "boolean"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Mcp Nblane Registered"
-     },
      "version": {
       "anyOf": [
        {

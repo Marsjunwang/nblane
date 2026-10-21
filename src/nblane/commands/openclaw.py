@@ -61,10 +61,10 @@ def _openclaw_home() -> Path:
     return Path.home() / ".openclaw"
 
 
-def cmd_doctor(profile: str | None = None) -> None:
+def cmd_doctor() -> None:
     """Run read-only OpenClaw health checks; exit 1 on any error failure."""
 
-    checks = run_doctor(profile_name=profile)
+    checks = run_doctor()
     print("OpenClaw 体检：")
     for check in checks:
         if check.ok:
@@ -333,12 +333,10 @@ def cmd_sync(
     and prunes their stale counterparts — generated corpus files whose
     sources disappeared and skills files under the managed top-level
     entries that are gone from the repo tree (foreign trees in the
-    workspace stay untouched). Automations changes are never applied here —
-    those stay plan-only and point at ``nblane openclaw automations sync
-    --apply``.  ``--check`` writes nothing and exits 1 when any of the
-    three sections drifted, stale files included (aligning with ``nblane
-    sync --check``).  Write mode also exits 1 on remaining automations
-    drift, matching the dry-run convention.
+    workspace stay untouched).  ``--check`` writes nothing and exits 1 when
+    either section drifted, stale files included (aligning with ``nblane
+    sync --check``).  Automations drift is reconciled separately by
+    ``nblane openclaw automations sync``.
     """
     home = Path(openclaw_home) if openclaw_home is not None else _openclaw_home()
     if not home.is_dir():

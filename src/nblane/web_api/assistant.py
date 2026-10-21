@@ -5,9 +5,6 @@ Read-only probes only; nothing here mutates the live gateway:
 - ``shutil.which("openclaw")`` — binary presence
 - ``openclaw --version`` — installed version
 - ``GET http://127.0.0.1:<port>/readyz`` — gateway readiness + uptime
-- the OpenClaw config file — whether the nblane MCP server is registered
-  (read directly; ``openclaw mcp list`` takes >5s and is only a fallback
-  for non-JSON configs)
 - ``openclaw automations list --all --json`` — automation counts
 - the OpenClaw workspace — whether the nblane skill (``skills/nblane/SKILL.md``)
   and the HTTP client (``skills/bin/nblane_api*``) match this nblane version
@@ -44,7 +41,6 @@ from nblane.core import openclaw_ops, openclaw_setup
 from nblane.web_api.auth import require_user
 
 PROBE_TIMEOUT_SECONDS = 5.0
-MCP_LIST_TIMEOUT_SECONDS = 15.0
 CACHE_TTL_SECONDS = 60.0
 
 DEFAULT_GATEWAY_BASE = "http://127.0.0.1:18789"
@@ -91,7 +87,6 @@ class AssistantStatusResponse(BaseModel):
     available: bool
     version: str | None = None
     gateway: AssistantGatewayStatus | None = None
-    mcp_nblane_registered: bool | None = None
     automations: AssistantAutomationsStatus | None = None
     channels: AssistantChannelsStatus | None = None
     console_url: str = DEFAULT_CONSOLE_URL
@@ -143,35 +138,6 @@ def _probe_gateway(http_get: HttpGetFn, gateway_base: str) -> AssistantGatewaySt
         if isinstance(raw, (int, float)) and not isinstance(raw, bool):
             uptime_ms = int(raw)
     return AssistantGatewayStatus(ready=ready, uptime_ms=uptime_ms)
-
-
-def _probe_mcp_registered(
-    runner: RunnerFn,
-    read_config: Callable[[], dict[str, Any] | None] = openclaw_setup.read_config,
-    prefix: list[str] | None = None,
-) -> bool | None:
-    """Whether the nblane MCP server is registered with OpenClaw.
-
-    Reads ``mcp.servers.nblane`` from the config file; only when the file
-    is not plain JSON does it fall back to ``openclaw mcp list``.
-    """
-    try:
-        config = read_config()
-    except Exception:
-        config = None
-    if config is not None:
-        return openclaw_setup._mcp_entry(config) is not None
-    try:
-        proc = runner(
-            [*(prefix or ["openclaw"]), "mcp", "list"],
-            timeout=MCP_LIST_TIMEOUT_SECONDS,
-        )
-    except Exception:
-        return None
-    if getattr(proc, "returncode", 1) != 0:
-        return None
-    stdout = getattr(proc, "stdout", "") or ""
-    return any("nblane" in line for line in stdout.splitlines())
 
 
 def _probe_automations(
@@ -280,7 +246,6 @@ def collect_assistant_status(
         available=True,
         version=_probe_version(runner),
         gateway=_probe_gateway(http_get, gateway_base),
-        mcp_nblane_registered=_probe_mcp_registered(runner, read_config, prefix),
         automations=_probe_automations(runner, prefix),
         channels=_probe_channels(
             (workspace or (lambda: _default_workspace(read_config)))()

@@ -4339,8 +4339,6 @@ export interface components {
              */
             console_url: string;
             gateway?: components["schemas"]["AssistantGatewayStatus"] | null;
-            /** Mcp Nblane Registered */
-            mcp_nblane_registered?: boolean | null;
             /** Version */
             version?: string | null;
         };

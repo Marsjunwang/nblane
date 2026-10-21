@@ -101,7 +101,7 @@ nblane agent handoff <agent_task_id> --target codex|opencode [--profile <profile
 nblane sync-agent-harness --target codex|opencode [--out PATH]
 ```
 
-见 [Agent Harness](agent-harness.md)。`sync-agent-harness --target openclaw` 仍能打印 MCP 片段，但助手不走 MCP，不要用它接 OpenClaw。
+见 [Agent Harness](agent-harness.md)。OpenClaw 助手不走 MCP，用 设置 → 系统 → 助手与备份 接入（HTTP 通道）。
 
 ## MCP
 

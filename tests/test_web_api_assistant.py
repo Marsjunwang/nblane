@@ -44,7 +44,6 @@ def _completed(argv: list[str], stdout: str, returncode: int = 0) -> subprocess.
 def make_runner(
     *,
     version: str | None = "openclaw 2026.9.4",
-    mcp_stdout: str = "NAME     TRANSPORT\nnblane   stdio\n",
     automations: object | None = (
         '[{"key": "daily", "enabled": true}, {"key": "weekly", "enabled": false}]'
     ),
@@ -63,8 +62,6 @@ def make_runner(
             if version is None:
                 return _completed(argv, "", returncode=1)
             return _completed(argv, version + "\n")
-        if argv[1:] == ["mcp", "list"]:
-            return _completed(argv, mcp_stdout)
         if argv[1:] == ["automations", "list", "--all", "--json"]:
             if automations is None:
                 return _completed(argv, "boom", returncode=1)
@@ -82,11 +79,7 @@ def make_client(
     http_get=None,
     read_config=lambda: None,
 ) -> TestClient:
-    """App with injected probe seams (auth off).
-
-    ``read_config`` defaults to "no JSON config" so the MCP probe falls back
-    to the fake ``openclaw mcp list``.
-    """
+    """App with injected probe seams (auth off)."""
     app = create_app()
     app.state.assistant_read_config = read_config
     app.state.assistant_which = lambda _name: which_result
@@ -108,7 +101,6 @@ class TestAssistantUnavailable(unittest.TestCase):
         self.assertFalse(payload["available"])
         self.assertIsNone(payload["version"])
         self.assertIsNone(payload["gateway"])
-        self.assertIsNone(payload["mcp_nblane_registered"])
         self.assertIsNone(payload["automations"])
         # Deep link + timestamp still present.
         self.assertEqual(payload["console_url"], "http://127.0.0.1:18789/")
@@ -141,7 +133,6 @@ class TestAssistantProbes(unittest.TestCase):
         self.assertEqual(
             payload["gateway"], {"ready": True, "uptime_ms": 123456}
         )
-        self.assertTrue(payload["mcp_nblane_registered"])
         self.assertEqual(payload["automations"], {"total": 2, "enabled": 1, "undelivered": []})
 
     def test_gateway_down_leaves_other_probes_intact(self) -> None:
@@ -156,7 +147,6 @@ class TestAssistantProbes(unittest.TestCase):
             payload["gateway"], {"ready": False, "uptime_ms": None}
         )
         self.assertEqual(payload["version"], "openclaw 2026.9.4")
-        self.assertTrue(payload["mcp_nblane_registered"])
         self.assertEqual(payload["automations"], {"total": 2, "enabled": 1, "undelivered": []})
 
     def test_automations_jobs_wrapped_shape(self) -> None:
@@ -176,7 +166,6 @@ class TestAssistantProbes(unittest.TestCase):
             payload = client.get("/api/v1/system/assistant").json()
         self.assertTrue(payload["available"])
         self.assertIsNone(payload["version"])
-        self.assertIsNone(payload["mcp_nblane_registered"])
         self.assertIsNone(payload["automations"])
         # HTTP seam still fine.
         self.assertTrue(payload["gateway"]["ready"])
@@ -190,8 +179,8 @@ class TestAssistantProbes(unittest.TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 200)
         self.assertEqual(first.json(), second.json())
-        # One probe round = version + mcp list + automations list.
-        self.assertEqual(len(runner.calls), 3)
+        # One probe round = version + automations list.
+        self.assertEqual(len(runner.calls), 2)
 
 
 class TestAssistantAuth(unittest.TestCase):
@@ -240,17 +229,6 @@ class TestProbeHelpers(unittest.TestCase):
     def test_automations_invalid_json_returns_none(self) -> None:
         runner = make_runner(automations="not json")
         self.assertIsNone(assistant_mod._probe_automations(runner))
-
-    def test_mcp_not_registered(self) -> None:
-        runner = make_runner(mcp_stdout="NAME  TRANSPORT\nother stdio\n")
-        self.assertFalse(assistant_mod._probe_mcp_registered(runner, lambda: None))
-
-    def test_mcp_registered_from_config_without_cli(self) -> None:
-        runner = make_runner(fail=True)
-        config = {"mcp": {"servers": {"nblane": {"command": "nblane-mcp"}}}}
-        self.assertTrue(assistant_mod._probe_mcp_registered(runner, lambda: config))
-        self.assertFalse(assistant_mod._probe_mcp_registered(runner, lambda: {"mcp": {}}))
-        self.assertEqual(runner.calls, [])
 
     def test_gateway_camel_case_uptime(self) -> None:
         status = assistant_mod._probe_gateway(

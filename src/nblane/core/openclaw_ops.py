@@ -430,7 +430,6 @@ def check_last_runs(
 
 
 def run_doctor(
-    profile_name: str | None = None,
     *,
     runner: Runner | None = None,
     connect: Callable[[str, int], bool] | None = None,

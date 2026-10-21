@@ -841,7 +841,8 @@ class TestCliSmoke(unittest.TestCase):
     def test_doctor_help(self) -> None:
         result = self._run("openclaw", "doctor", "--help")
         self.assertEqual(result.returncode, 0)
-        self.assertIn("--profile", result.stdout)
+        # The dead --profile flag (it never reconciled anything) is gone.
+        self.assertNotIn("--profile", result.stdout)
 
     def test_automations_sync_help(self) -> None:
         result = self._run("openclaw", "automations", "sync", "--help")
