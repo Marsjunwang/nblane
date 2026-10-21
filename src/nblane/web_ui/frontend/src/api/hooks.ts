@@ -610,11 +610,29 @@ export function useWorkshopStatus() {
 // walking shell history), so each send waits for the previous one to settle.
 let workshopKeysQueue: Promise<unknown> = Promise.resolve();
 
+// A phone fetch has no default timeout: one request hung by a network flap
+// (sleep/wake, WiFi→cellular) would jam every later key behind it until a
+// full page reload. Time-box each send so the queue always drains.
+const WORKSHOP_KEY_TIMEOUT_MS = 8000;
+
+function workshopKeySignal(): AbortSignal | undefined {
+  return typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(WORKSHOP_KEY_TIMEOUT_MS) : undefined;
+}
+
 /** Workshop key bar: whitelisted key names (see core/workshop_service.KEYS). */
 export function useWorkshopKeys() {
   return useMutation({
     mutationFn: (keys: string[]) => {
-      const run = workshopKeysQueue.then(() => apiPost<{ ok: boolean }>('/system/workshop/keys', { keys }));
+      const run = workshopKeysQueue.then(async () => {
+        try {
+          return await apiPost<{ ok: boolean }>('/system/workshop/keys', { keys }, { signal: workshopKeySignal() });
+        } catch (error) {
+          if (error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+            throw new Error('发送超时：网络没有响应，请再点一次');
+          }
+          throw error;
+        }
+      });
       workshopKeysQueue = run.catch(() => undefined);
       return run;
     },
