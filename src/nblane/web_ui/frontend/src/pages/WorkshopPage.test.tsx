@@ -156,6 +156,61 @@ describe('WorkshopPage', () => {
     expect(screen.getByRole('button', { name: '上' })).toBeInTheDocument();
   });
 
+  it('blurs xterm helper focus on touch devices so terminal taps never pop the keyboard', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn().mockImplementation((query: string) => ({
+        matches: query === '(pointer: coarse)',
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+    stubFetch(REACHABLE_PAYLOAD);
+    renderWithProviders(<WorkshopPage />, '/workshop');
+    const frame = (await screen.findByTestId('sidecar-frame')) as HTMLIFrameElement;
+
+    // Plant xterm's helper textarea, wait for the page to mark it, then focus
+    // it the way a terminal tap would. jsdom does not load iframe content, so
+    // give the placeholder document a body first.
+    const doc = frame.contentDocument!;
+    doc.open();
+    doc.write('<html><head></head><body></body></html>');
+    doc.close();
+    const helper = doc.createElement('textarea');
+    helper.className = 'xterm-helper-textarea';
+    doc.body.appendChild(helper);
+    // xterm/ttyd focus the helper on load, before the page's poll notices it.
+    helper.focus();
+    expect(doc.activeElement).toBe(helper);
+    await waitFor(() => expect(doc.activeElement).not.toBe(helper), { timeout: 2000 });
+    // A later re-focus (terminal tap) is handed back immediately too.
+    helper.focus();
+    expect(doc.activeElement).not.toBe(helper);
+  });
+
+  it('leaves xterm helper focus alone on non-touch devices', async () => {
+    stubFetch(REACHABLE_PAYLOAD);
+    renderWithProviders(<WorkshopPage />, '/workshop');
+    const frame = (await screen.findByTestId('sidecar-frame')) as HTMLIFrameElement;
+
+    const doc = frame.contentDocument!;
+    doc.open();
+    doc.write('<html><head></head><body></body></html>');
+    doc.close();
+    const helper = doc.createElement('textarea');
+    helper.className = 'xterm-helper-textarea';
+    doc.body.appendChild(helper);
+    helper.focus();
+    await new Promise((resolve) => setTimeout(resolve, 700)); // past one poll cycle
+    expect(helper.dataset.noblur).toBeUndefined();
+    expect(doc.activeElement).toBe(helper);
+  });
+
   it('tells non-admins the terminal is admin only', async () => {
     stubFetch({ ...REACHABLE_PAYLOAD, admin: false });
     renderWithProviders(<WorkshopPage />, '/workshop');

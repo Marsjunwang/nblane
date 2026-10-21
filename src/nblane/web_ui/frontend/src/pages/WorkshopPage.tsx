@@ -25,7 +25,10 @@ import { SidecarFrame } from '../components/SidecarFrame';
  * When vertical space is scarce (soft keyboard open or landscape) the page
  * enters a compact mode: the page header and the arrow-key row drop out so
  * the terminal keeps as many rows as possible while typing; they return when
- * the keyboard closes.
+ * the keyboard closes. On touch devices the terminal never grabs keyboard
+ * focus itself (xterm's hidden textarea is blurred on focus), so tapping or
+ * swiping the terminal never pops the phone keyboard — typed input always
+ * goes through the input box.
  */
 
 // Key bar groups: `main` and `nav` stay visible at all times — Enter and the
@@ -282,6 +285,32 @@ export function WorkshopPage() {
     const timer = window.setTimeout(scrollTerminalToBottom, 100);
     return () => window.clearTimeout(timer);
   }, [compact]);
+
+  // xterm focuses its hidden helper textarea whenever the terminal is tapped,
+  // which pops the phone keyboard over half the screen. Phone input goes
+  // through the input box instead (xterm + CJK IMEs do not mix), so on touch
+  // devices hand the focus straight back. The iframe remounts on reconnect,
+  // so re-attach until the marker sticks.
+  useEffect(() => {
+    if (!touch) return;
+    const attach = () => {
+      try {
+        const frame = document.querySelector<HTMLIFrameElement>('[data-testid="sidecar-frame"]');
+        const helper = frame?.contentDocument?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
+        if (!helper || helper.dataset.noblur) return;
+        helper.dataset.noblur = '1';
+        helper.addEventListener('focus', () => helper.blur());
+        // xterm/ttyd may already hold focus from page load — no focus event
+        // fires for that, so hand it back proactively too.
+        if (frame?.contentDocument?.activeElement === helper) helper.blur();
+      } catch {
+        // Terminal not ready or cross-origin: nothing to attach to.
+      }
+    };
+    const timer = window.setInterval(attach, 500);
+    attach();
+    return () => window.clearInterval(timer);
+  }, [touch]);
 
   if (status.isPending) {
     return (
