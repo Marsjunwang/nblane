@@ -111,9 +111,8 @@ const HIDDEN_DEFAULT_ITEMS = new Set(['video', 'audio', 'file']);
 
 type AnyEditor = ReturnType<typeof useCreateBlockNote>;
 
-function cloneBlocks(editor: AnyEditor): EditorBlocks {
-  return JSON.parse(JSON.stringify(editor.document)) as EditorBlocks;
-}
+/** Trailing debounce for the blocks sidecar clone and the outline emit. */
+const SIDECAR_DEBOUNCE_MS = 400;
 
 /** Id of the top-level block that contains block *id* (itself if top-level). */
 function topLevelBlockId(blocks: EditorBlocks, id: string): string {
@@ -159,6 +158,13 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
     const [selectionKind, setSelectionKind] = useState({ imagesOnly: false, mixed: false });
     // ProseMirror range + plain text of the selection sent to the AI.
     const capturedRef = useRef<{ document: string; ranges: Array<{ from: number; to: number }> } | null>(null);
+    // The blocks sidecar is a rebuildable cache of the Markdown (the
+    // keepalive save may even drop it), so it is cloned on a trailing
+    // debounce instead of per keystroke and may lag by one window.
+    const blocksJsonRef = useRef<EditorBlocks>(blocksJson);
+    const blocksJsonTextRef = useRef('');
+    const lastMarkdownRef = useRef(markdown);
+    const cloneTimerRef = useRef<number | undefined>(undefined);
 
     const editor = useCreateBlockNote({
       schema: blogSchema as never,
@@ -173,6 +179,21 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
     const [source, setSource] = useState(markdown);
     const sourceRef = useRef(markdown);
     const prevSourceModeRef = useRef(sourceMode);
+
+    // Deep-cloning the document is the hot path's biggest cost; rebuild the
+    // sidecar on a trailing debounce and re-emit only when it changed.
+    const scheduleBlocksClone = useCallback(() => {
+      window.clearTimeout(cloneTimerRef.current);
+      cloneTimerRef.current = window.setTimeout(() => {
+        const text = JSON.stringify(editor.document);
+        if (text === blocksJsonTextRef.current) return;
+        blocksJsonTextRef.current = text;
+        blocksJsonRef.current = JSON.parse(text) as EditorBlocks;
+        onChangeRef.current({ markdown: lastMarkdownRef.current, blocksJson: blocksJsonRef.current });
+      }, SIDECAR_DEBOUNCE_MS);
+    }, [editor]);
+
+    useEffect(() => () => window.clearTimeout(cloneTimerRef.current), []);
 
     const loadMarkdown = useCallback(
       (text: string, blocks: EditorBlocks) => {
@@ -221,10 +242,15 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
       if (sourceMode) {
         const text = blocksToNblaneMarkdown(editor, editor.document);
         sourceRef.current = text;
+        lastMarkdownRef.current = text;
         setSource(text);
       } else {
         loadMarkdown(sourceRef.current, []);
-        onChangeRef.current({ markdown: sourceRef.current, blocksJson: cloneBlocks(editor) });
+        lastMarkdownRef.current = sourceRef.current;
+        const text = JSON.stringify(editor.document);
+        blocksJsonTextRef.current = text;
+        blocksJsonRef.current = JSON.parse(text) as EditorBlocks;
+        onChangeRef.current({ markdown: sourceRef.current, blocksJson: blocksJsonRef.current });
       }
     }, [editor, loadMarkdown, sourceMode]);
 
@@ -309,12 +335,22 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
     );
 
     // Report the outline on load and after edits (visual mode only). The
-    // outline only reads top-level heading blocks, so no deep clone here.
+    // outline only reads top-level heading blocks, so no deep clone here; the
+    // emit is debounced so typing does not re-render the panel per keystroke.
     useEffect(() => {
       if (sourceMode) return undefined;
       const emit = () => onOutlineRef.current?.(editor.document as unknown as EditorBlocks);
       emit();
-      return editor.onChange(emit);
+      let timer: number | undefined;
+      const schedule = () => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(emit, SIDECAR_DEBOUNCE_MS);
+      };
+      const unsubscribe = editor.onChange(schedule);
+      return () => {
+        window.clearTimeout(timer);
+        unsubscribe();
+      };
     }, [editor, sourceMode]);
 
     // Caret tracking: the top-level block under the caret drives focus mode,
@@ -450,10 +486,10 @@ export const BlockNoteBlogEditor = forwardRef<BlockNoteBlogEditorHandle, BlockNo
             formattingToolbar={!onAIRewrite && !onAIImage}
             onChange={() => {
               if (hydratingRef.current) return;
-              onChangeRef.current({
-                markdown: blocksToNblaneMarkdown(editor, editor.document),
-                blocksJson: cloneBlocks(editor),
-              });
+              const next = blocksToNblaneMarkdown(editor, editor.document);
+              lastMarkdownRef.current = next;
+              onChangeRef.current({ markdown: next, blocksJson: blocksJsonRef.current });
+              scheduleBlocksClone();
             }}
           >
             <SuggestionMenuController triggerCharacter="/" getItems={getSlashItems} />

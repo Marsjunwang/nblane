@@ -1,8 +1,15 @@
+import { Center, Loader } from '@mantine/core';
+import { lazy, Suspense } from 'react';
 import { Navigate, useLocation, useParams, useSearchParams } from 'react-router-dom';
 
-import { ContentEditor } from '../components/content/ContentEditor';
 import { ContentLibrary } from '../components/content/ContentLibrary';
 import { contentEditorPath } from '../components/content/contentDraft';
+
+// The editor pulls in BlockNote/KaTeX/Mermaid; keep it out of the library
+// chunk so the post list loads without them.
+const ContentEditor = lazy(() =>
+  import('../components/content/ContentEditor').then((m) => ({ default: m.ContentEditor })),
+);
 
 /**
  * Content workspace: `/p/:name/content` is the post library and
@@ -24,5 +31,9 @@ export function ContentWorkspacePage() {
     .map((part) => decodeURIComponent(part))
     .join('/');
   if (!slug) return <ContentLibrary profile={name} />;
-  return <ContentEditor key={slug} profile={name} slug={slug} />;
+  return (
+    <Suspense fallback={<Center py="xl"><Loader /></Center>}>
+      <ContentEditor key={slug} profile={name} slug={slug} />
+    </Suspense>
+  );
 }

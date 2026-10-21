@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   BlockNoteSchema,
   defaultBlockSpecs,
@@ -7,9 +7,13 @@ import {
   insertOrUpdateBlock,
 } from "@blocknote/core";
 import { createReactBlockSpec } from "@blocknote/react";
-import katex from "katex";
-import "katex/dist/katex.min.css";
 import { MermaidRenderer } from "./MermaidRenderer.jsx";
+import "katex/dist/katex.min.css";
+
+async function loadKatex() {
+  const module = await import("katex");
+  return module.default || module;
+}
 
 const AI_PROPS = {
   ai_generated: { default: false },
@@ -165,28 +169,50 @@ function useResolvedMediaSrc(src, editor) {
 }
 
 function KatexPreview({ latex }) {
-  const rendered = useMemo(() => {
-    const source = cleanText(latex).trim();
+  const source = cleanText(latex).trim();
+  // KaTeX loads on demand: posts without formulas never pull the library.
+  const [rendered, setRendered] = useState({ html: "", error: "" });
+
+  useEffect(() => {
+    let cancelled = false;
     if (!source) {
-      return { html: "", error: "" };
-    }
-    try {
-      return {
-        html: katex.renderToString(source, {
-          displayMode: true,
-          throwOnError: false,
-          strict: false,
-          trust: false,
-        }),
-        error: "",
-      };
-    } catch (err) {
-      return {
-        html: "",
-        error: err instanceof Error ? err.message : String(err),
+      setRendered({ html: "", error: "" });
+      return () => {
+        cancelled = true;
       };
     }
-  }, [latex]);
+    loadKatex()
+      .then((katex) => {
+        if (cancelled) return;
+        try {
+          setRendered({
+            html: katex.renderToString(source, {
+              displayMode: true,
+              throwOnError: false,
+              strict: false,
+              trust: false,
+            }),
+            error: "",
+          });
+        } catch (err) {
+          setRendered({
+            html: "",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setRendered({
+            html: "",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
 
   if (rendered.error) {
     return <pre className="nb-math-fallback">{cleanText(latex)}</pre>;

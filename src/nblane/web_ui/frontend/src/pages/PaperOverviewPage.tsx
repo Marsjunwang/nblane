@@ -39,9 +39,8 @@ import {
   IconSparkles,
 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
-import katex from 'katex';
 import 'katex/dist/katex.min.css';
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 
@@ -150,14 +149,32 @@ function RefChips({ refs, profile, sourceId }: { refs: PaperRef[]; profile: stri
   );
 }
 
+async function loadKatex() {
+  const module = await import('katex');
+  return module.default;
+}
+
 /** Display-mode KaTeX for deep-read equations; falls back to the source on error. */
 function LatexBlock({ latex }: { latex: string }) {
-  const html = useMemo(() => {
-    try {
-      return katex.renderToString(latex, { displayMode: true, throwOnError: false, strict: false, trust: false });
-    } catch {
-      return '';
-    }
+  // KaTeX loads on demand so the main bundle does not carry it.
+  const [html, setHtml] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    loadKatex()
+      .then((katex) => {
+        if (cancelled) return;
+        try {
+          setHtml(katex.renderToString(latex, { displayMode: true, throwOnError: false, strict: false, trust: false }));
+        } catch {
+          setHtml('');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setHtml('');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [latex]);
   if (!html) {
     return (
