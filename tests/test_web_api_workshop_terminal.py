@@ -101,6 +101,19 @@ class TestTerminalProxy(_AuthMixin, unittest.TestCase):
         self.assertEqual(response.status_code, 308)
         self.assertEqual(response.headers["location"], "/terminal/")
 
+    def test_index_page_gets_a_viewport_meta_for_phones(self) -> None:
+        html = b"<html><head><title>ttyd</title></head><body></body></html>"
+        self.app.state.workshop_proxy_http_get = lambda url, headers: FakeUpstream(content=html)
+        response = self.client_as("boss").get("/terminal/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'name="viewport"', response.content)
+        self.assertIn(b"width=device-width", response.content)
+
+    def test_non_index_paths_are_not_rewritten(self) -> None:
+        response = self.client_as("boss").get("/terminal/token")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text, "<html>ttyd</html>")
+
     def test_upstream_down_is_502(self) -> None:
         def down(url: str, headers: dict[str, str]) -> FakeUpstream:
             raise ConnectionError("refused")

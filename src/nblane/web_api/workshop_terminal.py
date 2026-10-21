@@ -37,6 +37,21 @@ _HOP_BY_HOP = {
 _POLICY_VIOLATION = 1008
 _UPSTREAM_DOWN = 1013  # "try again later": ttyd's client then reconnects
 
+# ttyd's page ships no viewport meta, so phone browsers give the iframe the
+# desktop fallback viewport and the terminal renders at the wrong scale (only
+# a dozen columns visible). Inject one into the index page.
+_VIEWPORT_META = b'<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'
+
+
+def _inject_viewport_meta(content: bytes, content_type: str) -> bytes:
+    if "text/html" not in content_type or b'name="viewport"' in content:
+        return content
+    head = content.lower().find(b"<head>")
+    if head < 0:
+        return content
+    end = content.find(b">", head)
+    return content if end < 0 else content[: end + 1] + _VIEWPORT_META + content[end + 1 :]
+
 
 def _ws_upstream_url() -> str:
     parsed = urlparse(workshop_service.upstream_url())
@@ -72,7 +87,10 @@ def terminal_http(path: str, request: Request, _user: CurrentUser = Depends(requ
     headers = {key: value for key, value in upstream.headers.items() if key.lower() not in _HOP_BY_HOP}
     # Always revalidate: a cached page from before a restart breaks reconnects.
     headers["Cache-Control"] = "no-store"
-    return Response(upstream.content, status_code=upstream.status_code, headers=headers)
+    content = upstream.content
+    if path in ("", "index.html"):
+        content = _inject_viewport_meta(content, upstream.headers.get("content-type", ""))
+    return Response(content, status_code=upstream.status_code, headers=headers)
 
 
 def _same_origin(websocket: WebSocket) -> bool:
