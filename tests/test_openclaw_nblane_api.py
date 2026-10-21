@@ -107,8 +107,15 @@ class FakeServer:
 def _no_ambient_token(monkeypatch, tmp_path):
     """Keep a real NBLANE_OPENCLAW_API_TOKEN (env or api.env) out of tests."""
     monkeypatch.delenv(nblane_api.TOKEN_ENV, raising=False)
+    monkeypatch.delenv(nblane_api.PROFILE_ENV, raising=False)
     monkeypatch.delenv("NBLANE_OPENCLAW_API_ENV_FILE", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "isolated-config"))
+
+
+@pytest.fixture()
+def _default_profile(monkeypatch):
+    """Tests that parse argv without --profile resolve the env profile."""
+    monkeypatch.setenv(nblane_api.PROFILE_ENV, "王军")
 
 
 @pytest.fixture
@@ -353,7 +360,7 @@ def test_password_falls_back_to_config_file(server, tmp_path, monkeypatch):
     assert PASSWORD in server.requests[0].content.decode()
 
 
-def test_semantic_commands_hit_expected_routes(authed, server):
+def test_semantic_commands_hit_expected_routes(authed, server, _default_profile):
     run = nblane_api.run
     ns = nblane_api.build_parser().parse_args
     assert run(ns(["starmap"]), authed).json()["path"].endswith("/profiles/王军/starmap")
@@ -374,7 +381,7 @@ def test_semantic_commands_hit_expected_routes(authed, server):
     assert json.loads(patch_req.content) == {"project_id": "project:x"}
 
 
-def test_divine_uses_long_timeout_others_default(authed, server):
+def test_divine_uses_long_timeout_others_default(authed, server, _default_profile):
     # The server LLM-polishes casts (27–90s); 30s made the client give up
     # on casts that the server went on to answer with 200.
     run = nblane_api.run
@@ -395,7 +402,7 @@ def test_path_normalization():
         nblane_api.normalize_path("health")
 
 
-def test_plans_lists_with_filters(authed, server):
+def test_plans_lists_with_filters(authed, server, _default_profile):
     run = nblane_api.run
     ns = nblane_api.build_parser().parse_args
     data = run(ns(["plans", "--habit", "exercise", "--status", "active"]), authed)
@@ -411,7 +418,7 @@ def test_plans_lists_with_filters(authed, server):
     assert str(server.requests[-1].url).endswith("/habit-plans")
 
 
-def test_plan_show_filters_one_plan(authed, server):
+def test_plan_show_filters_one_plan(authed, server, _default_profile):
     run = nblane_api.run
     ns = nblane_api.build_parser().parse_args
     plan = run(ns(["plan-show", "hp_cut"]), authed)
@@ -422,7 +429,7 @@ def test_plan_show_filters_one_plan(authed, server):
         run(ns(["plan-show", "hp_ghost"]), authed)
 
 
-def test_checkin_plan_flag_sends_plan_id(authed, server):
+def test_checkin_plan_flag_sends_plan_id(authed, server, _default_profile):
     run = nblane_api.run
     ns = nblane_api.build_parser().parse_args
     response = run(ns(["checkin", "锻炼", "--plan", "hp_cut"]), authed)
@@ -440,6 +447,26 @@ def test_removed_review_queue_commands_are_gone():
     for argv in (["propose", "f", "v"], ["activity"]):
         with pytest.raises(SystemExit):
             parser.parse_args(argv)
+
+
+def test_missing_profile_fails_with_clear_message(authed, server):
+    """No --profile and no NBLANE_API_PROFILE → clear failure, no HTTP."""
+    run = nblane_api.run
+    ns = nblane_api.build_parser().parse_args
+    with pytest.raises(nblane_api.ApiFailure, match=nblane_api.PROFILE_ENV):
+        run(ns(["health"]), authed)
+    assert not any(r.url.path.startswith("/api/v1/profiles/") for r in server.requests)
+
+
+def test_profile_falls_back_to_config_file(authed, server, tmp_path, monkeypatch):
+    """NBLANE_API_PROFILE in api.env resolves the default profile."""
+    config = tmp_path / "config" / "nblane"
+    config.mkdir(parents=True)
+    (config / "api.env").write_text(f"{nblane_api.PROFILE_ENV}=alice\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    run = nblane_api.run
+    ns = nblane_api.build_parser().parse_args
+    assert run(ns(["health"]), authed).json()["path"].endswith("/profiles/alice/health")
 
 
 TOKEN = "nbl_ab12cd34_test-secret"

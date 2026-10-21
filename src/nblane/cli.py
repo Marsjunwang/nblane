@@ -59,6 +59,7 @@ Commands:
                                     with OpenClaw jobs (dry-run by default)
     nblane notify <text> [--dry-run]
                                     Push a message via the OpenClaw webhook
+                                    (experimental: payload contract unverified)
     nblane backup status|run [--target id]
                                     Snapshot + push the git backup targets
 
@@ -1019,7 +1020,10 @@ def main() -> None:
 
     p_notify = sub.add_parser(
         "notify",
-        help="Push a message to WeChat via the OpenClaw inbound webhook",
+        help=(
+            "Push a message to WeChat via the OpenClaw inbound webhook "
+            "(EXPERIMENTAL: gateway payload contract unverified, may change)"
+        ),
     )
     p_notify.add_argument("text", help="Message text to push")
     p_notify.add_argument(

@@ -160,7 +160,13 @@ def _run(
     env: dict[str, str] | None = None,
     cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run one command (argv list, no shell). Tests patch this function."""
+    """Run one command (argv list, no shell). Tests patch this function.
+
+    Kept separate from ``openclaw_automations.run_command``: that one never
+    raises and returns a minimal ``CommandResult``, while this one raises
+    ``OpenClawSetupError`` with user-facing copy and returns the full
+    ``CompletedProcess`` — merging them would break both test seams.
+    """
 
     try:
         return subprocess.run(

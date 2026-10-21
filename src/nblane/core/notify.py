@@ -11,9 +11,11 @@ Configuration (environment or ``.env``):
     NBLANE_OPENCLAW_HOOK_TOKEN  Bearer token (required; same value as the
                                 gateway's ``cron.webhookToken``)
 
-NOTE: the gateway-side payload contract is not fully verified yet. The
-conservative shape ``{"text": ..., "source": "nblane"}`` must be confirmed
-against the live OpenClaw gateway before first real use.
+EXPERIMENTAL: the gateway-side payload contract is not fully verified yet.
+The conservative shape ``{"text": ..., "source": "nblane"}`` must be
+confirmed against the live OpenClaw gateway before first real use, and both
+the payload shape and the ``nblane notify`` command may change without
+notice.
 
 Security: the token is read only from env / ``.env`` and is never logged,
 printed, or included in returned error strings.

@@ -43,7 +43,7 @@ from nblane.core.openclaw_ops import (
     doctor_exit_code,
     run_doctor,
 )
-from nblane.core.openclaw_setup import REPO_SCRIPTS
+from nblane.core.openclaw_setup import REPO_SCRIPTS, state_dir
 from nblane.core.profile_io import list_profiles
 
 _MARKS = {True: "[OK]", False: "[失败]"}
@@ -57,8 +57,8 @@ OVERLAY_FILENAME = "openclaw.overlay.json5"
 
 
 def _openclaw_home() -> Path:
-    """Return the OpenClaw home directory (``~/.openclaw``)."""
-    return Path.home() / ".openclaw"
+    """Return the OpenClaw state dir (honours ``NBLANE_OPENCLAW_PROFILE``)."""
+    return state_dir()
 
 
 def cmd_doctor() -> None:

@@ -41,7 +41,6 @@ import httpx
 API_PREFIX = "/api/v1"
 DEFAULT_BASE_URL = "http://127.0.0.1:8504"
 DEFAULT_USERNAME = "openclaw"
-DEFAULT_PROFILE = "王军"
 BASE_URL_ENV = "NBLANE_API_BASE"
 USERNAME_ENV = "NBLANE_OPENCLAW_API_USERNAME"
 PASSWORD_ENV = "NBLANE_OPENCLAW_API_PASSWORD"
@@ -406,7 +405,13 @@ class Session:
 
 
 def profile_path(args: argparse.Namespace, suffix: str) -> str:
-    return f"/profiles/{quote(args.profile, safe='')}{suffix}"
+    profile = str(getattr(args, "profile", "") or "").strip()
+    if not profile:
+        raise ApiFailure(
+            "no profile configured: pass --profile or set "
+            f"{PROFILE_ENV} (environment or ~/.config/nblane/api.env)"
+        )
+    return f"/profiles/{quote(profile, safe='')}{suffix}"
 
 
 def emit(response_or_data) -> None:
@@ -515,8 +520,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--profile",
-        default=os.environ.get(PROFILE_ENV, "").strip() or DEFAULT_PROFILE,
-        help=f"profile name (env {PROFILE_ENV}; default: %(default)s)",
+        default=_read_secret(PROFILE_ENV),
+        help=(
+            f"profile name (env {PROFILE_ENV} or ~/.config/nblane/api.env; "
+            "required for profile-scoped commands)"
+        ),
     )
     parser.add_argument(
         "--base-url",

@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from nblane.core import openclaw_setup
 from nblane.core.openclaw_automations import (
     ACTION_ADD,
     ACTION_KEEP,
@@ -46,12 +47,9 @@ SEVERITY_WARNING = "warning"
 SEVERITY_INFO = "info"
 
 GATEWAY_HOST = "127.0.0.1"
-GATEWAY_PORT = 18789
 
-# docs/zh/guides/openclaw-ops.md: Node >=24.16.0 <25 or >=26.1.0.
-_MIN_NODE_24 = (24, 16, 0)
-_MIN_NODE_26 = (26, 1, 0)
-
+# docs/zh/guides/openclaw-ops.md: Node >=24.16.0 <25 or >=26.1.0; the rule
+# itself is implemented once in openclaw_setup.node_supported.
 _VERSION_RE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
 
 
@@ -121,13 +119,9 @@ def check_node_version(runner: Runner = run_command) -> DoctorCheck:
             "确认 `node -v` 输出形如 v24.16.0",
         )
     version = tuple(int(part) for part in match.groups())
-    major = version[0]
-    ok = (
-        (major == 24 and version >= _MIN_NODE_24)
-        or (major >= 26 and version >= _MIN_NODE_26)
-    )
     text = ".".join(str(part) for part in version)
-    if ok:
+    # Single rule lives in openclaw_setup.node_supported (>=24.16 <25, or >=26.1).
+    if openclaw_setup.node_supported(text):
         return _check("node_version", True, SEVERITY_INFO, f"Node v{text}")
     return _check(
         "node_version",
@@ -173,21 +167,22 @@ def _default_connect(host: str, port: int, timeout: float = 2.0) -> bool:
 def check_gateway_port(
     connect: Callable[[str, int], bool] | None = None,
 ) -> DoctorCheck:
-    """The gateway should listen on 127.0.0.1:18789 (loopback only)."""
+    """The gateway should listen on loopback (env-aware port, never 0.0.0.0)."""
 
+    port = openclaw_setup.gateway_port()
     probe = connect or _default_connect
-    if probe(GATEWAY_HOST, GATEWAY_PORT):
+    if probe(GATEWAY_HOST, port):
         return _check(
             "gateway_port",
             True,
             SEVERITY_INFO,
-            f"{GATEWAY_HOST}:{GATEWAY_PORT} 正在监听",
+            f"{GATEWAY_HOST}:{port} 正在监听",
         )
     return _check(
         "gateway_port",
         False,
         SEVERITY_ERROR,
-        f"{GATEWAY_HOST}:{GATEWAY_PORT} 未监听",
+        f"{GATEWAY_HOST}:{port} 未监听",
         "systemctl --user status openclaw-gateway；不要绑定 0.0.0.0",
     )
 

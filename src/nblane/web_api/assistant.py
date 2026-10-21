@@ -43,7 +43,6 @@ from nblane.web_api.auth import require_user
 PROBE_TIMEOUT_SECONDS = 5.0
 CACHE_TTL_SECONDS = 60.0
 
-DEFAULT_GATEWAY_BASE = "http://127.0.0.1:18789"
 DEFAULT_CONSOLE_URL = "http://127.0.0.1:18789/"
 CONSOLE_URL_ENV = "NBLANE_OPENCLAW_CONSOLE_URL"
 
@@ -98,7 +97,10 @@ HttpGetFn = Callable[..., Any]
 
 
 def _default_runner(argv: list[str], timeout: float) -> subprocess.CompletedProcess:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    # Shares openclaw_setup's child env / DEVNULL stdin handling; the probes
+    # catch Exception, so OpenClawSetupError (missing binary / timeout) is
+    # equivalent to the raw subprocess errors this used to raise.
+    return openclaw_setup._run(argv, timeout=timeout)
 
 
 def _default_http_get(url: str, timeout: float) -> Any:

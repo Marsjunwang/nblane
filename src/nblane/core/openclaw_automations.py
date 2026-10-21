@@ -151,6 +151,11 @@ def run_command(
 
     ``input`` is fed to the process's stdin (used by
     ``openclaw config patch --stdin``).
+
+    Kept separate from ``openclaw_setup._run``: that runner raises
+    ``OpenClawSetupError`` and returns ``CompletedProcess``, while doctor /
+    automations code wants a non-raising minimal ``CommandResult`` — merging
+    them would break both injectable test seams.
     """
 
     try:
