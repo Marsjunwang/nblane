@@ -50,10 +50,11 @@ TOKEN_ENV = "NBLANE_OPENCLAW_API_TOKEN"
 PROFILE_ENV = "NBLANE_API_PROFILE"
 COOKIE_JAR_ENV = "NBLANE_API_COOKIE_JAR"
 
-# Delete/discard-class route segments refused by the escape hatches. This is
-# the client-side half of the tiered-authorization contract: conversation-tier
-# automation never deletes; the page tier (SPA) owns deletion with human
-# confirmation.
+# Delete/discard-class route segments refused by the escape hatches — unless
+# the route is one the server itself gates with chat confirmation (the
+# DELETABLE_PATHS / DELETABLE_POST_PATHS below). This is the client-side half
+# of the tiered-authorization contract and must stay aligned with the
+# server's ROUTE_ACTIONS (web_api/agent_guard.py).
 FORBIDDEN_SEGMENTS = {"delete", "discard", "del"}
 CONFIRM_HEADER = "X-Nblane-Confirm"
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -70,6 +71,13 @@ DELETABLE_PATHS = (
     re.compile(r"^/profiles/[^/]+/checkins/[^/]+$"),
     re.compile(r"^/profiles/[^/]+/habits/[^/]+$"),
     re.compile(r"^/profiles/[^/]+/habit-plans/[^/]+$"),
+    re.compile(r"^/profiles/[^/]+/project-board/cases/[^/]+$"),
+)
+# Delete-class POST routes (no DELETE verb server-side) that the server
+# likewise gates with chat confirmation; the generic `post` escape hatch
+# lets these through the FORBIDDEN_SEGMENTS check.
+DELETABLE_POST_PATHS = (
+    re.compile(r"^/profiles/[^/]+/project-board/cases/[^/]+/milestones/[^/]+/delete$"),
 )
 
 
@@ -188,8 +196,8 @@ def normalize_delete_path(path: str) -> str:
         raise ApiFailure(f"API path must not contain '..': {path!r}")
     if not any(pattern.match(target) for pattern in DELETABLE_PATHS):
         raise ApiFailure(
-            "refused: only kanban cards, check-ins, habits and habit plans can "
-            "be deleted from chat; open the SPA for anything else"
+            "refused: only kanban cards, check-ins, habits, habit plans and "
+            "project cases can be deleted from chat; open the SPA for anything else"
         )
     return path
 
@@ -208,10 +216,10 @@ def normalize_path(path: str) -> str:
         raise ApiFailure(f"API path must not contain '..': {path!r}")
     lowered = {segment.lower() for segment in target.split("/")}
     denied = lowered & FORBIDDEN_SEGMENTS
-    if denied:
+    if denied and not any(pattern.match(target) for pattern in DELETABLE_POST_PATHS):
         raise ApiFailure(
-            f"refused: {sorted(denied)[0]!r} is a delete-class action "
-            "(page-confirmation tier); open the SPA to perform it"
+            f"refused: {sorted(denied)[0]!r} is a delete-class action; "
+            "open the SPA to perform it"
         )
     return path
 

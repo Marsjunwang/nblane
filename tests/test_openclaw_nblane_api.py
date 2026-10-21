@@ -204,7 +204,7 @@ def test_delete_discard_hard_refused_without_http(session, server):
         "/profiles/x/research/sources/s1/discard",
         "/profiles/x/habits/h1/delete",
     ):
-        with pytest.raises(nblane_api.ApiFailure, match="page-confirmation"):
+        with pytest.raises(nblane_api.ApiFailure, match="delete-class"):
             nblane_api.normalize_path(path)
     with pytest.raises(nblane_api.ApiFailure, match=r"\.\."):
         nblane_api.normalize_path("/profiles/x/checkins/c1/../discard")
@@ -213,6 +213,10 @@ def test_delete_discard_hard_refused_without_http(session, server):
         with pytest.raises(nblane_api.ApiFailure):
             nblane_api.normalize_delete_path(path)
     assert nblane_api.normalize_delete_path("/api/v1/profiles/x/kanban/cards/kb_1") == "/profiles/x/kanban/cards/kb_1"
+    # Project cases and milestones are server-gated (T2) too, so the client
+    # lets them through to the 428 handshake.
+    assert nblane_api.normalize_delete_path("/profiles/x/project-board/cases/case_1") == "/profiles/x/project-board/cases/case_1"
+    assert nblane_api.normalize_path("/profiles/x/project-board/cases/case_1/milestones/m1/delete")
     assert server.requests == []  # nothing reached the wire
 
 
