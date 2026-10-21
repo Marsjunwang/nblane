@@ -1,4 +1,4 @@
-import { ActionIcon, Alert, Box, Button, Card, Center, Code, Group, Loader, ScrollArea, Stack, Text, Textarea, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Box, Button, Card, Center, Code, Group, Loader, Stack, Text, Textarea, Title, Tooltip } from '@mantine/core';
 import { useLocalStorage, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { IconKeyboard, IconRefresh, IconSend, IconSettings, IconTerminal, IconTerminal2 } from '@tabler/icons-react';
@@ -15,29 +15,33 @@ import { SidecarFrame } from '../components/SidecarFrame';
  * Phones lack Esc/Ctrl/arrow keys and xterm.js handles CJK IMEs poorly, so a
  * key bar and an input box sit under the terminal: keys and text go to the
  * active tmux pane server-side (tmux send-keys / paste-buffer), independent of
- * ttyd's frontend. The bar is on by default for touch devices.
+ * ttyd's frontend. The bar is on by default for touch devices, keeps Enter and
+ * the arrow keys always visible, and the input box sends on Enter (Shift+Enter
+ * inserts a newline) so the phone IME works end to end.
  */
 
-// Key bar order: what Claude Code / Codex need most, first.
-const KEY_BAR: Array<{ key: string; label: string; hint: string }> = [
-  { key: 'esc', label: 'Esc', hint: '中断 / 关闭菜单' },
-  { key: 'esc2', label: 'Esc×2', hint: '回退到上一条消息（Claude Code）' },
-  { key: 'ctrl_c', label: '^C', hint: 'Ctrl-C' },
-  { key: 'shift_tab', label: '⇧Tab', hint: '切换模式（Claude Code）' },
-  { key: 'tab', label: 'Tab', hint: 'Tab 补全' },
-  { key: 'up', label: '↑', hint: '上' },
-  { key: 'down', label: '↓', hint: '下' },
-  { key: 'left', label: '←', hint: '左' },
-  { key: 'right', label: '→', hint: '右' },
-  { key: 'enter', label: '⏎', hint: '回车' },
-  { key: 'ctrl_o', label: '^O', hint: 'Ctrl-O：展开完整记录（Claude Code）' },
-  { key: 'ctrl_r', label: '^R', hint: 'Ctrl-R：搜索历史' },
-  { key: 'ctrl_t', label: '^T', hint: 'Ctrl-T：任务列表（Claude Code）' },
-  { key: 'ctrl_l', label: '^L', hint: 'Ctrl-L：清屏 / 重绘' },
-  { key: 'ctrl_d', label: '^D', hint: 'Ctrl-D：退出' },
-  { key: 'ctrl_z', label: '^Z', hint: 'Ctrl-Z：挂起' },
-  { key: 'page_up', label: 'PgUp', hint: '上翻页' },
-  { key: 'page_down', label: 'PgDn', hint: '下翻页' },
+// Key bar groups: `main` and `nav` stay visible at all times — Enter and the
+// arrow keys must be reachable on a phone without horizontal scrolling. The
+// rarer `extra` keys sit behind the 更多 toggle.
+const KEY_BAR: Array<{ key: string; label: string; hint: string; group: 'main' | 'nav' | 'extra' }> = [
+  { key: 'esc', label: 'Esc', hint: '中断 / 关闭菜单', group: 'main' },
+  { key: 'ctrl_c', label: '^C', hint: 'Ctrl-C', group: 'main' },
+  { key: 'shift_tab', label: '⇧Tab', hint: '切换模式（Claude Code）', group: 'main' },
+  { key: 'tab', label: 'Tab', hint: 'Tab 补全', group: 'main' },
+  { key: 'enter', label: '⏎', hint: '回车', group: 'main' },
+  { key: 'left', label: '←', hint: '左', group: 'nav' },
+  { key: 'up', label: '↑', hint: '上', group: 'nav' },
+  { key: 'down', label: '↓', hint: '下', group: 'nav' },
+  { key: 'right', label: '→', hint: '右', group: 'nav' },
+  { key: 'page_up', label: 'PgUp', hint: '上翻页', group: 'nav' },
+  { key: 'page_down', label: 'PgDn', hint: '下翻页', group: 'nav' },
+  { key: 'esc2', label: 'Esc×2', hint: '回退到上一条消息（Claude Code）', group: 'extra' },
+  { key: 'ctrl_o', label: '^O', hint: 'Ctrl-O：展开完整记录（Claude Code）', group: 'extra' },
+  { key: 'ctrl_r', label: '^R', hint: 'Ctrl-R：搜索历史', group: 'extra' },
+  { key: 'ctrl_t', label: '^T', hint: 'Ctrl-T：任务列表（Claude Code）', group: 'extra' },
+  { key: 'ctrl_l', label: '^L', hint: 'Ctrl-L：清屏 / 重绘', group: 'extra' },
+  { key: 'ctrl_d', label: '^D', hint: 'Ctrl-D：退出', group: 'extra' },
+  { key: 'ctrl_z', label: '^Z', hint: 'Ctrl-Z：挂起', group: 'extra' },
 ];
 
 // Keep focus where it is (the terminal or the input box) so tapping a key
@@ -73,28 +77,57 @@ export function terminalUrl(url: string, fontSize: number): string {
 
 function KeyBar() {
   const send = useWorkshopKeys();
-  const press = (key: string) =>
+  const [pressed, setPressed] = useState<string | null>(null);
+  const [showExtra, setShowExtra] = useState(false);
+  const press = (key: string) => {
+    // Keys go server-side with no local echo, so flash a pressed state (and a
+    // short vibration on phones) — otherwise a tap has no visible effect.
+    setPressed(key);
+    window.setTimeout(() => setPressed((current) => (current === key ? null : current)), 180);
+    navigator.vibrate?.(10);
     send.mutate([key], { onError: (error) => notifications.show({ title: '按键发送失败', message: error.message, color: 'red' }) });
+  };
+  const renderKey = (item: (typeof KEY_BAR)[number]) => (
+    <Tooltip key={item.key} label={item.hint} openDelay={400} events={{ hover: true, focus: false, touch: true }}>
+      <Button
+        size="compact-md"
+        variant={pressed === item.key ? 'light' : 'default'}
+        data-pressed={pressed === item.key || undefined}
+        ff="monospace"
+        aria-label={item.hint}
+        onMouseDown={keepFocus}
+        onClick={() => press(item.key)}
+        style={{ flexShrink: 0, minWidth: 48, minHeight: 44 }}
+      >
+        {item.label}
+      </Button>
+    </Tooltip>
+  );
   return (
-    <ScrollArea type="never" offsetScrollbars={false}>
-      <Group gap={6} wrap="nowrap" role="toolbar" aria-label="终端快捷键">
-        {KEY_BAR.map((item) => (
-          <Tooltip key={item.key} label={item.hint} openDelay={600} events={{ hover: true, focus: false, touch: false }}>
-            <Button
-              size="compact-md"
-              variant="default"
-              ff="monospace"
-              aria-label={item.hint}
-              onMouseDown={keepFocus}
-              onClick={() => press(item.key)}
-              style={{ flexShrink: 0, minWidth: 48 }}
-            >
-              {item.label}
-            </Button>
-          </Tooltip>
-        ))}
+    <Stack gap={6} role="toolbar" aria-label="终端快捷键">
+      <Group gap={6} wrap="wrap">
+        {KEY_BAR.filter((item) => item.group === 'main').map(renderKey)}
+        <Button
+          size="compact-md"
+          variant="subtle"
+          aria-expanded={showExtra}
+          aria-label={showExtra ? '收起不常用按键' : '显示更多按键'}
+          onMouseDown={keepFocus}
+          onClick={() => setShowExtra((value) => !value)}
+          style={{ flexShrink: 0, minHeight: 44 }}
+        >
+          {showExtra ? '收起' : '更多'}
+        </Button>
       </Group>
-    </ScrollArea>
+      <Group gap={6} wrap="wrap">
+        {KEY_BAR.filter((item) => item.group === 'nav').map(renderKey)}
+      </Group>
+      {showExtra && (
+        <Group gap={6} wrap="wrap">
+          {KEY_BAR.filter((item) => item.group === 'extra').map(renderKey)}
+        </Group>
+      )}
+    </Stack>
   );
 }
 
@@ -113,26 +146,42 @@ function InputBox() {
     <Group gap={6} wrap="nowrap" align="flex-end">
       <Textarea
         aria-label="发送到终端的文字"
-        placeholder="用手机输入法打字，点发送"
+        placeholder="回车发送，Shift+回车换行"
         autosize
         minRows={1}
         maxRows={4}
         value={text}
         onChange={(event) => setText(event.currentTarget.value)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault();
-            submit(true);
-          }
+          // Enter sends. Composition Enter (confirming an IME candidate) and
+          // Shift+Enter (explicit newline) are left to the default behavior.
+          if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.shiftKey) return;
+          event.preventDefault();
+          submit(true);
         }}
         style={{ flex: 1 }}
       />
-      <Tooltip label="只输入，不回车" events={{ hover: true, focus: false, touch: false }}>
-        <Button size="sm" variant="default" disabled={!text} loading={send.isPending && !send.variables?.submit} onMouseDown={keepFocus} onClick={() => submit(false)}>
+      <Tooltip label="只输入，不回车" events={{ hover: true, focus: false, touch: true }}>
+        <Button
+          size="sm"
+          variant="default"
+          disabled={!text}
+          loading={send.isPending && !send.variables?.submit}
+          onMouseDown={keepFocus}
+          onClick={() => submit(false)}
+          style={{ minHeight: 44 }}
+        >
           输入
         </Button>
       </Tooltip>
-      <Button size="sm" leftSection={<IconSend size={14} />} loading={send.isPending && send.variables?.submit} onMouseDown={keepFocus} onClick={() => submit(true)}>
+      <Button
+        size="sm"
+        leftSection={<IconSend size={14} />}
+        loading={send.isPending && send.variables?.submit}
+        onMouseDown={keepFocus}
+        onClick={() => submit(true)}
+        style={{ minHeight: 44 }}
+      >
         发送
       </Button>
     </Group>
@@ -211,17 +260,17 @@ export function WorkshopPage() {
         </Group>
         <Group gap={4} wrap="nowrap">
           <Tooltip label={showBar ? '隐藏快捷输入' : '显示快捷输入'}>
-            <ActionIcon variant={showBar ? 'light' : 'subtle'} aria-label="快捷输入" aria-pressed={showBar} onClick={() => setBarPref(showBar ? 'off' : 'on')}>
+            <ActionIcon size="lg" variant={showBar ? 'light' : 'subtle'} aria-label="快捷输入" aria-pressed={showBar} onClick={() => setBarPref(showBar ? 'off' : 'on')}>
               <IconKeyboard size={18} />
             </ActionIcon>
           </Tooltip>
           <Tooltip label="重新连接">
-            <ActionIcon variant="subtle" aria-label="重新连接" onClick={() => setReloadSignal((value) => value + 1)}>
+            <ActionIcon size="lg" variant="subtle" aria-label="重新连接" onClick={() => setReloadSignal((value) => value + 1)}>
               <IconRefresh size={18} />
             </ActionIcon>
           </Tooltip>
           <Tooltip label="车间设置">
-            <ActionIcon component={Link} to="/settings/workshop" variant="subtle" aria-label="车间设置">
+            <ActionIcon size="lg" component={Link} to="/settings/workshop" variant="subtle" aria-label="车间设置">
               <IconSettings size={18} />
             </ActionIcon>
           </Tooltip>

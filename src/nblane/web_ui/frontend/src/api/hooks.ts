@@ -606,10 +606,18 @@ export function useWorkshopStatus() {
   });
 }
 
+// Serializes key-bar taps: parallel POSTs could arrive out of order (e.g. ↑↑↑
+// walking shell history), so each send waits for the previous one to settle.
+let workshopKeysQueue: Promise<unknown> = Promise.resolve();
+
 /** Workshop key bar: whitelisted key names (see core/workshop_service.KEYS). */
 export function useWorkshopKeys() {
   return useMutation({
-    mutationFn: (keys: string[]) => apiPost<{ ok: boolean }>('/system/workshop/keys', { keys }),
+    mutationFn: (keys: string[]) => {
+      const run = workshopKeysQueue.then(() => apiPost<{ ok: boolean }>('/system/workshop/keys', { keys }));
+      workshopKeysQueue = run.catch(() => undefined);
+      return run;
+    },
   });
 }
 

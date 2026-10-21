@@ -61,6 +61,47 @@ describe('WorkshopPage', () => {
     expect(calls.find((call) => call.url.endsWith('/system/workshop/input'))?.body).toEqual({ text: '你好', submit: true });
   });
 
+  it('sends typed text on Enter and keeps Shift+Enter as a newline', async () => {
+    const calls = stubFetch(REACHABLE_PAYLOAD);
+    renderWithProviders(<WorkshopPage />, '/workshop');
+
+    fireEvent.click(await screen.findByRole('button', { name: '快捷输入' }));
+    const box = screen.getByRole('textbox', { name: '发送到终端的文字' });
+    fireEvent.change(box, { target: { value: 'ls -la' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(calls.some((call) => call.url.endsWith('/system/workshop/input'))).toBe(true));
+    expect(calls.find((call) => call.url.endsWith('/system/workshop/input'))?.body).toEqual({ text: 'ls -la', submit: true });
+
+    const sent = calls.filter((call) => call.url.endsWith('/system/workshop/input')).length;
+    fireEvent.change(box, { target: { value: 'draft' } });
+    fireEvent.keyDown(box, { key: 'Enter', shiftKey: true });
+    expect(calls.filter((call) => call.url.endsWith('/system/workshop/input')).length).toBe(sent);
+  });
+
+  it('keeps the rare keys behind the 更多 toggle', async () => {
+    stubFetch(REACHABLE_PAYLOAD);
+    renderWithProviders(<WorkshopPage />, '/workshop');
+
+    fireEvent.click(await screen.findByRole('button', { name: '快捷输入' }));
+    // Enter and the arrows are always visible; Ctrl-R is not.
+    expect(screen.getByRole('button', { name: '回车' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '上' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Ctrl-R：搜索历史' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '显示更多按键' }));
+    expect(screen.getByRole('button', { name: 'Ctrl-R：搜索历史' })).toBeInTheDocument();
+  });
+
+  it('flashes a pressed state when a key is tapped', async () => {
+    stubFetch(REACHABLE_PAYLOAD);
+    renderWithProviders(<WorkshopPage />, '/workshop');
+
+    fireEvent.click(await screen.findByRole('button', { name: '快捷输入' }));
+    const esc = screen.getByRole('button', { name: '中断 / 关闭菜单' });
+    fireEvent.click(esc);
+    expect(esc).toHaveAttribute('data-pressed', 'true');
+  });
+
   it('tells non-admins the terminal is admin only', async () => {
     stubFetch({ ...REACHABLE_PAYLOAD, admin: false });
     renderWithProviders(<WorkshopPage />, '/workshop');
