@@ -18,8 +18,9 @@ import { SidecarFrame } from '../components/SidecarFrame';
  * ttyd's frontend. The bar is on by default for touch devices, keeps Enter and
  * the arrow keys always visible, and the input box sends on Enter (Shift+Enter
  * inserts a newline) so the phone IME works end to end. History is scrolled by
- * swiping inside the terminal (tmux mouse off + no alternate screen); ⇊ snaps
- * back to the latest output, as does sending any key or text.
+ * swiping inside the terminal (tmux mouse off + no alternate screen) or with
+ * the ⇞/⇟/⇊ view buttons, which page the terminal viewport directly — no
+ * server round-trip; sending any key or text snaps back to the latest output.
  *
  * When vertical space is scarce (soft keyboard open or landscape) the page
  * enters a compact mode: the page header and the arrow-key row drop out so
@@ -30,8 +31,8 @@ import { SidecarFrame } from '../components/SidecarFrame';
 // Key bar groups: `main` and `nav` stay visible at all times — Enter and the
 // arrow keys must be reachable on a phone without horizontal scrolling. The
 // rarer `extra` keys sit behind the 更多 toggle. Terminal history itself is
-// scrolled by swiping inside the terminal (native xterm scroll), so PgUp/PgDn
-// are only in-app paging keys (less / man / vim) and live in `extra`.
+// scrolled by swiping inside the terminal or with the ⇞/⇟/⇊ view buttons, so
+// PgUp/PgDn are only in-app paging keys (less / man / vim) and live in `extra`.
 const KEY_BAR: Array<{ key: string; label: string; hint: string; group: 'main' | 'nav' | 'extra' }> = [
   { key: 'esc', label: 'Esc', hint: '中断 / 关闭菜单', group: 'main' },
   { key: 'ctrl_c', label: '^C', hint: 'Ctrl-C', group: 'main' },
@@ -94,15 +95,26 @@ export function terminalUrl(url: string, fontSize: number): string {
   }
 }
 
-/** Snap the embedded xterm viewport to the latest output (same-origin iframe). */
-function scrollTerminalToBottom() {
+/** The xterm scroll container inside the same-origin terminal iframe. */
+function xtermViewport(): Element | null {
   try {
     const frame = document.querySelector<HTMLIFrameElement>('[data-testid="sidecar-frame"]');
-    const viewport = frame?.contentDocument?.querySelector('.xterm-viewport');
-    if (viewport) viewport.scrollTop = viewport.scrollHeight;
+    return frame?.contentDocument?.querySelector('.xterm-viewport') ?? null;
   } catch {
-    // Terminal not ready or cross-origin: nothing to scroll.
+    return null; // Terminal not ready or cross-origin.
   }
+}
+
+/** Snap the embedded xterm viewport to the latest output. */
+function scrollTerminalToBottom() {
+  const viewport = xtermViewport();
+  if (viewport) viewport.scrollTop = viewport.scrollHeight;
+}
+
+/** Page the embedded xterm viewport by one screen, with a little overlap. */
+function scrollTerminalPage(direction: 1 | -1) {
+  const viewport = xtermViewport();
+  if (viewport) viewport.scrollTop += direction * viewport.clientHeight * 0.9;
 }
 
 function KeyBar({ compact = false }: { compact?: boolean }) {
@@ -121,7 +133,7 @@ function KeyBar({ compact = false }: { compact?: boolean }) {
       onError: (error) => notifications.show({ title: '按键发送失败', message: error.message, color: 'red' }),
     });
   };
-  const renderKey = (item: (typeof KEY_BAR)[number]) => (
+  const renderKey = (item: (typeof KEY_BAR)[number], minWidth = 48) => (
     <Tooltip key={item.key} label={item.hint} openDelay={400} events={{ hover: true, focus: false, touch: true }}>
       <Button
         size="compact-md"
@@ -131,16 +143,31 @@ function KeyBar({ compact = false }: { compact?: boolean }) {
         aria-label={item.hint}
         onMouseDown={keepFocus}
         onClick={() => press(item.key)}
-        style={{ flexShrink: 0, minWidth: 48, minHeight: 44 }}
+        style={{ flexShrink: 0, minWidth, minHeight: 44 }}
       >
         {item.label}
+      </Button>
+    </Tooltip>
+  );
+  const renderViewButton = (label: string, hint: string, onClick: () => void) => (
+    <Tooltip key={label} label={hint} openDelay={400} events={{ hover: true, focus: false, touch: true }}>
+      <Button
+        size="compact-md"
+        variant="default"
+        ff="monospace"
+        aria-label={hint}
+        onMouseDown={keepFocus}
+        onClick={onClick}
+        style={{ flexShrink: 0, minWidth: 44, minHeight: 44 }}
+      >
+        {label}
       </Button>
     </Tooltip>
   );
   return (
     <Stack gap={6} role="toolbar" aria-label="终端快捷键">
       <Group gap={6} wrap="wrap">
-        {KEY_BAR.filter((item) => item.group === 'main').map(renderKey)}
+        {KEY_BAR.filter((item) => item.group === 'main').map((item) => renderKey(item))}
         {!compact && (
           <Button
             size="compact-md"
@@ -158,24 +185,14 @@ function KeyBar({ compact = false }: { compact?: boolean }) {
       {!compact && (
         <>
           <Group gap={6} wrap="wrap">
-            {KEY_BAR.filter((item) => item.group === 'nav').map(renderKey)}
-            <Tooltip label="滚动到最新输出" openDelay={400} events={{ hover: true, focus: false, touch: true }}>
-              <Button
-                size="compact-md"
-                variant="default"
-                ff="monospace"
-                aria-label="滚动到最新输出"
-                onMouseDown={keepFocus}
-                onClick={scrollTerminalToBottom}
-                style={{ flexShrink: 0, minWidth: 48, minHeight: 44 }}
-              >
-                ⇊
-              </Button>
-            </Tooltip>
+            {KEY_BAR.filter((item) => item.group === 'nav').map((item) => renderKey(item, 44))}
+            {renderViewButton('⇞', '向上翻一屏（终端画面）', () => scrollTerminalPage(-1))}
+            {renderViewButton('⇟', '向下翻一屏（终端画面）', () => scrollTerminalPage(1))}
+            {renderViewButton('⇊', '滚动到最新输出', scrollTerminalToBottom)}
           </Group>
           {showExtra && (
             <Group gap={6} wrap="wrap">
-              {KEY_BAR.filter((item) => item.group === 'extra').map(renderKey)}
+              {KEY_BAR.filter((item) => item.group === 'extra').map((item) => renderKey(item))}
             </Group>
           )}
         </>

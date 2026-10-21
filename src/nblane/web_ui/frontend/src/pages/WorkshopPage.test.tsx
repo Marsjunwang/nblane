@@ -109,11 +109,14 @@ describe('WorkshopPage', () => {
     expect(screen.getByRole('button', { name: '程序内上翻页（less / man）' })).toBeInTheDocument();
   });
 
-  it('offers a scroll-to-bottom button that sends no key', async () => {
+  it('offers view scroll buttons that send no key', async () => {
     const calls = stubFetch(REACHABLE_PAYLOAD);
     renderWithProviders(<WorkshopPage />, '/workshop');
 
     fireEvent.click(await screen.findByRole('button', { name: '快捷输入' }));
+    // View paging scrolls the terminal viewport client-side; nothing goes to tmux.
+    fireEvent.click(screen.getByRole('button', { name: '向上翻一屏（终端画面）' }));
+    fireEvent.click(screen.getByRole('button', { name: '向下翻一屏（终端画面）' }));
     fireEvent.click(screen.getByRole('button', { name: '滚动到最新输出' }));
     expect(calls.some((call) => call.url.endsWith('/system/workshop/keys'))).toBe(false);
   });
