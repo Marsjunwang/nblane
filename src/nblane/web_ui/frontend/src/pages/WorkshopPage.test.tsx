@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { jsonResponse, renderWithProviders } from '../test/render';
@@ -29,9 +29,24 @@ function stubFetch(payload: unknown, status = 200) {
   return calls;
 }
 
+/** jsdom has no visualViewport; stand one in with a controllable height. */
+function stubVisualViewport(height: number) {
+  let current = height;
+  const fake = new EventTarget();
+  Object.defineProperty(fake, 'height', { get: () => current });
+  Object.defineProperty(window, 'visualViewport', { value: fake, configurable: true });
+  return {
+    setHeight(next: number) {
+      current = next;
+      fake.dispatchEvent(new Event('resize'));
+    },
+  };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   window.localStorage.clear();
+  delete (window as unknown as Record<string, unknown>).visualViewport;
 });
 
 describe('WorkshopPage', () => {
@@ -111,6 +126,31 @@ describe('WorkshopPage', () => {
     const esc = screen.getByRole('button', { name: '中断 / 关闭菜单' });
     fireEvent.click(esc);
     expect(esc).toHaveAttribute('data-pressed', 'true');
+  });
+
+  it('collapses chrome while the soft keyboard is open and restores it after', async () => {
+    const viewport = stubVisualViewport(844);
+    stubFetch(REACHABLE_PAYLOAD);
+    renderWithProviders(<WorkshopPage />, '/workshop');
+
+    fireEvent.click(await screen.findByRole('button', { name: '快捷输入' }));
+    expect(screen.getByText('车间')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '上' })).toBeInTheDocument();
+
+    // Keyboard opens: the page header and the arrow row drop out; the main
+    // keys and the input box stay.
+    act(() => viewport.setHeight(500));
+    await waitFor(() => expect(screen.queryByText('车间')).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: '上' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '显示更多按键' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '回车' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '中断 / 关闭菜单' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '发送到终端的文字' })).toBeInTheDocument();
+
+    // Keyboard closes: everything returns.
+    act(() => viewport.setHeight(844));
+    await waitFor(() => expect(screen.getByText('车间')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '上' })).toBeInTheDocument();
   });
 
   it('tells non-admins the terminal is admin only', async () => {

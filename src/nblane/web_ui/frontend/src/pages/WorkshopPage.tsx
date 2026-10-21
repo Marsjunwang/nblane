@@ -1,8 +1,8 @@
 import { ActionIcon, Alert, Box, Button, Card, Center, Code, Group, Loader, Stack, Text, Textarea, Title, Tooltip } from '@mantine/core';
 import { useLocalStorage, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconKeyboard, IconRefresh, IconSend, IconSettings, IconTerminal, IconTerminal2 } from '@tabler/icons-react';
-import { useEffect, useState, type MouseEvent } from 'react';
+import { IconKeyboard, IconMaximize, IconMinimize, IconRefresh, IconSend, IconSettings, IconTerminal, IconTerminal2 } from '@tabler/icons-react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { Link } from 'react-router-dom';
 
 import { useWorkshopInput, useWorkshopKeys, useWorkshopStatus } from '../api/hooks';
@@ -20,6 +20,11 @@ import { SidecarFrame } from '../components/SidecarFrame';
  * inserts a newline) so the phone IME works end to end. History is scrolled by
  * swiping inside the terminal (tmux mouse off + no alternate screen); ⇊ snaps
  * back to the latest output, as does sending any key or text.
+ *
+ * When vertical space is scarce (soft keyboard open or landscape) the page
+ * enters a compact mode: the page header and the arrow-key row drop out so
+ * the terminal keeps as many rows as possible while typing; they return when
+ * the keyboard closes.
  */
 
 // Key bar groups: `main` and `nav` stay visible at all times — Enter and the
@@ -52,13 +57,23 @@ const KEY_BAR: Array<{ key: string; label: string; hint: string; group: 'main' |
 // does not close the phone's soft keyboard.
 const keepFocus = (event: MouseEvent) => event.preventDefault();
 
-/** Visible viewport height: shrinks when the phone keyboard opens. */
-function useVisualViewportHeight(): number {
+/**
+ * Visible viewport height (shrinks when the phone keyboard opens) plus a
+ * `compact` flag for scarce vertical space: soft keyboard open or landscape.
+ */
+function useVisualViewport(): { height: number; compact: boolean } {
   const read = () => Math.round(window.visualViewport?.height ?? window.innerHeight);
+  const baseline = useRef(read());
   const [height, setHeight] = useState(read);
   useEffect(() => {
     const viewport = window.visualViewport;
-    const update = () => setHeight(read());
+    const update = () => {
+      const next = read();
+      // The baseline only grows: it approximates the keyboard-closed height,
+      // and a rotation to the taller orientation lifts it on the next event.
+      baseline.current = Math.max(baseline.current, next);
+      setHeight(next);
+    };
     viewport?.addEventListener('resize', update);
     window.addEventListener('resize', update);
     return () => {
@@ -66,7 +81,7 @@ function useVisualViewportHeight(): number {
       window.removeEventListener('resize', update);
     };
   }, []);
-  return height;
+  return { height, compact: height < baseline.current * 0.8 };
 }
 
 export function terminalUrl(url: string, fontSize: number): string {
@@ -90,7 +105,7 @@ function scrollTerminalToBottom() {
   }
 }
 
-function KeyBar() {
+function KeyBar({ compact = false }: { compact?: boolean }) {
   const send = useWorkshopKeys();
   const [pressed, setPressed] = useState<string | null>(null);
   const [showExtra, setShowExtra] = useState(false);
@@ -126,38 +141,44 @@ function KeyBar() {
     <Stack gap={6} role="toolbar" aria-label="终端快捷键">
       <Group gap={6} wrap="wrap">
         {KEY_BAR.filter((item) => item.group === 'main').map(renderKey)}
-        <Button
-          size="compact-md"
-          variant="subtle"
-          aria-expanded={showExtra}
-          aria-label={showExtra ? '收起不常用按键' : '显示更多按键'}
-          onMouseDown={keepFocus}
-          onClick={() => setShowExtra((value) => !value)}
-          style={{ flexShrink: 0, minHeight: 44 }}
-        >
-          {showExtra ? '收起' : '更多'}
-        </Button>
-      </Group>
-      <Group gap={6} wrap="wrap">
-        {KEY_BAR.filter((item) => item.group === 'nav').map(renderKey)}
-        <Tooltip label="滚动到最新输出" openDelay={400} events={{ hover: true, focus: false, touch: true }}>
+        {!compact && (
           <Button
             size="compact-md"
-            variant="default"
-            ff="monospace"
-            aria-label="滚动到最新输出"
+            variant="subtle"
+            aria-expanded={showExtra}
+            aria-label={showExtra ? '收起不常用按键' : '显示更多按键'}
             onMouseDown={keepFocus}
-            onClick={scrollTerminalToBottom}
-            style={{ flexShrink: 0, minWidth: 48, minHeight: 44 }}
+            onClick={() => setShowExtra((value) => !value)}
+            style={{ flexShrink: 0, minHeight: 44 }}
           >
-            ⇊
+            {showExtra ? '收起' : '更多'}
           </Button>
-        </Tooltip>
+        )}
       </Group>
-      {showExtra && (
-        <Group gap={6} wrap="wrap">
-          {KEY_BAR.filter((item) => item.group === 'extra').map(renderKey)}
-        </Group>
+      {!compact && (
+        <>
+          <Group gap={6} wrap="wrap">
+            {KEY_BAR.filter((item) => item.group === 'nav').map(renderKey)}
+            <Tooltip label="滚动到最新输出" openDelay={400} events={{ hover: true, focus: false, touch: true }}>
+              <Button
+                size="compact-md"
+                variant="default"
+                ff="monospace"
+                aria-label="滚动到最新输出"
+                onMouseDown={keepFocus}
+                onClick={scrollTerminalToBottom}
+                style={{ flexShrink: 0, minWidth: 48, minHeight: 44 }}
+              >
+                ⇊
+              </Button>
+            </Tooltip>
+          </Group>
+          {showExtra && (
+            <Group gap={6} wrap="wrap">
+              {KEY_BAR.filter((item) => item.group === 'extra').map(renderKey)}
+            </Group>
+          )}
+        </>
       )}
     </Stack>
   );
@@ -228,7 +249,22 @@ export function WorkshopPage() {
   const touch = useMediaQuery('(pointer: coarse)') ?? false;
   const [barPref, setBarPref] = useLocalStorage<'auto' | 'on' | 'off'>({ key: 'nblane.workshop.keybar', defaultValue: 'auto' });
   const [reloadSignal, setReloadSignal] = useState(0);
-  const viewportHeight = useVisualViewportHeight();
+  const { height: viewportHeight, compact } = useVisualViewport();
+  const [canFullscreen] = useState(() => typeof document !== 'undefined' && document.fullscreenEnabled === true);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onChange = () => setFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // Entering compact mode (keyboard opened): keep the latest output in view.
+  useEffect(() => {
+    if (!compact) return;
+    const timer = window.setTimeout(scrollTerminalToBottom, 100);
+    return () => window.clearTimeout(timer);
+  }, [compact]);
 
   if (status.isPending) {
     return (
@@ -284,33 +320,46 @@ export function WorkshopPage() {
   const fontSize = touch ? data.font_size_mobile : data.font_size_desktop;
   // 56px app header + the AppShell's vertical padding.
   const height = `calc(${viewportHeight}px - 56px - 2 * var(--mantine-spacing-md))`;
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void document.documentElement.requestFullscreen().catch(() => undefined);
+  };
 
   return (
     <Stack gap={6} style={{ height }}>
-      <Group justify="space-between" wrap="nowrap">
-        <Group gap="xs" wrap="nowrap">
-          <IconTerminal2 size={20} />
-          <Title order={3}>车间</Title>
-          <Text size="xs" c="dimmed" visibleFrom="sm">tmux 会话 workshop：锁屏、断线、关页面后重进，内容都还在。</Text>
+      {!compact && (
+        <Group justify="space-between" wrap="nowrap">
+          <Group gap="xs" wrap="nowrap">
+            <IconTerminal2 size={20} />
+            <Title order={3}>车间</Title>
+            <Text size="xs" c="dimmed" visibleFrom="sm">tmux 会话 workshop：锁屏、断线、关页面后重进，内容都还在。</Text>
+          </Group>
+          <Group gap={4} wrap="nowrap">
+            <Tooltip label={showBar ? '隐藏快捷输入' : '显示快捷输入'}>
+              <ActionIcon size="lg" variant={showBar ? 'light' : 'subtle'} aria-label="快捷输入" aria-pressed={showBar} onClick={() => setBarPref(showBar ? 'off' : 'on')}>
+                <IconKeyboard size={18} />
+              </ActionIcon>
+            </Tooltip>
+            {canFullscreen && (
+              <Tooltip label={fullscreen ? '退出全屏' : '全屏'}>
+                <ActionIcon size="lg" variant={fullscreen ? 'light' : 'subtle'} aria-label={fullscreen ? '退出全屏' : '全屏'} aria-pressed={fullscreen} onClick={toggleFullscreen}>
+                  {fullscreen ? <IconMinimize size={18} /> : <IconMaximize size={18} />}
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <Tooltip label="重新连接">
+              <ActionIcon size="lg" variant="subtle" aria-label="重新连接" onClick={() => setReloadSignal((value) => value + 1)}>
+                <IconRefresh size={18} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="车间设置">
+              <ActionIcon size="lg" component={Link} to="/settings/workshop" variant="subtle" aria-label="车间设置">
+                <IconSettings size={18} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
         </Group>
-        <Group gap={4} wrap="nowrap">
-          <Tooltip label={showBar ? '隐藏快捷输入' : '显示快捷输入'}>
-            <ActionIcon size="lg" variant={showBar ? 'light' : 'subtle'} aria-label="快捷输入" aria-pressed={showBar} onClick={() => setBarPref(showBar ? 'off' : 'on')}>
-              <IconKeyboard size={18} />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="重新连接">
-            <ActionIcon size="lg" variant="subtle" aria-label="重新连接" onClick={() => setReloadSignal((value) => value + 1)}>
-              <IconRefresh size={18} />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="车间设置">
-            <ActionIcon size="lg" component={Link} to="/settings/workshop" variant="subtle" aria-label="车间设置">
-              <IconSettings size={18} />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      </Group>
+      )}
       <Box style={{ position: 'relative', flex: 1, minHeight: 120 }}>
         <Box style={{ position: 'absolute', inset: 0 }}>
           <SidecarFrame title="车间终端" url={terminalUrl(data.url, fontSize)} base="" height="100%" hideReloadButton reloadSignal={reloadSignal} />
@@ -318,7 +367,7 @@ export function WorkshopPage() {
       </Box>
       {showBar && (
         <Stack gap={6}>
-          <KeyBar />
+          <KeyBar compact={compact} />
           <InputBox />
         </Stack>
       )}
