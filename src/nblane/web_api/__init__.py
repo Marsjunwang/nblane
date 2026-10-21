@@ -18,6 +18,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.gzip import GZipMiddleware
 
 from nblane.web_api.accounts import router as accounts_router
 from nblane.web_api.agent_guard import agent_write_guard
@@ -71,6 +72,10 @@ def create_app(
         lifespan=_lifespan,
     )
     app.add_middleware(GitActorMiddleware)
+    # JSON lists and SPA assets compress well; SSE (text/event-stream) and
+    # responses already carrying Content-Encoding pass through untouched
+    # (Starlette >= 1.0 excludes event streams from compression).
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.state.login_rate_limiter = login_rate_limiter or LoginRateLimiter()
     app.add_exception_handler(ApiError, api_error_handler)
     # Unify 422 bodies: pydantic validation failures get the same

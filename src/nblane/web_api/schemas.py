@@ -2150,10 +2150,15 @@ class StudioValidationResponse(BaseModel):
 
 
 class StudioPostMutationResponse(BaseModel):
-    """Result of one blog post mutation (create/save/publish)."""
+    """Result of one blog post mutation (create/save/publish).
+
+    ``post`` echoes the re-parsed post for create/publish/explicit saves;
+    autosave (``autosave=1``) responses omit it and carry only the new ETag
+    in the header — the editor already holds the body it just wrote.
+    """
 
     ok: bool = True
-    post: StudioPostDetailModel
+    post: StudioPostDetailModel | None = None
     changed_paths: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 

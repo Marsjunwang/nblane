@@ -12433,7 +12433,7 @@
     "type": "object"
    },
    "StudioPostMutationResponse": {
-    "description": "Result of one blog post mutation (create/save/publish).",
+    "description": "Result of one blog post mutation (create/save/publish).\n\n``post`` echoes the re-parsed post for create/publish/explicit saves;\nautosave (``autosave=1``) responses omit it and carry only the new ETag\nin the header — the editor already holds the body it just wrote.",
     "properties": {
      "changed_paths": {
       "items": {
@@ -12448,7 +12448,14 @@
       "type": "boolean"
      },
      "post": {
-      "$ref": "#/components/schemas/StudioPostDetailModel"
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/StudioPostDetailModel"
+       },
+       {
+        "type": "null"
+       }
+      ]
      },
      "warnings": {
       "items": {
@@ -12458,9 +12465,6 @@
       "type": "array"
      }
     },
-    "required": [
-     "post"
-    ],
     "title": "StudioPostMutationResponse",
     "type": "object"
    },
@@ -16214,7 +16218,7 @@
     "summary": "Get Profile Content Blog"
    },
    "put": {
-    "description": "Conflict-safe save that cannot flip a post to ``published``.\n\nPublishing must go through ``.../publish`` so the readiness gate runs;\na plain save that asks for ``published`` on an unpublished post is 422.\n``autosave=1`` writes the files but skips the Git backup commit, so the\neditor's debounced saves do not produce a commit every few seconds; the\nnext explicit save (Ctrl/Cmd+S, leaving the editor) commits the diff.\nErasing a non-empty body is 409 ``empty_body_requires_confirm`` unless\n``allow_empty=1``. A stale ``If-Match`` whose body equals the files on\ndisk (a replayed save) succeeds without writing.",
+    "description": "Conflict-safe save that cannot flip a post to ``published``.\n\nPublishing must go through ``.../publish`` so the readiness gate runs;\na plain save that asks for ``published`` on an unpublished post is 422.\n``autosave=1`` writes the files but skips the Git backup commit, so the\neditor's debounced saves do not produce a commit every few seconds; the\nnext explicit save (Ctrl/Cmd+S, leaving the editor) commits the diff.\nAutosave responses are slim (``post`` is null, ETag in the header);\nexplicit saves echo the re-parsed post.\nErasing a non-empty body is 409 ``empty_body_requires_confirm`` unless\n``allow_empty=1``. A stale ``If-Match`` whose body equals the files on\ndisk (a replayed save) succeeds without writing.",
     "operationId": "save_profile_content_blog_api_v1_profiles__name__content_blog__slug__put",
     "parameters": [
      {
@@ -16663,7 +16667,7 @@
     "summary": "List Profile Content Blog Media"
    },
    "post": {
-    "description": "Store one media file for a post without touching the post itself.\n\nThe editor inserts the returned snippet into its own document and the\nnext save persists it; writing the post here would race the editor's\nunsaved state and bump its ETag underneath it.",
+    "description": "Store one media file for a post without touching the post itself.\n\nThe editor inserts the returned snippet into its own document and the\nnext save persists it; writing the post here would race the editor's\nunsaved state and bump its ETag underneath it.\n\nSync ``def`` on purpose: video uploads may transcode via ffprobe/ffmpeg\n(up to minutes) — a plain def runs in the threadpool instead of blocking\nthe event loop.",
     "operationId": "upload_profile_content_blog_media_api_v1_profiles__name__content_blog__slug__media_post",
     "parameters": [
      {
@@ -24290,7 +24294,7 @@
   },
   "/api/v1/profiles/{name}/public-site/works/media": {
    "post": {
-    "description": "Store a work cover / video under ``media/works/``; the works list is not written.",
+    "description": "Store a work cover / video under ``media/works/``; the works list is not written.\n\nSync ``def``: video uploads may transcode via ffmpeg, so this runs in the\nthreadpool instead of blocking the event loop.",
     "operationId": "upload_profile_public_site_work_media_api_v1_profiles__name__public_site_works_media_post",
     "parameters": [
      {

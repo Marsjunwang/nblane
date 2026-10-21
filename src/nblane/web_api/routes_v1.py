@@ -6904,25 +6904,23 @@ def _public_layer_fingerprints(pdir: Path) -> list[str]:
     """Fingerprint public-layer YAML files and blog documents for Studio."""
     fingerprints = []
     for relative in PUBLIC_LAYER_ETAG_FILES:
-        snapshot = file_state.snapshot_file(pdir / relative)
-        fingerprints.append(f"{relative}:{snapshot.sha256 or 'empty'}")
+        fingerprints.append(f"{relative}:{file_state.fingerprint_file(pdir / relative)}")
     blog_dir = pdir / BLOG_DIRNAME
     if blog_dir.exists():
         for path in sorted(blog_dir.rglob("*")):
             if not path.is_file() or path.suffix not in (".md", ".json"):
                 continue
-            snapshot = file_state.snapshot_file(path)
             rel = path.relative_to(pdir).as_posix()
-            fingerprints.append(f"{rel}:{snapshot.sha256 or 'empty'}")
+            fingerprints.append(f"{rel}:{file_state.fingerprint_file(path)}")
     return fingerprints
 
 
 def _studio_etag(pdir: Path) -> str:
-    """Weak ETag over the profile's public-layer files (sha256 fingerprint).
+    """Weak ETag over the profile's public-layer files (mtime+size fingerprint).
 
     Covers the public-layer YAML files plus every blog Markdown/sidecar
     document, so the create/init mutations can detect concurrent edits.
-    Weak (``W/``) because the hash identifies the source file versions,
+    Weak (``W/``) because the fingerprint identifies the source file versions,
     not the JSON response bytes.
     """
     digest = hashlib.sha256(
@@ -6931,17 +6929,19 @@ def _studio_etag(pdir: Path) -> str:
     return f'W/"{digest}"'
 
 
+def _studio_etag_for_files(paths: list[Path]) -> str:
+    """Weak ETag over a fixed set of source files (mtime+size fingerprints)."""
+    fingerprints = [f"{path.name}:{file_state.fingerprint_file(path)}" for path in paths]
+    digest = hashlib.sha256("|".join(fingerprints).encode("utf-8")).hexdigest()
+    return f'W/"{digest}"'
+
+
 def _studio_post_etag(post) -> str:
     """Weak ETag for one blog post (Markdown file + BlockNote sidecar)."""
     paths = [post.path]
     if post.sidecar_path is not None:
         paths.append(post.sidecar_path)
-    fingerprints = []
-    for path in paths:
-        snapshot = file_state.snapshot_file(path)
-        fingerprints.append(f"{path.name}:{snapshot.sha256 or 'empty'}")
-    digest = hashlib.sha256("|".join(fingerprints).encode("utf-8")).hexdigest()
-    return f'W/"{digest}"'
+    return _studio_etag_for_files(paths)
 
 
 def _studio_error(
@@ -7155,14 +7155,15 @@ def _save_blog_post(
     if_match: str | None = Header(default=None),
     *,
     allow_empty: bool = False,
+    autosave: bool = False,
 ) -> StudioPostMutationResponse | JSONResponse:
     """Save one blog post's front matter + Markdown body.
 
     ``None`` fields keep the current value; unknown front-matter keys are
-    preserved. ``blocks_json`` is intentionally not accepted: the Markdown
-    body is the source of truth in this slice and the BlockNote sidecar
-    keeps its existing blocks (the BlockNote editor slice will write them).
-    Honors ``If-Match`` (412 on mismatch, fresh ETag in the header).
+    preserved. Honors ``If-Match`` (412 on mismatch, fresh ETag in the
+    header). Explicit saves echo the re-parsed post; autosaves (the editor's
+    1.5s debounce) skip that re-parse and return only the new ETag — the
+    client already holds the body it sent.
     """
     pdir = _resolve_profile(name)
     post = _load_studio_post(pdir, slug)
@@ -7227,6 +7228,18 @@ def _save_blog_post(
         )
     except PublicSiteError as exc:
         raise ApiError(422, "studio_save_failed", str(exc)) from exc
+    if autosave:
+        # Slim path: no re-parse of the just-written sidecar. The ETag is
+        # computed from the source files directly (mtime+size), matching what
+        # the next _studio_post_etag would return for the reloaded post.
+        sidecar = public_site.blog_sidecar_path_for_slug(name, post.slug)
+        paths = [path] + ([sidecar] if sidecar.exists() else [])
+        response.headers["ETag"] = _studio_etag_for_files(paths)
+        return StudioPostMutationResponse(
+            ok=True,
+            post=None,
+            changed_paths=[str(path), *[str(item) for item in changed]],
+        )
     fresh = parse_blog_post(path)
     response.headers["ETag"] = _studio_post_etag(fresh)
     return StudioPostMutationResponse(
@@ -7403,7 +7416,7 @@ def get_profile_content_blog(name: str, slug: str, response: Response) -> Studio
     responses=STUDIO_MUTATION_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-async def upload_profile_content_blog_media(
+def upload_profile_content_blog_media(
     name: str,
     slug: str,
     file: UploadFile = File(...),
@@ -7416,6 +7429,10 @@ async def upload_profile_content_blog_media(
     The editor inserts the returned snippet into its own document and the
     next save persists it; writing the post here would race the editor's
     unsaved state and bump its ETag underneath it.
+
+    Sync ``def`` on purpose: video uploads may transcode via ffprobe/ffmpeg
+    (up to minutes) — a plain def runs in the threadpool instead of blocking
+    the event loop.
     """
     pdir = _resolve_profile(name)
     post = _load_studio_post(pdir, slug)
@@ -7423,7 +7440,7 @@ async def upload_profile_content_blog_media(
         result = add_blog_media_bytes(
             pdir.name,
             post.slug,
-            data=await file.read(),
+            data=file.file.read(),
             filename=file.filename or "upload",
             kind=kind,
             alt=alt,
@@ -7515,6 +7532,8 @@ def save_profile_content_blog(
     ``autosave=1`` writes the files but skips the Git backup commit, so the
     editor's debounced saves do not produce a commit every few seconds; the
     next explicit save (Ctrl/Cmd+S, leaving the editor) commits the diff.
+    Autosave responses are slim (``post`` is null, ETag in the header);
+    explicit saves echo the re-parsed post.
     Erasing a non-empty body is 409 ``empty_body_requires_confirm`` unless
     ``allow_empty=1``. A stale ``If-Match`` whose body equals the files on
     disk (a replayed save) succeeds without writing.
@@ -7534,7 +7553,7 @@ def save_profile_content_blog(
     if autosave:
         with git_backup.skip_changes():
             return _save_blog_post(
-                name, slug, body, response, if_match, allow_empty=allow_empty
+                name, slug, body, response, if_match, allow_empty=allow_empty, autosave=True
             )
     return _save_blog_post(name, slug, body, response, if_match, allow_empty=allow_empty)
 
@@ -8309,12 +8328,16 @@ def update_profile_public_site_works(
     responses=PUBLIC_SITE_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-async def upload_profile_public_site_work_media(
+def upload_profile_public_site_work_media(
     name: str, file: UploadFile = File(...)
 ) -> PublicSiteMediaResponse:
-    """Store a work cover / video under ``media/works/``; the works list is not written."""
+    """Store a work cover / video under ``media/works/``; the works list is not written.
+
+    Sync ``def``: video uploads may transcode via ffmpeg, so this runs in the
+    threadpool instead of blocking the event loop.
+    """
     pdir = _resolve_profile(name)
-    data = await file.read()
+    data = file.file.read()
     rel = _console_call(
         lambda: public_console.save_work_media(pdir.name, file.filename or "", data)
     )

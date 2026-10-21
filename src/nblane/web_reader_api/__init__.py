@@ -20,6 +20,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
@@ -99,6 +100,10 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="nblane Paper Reader API", lifespan=_lifespan)
+# Paper-library JSON compresses well. SSE (text/event-stream) is excluded by
+# Starlette's GZipMiddleware; PDF responses opt out via Content-Encoding:
+# identity in _range_response so range requests keep valid byte offsets.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 def _loopback_name(value: str) -> bool:
@@ -2460,6 +2465,9 @@ def _range_response(path: Path, range_header: str | None) -> Response:
         "Accept-Ranges": "bytes",
         "Cache-Control": "private, max-age=86400",
         "ETag": f'W/"{path.stat().st_mtime_ns:x}-{size:x}"',
+        # Opt out of GZipMiddleware: PDFs are already compressed, and
+        # re-encoding would invalidate Content-Range byte offsets.
+        "Content-Encoding": "identity",
     }
     media_type = "application/pdf"
     if not range_header:

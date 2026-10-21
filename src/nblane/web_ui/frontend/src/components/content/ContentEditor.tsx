@@ -650,8 +650,12 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
         .then(
           (result) => {
             unknownSaveRef.current = null;
-            markSaved(atRevision, autosave, result.etag, draftFromPost(result.post).body);
-            queryClient.setQueryData(['profiles', profile, 'content', 'post', slug], { post: result.post, etag: result.etag });
+            // Autosave responses omit the post echo: the server then holds
+            // exactly the body this save sent.
+            markSaved(atRevision, autosave, result.etag, result.post ? draftFromPost(result.post).body : current.body);
+            if (result.post) {
+              queryClient.setQueryData(['profiles', profile, 'content', 'post', slug], { post: result.post, etag: result.etag });
+            }
             return true;
           },
           async (error: unknown) => {

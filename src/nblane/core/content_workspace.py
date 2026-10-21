@@ -14,8 +14,12 @@ from nblane.core import public_site
 
 
 def overview(name: str) -> dict[str, Any]:
-    """Return the content workspace projection for *name*."""
-    posts = public_site.load_blog_posts(name, include_drafts=True, include_archived=True)
+    """Return the content workspace projection for *name*.
+
+    Meta-only: rows come from front matter / sidecar ``meta`` without
+    pydantic-validating every BlockNote block (sidecars can be ~0.5MB).
+    """
+    posts = public_site.load_blog_post_meta_list(name)
     rows = []
     for post in posts:
         rows.append(

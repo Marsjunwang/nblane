@@ -701,6 +701,8 @@ export interface paths {
          *     ``autosave=1`` writes the files but skips the Git backup commit, so the
          *     editor's debounced saves do not produce a commit every few seconds; the
          *     next explicit save (Ctrl/Cmd+S, leaving the editor) commits the diff.
+         *     Autosave responses are slim (``post`` is null, ETag in the header);
+         *     explicit saves echo the re-parsed post.
          *     Erasing a non-empty body is 409 ``empty_body_requires_confirm`` unless
          *     ``allow_empty=1``. A stale ``If-Match`` whose body equals the files on
          *     disk (a replayed save) succeeds without writing.
@@ -777,6 +779,10 @@ export interface paths {
          *     The editor inserts the returned snippet into its own document and the
          *     next save persists it; writing the post here would race the editor's
          *     unsaved state and bump its ETag underneath it.
+         *
+         *     Sync ``def`` on purpose: video uploads may transcode via ffprobe/ffmpeg
+         *     (up to minutes) — a plain def runs in the threadpool instead of blocking
+         *     the event loop.
          */
         post: operations["upload_profile_content_blog_media_api_v1_profiles__name__content_blog__slug__media_post"];
         delete?: never;
@@ -2625,6 +2631,9 @@ export interface paths {
         /**
          * Upload Profile Public Site Work Media
          * @description Store a work cover / video under ``media/works/``; the works list is not written.
+         *
+         *     Sync ``def``: video uploads may transcode via ffmpeg, so this runs in the
+         *     threadpool instead of blocking the event loop.
          */
         post: operations["upload_profile_public_site_work_media_api_v1_profiles__name__public_site_works_media_post"];
         delete?: never;
@@ -12248,6 +12257,10 @@ export interface components {
         /**
          * StudioPostMutationResponse
          * @description Result of one blog post mutation (create/save/publish).
+         *
+         *     ``post`` echoes the re-parsed post for create/publish/explicit saves;
+         *     autosave (``autosave=1``) responses omit it and carry only the new ETag
+         *     in the header — the editor already holds the body it just wrote.
          */
         StudioPostMutationResponse: {
             /** Changed Paths */
@@ -12257,7 +12270,7 @@ export interface components {
              * @default true
              */
             ok: boolean;
-            post: components["schemas"]["StudioPostDetailModel"];
+            post?: components["schemas"]["StudioPostDetailModel"] | null;
             /** Warnings */
             warnings?: string[];
         };

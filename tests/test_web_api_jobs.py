@@ -270,6 +270,32 @@ class TestJobCreation(JobsTestBase):
 class TestJobStream(JobsTestBase):
     """SSE stream: initial snapshot, replayed progress, terminal frame."""
 
+    def test_stream_is_not_gzipped(self) -> None:
+        """GZipMiddleware must pass text/event-stream through uncompressed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            _write_profile(root, tree=SKILL_TREE)
+            schemas = _write_schemas(base)
+            client = self._client(root, schemas)
+            created = client.post(
+                "/api/v1/profiles/alice/jobs",
+                json={"kind": "test-echo", "input": {"task": "grasp"}},
+            )
+            self.assertEqual(created.status_code, 202)
+            job_id = created.json()["job_id"]
+            self._wait_final(client, job_id)
+            with client.stream(
+                "GET",
+                f"/api/v1/profiles/alice/jobs/{job_id}/stream",
+                headers={"Accept-Encoding": "gzip"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                self.assertNotEqual(response.headers.get("content-encoding"), "gzip")
+                frames = _read_sse_frames(response)
+        self.assertEqual(frames[0][0], "job")
+        self.assertEqual(frames[-1][0], "done")
+
     def test_stream_done_replays_progress_phases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

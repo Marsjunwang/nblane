@@ -2177,6 +2177,12 @@ export interface ContentPostWriteResult {
   etag: string;
 }
 
+/** Save result: autosaves answer slim (post echo omitted), explicit saves include it. */
+export interface ContentPostSaveResult {
+  post: StudioPostDetail | null;
+  etag: string;
+}
+
 export function useCreateContentPost(profile: string) {
   const invalidate = useInvalidateContentList(profile);
   return useMutation({
@@ -2186,6 +2192,7 @@ export function useCreateContentPost(profile: string) {
         body,
         { headers: ifMatch(etag) },
       );
+      if (!data.post) throw new Error('创建文章后服务器没有返回内容');
       return { post: data.post, etag: headers.get('ETag') ?? '' };
     },
     onSuccess: invalidate,
@@ -2278,7 +2285,7 @@ export function useSaveContentPost(profile: string) {
       autosave?: boolean;
       /** The owner confirmed erasing the whole body (else 409). */
       allowEmpty?: boolean;
-    }): Promise<ContentPostWriteResult> => {
+    }): Promise<ContentPostSaveResult> => {
       const params = new URLSearchParams();
       if (autosave) params.set('autosave', '1');
       if (allowEmpty) params.set('allow_empty', '1');
@@ -2287,7 +2294,7 @@ export function useSaveContentPost(profile: string) {
       const { data, headers } = await apiPutWithHeaders<StudioPostMutationResponse>(path, body, {
         headers: ifMatch(etag),
       });
-      return { post: data.post, etag: headers.get('ETag') ?? '' };
+      return { post: data.post ?? null, etag: headers.get('ETag') ?? '' };
     },
     onSuccess: invalidate,
   });
@@ -2307,6 +2314,7 @@ export function usePublishContentPost(profile: string) {
       const { data, headers } = await apiPostWithHeaders<StudioPostMutationResponse>(`${contentBlogPath(profile, slug)}/publish`, body, {
         headers: ifMatch(etag),
       });
+      if (!data.post) throw new Error('发布后服务器没有返回内容');
       return { post: data.post, etag: headers.get('ETag') ?? '' };
     },
     onSuccess: invalidate,

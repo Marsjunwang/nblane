@@ -238,6 +238,87 @@ class ContentWorkspaceApiTest(unittest.TestCase):
         detail = self.client.get(f"/api/v1/profiles/alice/content/blog/{slug}").json()
         self.assertEqual(detail["body"].strip(), "Explicit body.")
 
+    def test_autosave_returns_slim_response_and_usable_etag(self) -> None:
+        slug, etag = self._create()
+        saved = self.client.put(
+            f"/api/v1/profiles/alice/content/blog/{slug}?autosave=1",
+            json={"body": "Autosaved body.\n", "summary": "S"},
+            headers={"If-Match": etag},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        payload = saved.json()
+        self.assertTrue(payload["ok"])
+        # Slim autosave: no post echo, only the fresh ETag in the header.
+        self.assertIsNone(payload["post"])
+        autosaved_etag = saved.headers["ETag"]
+        self.assertTrue(autosaved_etag)
+        # The ETag must match what a reload reports (next save can use it).
+        detail = self.client.get(f"/api/v1/profiles/alice/content/blog/{slug}")
+        self.assertEqual(detail.headers["ETag"], autosaved_etag)
+        self.assertEqual(detail.json()["body"].strip(), "Autosaved body.")
+        followup = self.client.put(
+            f"/api/v1/profiles/alice/content/blog/{slug}?autosave=1",
+            json={"body": "Second autosave.\n"},
+            headers={"If-Match": autosaved_etag},
+        )
+        self.assertEqual(followup.status_code, 200, followup.text)
+        # Explicit saves still echo the re-parsed post.
+        explicit = self.client.put(
+            f"/api/v1/profiles/alice/content/blog/{slug}",
+            json={"body": "Explicit body.\n"},
+            headers={"If-Match": followup.headers["ETag"]},
+        )
+        self.assertEqual(explicit.status_code, 200, explicit.text)
+        self.assertIsNotNone(explicit.json()["post"])
+        self.assertEqual(explicit.json()["post"]["body"].strip(), "Explicit body.")
+
+    def test_list_reads_meta_without_validating_sidecar_blocks(self) -> None:
+        slug, etag = self._create()
+        saved = self.client.put(
+            f"/api/v1/profiles/alice/content/blog/{slug}",
+            json={
+                "body": "Body.\n",
+                "summary": "List summary",
+                "tags": ["a", "b"],
+                "blocks_json": [
+                    {"id": "b1", "type": "paragraph", "props": {}, "content": [], "children": []}
+                ],
+            },
+            headers={"If-Match": etag},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        # The list must not pydantic-validate sidecar blocks: make that blow up.
+        with patch(
+            "nblane.core.public_site.BlockNoteDocument.model_validate",
+            side_effect=AssertionError("sidecar blocks were validated"),
+        ):
+            response = self.client.get("/api/v1/profiles/alice/content")
+        self.assertEqual(response.status_code, 200, response.text)
+        posts = response.json()["posts"]
+        row = next(item for item in posts if item["slug"] == slug)
+        self.assertEqual(row["title"], "Hello")
+        self.assertEqual(row["summary"], "List summary")
+        self.assertEqual(row["tags"], ["a", "b"])
+        self.assertEqual(row["status"], "draft")
+
+    def test_list_response_is_gzipped_over_threshold(self) -> None:
+        for index in range(3):
+            created = self.client.post(
+                "/api/v1/profiles/alice/content/blog",
+                json={"title": f"Post {index}", "summary": "摘要填充。" * 200},
+            )
+            self.assertEqual(created.status_code, 201, created.text)
+        response = self.client.get(
+            "/api/v1/profiles/alice/content", headers={"Accept-Encoding": "gzip"}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers.get("content-encoding"), "gzip")
+        # httpx already decoded it: the payload must still parse.
+        self.assertEqual(len(response.json()["posts"]), 3)
+        # Small responses stay uncompressed.
+        small = self.client.get("/api/v1/health", headers={"Accept-Encoding": "gzip"})
+        self.assertNotEqual(small.headers.get("content-encoding"), "gzip")
+
     def test_publish_runs_the_gate(self) -> None:
         slug, etag = self._create()
         blocked = self.client.post(

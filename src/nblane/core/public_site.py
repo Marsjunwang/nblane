@@ -738,12 +738,28 @@ def _public_library_to_yaml(library: PublicLibrary) -> dict:
     }
 
 
+# Raw public-library.yaml mapping per path, keyed by (mtime_ns, size); writes
+# go through atomic replace, so any change invalidates the entry. The raw
+# mapping is cached (not the PublicLibrary) because callers mutate the
+# normalized tree before saving; _normalize_public_library only reads it.
+_PUBLIC_LIBRARY_CACHE: dict[str, tuple[int, int, dict]] = {}
+
+
 def load_public_library(name: str) -> PublicLibrary:
     """Load the optional public-site file tree."""
     path = _public_library_path(name)
-    if not path.exists():
-        return _normalize_public_library({}, name)
-    return _normalize_public_library(_read_yaml_mapping(path), name)
+    try:
+        stat = path.stat()
+        key = (str(path), stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        key = (str(path), -1, -1)
+    cached = _PUBLIC_LIBRARY_CACHE.get(key[0])
+    if cached is not None and cached[0] == key[1] and cached[1] == key[2]:
+        raw = cached[2]
+    else:
+        raw = _read_yaml_mapping(path) if path.exists() else {}
+        _PUBLIC_LIBRARY_CACHE[key[0]] = (key[1], key[2], raw)
+    return _normalize_public_library(raw, name)
 
 
 def save_public_library(
@@ -2079,6 +2095,26 @@ def parse_blog_post(path: Path) -> BlogPost:
     )
 
 
+def _trashed_blog_routes(name: str) -> set[str]:
+    """Blog routes parked in the public-library trash (empty when unused)."""
+    library = load_public_library(name)
+    if not _public_library_has_real_nodes(library):
+        return set()
+    library_posts: dict[str, PublicLibraryNode] = {}
+    trashed_routes: set[str] = set()
+    for node in library.nodes:
+        if node.type != "post" or not node.ref:
+            continue
+        route = _library_blog_route(node.ref)
+        if not route:
+            continue
+        if node.status == "trashed":
+            trashed_routes.add(route)
+            continue
+        library_posts.setdefault(route, node)
+    return trashed_routes - set(library_posts)
+
+
 def load_blog_posts(
     name: str,
     *,
@@ -2093,19 +2129,15 @@ def load_blog_posts(
     library = load_public_library(name)
     library_enabled = _public_library_has_real_nodes(library)
     library_posts: dict[str, PublicLibraryNode] = {}
-    trashed_routes: set[str] = set()
+    trashed_routes: set[str] = _trashed_blog_routes(name)
     if library_enabled:
         for node in library.nodes:
             if node.type != "post" or not node.ref:
                 continue
             route = _library_blog_route(node.ref)
-            if not route:
-                continue
-            if node.status == "trashed":
-                trashed_routes.add(route)
+            if not route or node.status == "trashed":
                 continue
             library_posts.setdefault(route, node)
-        trashed_routes -= set(library_posts)
     public_library_only = library_enabled and not include_drafts and not include_archived
     posts: list[BlogPost] = []
     for path in _blog_post_candidate_paths(blog_dir):
@@ -2127,6 +2159,73 @@ def load_blog_posts(
         key=lambda p: (p.date, p.slug),
         reverse=True,
     )
+
+
+def _parse_blog_post_meta(path: Path) -> BlogPost:
+    """Parse one blog document's metadata only (no sidecar block validation).
+
+    Mirrors :func:`parse_blog_post`'s preference for the BlockNote sidecar,
+    but reads just its ``meta``/``slug`` fields — the sidecar's blocks are
+    never pydantic-validated or dumped, so list views stay cheap even with
+    large sidecars. ``body`` is left empty and ``blocks_json`` is ``[]``.
+    """
+    if path.name.endswith(".blocknote.json"):
+        sidecar_path: Path | None = path
+        md_path = path.with_name(f"{_blog_slug_from_sidecar_path(path)}.md")
+    else:
+        md_path = path
+        sidecar_path = _blog_sidecar_path_for_markdown(path)
+    meta: dict | None = None
+    doc_slug = ""
+    if sidecar_path is not None and sidecar_path.exists():
+        try:
+            raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            meta = dict(raw.get("meta") or {})
+            doc_slug = str(raw.get("slug") or "").strip()
+        except Exception:
+            meta = None
+    if meta is None:
+        if md_path.exists():
+            text = md_path.read_text(encoding="utf-8")
+            meta, _body = _parse_front_matter(text)
+        else:
+            meta = {}
+    route_from_path = _blog_route_from_document_path(md_path if md_path.exists() else path)
+    slug = str(route_from_path or doc_slug or _blog_slug_from_sidecar_path(path)).strip()
+    if not slug:
+        slug = route_from_path or _blog_slug_from_sidecar_path(path)
+    category_path = _blog_category_path_for_document(md_path, meta)
+    if category_path and not meta.get("category_path"):
+        meta["category_path"] = list(category_path)
+    return BlogPost(
+        slug=slug,
+        path=md_path,
+        meta=meta,
+        body="",
+        category_path=category_path,
+        blocks_json=[],
+        sidecar_path=sidecar_path if sidecar_path is not None and sidecar_path.exists() else None,
+    )
+
+
+def load_blog_post_meta_list(name: str) -> list[BlogPost]:
+    """Meta-only blog rows (drafts + published + archived, minus trash).
+
+    Same visibility and ordering as ``load_blog_posts(..., include_drafts=
+    True, include_archived=True)``, but each post is parsed with
+    :func:`_parse_blog_post_meta` — bodies and sidecar blocks are not read.
+    For list views only; use :func:`load_blog_posts` when bodies are needed.
+    """
+    blog_dir = _profile_path(name) / BLOG_DIRNAME
+    if not blog_dir.exists():
+        return []
+    trashed_routes = _trashed_blog_routes(name)
+    posts = [
+        _parse_blog_post_meta(path)
+        for path in _blog_post_candidate_paths(blog_dir)
+    ]
+    posts = [post for post in posts if post.route not in trashed_routes]
+    return sorted(posts, key=lambda p: (p.date, p.slug), reverse=True)
 
 
 def _status_visible(

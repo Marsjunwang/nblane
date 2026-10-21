@@ -219,6 +219,39 @@ def _make_profile(root: Path, name: str = "alice") -> Path:
 class TestPublicSite(unittest.TestCase):
     """Public site behavior."""
 
+    def test_public_library_cache_tracks_file_changes(self) -> None:
+        """The mtime-keyed raw-YAML cache invalidates on every write."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            path = profile / "public-library.yaml"
+            path.write_text("version: 1\nnodes: []\n", encoding="utf-8")
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                first = public_site.load_public_library("alice")
+                self.assertEqual(
+                    [node.title for node in first.nodes if node.type == "post"],
+                    [],
+                )
+                path.write_text(
+                    "version: 1\nnodes:\n"
+                    "  - id: p1\n    type: post\n    title: Cached Post\n"
+                    "    ref: blog/2026-01-01-cached/\n",
+                    encoding="utf-8",
+                )
+                second = public_site.load_public_library("alice")
+                self.assertEqual(
+                    [node.title for node in second.nodes if node.type == "post"],
+                    ["Cached Post"],
+                )
+                # Mutating the returned tree must not poison the cache.
+                second.nodes.clear()
+                third = public_site.load_public_library("alice")
+                self.assertEqual(
+                    [node.title for node in third.nodes if node.type == "post"],
+                    ["Cached Post"],
+                )
+
     def test_init_public_layer_is_idempotent(self) -> None:
         """Init creates missing files and does not overwrite existing ones."""
         with tempfile.TemporaryDirectory() as tmp:

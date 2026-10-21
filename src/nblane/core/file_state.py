@@ -50,6 +50,19 @@ def file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def fingerprint_file(path: Path) -> str:
+    """mtime+size fingerprint for *path* without reading its contents.
+
+    Writes go through atomic replace, so mtime_ns changes on every write;
+    use this for ETags where a content hash would reread the whole file.
+    """
+    try:
+        stat = path.stat()
+    except OSError:
+        return "empty"
+    return f"{stat.st_mtime_ns:x}-{stat.st_size:x}"
+
+
 def snapshot_file(path: Path) -> FileSnapshot:
     """Capture mtime, size, and content hash for *path*."""
     try:
