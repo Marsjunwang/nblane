@@ -87,8 +87,8 @@ class ContentWorkspaceApiTest(unittest.TestCase):
 
     def test_list_is_newest_first_and_create_returns_post_etag(self) -> None:
         older, older_etag = self._create("Older")
-        # Back-date through the API: the BlockNote sidecar wins over the
-        # Markdown front matter on read, so editing the .md is not enough.
+        # Back-date through the API so the .md and the sidecar move together
+        # (a hand-edited .md would win over the sidecar on read).
         backdated = self.client.put(
             f"/api/v1/profiles/alice/content/blog/{older}",
             json={"date": "2001-01-01"},

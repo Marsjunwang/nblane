@@ -871,6 +871,62 @@ class TestPublicSite(unittest.TestCase):
             self.assertIn("Published blog post:", out.getvalue())
             self.assertIn("draft-post.md", out.getvalue())
 
+    def test_external_markdown_edit_wins_over_stale_sidecar(self) -> None:
+        """File-first: a hand-edited .md beats the sidecar it outgrew."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _make_profile(root)
+            md_path = profile / "blog" / "post.md"
+            _write_blog(md_path, title="Post", status="draft", evidence=[], body="Original body.")
+
+            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
+                # A save through the API path writes .md + sidecar together.
+                loaded = public_site.load_blog_post("alice", "post")
+                public_site.save_blog_post(
+                    "alice",
+                    "post",
+                    dict(loaded.meta),
+                    "Original body.\n",
+                    blocks_json=[
+                        {"id": "b1", "type": "paragraph", "props": {}, "content": [], "children": []}
+                    ],
+                )
+                # Untouched: the sidecar wins and carries the blocks.
+                fresh = public_site.parse_blog_post(md_path)
+                self.assertEqual(fresh.body.strip(), "Original body.")
+                self.assertEqual([b["id"] for b in fresh.blocks_json], ["b1"])
+                rows = {p.slug: p for p in public_site.load_blog_post_meta_list("alice")}
+                self.assertEqual(rows["post"].title, "Post")
+
+                # External edit (hand edit / git checkout): the .md wins.
+                _write_blog(
+                    md_path,
+                    title="Post Renamed",
+                    status="draft",
+                    evidence=[],
+                    body="Edited by hand.",
+                )
+                stale = public_site.parse_blog_post(md_path)
+                self.assertEqual(stale.body.strip(), "Edited by hand.")
+                self.assertEqual(stale.title, "Post Renamed")
+                # Stale sidecar blocks are dropped; the editor rebuilds them.
+                self.assertEqual(stale.blocks_json, [])
+                # The sidecar file is still tracked for ETag/conflict purposes.
+                self.assertIsNotNone(stale.sidecar_path)
+                # The meta-only list agrees with the winner.
+                row = {p.slug: p for p in public_site.load_blog_post_meta_list("alice")}["post"]
+                self.assertEqual(row.title, "Post Renamed")
+                # The next save regenerates a fresh sidecar.
+                public_site.save_blog_post(
+                    "alice", "post", dict(stale.meta), stale.body,
+                    blocks_json=[
+                        {"id": "b2", "type": "paragraph", "props": {}, "content": [], "children": []}
+                    ],
+                )
+                regenerated = public_site.parse_blog_post(md_path)
+                self.assertEqual([b["id"] for b in regenerated.blocks_json], ["b2"])
+                self.assertEqual(regenerated.body.strip(), "Edited by hand.")
+
     def test_unsafe_link_schemes_are_rejected_and_sanitized(self) -> None:
         """Unsafe URL schemes fail validation and are stripped from HTML."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1071,80 +1127,6 @@ class TestPublicSite(unittest.TestCase):
             self.assertTrue(result.relative_path.endswith("-h264.mp4"))
             self.assertIn("::video[](", result.snippet)
 
-    def test_blog_media_library_rows_include_inline_image_preview(self) -> None:
-        """Editor media rows include image previews and skip large video inlining."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _make_profile(root)
-            media_dir = profile / "media" / "blog" / "draft-post"
-            media_dir.mkdir(parents=True)
-            image = media_dir / "cover.png"
-            image.write_bytes(b"\x89PNG\r\n\x1a\npreview")
-            video = media_dir / "clip.mp4"
-            video.write_bytes(
-                b"0" * (public_site.BLOG_PREVIEW_VIDEO_INLINE_MAX_BYTES + 1)
-            )
-            with patch(
-                "nblane.core.public_site._ffprobe_video_stream",
-                return_value={
-                    "codec_name": "mpeg4",
-                    "codec_tag_string": "mp4v",
-                    "profile": "Simple Profile",
-                },
-            ):
-                rows = public_site.blog_media_library_rows(
-                    profile,
-                    "draft-post",
-                    {"cover": "media/blog/draft-post/cover.png"},
-                    "![Cover](media/blog/draft-post/cover.png)",
-                )
-
-            by_name = {row["name"]: row for row in rows}
-            self.assertTrue(
-                by_name["cover.png"]["preview_src"].startswith(
-                    "data:image/png;base64,"
-                )
-            )
-            self.assertEqual(by_name["cover.png"]["preview_mime"], "image/png")
-            self.assertIn("preview_width", by_name["cover.png"])
-            self.assertIn("preview_height", by_name["cover.png"])
-            self.assertIn("original_size_kb", by_name["cover.png"])
-            self.assertTrue(by_name["cover.png"]["full_preview_available"])
-            self.assertTrue(by_name["cover.png"]["referenced"])
-            self.assertEqual(by_name["clip.mp4"]["preview_src"], "")
-            self.assertEqual(by_name["clip.mp4"]["preview_mime"], "video/mp4")
-            self.assertTrue(by_name["clip.mp4"]["full_preview_available"])
-            self.assertFalse(by_name["clip.mp4"]["video_browser_compatible"])
-            self.assertTrue(by_name["clip.mp4"]["needs_video_conversion"])
-            self.assertEqual(by_name["clip.mp4"]["video_codec"], "mpeg4")
-
-    def test_blog_media_library_marks_h264_video_compatible(self) -> None:
-        """H.264 MP4 rows are marked browser-compatible."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _make_profile(root)
-            media_dir = profile / "media" / "blog" / "draft-post"
-            media_dir.mkdir(parents=True)
-            video = media_dir / "clip.mp4"
-            video.write_bytes(b"0" * 64)
-            with patch(
-                "nblane.core.public_site._ffprobe_video_stream",
-                return_value={
-                    "codec_name": "h264",
-                    "codec_tag_string": "avc1",
-                    "profile": "High",
-                },
-            ):
-                rows = public_site.blog_media_library_rows(
-                    profile,
-                    "draft-post",
-                    {},
-                    "::video[](media/blog/draft-post/clip.mp4)",
-                )
-
-            self.assertTrue(rows[0]["video_browser_compatible"])
-            self.assertFalse(rows[0]["needs_video_conversion"])
-
     def test_visual_block_comment_counts_as_blog_media_ref(self) -> None:
         """Visual block comments preserve generated visual semantics and media refs."""
         body = (
@@ -1327,158 +1309,6 @@ class TestPublicSite(unittest.TestCase):
         self.assertTrue(public_site.markdown_contains_math(body))
         self.assertIn('class="math-display"', html)
         self.assertIn("x^2+y^2=z^2", html)
-
-    def test_render_blog_post_preview_uses_unsaved_text_and_cover(self) -> None:
-        """Single-post preview renders in-memory meta/body and does not write."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _make_profile(root)
-            media_dir = profile / "media" / "blog" / "draft-post"
-            media_dir.mkdir(parents=True)
-            (media_dir / "cover.png").write_bytes(b"\x89PNG\r\n\x1a\npreview")
-            post_path = profile / "blog" / "draft-post.md"
-            before = post_path.read_text(encoding="utf-8")
-            meta = {
-                "title": "Unsaved Title",
-                "date": "2026-04-29",
-                "status": "draft",
-                "tags": ["preview"],
-                "summary": "Unsaved summary",
-                "cover": "media/blog/draft-post/cover.png",
-                "related_evidence": [],
-                "related_kanban": [],
-            }
-
-            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
-                html = public_site.render_blog_post_preview(
-                    "alice",
-                    "draft-post",
-                    meta,
-                    "Unsaved **body**.",
-                )
-
-            self.assertIn("Unsaved Title", html)
-            self.assertIn("Unsaved summary", html)
-            self.assertIn("Unsaved", html)
-            self.assertIn("data:image/png;base64", html)
-            self.assertEqual(post_path.read_text(encoding="utf-8"), before)
-
-    def test_render_blog_post_preview_fast_uses_smaller_image_payload(self) -> None:
-        """Fast previews thumbnail images while full previews keep original bytes."""
-        try:
-            from PIL import Image
-        except Exception:
-            self.skipTest("Pillow is not installed")
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _make_profile(root)
-            media_dir = profile / "media" / "blog" / "draft-post"
-            media_dir.mkdir(parents=True)
-            image_path = media_dir / "cover.jpg"
-            image = Image.effect_noise((1600, 900), 96).convert("RGB")
-            image.save(image_path, format="JPEG", quality=95)
-            meta = {
-                "title": "Preview Size",
-                "date": "2026-04-29",
-                "status": "draft",
-                "tags": ["preview"],
-                "summary": "Preview summary",
-                "cover": "media/blog/draft-post/cover.jpg",
-                "related_evidence": [],
-                "related_kanban": [],
-            }
-            body = "![Cover](media/blog/draft-post/cover.jpg)"
-
-            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
-                fast_html = public_site.render_blog_post_preview(
-                    "alice",
-                    "draft-post",
-                    meta,
-                    body,
-                    preview_quality="fast",
-                )
-                full_html = public_site.render_blog_post_preview(
-                    "alice",
-                    "draft-post",
-                    meta,
-                    body,
-                    preview_quality="full",
-                )
-
-            self.assertIn("data:image/", fast_html)
-            self.assertNotIn('src=""', fast_html)
-            self.assertLess(len(fast_html), len(full_html))
-
-    def test_blog_media_full_preview_payload_returns_one_full_item(self) -> None:
-        """Full preview payloads are loaded on demand for a single media item."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _make_profile(root)
-            media_dir = profile / "media" / "blog" / "draft-post"
-            media_dir.mkdir(parents=True)
-            image = media_dir / "cover.png"
-            image.write_bytes(b"\x89PNG\r\n\x1a\nfull")
-
-            payload = public_site.blog_media_full_preview_payload(
-                profile,
-                "media/blog/draft-post/cover.png",
-                kind="image",
-            )
-
-            self.assertTrue(payload["full_preview_src"].startswith("data:image/png;base64,"))
-            self.assertEqual(payload["full_preview_mime"], "image/png")
-            self.assertTrue(payload["full_preview_available"])
-
-    def test_render_blog_post_preview_full_inlines_large_video(self) -> None:
-        """Full blog preview can play local videos that fast preview skips."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = _make_profile(root)
-            media_dir = profile / "media" / "blog" / "draft-post"
-            media_dir.mkdir(parents=True)
-            video = media_dir / "clip.mp4"
-            video.write_bytes(
-                b"0" * (public_site.BLOG_PREVIEW_VIDEO_INLINE_MAX_BYTES + 1)
-            )
-            meta = {
-                "title": "Video Preview",
-                "date": "2026-04-29",
-                "status": "draft",
-                "tags": ["preview"],
-                "summary": "Preview summary",
-                "cover": "",
-                "related_evidence": [],
-                "related_kanban": [],
-            }
-            body = "::video[Clip](media/blog/draft-post/clip.mp4)"
-
-            with patch("nblane.core.public_site.profile_dir", lambda _n: profile):
-                fast_html = public_site.render_blog_post_preview(
-                    "alice",
-                    "draft-post",
-                    meta,
-                    body,
-                    preview_quality="fast",
-                )
-                full_html = public_site.render_blog_post_preview(
-                    "alice",
-                    "draft-post",
-                    meta,
-                    body,
-                    preview_quality="full",
-                )
-                detail = public_site.blog_media_full_preview_payload(
-                    profile,
-                    "media/blog/draft-post/clip.mp4",
-                    kind="video",
-                )
-
-            self.assertIn('<video class="media-video"', fast_html)
-            self.assertNotIn("data:video/mp4;base64", fast_html)
-            self.assertIn("data:video/mp4;base64", full_html)
-            self.assertTrue(detail["full_preview_src"].startswith("data:video/mp4;base64,"))
-            self.assertEqual(detail["full_preview_mime"], "video/mp4")
-            self.assertTrue(detail["full_preview_available"])
 
     def test_publish_blog_text_validates_before_writing(self) -> None:
         """Unsaved publish writes only after validation succeeds."""

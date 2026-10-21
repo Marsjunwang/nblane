@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 
 class FileConflictError(RuntimeError):
@@ -20,25 +19,6 @@ class FileSnapshot:
     mtime_ns: int | None
     size: int | None
     sha256: str | None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize for Streamlit session state."""
-        return {
-            "exists": self.exists,
-            "mtime_ns": self.mtime_ns,
-            "size": self.size,
-            "sha256": self.sha256,
-        }
-
-    @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "FileSnapshot":
-        """Deserialize from Streamlit session state."""
-        return cls(
-            exists=bool(raw.get("exists")),
-            mtime_ns=raw.get("mtime_ns"),
-            size=raw.get("size"),
-            sha256=raw.get("sha256"),
-        )
 
 
 def file_sha256(path: Path) -> str:

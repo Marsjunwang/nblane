@@ -5,16 +5,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ContentJobHandle } from './contentJobs';
+import { errorText } from './contentDraft';
 
 export type JobOutcome<T> =
   | { status: 'done'; value: T }
   | { status: 'error'; error: string }
   /** Superseded by a newer start, cancelled, or the panel unmounted. */
   | { status: 'stale' };
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /**
  * Combine several handles into one: cancel stops all of them, and the first

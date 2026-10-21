@@ -8195,7 +8195,7 @@ def _public_build_output_dir(name: str) -> Path:
 
 
 def _public_build_initialized(pdir: Path) -> bool:
-    """Same four-file public-layer gate as the Streamlit page / studio."""
+    """The four-file public-layer gate used by the studio."""
     return all(
         (pdir / filename).exists()
         for filename in (

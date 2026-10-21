@@ -24,6 +24,7 @@ import { useEffect, useState } from 'react';
 import { ApiError } from '../../api/client';
 import { useRenderSocialCards, useSocialCardSettings } from '../../api/hooks';
 import type { SocialCardRenderResponse, SocialCardSettings } from '../../api/types';
+import { errorText } from './contentDraft';
 import { runContentJob } from './contentJobs';
 import { useContentJob } from './useContentJob';
 
@@ -77,10 +78,6 @@ export function xLengthHint(text: string, length: number, withLink: boolean): st
     withLink ? '含文章链接（按 23 计）' : '',
   ].filter(Boolean);
   return `${length} / 280${notes.length ? `（${notes.join('，')}）` : ''}`;
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**

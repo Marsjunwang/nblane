@@ -46,9 +46,7 @@ def overview(name: str) -> dict[str, Any]:
 def post_media(name: str, post: public_site.BlogPost) -> list[dict[str, Any]]:
     """List one post's media directory without building inline previews.
 
-    ``public_site.blog_media_library_rows`` base64-encodes every file for the
-    Streamlit component; the SPA loads files by URL instead, so this listing
-    only stats the files.
+    The SPA loads files by URL, so this listing only stats the files.
     """
     profile_root = public_site._profile_path(name)
     media_dir = (

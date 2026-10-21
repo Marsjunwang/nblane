@@ -36,7 +36,7 @@ def _write_blog(path: Path, *, title: str = "Draft", body: str = "Body.") -> Non
 
 
 class AIBlogPhase4Tests(unittest.TestCase):
-    def test_sidecar_wins_over_markdown_and_restores_deleted_md(self) -> None:
+    def test_external_markdown_edit_wins_and_deleted_md_restores_from_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = Path(tmp) / "alice"
             blog = profile / "blog"
@@ -80,9 +80,11 @@ class AIBlogPhase4Tests(unittest.TestCase):
 
                 post_path.write_text("---\ntitle: External edit\n---\n\nExternal body\n", encoding="utf-8")
                 loaded = public_site.load_blog_post("alice", "post")
-                self.assertEqual(loaded.title, "Sidecar title")
-                self.assertEqual(loaded.body, "Sidecar body.\n")
-                self.assertEqual(loaded.blocks_json[0]["id"], "b1")
+                # File-first: the externally edited Markdown beats the stale
+                # sidecar; its blocks are dropped and rebuilt by the editor.
+                self.assertEqual(loaded.title, "External edit")
+                self.assertEqual(loaded.body.strip(), "External body")
+                self.assertEqual(loaded.blocks_json, [])
 
                 post_path.unlink()
                 posts = public_site.load_blog_posts("alice", include_drafts=True)

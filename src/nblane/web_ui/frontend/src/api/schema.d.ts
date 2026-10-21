@@ -12151,8 +12151,8 @@ export interface components {
          *
          *     ``meta`` carries the full front matter for round-trip fidelity (editor
          *     fields are whitelisted on save; unknown keys survive untouched).
-         *     ``has_math`` mirrors the Streamlit math-safe rule: bodies containing
-         *     LaTeX stay on the Markdown source editor.
+         *     ``has_math`` marks bodies containing LaTeX: they open on the Markdown
+         *     source editor instead of the visual editor.
          */
         StudioPostDetailModel: {
             /** Blocks Json */

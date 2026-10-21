@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-07
+last_verified: 2026-10-22
 source_of_truth: true
 ---
 
@@ -68,7 +68,7 @@ flowchart TB
 | 首页与目标 | `starmap_snapshot.py`、`home_dashboard.py`、`goals.py`、`goal_alignment.py`、`divination.py`、`daily_brief.py`、`chronicle.py`、`growth_graph_contract.py`、`workspace_graph.py`、`command_bar.py`、`intent.py` |
 | 项目与看板 | `projects_board.py`（/projects 聚合读模型）、`project_board.py`、`project_board_sync.py`、`project_board_events.py`、`project_suggest.py`、`kanban_merge.py`、`kanban_archive.py`、`kanban_events.py`、`kanban_ai.py`、`task_intake.py`、`activity_log.py`（打卡 / 习惯 / 阶段计划）、`plan_templates.py`、`experience.py` |
 | 研究 | `research_workspace.py`、`research_sources.py`、`research_connectors.py`、`research_papers/`、`paper_library_workspace.py`、`reader_actions.py`、`reader_tasks.py`、`learning_log.py`、`local_dict.py`、`grobid_service.py` |
-| 内容、求职、公开站 | `content_workspace.py`、`content_ai.py`、`career_workspace.py`、`career_ai.py`、`resume_doc.py`、`resume_extract.py`、`jd_match.py`、`public_site.py`、`public_console.py`、`public_curation.py`、`visual_generation.py`、`visual_candidate_store.py`、`ai_blog_outline.py`、`ai_blog_reviewer.py`、`ai_dispatcher.py`、`blog_workspace.py` |
+| 内容、求职、公开站 | `content_workspace.py`、`content_ai.py`、`career_workspace.py`、`career_ai.py`、`resume_doc.py`、`resume_extract.py`、`jd_match.py`、`public_site.py`、`public_console.py`、`public_curation.py`、`visual_generation.py`、`visual_candidate_store.py`、`ai_blog_outline.py`、`ai_blog_reviewer.py`、`ai_dispatcher.py` |
 | AI | `ai/`（gateway、router、backends、structured、prompts、runs、exceptions、skill_suggest、local_models、local_translation）、`llm.py`、`jsonutil.py`、`codex_adapter.py`、`agent_tasks.py`、`agent_activity.py`（AI 候选与失败记录） |
 | Agent | `agent_policy.py`、`agent_ops.py`、`agent_journal.py`、`openclaw_setup.py`、`openclaw_ops.py`、`openclaw_corpus.py`、`openclaw_automations.py`（可选手动同步）、`notify.py`、`mcp_client_config.py`、`cursor_rule.py` |
 | 账号、设置、备份 | `auth.py`、`web_preferences.py`、`git_backup.py`、`backup_targets.py`、`workshop_service.py`、`tag_taxonomy.py` |

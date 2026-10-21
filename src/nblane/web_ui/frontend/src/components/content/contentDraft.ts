@@ -5,6 +5,11 @@ import type { StudioPostDetail, StudioPostSaveRequest } from '../../api/types';
 
 export type EditorBlocks = Array<Record<string, unknown>>;
 
+/** Best-effort human-readable text for an unknown thrown value. */
+export function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export const STATUS_LABELS: Record<string, string> = {
   draft: '草稿',
   published: '已发布',

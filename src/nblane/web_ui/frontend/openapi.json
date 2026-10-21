@@ -12262,7 +12262,7 @@
     "type": "object"
    },
    "StudioPostDetailModel": {
-    "description": "One public blog post, editor view (meta + Markdown body).\n\n``meta`` carries the full front matter for round-trip fidelity (editor\nfields are whitelisted on save; unknown keys survive untouched).\n``has_math`` mirrors the Streamlit math-safe rule: bodies containing\nLaTeX stay on the Markdown source editor.",
+    "description": "One public blog post, editor view (meta + Markdown body).\n\n``meta`` carries the full front matter for round-trip fidelity (editor\nfields are whitelisted on save; unknown keys survive untouched).\n``has_math`` marks bodies containing LaTeX: they open on the Markdown\nsource editor instead of the visual editor.",
     "properties": {
      "blocks_json": {
       "items": {

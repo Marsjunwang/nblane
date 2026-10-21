@@ -30,10 +30,8 @@ import '../blogBlocks/blocks.css';
 import './blogEditor.css';
 import { selectedImages, containsMedia } from './content/imageSelection';
 import type { SelectedImage, ImageTarget } from './content/imageTypes';
-import { AI_REWRITE_MENU } from './rewriteOperations';
+import type { EditorBlocks } from './content/contentDraft';
 import { AIRewriteMenu } from './AIRewriteMenu';
-
-export type EditorBlocks = Array<Record<string, unknown>>;
 
 export interface BlogEditorChange {
   markdown: string;
@@ -71,8 +69,6 @@ export interface AIRewriteRequest {
   context: string;
   parts?: string[];
 }
-
-export { AI_REWRITE_MENU };
 
 export interface BlockNoteBlogEditorProps {
   /** Initial content. The editor is uncontrolled: remount (key) to reload. */

@@ -7,19 +7,14 @@ import {
   Center,
   CloseButton,
   Drawer,
-  FileButton,
   Group,
   Loader,
   Menu,
   Modal,
   ScrollArea,
   SegmentedControl,
-  Select,
   Stack,
-  Tabs,
-  TagsInput,
   Text,
-  TextInput,
   Textarea,
   Tooltip,
 } from '@mantine/core';
@@ -31,102 +26,77 @@ import {
   IconArrowLeft,
   IconArrowsHorizontal,
   IconCheck,
-  IconChecklist,
   IconChevronDown,
   IconCircleCheck,
-  IconCircleX,
   IconDots,
   IconExternalLink,
   IconFocusCentered,
   IconLayoutSidebarRight,
   IconListSearch,
   IconPencil,
-  IconPhoto,
-  IconPhotoStar,
   IconRefresh,
   IconRocket,
-  IconRowInsertBottom,
   IconSearch,
   IconShare,
   IconTrash,
-  IconUpload,
 } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import { containsDisplayMathBlock } from '../../blogBlocks/markdown.js';
-import { ApiError, ifMatch } from '../../api/client';
-import { SESSION_RESTORED_EVENT, isSessionExpired } from '../../api/session';
 import {
-  contentBlogApiUrl,
   contentMediaUrl,
-  fetchContentPost,
   publicSitePreviewPageUrl,
   useCheckContentPost,
   useContentPost,
   useContentPostMedia,
-  useDeleteContentPostMedia,
   usePublishContentPost,
-  useSaveContentPost,
   useUploadContentMedia,
 } from '../../api/hooks';
-import type { ContentMedia, ContentRewriteResult, StudioValidationResponse } from '../../api/types';
+import type { ContentRewriteResult, StudioValidationResponse } from '../../api/types';
 import {
   BlockNoteBlogEditor,
   type AIRewriteRequest,
   type BlockNoteBlogEditorHandle,
   type ReplaceOutcome,
-  type EditorBlocks,
 } from '../BlockNoteBlogEditor';
 import { isConflictError } from '../ConflictAlert';
 import {
   STATUS_COLORS,
   STATUS_LABELS,
-  checkMessage,
   clearLocalDraft,
   contentEditorPath,
   contentLibraryPath,
-  draftFromPost,
   draftToSaveRequest,
-  erasesBody,
-  readLocalDraft,
-  sameDraftContent,
-  writeLocalDraft,
-  type LocalDraft,
-  isMissingSummary,
+  errorText,
   mediaSnippet,
   outlineFromBlocks,
+  wordCount,
+  writeLocalDraft,
+  type EditorBlocks,
   type OutlineItem,
   type PostDraft,
-  wordCount,
 } from './contentDraft';
 import { ImageWorkspace } from './ImageWorkspace';
 import { ImagePreview } from './ImagePreview';
 import { useImageRuns } from './imageApi';
 import type { ImageEditRequest, SelectedImage } from './imageTypes';
-import { AICoverGenerator } from './AICoverGenerator';
 import { changedFields, previousOf, undoPatch, type AIPatch } from './aiUndo';
 import { showAIUndo } from './aiUndoNotice';
-import { AIMetaSuggestions } from './AIMetaSuggestions';
 import { AIRewriteDialog, type RewriteState } from './AIRewriteDialog';
 import { runContentJob } from './contentJobs';
 import { combineJobs, useContentJob } from './useContentJob';
 import { OutlinePanel } from './OutlinePanel';
 import { PostSwitcher } from './PostSwitcher';
+import { PublishDialog } from './PublishDialog';
+import { PostSettings } from './PostSettings';
 import { SocialShareDrawer } from './SocialShareDrawer';
 import { DeleteContentPostDialog } from './DeleteContentPostDialog';
+import { AUTOSAVE_DELAY_MS, usePostSaveController, type SaveState } from './usePostSaveController';
 import { useContentAIStatus, useContentWorkspace } from '../../api/hooks';
 
 type EditorMode = 'visual' | 'source' | 'preview';
-type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict' | 'empty';
-
-/** Idle time after the last keystroke before the draft is written. */
-const AUTOSAVE_DELAY_MS = 1500;
-/** Idle time before the draft is mirrored into localStorage. */
-const LOCAL_DRAFT_DELAY_MS = 500;
-/** keepalive fetch bodies are capped at 64 KiB by browsers. */
-const KEEPALIVE_MAX_BYTES = 60_000;
 
 const COLUMN_WIDTH = { normal: 760, wide: 1080 } as const;
 const TOP_BAR_HEIGHT = 52;
@@ -141,351 +111,8 @@ const REPLACE_FAILURE_TEXT: Record<Exclude<ReplaceOutcome, 'ok'>, string> = {
   media: '候选里出现了图片或视频，只能替换文字。请在「编辑候选」里删掉媒体后再替换，或复制候选手动粘贴。',
 };
 
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function formatTime(date: Date): string {
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-}
-
-// --- Settings panel -------------------------------------------------------------
-
-function MediaList({
-  profile,
-  media,
-  loading,
-  uploading,
-  cover,
-  onUpload,
-  onInsert,
-  onSetCover,
-  onDelete,
-  deleting,
-  bodyUses,
-  onImageEdit,
-}: {
-  profile: string;
-  media: ContentMedia[];
-  loading: boolean;
-  uploading: boolean;
-  cover: string;
-  onUpload: (file: File | null) => void;
-  onInsert: (item: ContentMedia) => void;
-  onSetCover: (path: string) => void;
-  onDelete?: (item: ContentMedia) => void;
-  deleting?: string;
-  /** True when the unsaved editor text already uses this file. */
-  bodyUses?: (path: string) => boolean;
-  onImageEdit: (item: ContentMedia) => void;
-}) {
-  return (
-    <Stack gap="sm" data-testid="content-media">
-      <FileButton onChange={onUpload} accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm">
-        {(props) => (
-          <Button {...props} variant="light" loading={uploading} leftSection={<IconUpload size={15} />} fullWidth>
-            上传图片或视频
-          </Button>
-        )}
-      </FileButton>
-      <Text size="xs" c="dimmed">
-        上传后插入到光标处。
-        <Text span inherit visibleFrom="sm">
-          也可以把图片直接拖进正文。
-        </Text>
-      </Text>
-      {loading ? (
-        <Loader size="xs" />
-      ) : (
-        media.map((item) => (
-          <Group key={item.path} gap="xs" wrap="wrap">
-            {item.kind === 'image' ? (
-              <ImagePreview src={contentMediaUrl(profile, item.path)} width={88} height={66} alt={item.name} />
-            ) : (
-              <Center w={52} h={52} bg="dark.5" style={{ borderRadius: 4 }}>
-                <Text size="xs">视频</Text>
-              </Center>
-            )}
-            <Box style={{ flex: 1, minWidth: 100 }}>
-              <Text size="xs" truncate>
-                {item.name}
-              </Text>
-              <Text size="xs" c="dimmed">
-                {item.path === cover ? '封面' : item.referenced ? '正文已引用' : '未使用'}
-              </Text>
-            </Box>
-            {item.kind === 'image' && <Tooltip label="AI 修改图片"><ActionIcon size={44} variant="subtle" aria-label={`AI 修改 ${item.name}`} onClick={() => onImageEdit(item)}>AI</ActionIcon></Tooltip>}
-            <Tooltip label="插入到光标处">
-              <ActionIcon size={44} variant="subtle" aria-label={`插入 ${item.name}`} onClick={() => onInsert(item)}>
-                <IconRowInsertBottom size={16} />
-              </ActionIcon>
-            </Tooltip>
-            {item.kind === 'image' && item.path !== cover && (
-              <Tooltip label="设为封面">
-                <ActionIcon size={44} variant="subtle" aria-label={`设 ${item.name} 为封面`} onClick={() => onSetCover(item.path)}>
-                  <IconPhotoStar size={16} />
-                </ActionIcon>
-              </Tooltip>
-            )}
-            {onDelete && !item.referenced && item.path !== cover && !bodyUses?.(item.path) && (
-              <Tooltip label="删除这个文件（其他文章在用时会拒绝）">
-                <ActionIcon size={44} variant="subtle" color="red" aria-label={`删除 ${item.name}`}
-                  loading={deleting === item.path} disabled={Boolean(deleting)} onClick={() => onDelete(item)}
-                  data-testid="content-media-delete">
-                  <IconTrash size={16} />
-                </ActionIcon>
-              </Tooltip>
-            )}
-          </Group>
-        ))
-      )}
-    </Stack>
-  );
-}
-
-function PostSettings({
-  profile,
-  slug,
-  draft,
-  media,
-  mediaLoading,
-  uploading,
-  aiText,
-  aiCover,
-  onEdit,
-  onApplyAI,
-  onUpload,
-  onInsert,
-  onImageOpen,
-}: {
-  profile: string;
-  slug: string;
-  draft: PostDraft;
-  media: ContentMedia[];
-  mediaLoading: boolean;
-  uploading: boolean;
-  aiText: boolean;
-  aiCover: boolean;
-  onEdit: (patch: Partial<PostDraft>) => void;
-  /** AI-suggested field values: applied with an undo notification. */
-  onApplyAI: (patch: AIPatch) => void;
-  onUpload: (file: File | null) => void;
-  onInsert: (item: ContentMedia) => void;
-  onImageOpen: (request: ImageEditRequest | null) => void;
-}) {
-  const removeMedia = useDeleteContentPostMedia(profile, slug);
-  const deleteMedia = (item: ContentMedia) =>
-    removeMedia.mutate(item.path, {
-      onSuccess: () => notifications.show({ color: 'gray', title: '已删除', message: item.name }),
-      onError: (error) =>
-        notifications.show({ color: 'red', title: '没有删除', message: error instanceof Error ? error.message : String(error) }),
-    });
-  const coverOptions = media.filter((item) => item.kind === 'image').map((item) => ({ value: item.path, label: item.name }));
-  if (draft.cover && !coverOptions.some((option) => option.value === draft.cover)) {
-    coverOptions.unshift({ value: draft.cover, label: draft.cover });
-  }
-  const published = draft.status === 'published';
-  return (
-    <Tabs defaultValue="post" keepMounted={false} data-testid="content-properties">
-      <Tabs.List grow>
-        <Tabs.Tab value="post">文章</Tabs.Tab>
-        <Tabs.Tab value="media" leftSection={<IconPhoto size={14} />}>
-          媒体 {media.length ? media.length : ''}
-        </Tabs.Tab>
-      </Tabs.List>
-      <Tabs.Panel value="post" pt="md">
-        <Stack gap="md">
-          <AIMetaSuggestions profile={profile} enabled={aiText} draft={draft} onApply={onApplyAI} />
-          <Textarea
-            label="摘要"
-            description="发布必填；显示在博客列表和分享卡片上"
-            withAsterisk
-            autosize
-            minRows={3}
-            maxRows={8}
-            value={draft.summary}
-            onChange={(event) => onEdit({ summary: event.currentTarget.value })}
-          />
-          <TagsInput label="标签" placeholder="回车添加" value={draft.tags} onChange={(tags) => onEdit({ tags })} clearable />
-          <TextInput label="日期" type="date" value={draft.date} onChange={(event) => onEdit({ date: event.currentTarget.value })} />
-          <Select
-            label="封面"
-            placeholder="不使用封面"
-            data={coverOptions}
-            value={draft.cover || null}
-            onChange={(value) => onEdit({ cover: value ?? '' })}
-            clearable
-            nothingFoundMessage="先在「媒体」上传图片"
-          />
-          {draft.cover && (
-            <Box pos="relative">
-              <ImagePreview src={contentMediaUrl(profile, draft.cover)} height={180} alt="封面预览" />
-              <CloseButton size="sm" pos="absolute" top={6} right={6} aria-label="移除封面" onClick={() => onEdit({ cover: '' })} />
-            </Box>
-          )}
-          <AICoverGenerator enabled={aiCover} cover={draft.cover} onOpen={onImageOpen} />
-          {!published && (
-            <Select
-              label="可见性"
-              data={[
-                { value: 'draft', label: '草稿（未发布）' },
-                { value: 'archived', label: '已归档（不公开，不发布）' },
-              ]}
-              value={draft.status === 'archived' ? 'archived' : 'draft'}
-              onChange={(value) => onEdit({ status: value ?? 'draft' })}
-              allowDeselect={false}
-            />
-          )}
-          <Box>
-            <Text size="sm" fw={500}>
-              公开地址
-            </Text>
-            <Text size="xs" c="dimmed" mt={2} style={{ wordBreak: 'break-all' }}>
-              /blog/{slug}/
-            </Text>
-          </Box>
-          {published && (
-            <Text size="xs" c="dimmed">
-              已发布：修改会自动保存，并在下次构建站点时更新到网站。
-            </Text>
-          )}
-        </Stack>
-      </Tabs.Panel>
-      <Tabs.Panel value="media" pt="md">
-        <MediaList
-          profile={profile}
-          media={media}
-          loading={mediaLoading}
-          uploading={uploading}
-          cover={draft.cover}
-          onUpload={onUpload}
-          onInsert={onInsert}
-          onSetCover={(path) => onEdit({ cover: path })}
-          onDelete={deleteMedia}
-          deleting={removeMedia.isPending ? removeMedia.variables : undefined}
-          bodyUses={(path) => draft.body.includes(path)}
-          onImageEdit={(item) => onImageOpen({ mode: 'edit', reference: item.path, target: { kind: 'media', source: item.path } })}
-        />
-      </Tabs.Panel>
-    </Tabs>
-  );
-}
-
-// --- Publish dialog ------------------------------------------------------------
-
-function PublishDialog({
-  opened,
-  profile,
-  aiText,
-  draft,
-  result,
-  checking,
-  stale,
-  publishing,
-  blocked,
-  onClose,
-  onRecheck,
-  onEditSummary,
-  onApplySummary,
-  onConfirm,
-}: {
-  opened: boolean;
-  profile: string;
-  aiText: boolean;
-  draft: PostDraft;
-  result: StudioValidationResponse | null;
-  checking: boolean;
-  stale: boolean;
-  publishing: boolean;
-  blocked: boolean;
-  onClose: () => void;
-  onRecheck: () => void;
-  onEditSummary: (value: string) => void;
-  onApplySummary: (value: string) => void;
-  onConfirm: () => void;
-}) {
-  const errors = result?.errors ?? [];
-  const warnings = result?.warnings ?? [];
-  const needsSummary = errors.some(isMissingSummary);
-  const ready = !!result?.ok && !stale && !checking;
-  return (
-    <Modal opened={opened} onClose={onClose} title="发布文章" centered size="lg" data-testid="content-publish-dialog">
-      <Stack gap="md">
-        <Text size="sm" c="dimmed">
-          发布后文章进入公开层；在「公开站点」发布到线上后才会出现在网站上。
-        </Text>
-        {checking || !result ? (
-          <Group gap="xs">
-            <Loader size="xs" />
-            <Text size="sm">正在检查…</Text>
-          </Group>
-        ) : (
-          <Stack gap={6} data-testid="content-check-result">
-            {errors.map((item) => (
-              <Group key={item} gap="xs" wrap="nowrap" align="flex-start">
-                <IconCircleX size={18} color="var(--mantine-color-red-5)" style={{ flexShrink: 0 }} />
-                <Text size="sm">{checkMessage(item)}</Text>
-              </Group>
-            ))}
-            {warnings.map((item) => (
-              <Group key={item} gap="xs" wrap="nowrap" align="flex-start">
-                <IconChecklist size={18} color="var(--mantine-color-yellow-5)" style={{ flexShrink: 0 }} />
-                <Text size="sm" c="dimmed">
-                  {checkMessage(item)}
-                </Text>
-              </Group>
-            ))}
-            {result.ok && (
-              <Group gap="xs">
-                <IconCircleCheck size={18} color="var(--mantine-color-green-5)" />
-                <Text size="sm">{stale ? '内容有改动，请重新检查。' : '检查通过，可以发布。'}</Text>
-              </Group>
-            )}
-          </Stack>
-        )}
-        {needsSummary && (
-          <Textarea
-            label="摘要"
-            description="一两句话说明这篇文章讲什么"
-            autosize
-            minRows={2}
-            value={draft.summary}
-            onChange={(event) => onEditSummary(event.currentTarget.value)}
-            data-autofocus
-          />
-        )}
-        {needsSummary && (
-          <AIMetaSuggestions
-            profile={profile}
-            enabled={aiText}
-            draft={draft}
-            compact
-            onApply={(patch) => patch.summary && onApplySummary(patch.summary)}
-          />
-        )}
-        <Group justify="space-between">
-          <Button variant="subtle" leftSection={<IconRefresh size={14} />} onClick={onRecheck} loading={checking}>
-            重新检查
-          </Button>
-          <Group gap="xs">
-            <Button variant="default" onClick={onClose}>
-              取消
-            </Button>
-            <Button
-              color="green"
-              leftSection={<IconRocket size={15} />}
-              disabled={!ready || blocked}
-              loading={publishing}
-              onClick={onConfirm}
-              data-testid="content-publish-confirm"
-            >
-              确认发布
-            </Button>
-          </Group>
-        </Group>
-      </Stack>
-    </Modal>
-  );
 }
 
 // --- Editor ---------------------------------------------------------------------
@@ -513,22 +140,14 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
     const image = images[0];
     if (image) openImages({ mode: 'edit', reference: image.source, target: { kind: 'block', source: image.source, block_id: image.id, fingerprint: image.fingerprint } });
   };
-  const save = useSaveContentPost(profile);
   const check = useCheckContentPost(profile);
   const publish = usePublishContentPost(profile);
   const upload = useUploadContentMedia(profile);
 
-  const [draft, setDraft] = useState<PostDraft | null>(null);
   const [mode, setMode] = useState<EditorMode>('visual');
   const [editorKey, setEditorKey] = useState('');
-  const [saveState, setSaveState] = useState<SaveState>('saved');
-  const [savedAt, setSavedAt] = useState<Date | null>(null);
-  const [saveError, setSaveError] = useState('');
-  const [localCandidate, setLocalCandidate] = useState<LocalDraft | null>(null);
-  const [revision, setRevision] = useState(0);
   const [checked, setChecked] = useState<{ result: StudioValidationResponse; revision: number } | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
-  const [previewNonce, setPreviewNonce] = useState(0);
   const [wideColumn, setWideColumn] = useLocalStorage({ key: 'nblane.content.wideColumn', defaultValue: false });
   const [settingsPinned, setSettingsPinned] = useLocalStorage({ key: 'nblane.content.settingsOpen', defaultValue: false });
   const [outlinePinned, setOutlinePinned] = useLocalStorage({ key: 'nblane.content.outlineOpen', defaultValue: false });
@@ -545,50 +164,54 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const [rewriteView, setRewriteView] = useState<'diff' | 'edit'>('diff');
   const rewriteJob = useContentJob<ContentRewriteResult[]>();
 
-  // Refs mirror the latest state for timers, unload handlers and async saves.
-  const draftRef = useRef<PostDraft | null>(null);
-  const etagRef = useRef('');
-  const revisionRef = useRef(0);
-  const savedRevisionRef = useRef(0);
-  const uncommittedRef = useRef(false);
-  const conflictRef = useRef(false);
-  const inFlightRef = useRef<Promise<boolean> | null>(null);
-  const timerRef = useRef<number | undefined>(undefined);
-  const loadedSlugRef = useRef('');
   const editorRef = useRef<BlockNoteBlogEditorHandle>(null);
-  // Body the server holds now: an edit that would erase it waits for consent.
-  const serverBodyRef = useRef('');
-  const emptyPendingRef = useRef(false);
-  const localTimerRef = useRef<number | undefined>(undefined);
-  // Draft of a save whose response never arrived: it may have landed.
-  const unknownSaveRef = useRef<PostDraft | null>(null);
-  const deletingRef = useRef(false);
 
-  const isDirty = () => revisionRef.current !== savedRevisionRef.current;
-
-  const applyServerPost = useCallback(
-    (result: { post: Parameters<typeof draftFromPost>[0]; etag: string }) => {
-      loadedSlugRef.current = slug;
-      const next = draftFromPost(result.post);
-      draftRef.current = next;
-      etagRef.current = result.etag;
-      serverBodyRef.current = next.body;
-      emptyPendingRef.current = false;
-      unknownSaveRef.current = null;
-      setDraft(next);
-      const local = readLocalDraft(window.localStorage, profile, slug);
-      if (local && !sameDraftContent(local.draft, next)) setLocalCandidate(local);
-      else {
-        if (local) clearLocalDraft(window.localStorage, profile, slug);
-        setLocalCandidate(null);
-      }
+  // UI reset after the save controller (re)loads a draft: switch mode for
+  // display math, remount the editor, and (on server loads) reset the outline.
+  const handleApplyPost = useCallback(
+    (next: PostDraft, options: { resetOutline: boolean }) => {
       setMode(containsDisplayMathBlock(next.body) ? 'source' : 'visual');
-      setOutline([]);
-      setActiveHeading('');
+      if (options.resetOutline) {
+        setOutline([]);
+        setActiveHeading('');
+      }
       setEditorKey(`${slug}:${Date.now()}`);
     },
-    [profile, slug],
+    [slug],
   );
+
+  const {
+    draft,
+    setDraft,
+    saveState,
+    setSaveState,
+    savedAt,
+    setSavedAt,
+    saveError,
+    localCandidate,
+    revision,
+    previewNonce,
+    setPreviewNonce,
+    draftRef,
+    etagRef,
+    revisionRef,
+    savedRevisionRef,
+    uncommittedRef,
+    inFlightRef,
+    timerRef,
+    localTimerRef,
+    loadedSlugRef,
+    deletingRef,
+    conflictRef,
+    isDirty,
+    applyServerPost,
+    runSave,
+    edit,
+    reloadFromServer,
+    keepMine,
+    restoreLocalDraft,
+    discardLocalDraft,
+  } = usePostSaveController({ profile, slug, onApplyPost: handleApplyPost });
 
   // Load the post once per mount (the page remounts this component per slug).
   useEffect(() => {
@@ -600,160 +223,6 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.data, location.state, slug]);
-
-  const markSaved = (atRevision: number, autosave: boolean, etag: string, body: string) => {
-    etagRef.current = etag;
-    serverBodyRef.current = body;
-    savedRevisionRef.current = atRevision;
-    uncommittedRef.current = autosave;
-    setSavedAt(new Date());
-    setSaveError('');
-    setPreviewNonce((value) => value + 1);
-    if (!isDirty()) clearLocalDraft(window.localStorage, profile, slug);
-  };
-
-  const runSave = useCallback(
-    async (autosave: boolean, options: { allowEmpty?: boolean } = {}): Promise<boolean> => {
-      window.clearTimeout(timerRef.current);
-      if (deletingRef.current || conflictRef.current || !draftRef.current) return false;
-      // Saves run one at a time. Autosaves coalesce into the running one (it
-      // reschedules itself when edits are pending); explicit saves wait in
-      // turn, so a burst of Ctrl+S never sends parallel PUTs with one ETag.
-      while (inFlightRef.current) {
-        if (autosave) return inFlightRef.current;
-        await inFlightRef.current;
-        if (deletingRef.current || conflictRef.current) return false;
-      }
-      if (!isDirty() && !(uncommittedRef.current && !autosave)) return true;
-      if (isSessionExpired()) {
-        setSaveState('error');
-        setSaveError('登录已过期，重新登录后会自动保存。');
-        return false;
-      }
-      const current = draftRef.current!;
-      if (!options.allowEmpty && erasesBody(current, serverBodyRef.current)) {
-        emptyPendingRef.current = true;
-        setSaveState('empty');
-        return false;
-      }
-      emptyPendingRef.current = false;
-      const atRevision = revisionRef.current;
-      setSaveState('saving');
-      const promise = save
-        .mutateAsync({
-          slug,
-          body: draftToSaveRequest(current),
-          etag: etagRef.current,
-          autosave,
-          allowEmpty: options.allowEmpty,
-        })
-        .then(
-          (result) => {
-            unknownSaveRef.current = null;
-            // Autosave responses omit the post echo: the server then holds
-            // exactly the body this save sent.
-            markSaved(atRevision, autosave, result.etag, result.post ? draftFromPost(result.post).body : current.body);
-            if (result.post) {
-              queryClient.setQueryData(['profiles', profile, 'content', 'post', slug], { post: result.post, etag: result.etag });
-            }
-            return true;
-          },
-          async (error: unknown) => {
-            if (isConflictError(error)) {
-              // The response to an earlier save may have been lost (dropped
-              // connection): if the server already holds exactly this draft,
-              // adopt its ETag and carry on instead of reporting a conflict.
-              try {
-                const server = await fetchContentPost(profile, slug);
-                const onServer = draftFromPost(server.post);
-                if (sameDraftContent(onServer, current)) {
-                  markSaved(atRevision, autosave, server.etag, onServer.body);
-                  queryClient.setQueryData(['profiles', profile, 'content', 'post', slug], server);
-                  return true;
-                }
-                const lost = unknownSaveRef.current;
-                if (lost && sameDraftContent(onServer, lost)) {
-                  // Our earlier save did land; newer edits are still pending.
-                  // Rebase on its ETag and save again (marked dirty, so the
-                  // follow-up below reschedules the autosave).
-                  unknownSaveRef.current = null;
-                  etagRef.current = server.etag;
-                  serverBodyRef.current = onServer.body;
-                  queryClient.setQueryData(['profiles', profile, 'content', 'post', slug], server);
-                  return true;
-                }
-              } catch {
-                // fall through to the conflict state
-              }
-              conflictRef.current = true;
-              setSaveState('conflict');
-              return false;
-            }
-            if (error instanceof ApiError && error.code === 'empty_body_requires_confirm') {
-              emptyPendingRef.current = true;
-              setSaveState('empty');
-              return false;
-            }
-            if (!(error instanceof ApiError)) unknownSaveRef.current = current;
-            setSaveState('error');
-            setSaveError(
-              error instanceof ApiError && error.status === 401 ? '登录已过期，重新登录后会自动保存。' : errorText(error),
-            );
-            return false;
-          },
-        )
-        .then((ok) => {
-          if (ok) {
-            if (isDirty()) {
-              setSaveState('dirty');
-              timerRef.current = window.setTimeout(() => void runSave(true), AUTOSAVE_DELAY_MS);
-            } else {
-              setSaveState('saved');
-            }
-          }
-          return ok;
-        })
-        .finally(() => {
-          inFlightRef.current = null;
-        });
-      inFlightRef.current = promise;
-      return promise;
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [profile, queryClient, slug],
-  );
-
-  // After re-login in the session modal, push what piled up meanwhile.
-  useEffect(() => {
-    const onRestored = () => {
-      if (isDirty() || uncommittedRef.current) void runSave(false);
-    };
-    window.addEventListener(SESSION_RESTORED_EVENT, onRestored);
-    return () => window.removeEventListener(SESSION_RESTORED_EVENT, onRestored);
-  }, [runSave]);
-
-  const edit = useCallback(
-    (patch: Partial<PostDraft>) => {
-      if (deletingRef.current || !draftRef.current) return;
-      draftRef.current = { ...draftRef.current, ...patch };
-      setDraft(draftRef.current);
-      revisionRef.current += 1;
-      setRevision(revisionRef.current);
-      window.clearTimeout(localTimerRef.current);
-      localTimerRef.current = window.setTimeout(() => {
-        if (draftRef.current && isDirty()) {
-          writeLocalDraft(window.localStorage, profile, slug, draftRef.current, etagRef.current);
-        }
-      }, LOCAL_DRAFT_DELAY_MS);
-      if (emptyPendingRef.current && draftRef.current.body.trim()) emptyPendingRef.current = false;
-      if (conflictRef.current) return;
-      setSaveState('dirty');
-      window.clearTimeout(timerRef.current);
-      timerRef.current = window.setTimeout(() => void runSave(true), AUTOSAVE_DELAY_MS);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [profile, runSave, slug],
-  );
 
   // AI suggestions and AI covers overwrite fields the writer may have typed;
   // apply at once, but offer 撤销 (restores only fields still holding the AI
@@ -776,110 +245,12 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
     [edit],
   );
 
-  // Last-chance save when the tab closes or the user navigates elsewhere in
-  // the app (rail links). keepalive lets the request outlive the page.
-  const flushOnExit = useCallback(() => {
-    window.clearTimeout(timerRef.current);
-    window.clearTimeout(localTimerRef.current);
-    if (deletingRef.current) return;
-    const current = draftRef.current;
-    if (!current || (!isDirty() && !uncommittedRef.current)) return;
-    if (isDirty()) writeLocalDraft(window.localStorage, profile, slug, current, etagRef.current);
-    if (conflictRef.current || isSessionExpired() || erasesBody(current, serverBodyRef.current)) return;
-    let body = draftToSaveRequest(current);
-    let payload = JSON.stringify(body);
-    if (payload.length > KEEPALIVE_MAX_BYTES) {
-      // Drop the blocks sidecar; it is rebuilt from the Markdown on next open.
-      body = { ...body, blocks_json: [] };
-      payload = JSON.stringify(body);
-    }
-    if (payload.length > KEEPALIVE_MAX_BYTES) return;
-    void fetch(contentBlogApiUrl(profile, slug), {
-      method: 'PUT',
-      keepalive: true,
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json', ...ifMatch(etagRef.current) },
-      body: payload,
-    }).catch(() => undefined);
-    savedRevisionRef.current = revisionRef.current;
-    uncommittedRef.current = false;
-  }, [profile, slug]);
-
-  useEffect(() => {
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (conflictRef.current || (saveState === 'error' && isDirty())) {
-        event.preventDefault();
-        return;
-      }
-      flushOnExit();
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [flushOnExit, saveState]);
-
-  useEffect(() => () => flushOnExit(), [flushOnExit]);
-
   const backToLibrary = async () => {
     if (isDirty() || uncommittedRef.current) {
       const ok = await runSave(false);
       if (!ok) return;
     }
     navigate(contentLibraryPath(profile));
-  };
-
-  const reloadFromServer = async () => {
-    window.clearTimeout(timerRef.current);
-    window.clearTimeout(localTimerRef.current);
-    let result;
-    try {
-      result = await fetchContentPost(profile, slug);
-    } catch (error) {
-      notifications.show({ color: 'red', title: '加载最新版本失败', message: errorText(error) });
-      return;
-    }
-    conflictRef.current = false;
-    clearLocalDraft(window.localStorage, profile, slug);
-    revisionRef.current = 0;
-    savedRevisionRef.current = 0;
-    setRevision(0);
-    uncommittedRef.current = false;
-    queryClient.setQueryData(['profiles', profile, 'content', 'post', slug], result);
-    applyServerPost(result);
-    setSaveState('saved');
-  };
-
-  // Conflict: keep this editor's text and overwrite the server copy.
-  const keepMine = async () => {
-    try {
-      const server = await fetchContentPost(profile, slug);
-      etagRef.current = server.etag;
-      serverBodyRef.current = draftFromPost(server.post).body;
-    } catch (error) {
-      notifications.show({ color: 'red', title: '无法读取最新版本', message: errorText(error) });
-      return;
-    }
-    conflictRef.current = false;
-    savedRevisionRef.current = -1;
-    await runSave(false);
-  };
-
-  const restoreLocalDraft = () => {
-    if (!localCandidate) return;
-    draftRef.current = localCandidate.draft;
-    setDraft(localCandidate.draft);
-    setMode(containsDisplayMathBlock(localCandidate.draft.body) ? 'source' : 'visual');
-    setEditorKey(`${slug}:${Date.now()}`);
-    revisionRef.current += 1;
-    setRevision(revisionRef.current);
-    setLocalCandidate(null);
-    setSaveState('dirty');
-    window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => void runSave(true), AUTOSAVE_DELAY_MS);
-  };
-
-  const discardLocalDraft = () => {
-    clearLocalDraft(window.localStorage, profile, slug);
-    setLocalCandidate(null);
   };
 
   const runCheck = useCallback(() => {

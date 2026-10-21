@@ -2067,18 +2067,50 @@ def _blog_post_candidate_paths(blog_dir: Path) -> list[Path]:
     return [candidate_paths[route] for route in sorted(candidate_paths)]
 
 
+def _sidecar_matches_markdown(sidecar_path: Path, markdown_text: str) -> bool:
+    """True when the sidecar was written for exactly this Markdown file.
+
+    ``source_md_sha256`` covers ``_format_front_matter(meta, body)`` — the
+    whole .md as written. Sidecars without a recorded hash (pre-checksum
+    files) keep their historical precedence; a malformed sidecar never wins.
+    """
+    if not sidecar_path.exists():
+        return False
+    try:
+        raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    recorded = str(raw.get("source_md_sha256") or "") if isinstance(raw, dict) else ""
+    if not recorded:
+        return True
+    return recorded == hashlib.sha256(markdown_text.encode("utf-8")).hexdigest()
+
+
 def parse_blog_post(path: Path) -> BlogPost:
-    """Parse a blog post, preferring BlockNote sidecar state when present."""
+    """Parse a blog post, preferring BlockNote sidecar state when fresh.
+
+    File-first: when the .md changed after the sidecar was written (hand
+    edit, git checkout — ``source_md_sha256`` mismatch), the Markdown wins
+    and the stale sidecar blocks are dropped (``blocks_json=[]``); the
+    BlockNote editor rebuilds them from the Markdown on next open, and the
+    next save rewrites the sidecar.
+    """
     if path.name.endswith(".blocknote.json"):
         sidecar_post = _parse_blog_sidecar(path)
         if sidecar_post is not None:
             return sidecar_post
         raise PublicSiteError(f"Invalid blog sidecar: {path}")
     sidecar_path = _blog_sidecar_path_for_markdown(path)
-    sidecar_post = _parse_blog_sidecar(sidecar_path, markdown_path=path)
-    if sidecar_post is not None:
-        return sidecar_post
-    text = path.read_text(encoding="utf-8")
+    text: str | None = None
+    if path.exists():
+        text = path.read_text(encoding="utf-8")
+    if text is None or _sidecar_matches_markdown(sidecar_path, text):
+        sidecar_post = _parse_blog_sidecar(sidecar_path, markdown_path=path)
+        if sidecar_post is not None:
+            return sidecar_post
+    if text is None:
+        # Preserve the historical failure mode for a missing pair.
+        text = path.read_text(encoding="utf-8")
     meta, body = _parse_front_matter(text)
     route = _blog_route_from_document_path(path)
     category_path = _blog_category_path_for_document(path, meta)
@@ -2167,7 +2199,9 @@ def _parse_blog_post_meta(path: Path) -> BlogPost:
     Mirrors :func:`parse_blog_post`'s preference for the BlockNote sidecar,
     but reads just its ``meta``/``slug`` fields — the sidecar's blocks are
     never pydantic-validated or dumped, so list views stay cheap even with
-    large sidecars. ``body`` is left empty and ``blocks_json`` is ``[]``.
+    large sidecars. The same file-first rule applies: an externally edited
+    .md (``source_md_sha256`` mismatch) wins over the sidecar meta.
+    ``body`` is left empty and ``blocks_json`` is ``[]``.
     """
     if path.name.endswith(".blocknote.json"):
         sidecar_path: Path | None = path
@@ -2175,19 +2209,26 @@ def _parse_blog_post_meta(path: Path) -> BlogPost:
     else:
         md_path = path
         sidecar_path = _blog_sidecar_path_for_markdown(path)
+    md_text: str | None = None
+    if md_path.exists():
+        md_text = md_path.read_text(encoding="utf-8")
     meta: dict | None = None
     doc_slug = ""
     if sidecar_path is not None and sidecar_path.exists():
         try:
             raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
-            meta = dict(raw.get("meta") or {})
-            doc_slug = str(raw.get("slug") or "").strip()
+            recorded = str(raw.get("source_md_sha256") or "") if isinstance(raw, dict) else ""
+            fresh = not md_text or not recorded or recorded == hashlib.sha256(
+                md_text.encode("utf-8")
+            ).hexdigest()
+            if fresh:
+                meta = dict(raw.get("meta") or {})
+                doc_slug = str(raw.get("slug") or "").strip()
         except Exception:
             meta = None
     if meta is None:
-        if md_path.exists():
-            text = md_path.read_text(encoding="utf-8")
-            meta, _body = _parse_front_matter(text)
+        if md_text is not None:
+            meta, _body = _parse_front_matter(md_text)
         else:
             meta = {}
     route_from_path = _blog_route_from_document_path(md_path if md_path.exists() else path)
@@ -2921,16 +2962,6 @@ def _video_compatibility_payload(path: Path) -> dict:
             "H.264 MP4 before publishing."
         )
     return payload
-
-
-def _video_compatibility_payload_from_bytes(data: bytes, filename: str) -> dict:
-    suffix = Path(filename).suffix.lower() or ".mp4"
-    if suffix.lstrip(".") not in BLOG_VIDEO_EXTENSIONS:
-        return {}
-    with tempfile.TemporaryDirectory(prefix="nblane-video-probe-") as tmp:
-        target = Path(tmp) / f"probe{suffix}"
-        target.write_bytes(data)
-        return _video_compatibility_payload(target)
 
 
 def _transcode_video_file(source: Path, target: Path) -> None:
@@ -6139,135 +6170,6 @@ def _image_preview_from_bytes(
         return _data_uri(data, source_mime), source_mime, width, height
 
 
-def _image_dimensions_from_bytes(data: bytes) -> tuple[int, int]:
-    try:
-        from PIL import Image, ImageOps
-
-        with Image.open(io.BytesIO(data)) as image:
-            image = ImageOps.exif_transpose(image)
-            return image.size
-    except Exception:
-        return 0, 0
-
-
-def _media_preview_payload_from_bytes(
-    data: bytes,
-    *,
-    source_name: str,
-    kind: str,
-    mime: str = "",
-    preview_quality: str = "fast",
-) -> dict:
-    clean_kind = str(kind or "").strip().lower() or "image"
-    clean_mime = mime or mimetypes.guess_type(source_name)[0] or "application/octet-stream"
-    size_kb = round(len(data) / 1024, 1)
-    if clean_kind == "image" or clean_mime.startswith("image/"):
-        src, preview_mime, width, height = _image_preview_from_bytes(
-            data,
-            source_name,
-            preview_quality=preview_quality,
-        )
-        if not width or not height:
-            width, height = _image_dimensions_from_bytes(data)
-        return {
-            "preview_src": src,
-            "preview_mime": preview_mime,
-            "preview_width": width,
-            "preview_height": height,
-            "original_size_kb": size_kb,
-            "full_preview_available": len(data) <= BLOG_IMAGE_MAX_BYTES,
-        }
-    inline_available = len(data) <= BLOG_PREVIEW_VIDEO_INLINE_MAX_BYTES
-    full_available = len(data) <= BLOG_VIDEO_MAX_BYTES
-    return {
-        "preview_src": _data_uri(data, clean_mime) if inline_available else "",
-        "preview_mime": clean_mime,
-        "preview_width": 0,
-        "preview_height": 0,
-        "original_size_kb": size_kb,
-        "full_preview_available": full_available,
-        **_video_compatibility_payload_from_bytes(data, source_name),
-    }
-
-
-def _blog_media_preview_payload(
-    path: Path,
-    kind: str,
-    *,
-    preview_quality: str = "fast",
-) -> dict:
-    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    if kind == "video" and path.stat().st_size > BLOG_PREVIEW_VIDEO_INLINE_MAX_BYTES:
-        return {
-            "preview_src": "",
-            "preview_mime": mime,
-            "preview_width": 0,
-            "preview_height": 0,
-            "original_size_kb": round(path.stat().st_size / 1024, 1),
-            "full_preview_available": path.stat().st_size <= BLOG_VIDEO_MAX_BYTES,
-            **_video_compatibility_payload(path),
-        }
-    return _media_preview_payload_from_bytes(
-        path.read_bytes(),
-        source_name=path.name,
-        kind=kind,
-        mime=mime,
-        preview_quality=preview_quality,
-    )
-
-
-def blog_media_full_preview_payload(
-    profile_root: Path,
-    rel: str,
-    *,
-    data: bytes | None = None,
-    filename: str = "",
-    kind: str = "",
-    mime: str = "",
-) -> dict:
-    """Return an on-demand full preview payload for one local media item."""
-    clean = _normalize_media_ref(_strip_markdown_url(rel))
-    source_name = filename or Path(clean).name or "media.bin"
-    payload_data = data
-    if payload_data is None:
-        if not clean or _is_external_url(clean):
-            return {}
-        target = _local_media_target(profile_root, clean)
-        if target is None or not target.exists() or not target.is_file():
-            return {}
-        source_name = target.name
-        payload_data = target.read_bytes()
-    clean_mime = mime or mimetypes.guess_type(source_name)[0] or "application/octet-stream"
-    clean_kind = str(kind or "").strip().lower()
-    if not clean_kind:
-        clean_kind = "video" if clean_mime.startswith("video/") else "image"
-    if clean_kind == "video" and len(payload_data) > BLOG_VIDEO_MAX_BYTES:
-        return {
-            "full_preview_available": False,
-            "full_preview_src": "",
-            "full_preview_mime": clean_mime,
-        }
-    if clean_kind == "image" and len(payload_data) > BLOG_IMAGE_MAX_BYTES:
-        return {
-            "full_preview_available": False,
-            "full_preview_src": "",
-            "full_preview_mime": clean_mime,
-        }
-    width, height = (
-        _image_dimensions_from_bytes(payload_data)
-        if clean_kind == "image" or clean_mime.startswith("image/")
-        else (0, 0)
-    )
-    return {
-        "full_preview_available": True,
-        "full_preview_src": _data_uri(payload_data, clean_mime),
-        "full_preview_mime": clean_mime,
-        "full_preview_width": width,
-        "full_preview_height": height,
-        "original_size_kb": round(len(payload_data) / 1024, 1),
-    }
-
-
 def _data_uri_for_media(
     profile_root: Path,
     rel: str,
@@ -6411,94 +6313,6 @@ def render_public_site_preview(
         pages=pages,
         page_titles=dict(rendered.page_titles),
         warnings=warnings,
-    )
-
-
-def blog_preview_fingerprint(
-    profile_root: Path,
-    meta: dict,
-    body: str,
-    *,
-    preview_quality: str = "fast",
-) -> str:
-    """Return a stable fingerprint for one in-editor blog preview."""
-    refs = set(_blog_body_media_refs(str(body or "")))
-    cover = _strip_markdown_url(str((meta or {}).get("cover", "") or "")).lstrip("/")
-    if cover and _is_local_media_ref(cover):
-        refs.add(cover)
-    media_state: list[dict] = []
-    for ref in sorted(refs):
-        target = _local_media_target(profile_root, ref)
-        if target is None:
-            media_state.append({"ref": ref, "state": "outside"})
-            continue
-        if not target.exists() or not target.is_file():
-            media_state.append({"ref": ref, "state": "missing"})
-            continue
-        stat = target.stat()
-        media_state.append(
-            {
-                "ref": ref,
-                "size": stat.st_size,
-                "mtime_ns": stat.st_mtime_ns,
-            }
-        )
-    raw = json.dumps(
-        {
-            "meta": _normalize_blog_meta(meta or {}),
-            "body": str(body or ""),
-            "preview_quality": _normalize_preview_quality(preview_quality),
-            "media": media_state,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        default=str,
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def render_blog_post_preview(
-    name: str,
-    slug: str,
-    meta: dict,
-    body: str,
-    *,
-    preview_quality: str = "fast",
-) -> str:
-    """Render one blog post preview from unsaved meta/body without writing files."""
-    profile_root = _profile_path(name)
-    public_profile = load_public_profile(name)
-    clean_slug = _slugify_route(slug)
-    category_path = _blog_category_path_from_route(clean_slug)
-    clean_meta = _normalize_blog_meta(meta)
-    if category_path and not clean_meta.get("category_path"):
-        clean_meta["category_path"] = category_path
-    post = BlogPost(
-        slug=clean_slug,
-        path=profile_root / BLOG_DIRNAME / f"{clean_slug}.md",
-        meta=clean_meta,
-        body=str(body or ""),
-        category_path=category_path,
-    )
-    cover_ref = _valid_blog_cover_ref(profile_root, post.meta.get("cover"))
-    html_text = _html_page(
-        title=post.title,
-        body=_render_blog_article(profile_root, post),
-        public_profile=public_profile,
-        current="blog",
-        description=post.summary,
-        og_type="article",
-        include_math=markdown_contains_math(post.body),
-        image_url=_media_src(cover_ref) if cover_ref else "",
-    )
-    warnings: list[str] = []
-    return _inline_preview_assets(
-        html_text,
-        css=_site_css(),
-        profile_root=profile_root,
-        media_overrides={},
-        warnings=warnings,
-        preview_quality=preview_quality,
     )
 
 
@@ -6776,43 +6590,6 @@ def _unique_media_path(media_dir: Path, filename: str, data: bytes) -> Path:
 def _media_relative_path(name: str, path: Path) -> str:
     root = _profile_path(name).resolve()
     return path.resolve().relative_to(root).as_posix()
-
-
-def blog_media_library_rows(
-    profile_root: Path,
-    slug: str,
-    meta: dict,
-    body: str,
-) -> list[dict]:
-    """Return local blog media rows with preview data for editor components."""
-    media_dir = profile_root / MEDIA_DIRNAME / BLOG_DIRNAME / _slugify_route(slug)
-    if not media_dir.exists():
-        return []
-    cover = str((meta or {}).get("cover", "") or "")
-    rows: list[dict] = []
-    for path in sorted(media_dir.iterdir()):
-        if not path.is_file():
-            continue
-        ext = path.suffix.lower().lstrip(".")
-        if ext in BLOG_IMAGE_EXTENSIONS:
-            kind = "image"
-        elif ext in BLOG_VIDEO_EXTENSIONS:
-            kind = "video"
-        else:
-            continue
-        rel = path.resolve().relative_to(profile_root.resolve()).as_posix()
-        preview_payload = _blog_media_preview_payload(path, kind)
-        rows.append(
-            {
-                "name": path.name,
-                "kind": kind,
-                "relative_path": rel,
-                "size_kb": round(path.stat().st_size / 1024, 1),
-                "referenced": rel in body or rel == cover,
-                **preview_payload,
-            }
-        )
-    return rows
 
 
 def _image_ext_from_data_uri(kind: str) -> str:
