@@ -26,17 +26,21 @@ import {
 import { useHotkeys, useLocalStorage, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
+  IconAlertTriangle,
   IconArrowBackUp,
   IconArrowLeft,
   IconArrowsHorizontal,
+  IconCheck,
   IconChecklist,
   IconChevronDown,
   IconCircleCheck,
   IconCircleX,
+  IconDots,
   IconExternalLink,
   IconFocusCentered,
   IconLayoutSidebarRight,
   IconListSearch,
+  IconPencil,
   IconPhoto,
   IconPhotoStar,
   IconRefresh,
@@ -185,7 +189,10 @@ function MediaList({
         )}
       </FileButton>
       <Text size="xs" c="dimmed">
-        上传后插入到光标处。也可以把图片直接拖进正文。
+        上传后插入到光标处。
+        <Text span inherit visibleFrom="sm">
+          也可以把图片直接拖进正文。
+        </Text>
       </Text>
       {loading ? (
         <Loader size="xs" />
@@ -209,20 +216,20 @@ function MediaList({
             </Box>
             {item.kind === 'image' && <Tooltip label="AI 修改图片"><ActionIcon size={44} variant="subtle" aria-label={`AI 修改 ${item.name}`} onClick={() => onImageEdit(item)}>AI</ActionIcon></Tooltip>}
             <Tooltip label="插入到光标处">
-              <ActionIcon variant="subtle" aria-label={`插入 ${item.name}`} onClick={() => onInsert(item)}>
+              <ActionIcon size={44} variant="subtle" aria-label={`插入 ${item.name}`} onClick={() => onInsert(item)}>
                 <IconRowInsertBottom size={16} />
               </ActionIcon>
             </Tooltip>
             {item.kind === 'image' && item.path !== cover && (
               <Tooltip label="设为封面">
-                <ActionIcon variant="subtle" aria-label={`设 ${item.name} 为封面`} onClick={() => onSetCover(item.path)}>
+                <ActionIcon size={44} variant="subtle" aria-label={`设 ${item.name} 为封面`} onClick={() => onSetCover(item.path)}>
                   <IconPhotoStar size={16} />
                 </ActionIcon>
               </Tooltip>
             )}
             {onDelete && !item.referenced && item.path !== cover && !bodyUses?.(item.path) && (
               <Tooltip label="删除这个文件（其他文章在用时会拒绝）">
-                <ActionIcon variant="subtle" color="red" aria-label={`删除 ${item.name}`}
+                <ActionIcon size={44} variant="subtle" color="red" aria-label={`删除 ${item.name}`}
                   loading={deleting === item.path} disabled={Boolean(deleting)} onClick={() => onDelete(item)}
                   data-testid="content-media-delete">
                   <IconTrash size={16} />
@@ -526,6 +533,9 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
   const [settingsPinned, setSettingsPinned] = useLocalStorage({ key: 'nblane.content.settingsOpen', defaultValue: false });
   const [outlinePinned, setOutlinePinned] = useLocalStorage({ key: 'nblane.content.outlineOpen', defaultValue: false });
   const [focusMode, setFocusMode] = useLocalStorage({ key: 'nblane.content.focusMode', defaultValue: false });
+  // Mobile drawers are explicit, never restored from the pinned desktop state.
+  const [settingsOpenMobile, setSettingsOpenMobile] = useState(false);
+  const [outlineOpenMobile, setOutlineOpenMobile] = useState(false);
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [activeHeading, setActiveHeading] = useState('');
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -1067,6 +1077,13 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
     true,
   );
 
+  // On mobile the panels are ephemeral drawers; elsewhere they follow the
+  // pinned state (inline rail on wide screens, drawer in between).
+  const openSettings = () => (mobile ? setSettingsOpenMobile(true) : setSettingsPinned(true));
+  const openOutline = () => (mobile ? setOutlineOpenMobile(true) : setOutlinePinned(true));
+  const closeSettings = () => (mobile ? setSettingsOpenMobile(false) : setSettingsPinned(false));
+  const closeOutline = () => (mobile ? setOutlineOpenMobile(false) : setOutlinePinned(false));
+
   // --- Render -------------------------------------------------------------------
 
   if (detail.isError) {
@@ -1179,6 +1196,24 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
         >
           {saveLabel[saveState]}
         </Text>
+        <Box
+          hiddenFrom="sm"
+          component="span"
+          role="status"
+          aria-label={saveLabel[saveState]}
+          data-testid="content-save-state-mobile"
+          style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}
+        >
+          {saveState === 'saving' ? (
+            <Loader size={14} />
+          ) : saveState === 'error' || saveState === 'conflict' || saveState === 'empty' ? (
+            <IconAlertTriangle size={16} color="var(--mantine-color-red-5)" />
+          ) : saveState === 'dirty' ? (
+            <IconPencil size={14} color="var(--mantine-color-dimmed)" />
+          ) : (
+            <IconCircleCheck size={16} color="var(--mantine-color-dimmed)" />
+          )}
+        </Box>
       </Group>
       <Group gap={6} wrap="nowrap">
         {!mobile && (
@@ -1206,19 +1241,21 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
           ]}
           data-testid="content-mode"
         />
-        <Tooltip label="目录（⌘⇧O）">
-          <ActionIcon
-            variant={outlinePinned ? 'light' : 'subtle'}
-            color="gray"
-            size="lg"
-            aria-label="文档目录"
-            aria-pressed={outlinePinned}
-            onClick={() => setOutlinePinned((value) => !value)}
-            data-testid="content-outline-toggle"
-          >
-            <IconListSearch size={18} />
-          </ActionIcon>
-        </Tooltip>
+        {!mobile && (
+          <Tooltip label="目录（⌘⇧O）">
+            <ActionIcon
+              variant={outlinePinned ? 'light' : 'subtle'}
+              color="gray"
+              size="lg"
+              aria-label="文档目录"
+              aria-pressed={outlinePinned}
+              onClick={() => setOutlinePinned((value) => !value)}
+              data-testid="content-outline-toggle"
+            >
+              <IconListSearch size={18} />
+            </ActionIcon>
+          </Tooltip>
+        )}
         {!mobile && (
           <Tooltip label="专注模式（⌘⇧F）">
             <ActionIcon
@@ -1249,20 +1286,70 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
             </ActionIcon>
           </Tooltip>
         )}
-        <Tooltip label="文章设置与媒体（⌘⇧.）">
-          <ActionIcon
-            variant={settingsPinned ? 'light' : 'subtle'}
-            color="gray"
-            size="lg"
-            aria-label="文章设置"
-            aria-pressed={settingsPinned}
-            onClick={() => setSettingsPinned((value) => !value)}
-            data-testid="content-settings-toggle"
-          >
-            <IconLayoutSidebarRight size={18} />
-          </ActionIcon>
-        </Tooltip>
-        {!published && (
+        {!mobile && (
+          <Tooltip label="文章设置与媒体（⌘⇧.）">
+            <ActionIcon
+              variant={settingsPinned ? 'light' : 'subtle'}
+              color="gray"
+              size="lg"
+              aria-label="文章设置"
+              aria-pressed={settingsPinned}
+              onClick={() => setSettingsPinned((value) => !value)}
+              data-testid="content-settings-toggle"
+            >
+              <IconLayoutSidebarRight size={18} />
+            </ActionIcon>
+          </Tooltip>
+        )}
+        {mobile && (
+          <Menu position="bottom-end" withinPortal>
+            <Menu.Target>
+              <ActionIcon variant="subtle" color="gray" size="lg" aria-label="更多操作" data-testid="content-overflow-menu">
+                <IconDots size={18} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item
+                leftSection={<IconSearch size={14} />}
+                onClick={() => setSwitcherOpen(true)}
+                data-testid="content-switcher-menu-item"
+              >
+                跳转到文章
+              </Menu.Item>
+              <Menu.Item leftSection={<IconListSearch size={14} />} onClick={openOutline} data-testid="content-outline-menu-item">
+                文档目录
+              </Menu.Item>
+              <Menu.Item
+                leftSection={<IconFocusCentered size={14} />}
+                rightSection={focusMode ? <IconCheck size={14} /> : null}
+                onClick={() => setFocusMode((value) => !value)}
+                data-testid="content-focus-menu-item"
+              >
+                专注模式
+              </Menu.Item>
+              <Menu.Item
+                leftSection={<IconArrowsHorizontal size={14} />}
+                rightSection={wideColumn ? <IconCheck size={14} /> : null}
+                onClick={() => setWideColumn((value) => !value)}
+              >
+                加宽版面
+              </Menu.Item>
+              <Menu.Item
+                leftSection={<IconLayoutSidebarRight size={14} />}
+                onClick={openSettings}
+                data-testid="content-settings-menu-item"
+              >
+                文章设置
+              </Menu.Item>
+              {!published && (
+                <Menu.Item leftSection={<IconShare size={14} />} onClick={() => setShareOpen(true)} data-testid="content-share-menu-item">
+                  发到小红书 / X
+                </Menu.Item>
+              )}
+            </Menu.Dropdown>
+          </Menu>
+        )}
+        {!published && !mobile && (
           <Tooltip label="发到小红书 / X">
             <ActionIcon variant="subtle" color="gray" size="lg" aria-label="发到小红书 / X" onClick={() => setShareOpen(true)} data-testid="content-share-draft">
               <IconShare size={18} />
@@ -1376,7 +1463,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
             data-testid="content-preview-frame"
             style={{
               width: '100%',
-              height: `calc(100vh - 56px - ${TOP_BAR_HEIGHT}px - 32px)`,
+              height: `calc(100dvh - 56px - ${TOP_BAR_HEIGHT}px - 32px)`,
               border: 0,
               borderRadius: 10,
               background: '#fff',
@@ -1431,7 +1518,7 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
                   size="xs"
                   c="yellow"
                   style={{ cursor: 'pointer' }}
-                  onClick={() => setSettingsPinned(true)}
+                  onClick={openSettings}
                 >
                   · 还没有摘要
                 </Text>
@@ -1510,8 +1597,8 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
       </Box>
 
       <Drawer
-        opened={!wideScreen && settingsPinned}
-        onClose={() => setSettingsPinned(false)}
+        opened={mobile ? settingsOpenMobile : !wideScreen && settingsPinned}
+        onClose={closeSettings}
         position="right"
         size={mobile ? '100%' : SETTINGS_WIDTH + 40}
         title="文章设置"
@@ -1520,13 +1607,13 @@ export function ContentEditor({ profile, slug }: { profile: string; slug: string
       </Drawer>
 
       <Drawer
-        opened={!wideScreen && outlinePinned}
-        onClose={() => setOutlinePinned(false)}
+        opened={mobile ? outlineOpenMobile : !wideScreen && outlinePinned}
+        onClose={closeOutline}
         position="left"
         size={mobile ? '80%' : OUTLINE_WIDTH + 40}
         title="目录"
       >
-        <OutlinePanel items={outline} activeId={activeHeading} onJump={(id) => { setOutlinePinned(false); jumpToHeading(id); }} />
+        <OutlinePanel items={outline} activeId={activeHeading} onJump={(id) => { closeOutline(); jumpToHeading(id); }} />
       </Drawer>
 
       {deleteOpen && <DeleteContentPostDialog profile={profile} slug={slug}

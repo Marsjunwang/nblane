@@ -5,7 +5,7 @@ import type { APIRequestContext, Page } from "@playwright/test";
  * Mobile viewport (375×812, iPhone) spot-checks for the SPA — the automated
  * arm of the SPA manual (docs/zh/guides/web-ui.md),
  * against the isolated sandbox (`scripts/dev-web.sh --isolated`, profile=dev).
- * 9 tests across four groups:
+ * 10 tests across five groups:
  *
  * Coverage:
  *  a) navigation: hamburger open/close, every menu entry clickable, 项目
@@ -17,7 +17,10 @@ import type { APIRequestContext, Page } from "@playwright/test";
  *  c) projects lane touch drag: a real CDP touch gesture (press-and-hold past
  *     the dnd-kit TouchSensor 250ms delay, then drag) moves a card
  *     Queue→Doing inside its lane, plus the detail-card 移至 Doing fallback
- *     over tap.
+ *     over tap;
+ *  d) content editor: top bar stays inside 375px (lesser controls in the ⋯
+ *     overflow menu), 发布 opens its dialog, autosave is observable on the
+ *     compact save icon, and desktop-pinned panels never auto-open drawers.
  *
  * Touch-drag geometry notes (hard-won, do not "simplify"):
  *  - The dragged card is seeded via API and moved to the Queue HEAD: the
@@ -248,6 +251,58 @@ test.describe("SPA mobile 375px — 宽表格五页", () => {
     await expect(page.getByRole("heading", { name: /研究台/ })).toBeVisible();
     await expect(page.getByText("论文索引", { exact: true })).toBeVisible();
     await expect(page.getByPlaceholder("搜索标题、摘要或标签")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+});
+
+test.describe("SPA mobile 375px — 内容编辑器", () => {
+  test("顶栏不溢出,发布可达,编辑后有保存指示,持久抽屉不自动打开", async ({ page, request }) => {
+    // Desktop-pinned panels must not auto-open as full drawers on a phone.
+    await page.addInitScript(() => {
+      window.localStorage.setItem("nblane.content.settingsOpen", "true");
+      window.localStorage.setItem("nblane.content.outlineOpen", "true");
+    });
+
+    const title = `e2e-mob-editor-${Date.now()}`;
+    const create = await request.post(api("/content/blog"), {
+      data: { title, body: "移动端顶栏验收正文。", tags: [], summary: "" },
+    });
+    expect(create.status(), "content post seed should succeed").toBe(201);
+    const slug: string = (await create.json()).post.slug;
+
+    await page.goto(spa(`content/${encodeURIComponent(slug)}`));
+    await expect(page.getByTestId("content-editor-topbar")).toBeVisible();
+    await expect(page.locator(".bn-editor")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    // Persisted pinned state must not reopen drawers on mobile.
+    await expect(page.getByRole("dialog", { name: "文章设置" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "目录" })).toHaveCount(0);
+
+    // Lesser controls live behind the overflow menu; 发布 stays reachable.
+    const overflow = page.getByTestId("content-overflow-menu");
+    await expect(overflow).toBeVisible();
+    await overflow.tap();
+    await expect(page.getByRole("menuitem", { name: "跳转到文章" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "专注模式" })).toBeVisible();
+    await page.getByRole("menuitem", { name: "跳转到文章" }).tap();
+    await expect(page.getByTestId("content-switcher")).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    const publish = page.getByTestId("content-publish");
+    await expect(publish).toBeVisible();
+    await publish.tap();
+    // The Mantine Modal root itself is a zero-height wrapper; assert the panel.
+    const publishDialog = page.getByRole("dialog", { name: "发布文章" });
+    await expect(publishDialog).toBeVisible();
+    await publishDialog.getByRole("button", { name: "取消" }).tap();
+
+    // Autosave is observable on mobile: dirty → saved on the compact icon.
+    const saveIndicator = page.getByTestId("content-save-state-mobile");
+    await expect(saveIndicator).toBeVisible();
+    await page.getByTestId("content-title").fill(`${title}（改）`);
+    await expect(saveIndicator).toHaveAttribute("aria-label", /编辑中|保存中/);
+    await expect(saveIndicator).toHaveAttribute("aria-label", /已保存/, { timeout: 10_000 });
     await expectNoHorizontalOverflow(page);
   });
 });
