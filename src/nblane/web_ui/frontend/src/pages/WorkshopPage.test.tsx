@@ -211,6 +211,36 @@ describe('WorkshopPage', () => {
     expect(doc.activeElement).toBe(helper);
   });
 
+  it('reconnects the terminal after a long background spell, not after a short one', async () => {
+    stubFetch(REACHABLE_PAYLOAD);
+    renderWithProviders(<WorkshopPage />, '/workshop');
+    const frame = await screen.findByTestId('sidecar-frame');
+
+    const setVisibility = (value: string) => {
+      Object.defineProperty(document, 'visibilityState', { value, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+
+    // A quick hide/show (app switch) keeps the same iframe.
+    act(() => setVisibility('hidden'));
+    act(() => setVisibility('visible'));
+    expect(screen.getByTestId('sidecar-frame')).toBe(frame);
+
+    // Two minutes in the background: the iframe is remounted (fresh socket).
+    vi.useFakeTimers();
+    try {
+      act(() => setVisibility('hidden'));
+      act(() => {
+        vi.setSystemTime(Date.now() + 130_000);
+      });
+      act(() => setVisibility('visible'));
+      expect(screen.getByTestId('sidecar-frame')).not.toBe(frame);
+    } finally {
+      vi.useRealTimers();
+    }
+    delete (document as unknown as Record<string, unknown>).visibilityState;
+  });
+
   it('tells non-admins the terminal is admin only', async () => {
     stubFetch({ ...REACHABLE_PAYLOAD, admin: false });
     renderWithProviders(<WorkshopPage />, '/workshop');

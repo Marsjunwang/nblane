@@ -28,7 +28,9 @@ import { SidecarFrame } from '../components/SidecarFrame';
  * the keyboard closes. On touch devices the terminal never grabs keyboard
  * focus itself (xterm's hidden textarea is blurred on focus), so tapping or
  * swiping the terminal never pops the phone keyboard — typed input always
- * goes through the input box.
+ * goes through the input box. Returning from a long background spell
+ * (visibilitychange / bfcache restore) reconnects the terminal, because
+ * phone OSes kill the ttyd websocket silently while the page is hidden.
  */
 
 // Key bar groups: `main` and `nav` stay visible at all times — Enter and the
@@ -285,6 +287,34 @@ export function WorkshopPage() {
     const timer = window.setTimeout(scrollTerminalToBottom, 100);
     return () => window.clearTimeout(timer);
   }, [compact]);
+
+  // Phone OSes silently kill the ttyd websocket while the page is hidden:
+  // key-bar sends still work over HTTP, but the terminal shows a frozen
+  // picture and never notices (it sends nothing itself, so it cannot tell
+  // the socket is dead). Reconnect when the page returns from a long
+  // background spell — the tmux session lives server-side, so it is free.
+  useEffect(() => {
+    let hiddenAt = 0;
+    const maybeReconnect = () => {
+      if (hiddenAt && Date.now() - hiddenAt > 120_000) {
+        setReloadSignal((value) => value + 1);
+      }
+      hiddenAt = 0;
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') hiddenAt = Date.now();
+      else maybeReconnect();
+    };
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) maybeReconnect();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onPageShow);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onPageShow);
+    };
+  }, []);
 
   // xterm focuses its hidden helper textarea whenever the terminal is tapped,
   // which pops the phone keyboard over half the screen. Phone input goes
