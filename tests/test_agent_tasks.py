@@ -72,7 +72,8 @@ class TestAgentTasks(unittest.TestCase):
         self.assertIn("research:src_1", body)
         self.assertIn("Produce candidate, patch, or writeback-review artifacts only", body)
         self.assertIn("agent://task/agenttask_1", body)
-        self.assertIn("submit_agent_task_candidate", body)
+        self.assertIn("update_agent_task_status", body)
+        self.assertNotIn("submit_agent_task_candidate", body)
 
     def test_sync_harness_snippet_mentions_permissions(self) -> None:
         """Harness snippets borrow roles and allow/ask/deny permission framing."""
@@ -85,7 +86,8 @@ class TestAgentTasks(unittest.TestCase):
         self.assertIn("ask:", body)
         self.assertIn("deny:", body)
         self.assertIn("agent://tasks", body)
-        self.assertIn("submit_agent_task_candidate", body)
+        self.assertIn("update_agent_task_status", body)
+        self.assertNotIn("submit_agent_task_candidate", body)
 
     def test_invalid_harness_snippet_target_is_rejected(self) -> None:
         """Unknown harness names do not create ambiguous config."""

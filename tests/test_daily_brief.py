@@ -82,30 +82,6 @@ def _profile(tmp: Path) -> Path:
     return profile
 
 
-def _write_agent_activity(profile: Path, pending_titles: list[str]) -> None:
-    items = [
-        {
-            "id": f"act:writeback:{index}",
-            "kind": "writeback",
-            "status": "pending",
-            "title": title,
-        }
-        for index, title in enumerate(pending_titles)
-    ]
-    items.append(
-        {
-            "id": "act:candidate:done",
-            "kind": "candidate",
-            "status": "applied",
-            "title": "Already applied",
-        }
-    )
-    _write_yaml(
-        profile / "agent-activity.yaml",
-        {"schema_version": "1.0", "profile": "alice", "items": items},
-    )
-
-
 class TestDailyBrief(unittest.TestCase):
     """The heuristic brief derives structured data from the payload only."""
 
@@ -120,7 +96,6 @@ class TestDailyBrief(unittest.TestCase):
     def test_brief_focus_decisions_risks_research(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_s:
             profile = _profile(Path(tmp_s))
-            _write_agent_activity(profile, ["Update SKILL.md", "Patch kanban"])
             payload = dashboard_payload(profile)
         brief = payload["daily_brief"]
 
@@ -135,7 +110,6 @@ class TestDailyBrief(unittest.TestCase):
         self.assertEqual(focus["path"], "pages/3_Kanban.py")
 
         decisions = brief["decisions"]
-        self.assertEqual(decisions["agent_pending"], 2)
         self.assertEqual(
             decisions["evidence_pending"],
             int(payload["pending_evidence"]["done_uncrystallized_count"])
@@ -143,12 +117,8 @@ class TestDailyBrief(unittest.TestCase):
             + int(payload["pending_evidence"]["needs_review_count"])
             + int(payload["pending_evidence"]["status_risk_count"]),
         )
-        self.assertEqual(
-            decisions["total"],
-            decisions["evidence_pending"] + decisions["agent_pending"],
-        )
+        self.assertEqual(decisions["total"], decisions["evidence_pending"])
         self.assertEqual(decisions["evidence_path"], "pages/2_Evidence_Review.py")
-        self.assertEqual(decisions["agent_path"], "pages/9_Agent_Activity.py")
 
         risks = brief["risks"]
         health_counts = payload["health"]["counts"]
@@ -190,24 +160,6 @@ class TestDailyBrief(unittest.TestCase):
         self.assertTrue(focus["goal_locked"])
         self.assertEqual(focus["goal_label"], "")
 
-    def test_agent_activity_summary_and_fingerprint_invalidation(self) -> None:
-        """Rewriting agent-activity.yaml busts the payload cache via mtime."""
-        with tempfile.TemporaryDirectory() as tmp_s:
-            profile = _profile(Path(tmp_s))
-            _write_agent_activity(profile, ["One pending"])
-            first = dashboard_payload(profile)
-            self.assertEqual(first["agent_activity"]["pending_total"], 1)
-            self.assertEqual(
-                first["agent_activity"]["pending_titles"], ["One pending"]
-            )
-
-            _write_agent_activity(profile, ["One pending", "Second pending"])
-            second = dashboard_payload(profile)
-        self.assertEqual(second["agent_activity"]["pending_total"], 2)
-        self.assertEqual(second["agent_activity"]["total"], 3)
-        self.assertEqual(second["agent_activity"]["path"], "pages/9_Agent_Activity.py")
-        self.assertEqual(second["daily_brief"]["decisions"]["agent_pending"], 2)
-
     def test_brief_builder_is_pure_over_payload_dict(self) -> None:
         """build_daily_brief needs no profile I/O — just an assembled payload."""
         brief = build_daily_brief(
@@ -215,7 +167,6 @@ class TestDailyBrief(unittest.TestCase):
                 "primary_goal": {"is_set": False, "locked": False, "projection": None},
                 "kanban": {"doing": [], "doing_items": [], "doing_total": 0},
                 "pending_evidence": {},
-                "agent_activity": {"pending_total": 0},
                 "health": {"counts": {}},
                 "sources": {},
             },

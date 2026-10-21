@@ -20,7 +20,6 @@ const LEGACY_PAGES: Record<string, string> = {
   profile_health: 'evidence',
   output_studio: 'content',
   research: 'research',
-  agent_activity: 'home',
   public_build: 'public-build',
   project_board: 'projects',
   settings: '/settings',

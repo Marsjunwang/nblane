@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-07
+last_verified: 2026-10-21
 source_of_truth: true
 ---
 
@@ -10,7 +10,7 @@ source_of_truth: true
 nblane 不内嵌 Codex / OpenCode。它们有两种用法：
 
 - 只读 AI backend：在「设置 → AI 路由」里给某个工作流动作（任务对齐、子任务拆分、证据结晶等）选 Codex，调用只读 `codex exec`，不改项目文件。见 [本机安装 · AI 配置](../guides/setup.md#ai-配置)。
-- 外部执行器：多步、可改代码的任务通过 CLI handoff 交给 Codex / OpenCode，结果作为候选写回任务文件，由人审阅后自己合并。
+- 外部执行器：多步、可改代码的任务通过 CLI handoff 交给 Codex / OpenCode，结果记录在任务文件和仓库 diff 里，由人在 git 里审阅后自己合并。
 
 ```text
 nblane = 长期数据、上下文、项目、研究、证据、公开层
@@ -47,7 +47,7 @@ tasks:
 nblane sync-agent-harness --target codex|opencode [--out PATH]
 ```
 
-打印 Codex `AGENTS.md` 或 OpenCode agent 配置片段：角色提示词、handoff 命令、可读的 MCP 资源（`profile://context`、`profile://kanban`、`agent://tasks`、`agent://task/{task_id}`）、回传工具（`submit_agent_task_candidate`、`update_agent_task_status`）和权限约定（不发布、不删档案事实）。
+打印 Codex `AGENTS.md` 或 OpenCode agent 配置片段：角色提示词、handoff 命令、可读的 MCP 资源（`profile://context`、`profile://kanban`、`agent://tasks`、`agent://task/{task_id}`）、状态回传工具（`update_agent_task_status`）和权限约定（不发布、不删档案事实）。
 
 ## Handoff
 
@@ -55,7 +55,7 @@ nblane sync-agent-harness --target codex|opencode [--out PATH]
 nblane agent handoff <task_id> --target codex|opencode [--profile <name>]
 ```
 
-只生成可复制给外部 agent 的任务包，不启动任何进程。省略 `--profile` 时扫描所有档案找任务 id。外部 agent 完成后通过 MCP `submit_agent_task_candidate` 回传摘要、`changed_paths`、warnings 和 result payload，任务变为 `candidate_ready`；失败或阻塞用 `update_agent_task_status`。见 [MCP 参考](mcp.md)。
+只生成可复制给外部 agent 的任务包，不启动任何进程。省略 `--profile` 时扫描所有档案找任务 id。候选/审批队列模型已移除：外部 agent 不再回传"候选"等审批，而是用 MCP `update_agent_task_status` 汇报进度、失败或阻塞；结果本身以仓库 diff / 产物形式由人在 git 里审阅（Codex Cloud 的 diff 回传由 `nblane codex cloud refresh --diff` 在内部完成，见下）。见 [MCP 参考](mcp.md)。
 
 ## 本地 Codex runner
 
@@ -87,4 +87,4 @@ nblane codex cloud refresh <task_id> --profile <name> [--diff]
 
 ## 审阅
 
-候选结果只在 `agent-tasks.yaml` 和 runner 保留的 worktree / diff 里，SPA 没有审批页。审阅后自己在仓库里应用 diff，再用 MCP `update_agent_task_status` 把任务标为 `applied`。
+任务结果只记录在 `agent-tasks.yaml` 和 runner 保留的 worktree / diff 里，SPA 没有审批页。人在 git 里审阅 diff、自己应用，再用 MCP `update_agent_task_status` 把任务标为 `applied`。

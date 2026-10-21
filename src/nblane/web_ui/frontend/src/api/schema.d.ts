@@ -7296,24 +7296,6 @@ export interface components {
             version: string;
         };
         /**
-         * HomeAgentActivityModel
-         * @description Agent Activity queue counters for the Home overview.
-         */
-        HomeAgentActivityModel: {
-            /** Pending Titles */
-            pending_titles?: string[];
-            /**
-             * Pending Total
-             * @default 0
-             */
-            pending_total: number;
-            /**
-             * Total
-             * @default 0
-             */
-            total: number;
-        };
-        /**
          * HomeClaimsModel
          * @description Profile claim counters for the Home overview.
          */
@@ -7499,7 +7481,6 @@ export interface components {
          *     3D dashboard iframe.
          */
         HomeResponse: {
-            agent_activity?: components["schemas"]["HomeAgentActivityModel"];
             claims?: components["schemas"]["HomeClaimsModel"];
             evidence?: components["schemas"]["HomeEvidenceModel"];
             /** Goal Counts */

@@ -2603,14 +2603,6 @@ class HomeClaimsModel(BaseModel):
     needs_refresh_count: int = 0
 
 
-class HomeAgentActivityModel(BaseModel):
-    """Agent Activity queue counters for the Home overview."""
-
-    total: int = 0
-    pending_total: int = 0
-    pending_titles: list[str] = Field(default_factory=list)
-
-
 class HomeHealthModel(BaseModel):
     """Profile-health counters for the Home overview."""
 
@@ -2638,9 +2630,6 @@ class HomeResponse(BaseModel):
     sources: HomeSourcesModel = Field(default_factory=HomeSourcesModel)
     projects: HomeProjectsModel = Field(default_factory=HomeProjectsModel)
     claims: HomeClaimsModel = Field(default_factory=HomeClaimsModel)
-    agent_activity: HomeAgentActivityModel = Field(
-        default_factory=HomeAgentActivityModel
-    )
     health: HomeHealthModel = Field(default_factory=HomeHealthModel)
     sidecar: SidecarInfoModel = Field(default_factory=SidecarInfoModel)
 

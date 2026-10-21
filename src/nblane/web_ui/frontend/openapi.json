@@ -5062,30 +5062,6 @@
     "title": "HealthResponse",
     "type": "object"
    },
-   "HomeAgentActivityModel": {
-    "description": "Agent Activity queue counters for the Home overview.",
-    "properties": {
-     "pending_titles": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Pending Titles",
-      "type": "array"
-     },
-     "pending_total": {
-      "default": 0,
-      "title": "Pending Total",
-      "type": "integer"
-     },
-     "total": {
-      "default": 0,
-      "title": "Total",
-      "type": "integer"
-     }
-    },
-    "title": "HomeAgentActivityModel",
-    "type": "object"
-   },
    "HomeClaimsModel": {
     "description": "Profile claim counters for the Home overview.",
     "properties": {
@@ -5294,9 +5270,6 @@
    "HomeResponse": {
     "description": "Home dashboard overview (M4): aggregated profile snapshot.\n\nComposed from the ``core.home_dashboard`` sub-summaries — the same\npure-read aggregation the sidecar 3D dashboard consumes — but without\nthe sidecar payload's snapshot-recording side effect (this GET never\nwrites). ``sidecar`` carries the coordinates for the optional embedded\n3D dashboard iframe.",
     "properties": {
-     "agent_activity": {
-      "$ref": "#/components/schemas/HomeAgentActivityModel"
-     },
      "claims": {
       "$ref": "#/components/schemas/HomeClaimsModel"
      },

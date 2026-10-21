@@ -12,12 +12,8 @@ import yaml
 
 from nblane.core import io as io_facade
 from nblane.core import profile_health
-from nblane.core.agent_activity import (
-    AGENT_ACTIVITY_FILENAME,
-    load_agent_activity,
-)
 from nblane.core.claims import claims_with_refresh_status
-from nblane.core.daily_brief import AGENT_ACTIVITY_PAGE, build_daily_brief
+from nblane.core.daily_brief import build_daily_brief
 from nblane.core.evidence_review import (
     EVIDENCE_REVIEW_PAGE,
     build_evidence_review,
@@ -249,7 +245,6 @@ _DASHBOARD_FINGERPRINT_FILES: tuple[str, ...] = (
     "sources.yaml",
     "SKILL.md",
     "outputs.yaml",
-    AGENT_ACTIVITY_FILENAME,
 )
 
 
@@ -1082,30 +1077,6 @@ def dashboard_health_summary(profile: ProfileRef) -> dict:
     }
 
 
-def dashboard_agent_activity_summary(profile: ProfileRef) -> dict:
-    """Return the pending agent-writeback count for the decision queue.
-
-    One extra YAML read, covered by the dashboard payload fingerprint cache
-    (``agent-activity.yaml`` is a fingerprint input), so reruns stay cheap.
-    """
-    activity = load_agent_activity(profile)
-    items = activity.get("items") or []
-    pending = [
-        item
-        for item in items
-        if isinstance(item, dict) and item.get("status") == "pending"
-    ]
-    return {
-        "total": len(items),
-        "pending_total": len(pending),
-        "pending_titles": [
-            str(item.get("title") or item.get("id") or "")
-            for item in pending[:3]
-        ],
-        "path": AGENT_ACTIVITY_PAGE,
-    }
-
-
 def _status_counts_from_items(items: list) -> dict[str, int]:
     counts = {"draft": 0, "published": 0, "archived": 0, "other": 0}
     for item in items:
@@ -1826,7 +1797,6 @@ def _build_dashboard_payload(
     health = dashboard_health_summary(profile)
     public = dashboard_public_summary(profile)
     claims = dashboard_claim_summary(profile)
-    agent_activity = dashboard_agent_activity_summary(profile)
     book = _goal_book(profile)
     primary = book.primary()
     primary_goal_id = primary.id if primary is not None else ""
@@ -1870,7 +1840,6 @@ def _build_dashboard_payload(
         "health": health,
         "public": public,
         "claims": claims,
-        "agent_activity": agent_activity,
         "charts": {
             "skills": {
                 "counts": skills.get("counts", {}),

@@ -1,7 +1,7 @@
 ---
 status: active
 owner: 王军
-last_verified: 2026-10-13
+last_verified: 2026-10-21
 source_of_truth: false
 ---
 
@@ -12,7 +12,8 @@ source_of_truth: false
 ## 分工
 
 - OpenClaw：常驻网关、微信通道、模型路由、定时任务、自己的情景记忆（`USER.md`、`MEMORY.md`、daily notes）。
-- nblane：成长档案。助手只通过 HTTP（`skills/bin/nblane_api` → `http://127.0.0.1:8504/api/v1`）读写，以 `openclaw` 服务账号登录，按账号权限和 `core/agent_policy.py` 检查。
+- nblane：成长档案。助手只通过 HTTP（`skills/bin/nblane_api` → `http://127.0.0.1:8504/api/v1`）读写，以 `openclaw` 服务账号登录，按账号权限和 `core/agent_policy.py` 检查。`nblane_api` 的档案名没有默认值：用 `--profile` 或 `NBLANE_API_PROFILE`（环境变量或 `~/.config/nblane/api.env`）指定。
+- 候选 / 审批队列模型已移除：助手的写入就是 HTTP 分级策略下的直写（journal + 撤销，重要操作聊天确认），没有"待审候选"页；代码类任务用 `nblane agent handoff` 交给外部 harness，结果由人在 git 里审阅（见 [Agent Harness](../reference/agent-harness.md)）。
 - nblane 不给 OpenClaw 注册 MCP。「接入 nblane」发现旧的 `mcp.servers.nblane` 时会执行 `openclaw mcp unset nblane`。原因：本机 MCP 无登录无 ACL；且 OpenClaw 每开一个会话就起一个 `nblane-mcp`，默认不回收，心跳每小时一次会让进程一直累积。
 
 ## 前置条件
@@ -185,7 +186,7 @@ tools.message.crossContext = {allowAcrossProviders: true, marker: {enabled: true
 
 ### 反向推送
 
-`nblane notify <text> [--dry-run]` 经 OpenClaw 入站 webhook 推消息到微信。地址 `NBLANE_OPENCLAW_HOOK_URL`（默认 `http://127.0.0.1:18789/hooks/agent`），token 只从环境 / `.env` 的 `NBLANE_OPENCLAW_HOOK_TOKEN` 读取，须与网关 `cron.webhookToken` 一致。
+`nblane notify <text> [--dry-run]` 经 OpenClaw 入站 webhook 推消息到微信。**实验性**：网关侧 payload 契约尚未在真实网关上验证，命令和 payload 形状可能变化。地址 `NBLANE_OPENCLAW_HOOK_URL`（默认 `http://127.0.0.1:18789/hooks/agent`），token 只从环境 / `.env` 的 `NBLANE_OPENCLAW_HOOK_TOKEN` 读取，须与网关 `cron.webhookToken` 一致。
 
 ## 定时任务
 

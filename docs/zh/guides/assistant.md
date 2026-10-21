@@ -1,7 +1,7 @@
 ---
 status: active
 owner: 王军
-last_verified: 2026-10-08
+last_verified: 2026-10-21
 source_of_truth: false
 ---
 
@@ -54,6 +54,8 @@ source_of_truth: false
 - 服务端：[`src/nblane/core/agent_policy.py`](../../../src/nblane/core/agent_policy.py) 的分级表（T0 只读、T1 直写、T2 确认、T3 页面专属）。表里没登记的写操作按 T2 处理。
 
 本机 MCP 不归助手用，见 [MCP 参考](../reference/mcp.md)。
+
+旧的候选 / 审批队列模型（`agent-activity.yaml` 待审批 + `submit_agent_task_candidate`）已移除：助手对自己的日常档案读写就走上面的 HTTP 分级策略（journal + 撤销）；代码类任务交给外部 harness 时用 `nblane agent handoff` 生成任务包、记录在 `agent-tasks.yaml`，结果以仓库 diff 形式由人在 git 里审阅（见 [Agent Harness](../reference/agent-harness.md)）。
 
 ## 撤销
 

@@ -245,7 +245,6 @@ from nblane.web_api.schemas import (
     CodexSettingsPatch,
     CodexSettingsResponse,
     CodexStatusResponse,
-    HomeAgentActivityModel,
     HomeClaimsModel,
     HomeEvidenceModel,
     HomeGoalModel,
@@ -8515,7 +8514,6 @@ def get_profile_home(
     projects = home_dashboard.dashboard_project_summary(pdir)
     claims = home_dashboard.dashboard_claim_summary(pdir)
     health = home_dashboard.dashboard_health_summary(pdir)
-    activity = home_dashboard.dashboard_agent_activity_summary(pdir)
     progress_map = home_dashboard.dashboard_goal_progress(pdir, kanban=kanban)
 
     book = load_goal_book(pdir)
@@ -8593,11 +8591,6 @@ def get_profile_home(
             accepted_count=int(claims.get("accepted_count", 0) or 0),
             draft_count=int(claims.get("draft_count", 0) or 0),
             needs_refresh_count=int(claims.get("needs_refresh_count", 0) or 0),
-        ),
-        agent_activity=HomeAgentActivityModel(
-            total=int(activity.get("total", 0) or 0),
-            pending_total=int(activity.get("pending_total", 0) or 0),
-            pending_titles=[str(t) for t in activity.get("pending_titles") or []],
         ),
         health=HomeHealthModel(
             counts=dict(health.get("counts") or {}),

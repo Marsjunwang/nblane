@@ -111,31 +111,6 @@ EVIDENCE_POOL = {
     ],
 }
 
-AGENT_ACTIVITY = {
-    "schema_version": "1.0",
-    "profile": "alice",
-    "items": [
-        {
-            "id": "act:candidate:aaa",
-            "kind": "candidate",
-            "candidate_type": "agent_dispatch",
-            "target_owner": "kanban",
-            "status": "pending",
-            "title": "Pending candidate",
-            "updated": "2026-09-18T10:00:00+00:00",
-        },
-        {
-            "id": "act:candidate:ccc",
-            "kind": "candidate",
-            "candidate_type": "evidence_draft",
-            "target_owner": "evidence_pool",
-            "status": "applied",
-            "title": "Applied candidate",
-            "updated": "2026-09-17T09:00:00+00:00",
-        },
-    ],
-}
-
 RESEARCH_SOURCES = {
     "schema_version": "1.0",
     "profile": "alice",
@@ -216,7 +191,6 @@ def _write_profile(root: Path, name: str = "alice") -> Path:
 
     _dump("goals.yaml", GOALS)
     _dump("evidence-pool.yaml", EVIDENCE_POOL)
-    _dump("agent-activity.yaml", AGENT_ACTIVITY)
     _dump("research/sources.yaml", RESEARCH_SOURCES)
     _dump("research/claims.yaml", RESEARCH_CLAIMS)
     _dump("research/citations.yaml", RESEARCH_CITATIONS)
@@ -275,12 +249,6 @@ class TestHomeEndpoint(_HomeResearchBase):
         # Research source counters (reading + inbox are active).
         self.assertEqual(payload["sources"]["total"], 3)
         self.assertEqual(payload["sources"]["active_total"], 2)
-        # Agent activity queue counters.
-        self.assertEqual(payload["agent_activity"]["total"], 2)
-        self.assertEqual(payload["agent_activity"]["pending_total"], 1)
-        self.assertEqual(
-            payload["agent_activity"]["pending_titles"], ["Pending candidate"]
-        )
         # Skills / health / projects / claims blocks are present.
         self.assertIn("has_tree", payload["skills"])
         self.assertIn("counts", payload["health"])

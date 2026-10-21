@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-08
+last_verified: 2026-10-21
 source_of_truth: true
 ---
 
@@ -39,8 +39,7 @@ source_of_truth: true
 | `log_skill_evidence` | 确认 | 给技能节点加一条内联证据；需要确认时返回以 `CONFIRM REQUIRED:` 开头的一行 |
 | `log_interaction` | 记录 | 追加交互记录到 `interactions/*.jsonl`，不进撤销日志 |
 | `suggest_skill_upgrade` | 只读 | 只返回文本建议，不写文件 |
-| `submit_agent_task_candidate` | 记录 | 外部 agent 回传任务结果（`summary`、`changed_paths`、`warnings`、`result_payload`），任务变为 `candidate_ready` |
-| `update_agent_task_status` | 记录 | 更新外部 agent 任务状态 |
+| `update_agent_task_status` | 记录 | 更新外部 agent 任务状态（`running` / `failed` 等，附简短 blocker 或 error） |
 | `recent_actions` | 只读 | 撤销日志最新条目（`limit` 默认 10，上限 50），HTTP 和 MCP 的写入都在里面 |
 | `undo_action` | — | 按 `journal_id` 撤销；之后有人改过同一内容时拒绝（`journal_undo_conflict`） |
 | `run_validate` | 只读 | 对当前档案跑 validate，返回 errors / warnings |
@@ -48,7 +47,9 @@ source_of_truth: true
 
 - 确认码 10 分钟有效、一次性、绑定参数，存在 `~/.local/share/nblane/agent/mcp-confirmations.json`（`NBLANE_AGENT_STATE_DIR` 可改），多个 MCP 进程共享。
 - 撤销日志里的操作人是 `NBLANE_MCP_ACTOR`（默认 `mcp`）。
-- 结构化工具返回 dict（带 `ToolAnnotations`）；旧版字符串工具（`append_growth_log`、`log_skill_evidence`、`log_interaction`、`suggest_skill_upgrade`、`crystallize_method_draft`、外部 agent 任务两个）返回 `OK:` / `ERROR:` 开头的文本。
+- 结构化工具返回 dict（带 `ToolAnnotations`）；旧版字符串工具（`append_growth_log`、`log_skill_evidence`、`log_interaction`、`suggest_skill_upgrade`、`crystallize_method_draft`、`update_agent_task_status`）返回 `OK:` / `ERROR:` 开头的文本。
+
+外部 agent 任务的候选/审批队列模型已移除：不再有 `submit_agent_task_candidate` 工具，外部 agent 通过 `nblane agent handoff` 领取任务、用 `update_agent_task_status` 汇报进度或失败，结果以仓库 diff / 产物形式由人在 git 里评审（Codex Cloud 的 diff 回传由 `nblane codex cloud` 流程内部完成）。
 
 摄入简历、完整证据编辑、`sync --write`、看板正文编辑等不经 MCP，用 CLI 或 SPA。
 

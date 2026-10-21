@@ -22,7 +22,6 @@ from typing import Any
 
 KANBAN_PAGE = "pages/3_Kanban.py"
 EVIDENCE_REVIEW_PAGE = "pages/2_Evidence_Review.py"
-AGENT_ACTIVITY_PAGE = "pages/9_Agent_Activity.py"
 PROFILE_HEALTH_PAGE = "pages/5_Profile_Health.py"
 RESEARCH_PAGE = "pages/7_Research.py"
 
@@ -115,7 +114,6 @@ def build_daily_brief(payload: dict, *, today: "date | None" = None) -> dict:
     source = _as_dict(payload)
     kanban = _as_dict(source.get("kanban"))
     pending = _as_dict(source.get("pending_evidence"))
-    agent = _as_dict(source.get("agent_activity"))
     health = _as_dict(source.get("health"))
     sources = _as_dict(source.get("sources"))
 
@@ -131,7 +129,6 @@ def build_daily_brief(payload: dict, *, today: "date | None" = None) -> dict:
         + _as_int(pending.get("needs_review_count"))
         + _as_int(pending.get("status_risk_count"))
     )
-    agent_pending = _as_int(agent.get("pending_total"))
     health_counts = _as_dict(health.get("counts"))
 
     focus = {
@@ -143,10 +140,8 @@ def build_daily_brief(payload: dict, *, today: "date | None" = None) -> dict:
     }
     decisions = {
         "evidence_pending": evidence_pending,
-        "agent_pending": agent_pending,
-        "total": evidence_pending + agent_pending,
+        "total": evidence_pending,
         "evidence_path": EVIDENCE_REVIEW_PAGE,
-        "agent_path": AGENT_ACTIVITY_PAGE,
     }
     risks = {
         "health_errors": _as_int(health_counts.get("error")),
@@ -305,7 +300,6 @@ def ai_daily_brief_summary(
 
 
 __all__ = [
-    "AGENT_ACTIVITY_PAGE",
     "AI_DAILY_BRIEF_ACTION",
     "DOING_STALL_DAYS",
     "EVIDENCE_REVIEW_PAGE",
