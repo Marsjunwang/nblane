@@ -209,6 +209,39 @@ class TestResearchPapers(unittest.TestCase):
 
         self.assertEqual(after, before)
 
+    def test_find_orphaned_paper_artifacts_reports_only_dead_sources(self) -> None:
+        from nblane.core.research_papers import find_orphaned_paper_artifacts
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = self._profile(Path(tmp))
+            research = profile / "research"
+            # Live source artifact: never an orphan, even when trashed.
+            live = research / "translations" / "source-paper-grounded.jsonl"
+            live.parent.mkdir(parents=True, exist_ok=True)
+            live.write_text("{}\n", encoding="utf-8")
+            # Dead-source artifacts across several artifact dirs.
+            for dirname, filename in (
+                ("translations", "ghost.jsonl"),
+                ("paper-segments", "ghost.jsonl"),
+                ("paper-pages", "ghost.jsonl"),
+                ("paper-structure", "ghost.jsonl"),
+                ("analysis", "ghost.yaml"),
+                ("annotations", "ghost.jsonl"),
+                ("notes", "ghost.md"),
+                ("exports", "ghost.bib"),
+                ("chunks", "ghost.jsonl"),
+            ):
+                path = research / dirname / filename
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("x\n", encoding="utf-8")
+            orphans = find_orphaned_paper_artifacts(profile)
+
+        self.assertEqual(len(orphans), 9)
+        self.assertTrue(all("source no longer exists" in row for row in orphans))
+        self.assertFalse(any("source-paper-grounded" in row for row in orphans))
+        self.assertIn("translations/ghost.jsonl: source no longer exists", orphans)
+        self.assertIn("chunks/ghost.jsonl: source no longer exists", orphans)
+
     def test_library_tree_and_source_refs_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = self._profile(Path(tmp))

@@ -3,51 +3,25 @@
 from __future__ import annotations
 
 import copy
-import base64
-import contextlib
-import difflib
-import hashlib
-from html import unescape
-from html.parser import HTMLParser
-import io
 import json
-import math
-import os
 import re
-import shutil
-import subprocess
-import tempfile
-import threading
-import time
 import unicodedata
-import urllib.parse
-import urllib.request
-import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import yaml
 
 from nblane.core import git_backup
 from nblane.core.file_state import FileConflictError, snapshot_file
 from nblane.core.file_write import atomic_write_text
-from nblane.core.profile_io import profile_dir, validate_profile_name
 from nblane.core.research_sources import (
     RESEARCH_DIRNAME,
-    SOURCE_STATUSES,
-    SOURCE_VISIBILITIES,
     ResearchSource,
     ResearchSourceInbox,
-    add_research_source,
     load_research_sources,
     save_research_sources,
-    update_research_source,
 )
 from nblane.core.research_workspace import (
-    RESEARCH_CHUNKS_DIRNAME,
     ResearchCitation,
     ResearchChunk,
     load_chunks,
@@ -55,23 +29,17 @@ from nblane.core.research_workspace import (
     load_research_claims,
     save_chunks,
     source_slug,
-    validate_research_workspace,
 )
-from nblane.core.yaml_io import _load_yaml_dict
 
 from ._constants import (
-    PAPER_ANALYSIS_DIRNAME,
     PAPER_EXPORTS_DIRNAME,
     PAPER_NOTES_DIRNAME,
 )
 from ._paths import (
-    _jsonl_path,
     _md_path,
     _profile_root,
-    _research_chunk_path,
     _research_root,
 )
-from ._types import PaperAnnotation, PaperLibraryNode
 from ._utils import (
     _clean_list,
     _clean_mapping,
@@ -79,9 +47,8 @@ from ._utils import (
     _now,
     _slug,
     _today,
-    text_hash,
 )
-from ._io import load_paper_annotations, load_paper_pages, load_paper_segments
+from ._io import load_paper_segments
 from ._types import _published_year
 
 def save_paper_note(profile: str | Path, source_id: str, body: str, *, metadata: dict[str, object] | None = None) -> Path:

@@ -2,32 +2,10 @@
 
 from __future__ import annotations
 
-import copy
-import base64
 import contextlib
-import difflib
 import functools
-import hashlib
-from html import unescape
-from html.parser import HTMLParser
-import io
-import json
-import math
-import os
-import re
-import shutil
-import subprocess
-import tempfile
 import threading
-import time
-import urllib.parse
-import urllib.request
-import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -35,33 +13,29 @@ from nblane.core import git_backup
 from nblane.core.file_lock import locked_profile_write
 from nblane.core.file_state import FileSnapshot, assert_unchanged, snapshot_file
 from nblane.core.file_write import atomic_write_text
-from nblane.core.profile_io import profile_dir, validate_profile_name
 from nblane.core.research_sources import (
-    RESEARCH_DIRNAME,
-    SOURCE_STATUSES,
-    SOURCE_VISIBILITIES,
     ResearchSource,
-    ResearchSourceInbox,
-    add_research_source,
     load_research_sources,
     save_research_sources,
-    update_research_source,
 )
 from nblane.core.research_workspace import (
     RESEARCH_CHUNKS_DIRNAME,
-    ResearchCitation,
-    ResearchChunk,
-    load_chunks,
-    load_research_citations,
-    load_research_claims,
-    save_chunks,
     source_slug,
-    validate_research_workspace,
 )
 from nblane.core.yaml_io import _load_yaml_dict
 
-from ._constants import LIBRARY_TREE_FILENAME
-from ._paths import _profile_name, _profile_root, _research_root, _yaml_path
+from ._constants import (
+    LIBRARY_TREE_FILENAME,
+    PAPER_ANALYSIS_DIRNAME,
+    PAPER_ANNOTATIONS_DIRNAME,
+    PAPER_EXPORTS_DIRNAME,
+    PAPER_NOTES_DIRNAME,
+    PAPER_PAGES_DIRNAME,
+    PAPER_SEGMENTS_DIRNAME,
+    PAPER_STRUCTURE_DIRNAME,
+    PAPER_TRANSLATIONS_DIRNAME,
+)
+from ._paths import _profile_name, _profile_root, _research_root
 from ._types import PaperLibraryNode, PaperLibraryTree
 from ._utils import _clean_list, _clean_text, _now, _slug, _today
 
@@ -728,3 +702,40 @@ def validate_paper_library(profile: str | Path) -> list[str]:
             elif nodes[ref].status == "trashed":
                 diagnostics.append(f"{source.id}: trashed library node ref {ref}")
     return diagnostics
+
+
+def find_orphaned_paper_artifacts(profile: str | Path) -> list[str]:
+    """Artifact files on disk whose source no longer exists (read-only).
+
+    Reports ``dirname/file`` rows for every paper artifact directory; trashed
+    sources still count as existing (their artifacts survive a restore).
+    Cleanup stays explicit — the delete flow with
+    ``delete_reader_artifacts=True`` owns removal.
+    """
+    root = _research_root(profile)
+    if not root.is_dir():
+        return []
+    known_slugs = {
+        source_slug(source.id)
+        for source in load_research_sources(_profile_root(profile)).sources
+        if source.id
+    }
+    orphans: list[str] = []
+    for dirname in (
+        PAPER_PAGES_DIRNAME,
+        PAPER_SEGMENTS_DIRNAME,
+        PAPER_STRUCTURE_DIRNAME,
+        PAPER_TRANSLATIONS_DIRNAME,
+        PAPER_ANALYSIS_DIRNAME,
+        PAPER_ANNOTATIONS_DIRNAME,
+        PAPER_NOTES_DIRNAME,
+        PAPER_EXPORTS_DIRNAME,
+        RESEARCH_CHUNKS_DIRNAME,
+    ):
+        folder = root / dirname
+        if not folder.is_dir():
+            continue
+        for path in sorted(folder.iterdir()):
+            if path.is_file() and path.stem not in known_slugs:
+                orphans.append(f"{dirname}/{path.name}: source no longer exists")
+    return orphans

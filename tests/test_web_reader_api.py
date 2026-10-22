@@ -1213,6 +1213,33 @@ class TestWebReaderApi(unittest.TestCase):
         self.assertEqual(source.url, "https://arxiv.org/abs/2401.12345")
         self.assertEqual(source.metadata["open_access_pdf_url"], "https://arxiv.org/pdf/2401.12345")
 
+    def test_paper_library_upload_rejects_oversized_pdf_early(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "NBLANE_READER_TOKEN_SECRET": "test-secret",
+                "NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets"),
+                "NBLANE_RESEARCH_PDF_MAX_BYTES": "65536",
+            },
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            client = self._client(profile)
+            oversized = PDF_BYTES + b"\n" + (b"0" * 128 * 1024)
+            with patch("nblane.core.research_sources.git_backup.record_change"):
+                response = client.post(
+                    "/api/research/alice/paper-library/upload",
+                    headers={"Origin": "http://testserver"},
+                    data={"title": "Oversized Upload", "status": "reading"},
+                    files={"file": ("too-big.pdf", oversized, "application/pdf")},
+                )
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("NBLANE_RESEARCH_PDF_MAX_BYTES", str(response.json()["detail"]))
+        # Nothing was imported.
+        self.assertFalse(
+            any(s.title == "Oversized Upload" for s in load_research_sources(profile).sources)
+        )
+
     def test_paper_library_upload_creates_paper_source_with_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
             os.environ,

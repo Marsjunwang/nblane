@@ -1,7 +1,6 @@
 """Research source intake endpoints for the SPA research desk.
 
-Replaces the Streamlit Research page's "Inbox & Connectors" tab and its
-"AI" popover so source intake no longer needs Streamlit:
+Covers the research desk's "Inbox & Connectors" tab and its "AI" popover:
 
 - Source inbox: list / manual add / partial update of
   ``research/sources.yaml`` rows (plus "create linked kanban task").
@@ -14,7 +13,7 @@ Replaces the Streamlit Research page's "Inbox & Connectors" tab and its
   synchronously.
 - Research AI config: the research-scoped slice of
   ``web-preferences.yaml`` ``ai.actions`` (same storage the Settings page
-  and the Streamlit popover write).
+  writes).
 
 Claim / evidence flows are deliberately absent: sources are not evidence,
 and promotion stays out of the SPA.
@@ -113,8 +112,8 @@ router = APIRouter(prefix="/api/v1")
 KIND_CONNECTOR_PREVIEW = "research-connector-preview"
 KIND_CONNECTOR_IMPORT = "research-connector-import"
 
-# Research actions owned by the research desk (same list as the Streamlit
-# Research page "AI" popover, pages/7_Research.py ``_RESEARCH_AI_ACTIONS``).
+# Research actions owned by the research desk's "AI" popover: every action
+# namespaced ``research.*`` in the shared AI action registry.
 RESEARCH_AI_ACTIONS: tuple[str, ...] = tuple(
     action for action in AI_ACTION_DEFAULT_BACKENDS if action.startswith("research.")
 )

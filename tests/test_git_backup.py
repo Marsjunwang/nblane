@@ -47,6 +47,40 @@ def test_sync_push_by_default(repos) -> None:
     assert _git(remote, "rev-parse", "main") == _git(work, "rev-parse", "HEAD")
 
 
+def test_defer_changes_coalesces_into_one_commit(repos) -> None:
+    """A multi-file run commits once on success; failures commit nothing."""
+    work, remote = repos
+    head_before = _git(work, "rev-parse", "HEAD")
+    with git_backup.defer_changes("batch run"):
+        (work / "b1.txt").write_text("b1\n", encoding="utf-8")
+        first = git_backup.record_change([work / "b1.txt"], action="step 1")
+        (work / "b2.txt").write_text("b2\n", encoding="utf-8")
+        second = git_backup.record_change([work / "b2.txt"], action="step 2")
+        assert first.skipped_reason == second.skipped_reason == "deferred"
+        assert _git(work, "rev-parse", "HEAD") == head_before
+    assert _git(work, "rev-parse", "HEAD") != head_before
+    assert "batch run" in _git(work, "log", "--format=%s", "-1")
+    assert _git(work, "show", "--stat", "--format=", "HEAD").count("b") >= 2
+
+    head_after = _git(work, "rev-parse", "HEAD")
+    try:
+        with git_backup.defer_changes("failing run"):
+            (work / "c.txt").write_text("c\n", encoding="utf-8")
+            git_backup.record_change([work / "c.txt"], action="step 1")
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+    assert _git(work, "rev-parse", "HEAD") == head_after
+
+    # Nested deferrals do not double-commit: the outer context owns the commit.
+    with git_backup.defer_changes("outer run"):
+        with git_backup.defer_changes("inner run"):
+            (work / "d.txt").write_text("d\n", encoding="utf-8")
+            git_backup.record_change([work / "d.txt"], action="step")
+        assert _git(work, "rev-parse", "HEAD") == head_after
+    assert "outer run" in _git(work, "log", "--format=%s", "-1")
+
+
 def test_background_push_returns_before_push_and_catches_up(repos) -> None:
     work, remote = repos
     git_backup.enable_background_push()

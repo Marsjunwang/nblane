@@ -54,6 +54,7 @@ from nblane.core.research_papers import (
     paper_page_preview_cache_key,
     paper_translations_bulk,
     render_paper_page_preview,
+    _max_pdf_bytes,
     search_papers,
     search_papers_with_codex,
     upload_paper_library_pdf,
@@ -125,13 +126,13 @@ def _loopback_name(value: str) -> bool:
 def _null_origin_is_local(request: Request) -> bool:
     """Return True when an ``Origin: null`` request verifiably stays on this machine.
 
-    Streamlit renders custom components inside a sandboxed iframe, so the
-    legitimate local Paper Library embed always sends ``Origin: null`` — but
-    any website can forge the same header (a sandboxed iframe on an arbitrary
-    page produces it too). In the auth-less local mode we therefore only trust
-    the header when the request targets a loopback host or arrives over a
-    loopback connection, which keeps the Streamlit-on-localhost embed working
-    while rejecting calls aimed at a non-loopback interface of the machine.
+    Browser sandboxed iframes (the Paper Library embed inside the SPA, and
+    any other sandboxed embed) send ``Origin: null`` — but any website can
+    forge the same header (a sandboxed iframe on an arbitrary page produces
+    it too). In the auth-less local mode we therefore only trust the header
+    when the request targets a loopback host or arrives over a loopback
+    connection, which keeps the on-localhost embed working while rejecting
+    calls aimed at a non-loopback interface of the machine.
     """
 
     host = (request.headers.get("host") or "").split("@")[-1].strip()
@@ -146,11 +147,12 @@ def _null_origin_is_local(request: Request) -> bool:
 
 
 def _is_local_paper_library_embed(request: Request) -> bool:
-    """Return True for Streamlit sandbox iframe calls into local Paper Library APIs.
+    """Return True for sandboxed-iframe calls into local Paper Library APIs.
 
-    The legitimate client is the Streamlit custom component iframe (always
-    ``Origin: null``) on an auth-less local deployment; the loopback gate in
-    ``_null_origin_is_local`` keeps forged null-Origin calls out.
+    The legitimate client is the Paper Library page embedded in the SPA
+    (sandboxed iframe, always ``Origin: null``) on an auth-less local
+    deployment; the loopback gate in ``_null_origin_is_local`` keeps forged
+    null-Origin calls out.
     """
 
     if auth_core.auth_configured():
@@ -178,7 +180,7 @@ def _paper_library_embed_cors_headers(request: Request) -> dict[str, str]:
 
 @app.middleware("http")
 async def paper_library_embed_cors(request: Request, call_next):
-    """Allow the 8503 Streamlit iframe to call the local 8502 Paper Library API."""
+    """Allow the SPA's embedded Paper Library iframe to call this sidecar API."""
 
     cors_headers = _paper_library_embed_cors_headers(request)
     if cors_headers and request.method.upper() == "OPTIONS":
@@ -218,7 +220,9 @@ def _auth_cookie_secure(request: Request) -> bool:
     explicit = _truthy_env("NBLANE_AUTH_COOKIE_SECURE")
     if explicit is not None:
         return explicit
-    return False
+    # Behind a TLS-terminating proxy (Caddy) the request arrives as http;
+    # trust the forwarded scheme, same as the reader session cookie.
+    return request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
 
 
 def _auth_cookie_max_age(exp: int) -> int:
@@ -363,8 +367,19 @@ async def auth_session_ok():
     )
 
 
+@app.post("/auth/logout")
+async def auth_logout_post(request: Request):
+    return _logout_response(request)
+
+
 @app.get("/auth/logout")
 async def auth_logout(request: Request):
+    # Deprecated: state-changing endpoints should be POST; the GET stays for
+    # older direct links. New callers use POST /auth/logout.
+    return _logout_response(request)
+
+
+def _logout_response(request: Request) -> Response:
     response = Response("<!doctype html><html><body>signed out</body></html>", media_type="text/html")
     _delete_auth_session_cookie(response, request)
     return response
@@ -503,6 +518,34 @@ def _same_origin_mutation(request: Request) -> None:
         if parsed.scheme not in {"http", "https"} or parsed.netloc.lower() != host:
             raise HTTPException(status_code=403, detail="cross-origin reader mutation rejected")
         return
+
+
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+async def _read_upload_capped(file: UploadFile) -> bytes:
+    """Read an upload with the PDF size cap enforced as it streams in.
+
+    Aborts with 413 as soon as the body exceeds the cap instead of buffering
+    everything first (mirrors the capped download loop in research_papers).
+    """
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        while True:
+            chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > _max_pdf_bytes():
+                raise HTTPException(
+                    status_code=413,
+                    detail="PDF payload exceeds NBLANE_RESEARCH_PDF_MAX_BYTES.",
+                )
+            chunks.append(chunk)
+    finally:
+        await file.close()
+    return b"".join(chunks)
 
 
 async def _json_body(request: Request) -> dict[str, object]:
@@ -2287,10 +2330,7 @@ async def paper_library_upload_pdf(
     profile_path = _paper_library_profile_dir(profile, request)
     user = _paper_library_user(profile, request)
     filename = _clean_text(file.filename) or "paper.pdf"
-    try:
-        payload = await file.read()
-    finally:
-        await file.close()
+    payload = await _read_upload_capped(file)
     try:
         outcome = await asyncio.to_thread(
             _paper_library_import_upload_pdf,
@@ -2355,10 +2395,7 @@ async def paper_library_pdf_upload(
     profile_path = _paper_library_profile_dir(profile, request)
     user = _paper_library_user(profile, request)
     filename = _clean_text(file.filename) or "paper.pdf"
-    try:
-        payload = await file.read()
-    finally:
-        await file.close()
+    payload = await _read_upload_capped(file)
     try:
         await asyncio.to_thread(
             import_paper_pdf,

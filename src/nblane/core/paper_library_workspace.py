@@ -17,6 +17,7 @@ from nblane.core import llm as llm_client
 from nblane.core.auth import mint_reader_token
 from nblane.core.profile_io import profile_dir
 from nblane.core.research_papers import (
+    find_orphaned_paper_artifacts,
     auto_chunk_paper,
     build_paper_delete_preview,
     create_paper_library_node,
@@ -945,7 +946,7 @@ def build_paper_library_payload(
             {"id": "csl-json", "label": labels["format_csl_json"]},
             {"id": "markdown", "label": labels["format_markdown"]},
         ],
-        "diagnostics": validate_paper_library(profile),
+        "diagnostics": validate_paper_library(profile) + find_orphaned_paper_artifacts(profile),
         "labels": labels,
     }
 

@@ -3,72 +3,25 @@
 from __future__ import annotations
 
 import copy
-import base64
-import contextlib
-import difflib
 import hashlib
-from html import unescape
-from html.parser import HTMLParser
-import io
-import json
-import math
-import os
 import re
-import shutil
-import subprocess
-import tempfile
-import threading
-import time
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
-from pathlib import Path
 from typing import Any
 
-import yaml
 
-from nblane.core import git_backup
-from nblane.core.file_write import atomic_write_text
-from nblane.core.profile_io import profile_dir, validate_profile_name
-from nblane.core.research_sources import (
-    RESEARCH_DIRNAME,
-    SOURCE_STATUSES,
-    SOURCE_VISIBILITIES,
-    ResearchSource,
-    ResearchSourceInbox,
-    add_research_source,
-    load_research_sources,
-    save_research_sources,
-    update_research_source,
-)
-from nblane.core.research_workspace import (
-    RESEARCH_CHUNKS_DIRNAME,
-    ResearchCitation,
-    ResearchChunk,
-    load_chunks,
-    load_research_citations,
-    load_research_claims,
-    save_chunks,
-    source_slug,
-    validate_research_workspace,
-)
-from nblane.core.yaml_io import _load_yaml_dict
 
 from ._constants import (
     PAPER_ANNOTATION_KINDS,
     PAPER_ANNOTATION_STATUSES,
     PAPER_TRANSLATION_STATUSES,
-    PAPER_TRANSLATION_SCOPES,
     PAPER_STRUCTURE_VERSION,
 )
 from ._utils import (
     _clean_text,
     _clean_list,
     _clean_mapping,
-    _clean_bool,
     _choice,
     _now,
     _url_looks_like_pdf,
