@@ -94,6 +94,7 @@ cancel: Cancel
 collapse: Collapse
 collapse_all: Collapse all
 collection_actions: Collection actions
+paper_actions: Paper actions
 collection_title: Collection title
 delete_collection: Delete collection
 discard: Mark as discarded

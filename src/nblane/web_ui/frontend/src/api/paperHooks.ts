@@ -4,6 +4,7 @@
 // schema.d.ts locally so api/types.ts stays untouched.
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMediaQuery } from '@mantine/hooks';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { apiGet, apiPost } from './client';
@@ -53,6 +54,17 @@ export function paperOverviewPath(profile: string, sourceId: string): string {
  */
 export function readerTabTarget(sourceId: string): string {
   return `nblane-reader-${sourceId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+}
+
+/**
+ * Viewport-aware reader target: on touch phones / small viewports a named
+ * background tab has no back path, so reader links navigate in place
+ * (no ``target``) to the embedded SPA reader page instead. Desktop keeps the
+ * named-tab behavior. Returns a function so lists can resolve many ids.
+ */
+export function useReaderTabTarget(): (sourceId: string) => string | undefined {
+  const inPlace = useMediaQuery('(pointer: coarse), (max-width: 48em)') ?? false;
+  return useCallback((sourceId: string) => (inPlace ? undefined : readerTabTarget(sourceId)), [inPlace]);
 }
 
 export function paperReaderPath(

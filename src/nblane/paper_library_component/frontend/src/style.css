@@ -1549,6 +1549,35 @@ a {
   cursor: grabbing;
 }
 
+/* Touch tier: a visible ⋯ per card opens the same menu as right-click. */
+.paper-card-menu-button {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  .paper-list-card {
+    grid-template-columns: 28px minmax(0, 1fr) 36px;
+  }
+
+  .paper-card-menu-button {
+    display: grid;
+    place-items: start center;
+    min-width: 36px;
+    min-height: 40px;
+    padding-top: 8px;
+    border: 0;
+    background: transparent;
+    color: var(--pl-muted, #8a93a6);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .paper-card-menu-button:active {
+    color: var(--pl-gold);
+  }
+}
+
 .paper-card-title-row {
   display: flex;
   align-items: flex-start;

@@ -88,6 +88,7 @@ cancel: 取消
 collapse: 收起
 collapse_all: 全部收起
 collection_actions: 分组操作
+paper_actions: 论文操作
 collection_title: 分组名称
 delete_collection: 删除分组
 discard: 标记为弃用

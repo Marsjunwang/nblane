@@ -40,6 +40,7 @@ import {
   IconRobot,
   IconSearch,
 } from '@tabler/icons-react';
+import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
@@ -271,8 +272,10 @@ function EditSourceModal({
     setNotes(source.notes);
   }, [source]);
 
+  const mobile = useMediaQuery('(max-width: 48em)') ?? false;
+
   return (
-    <Modal opened={source !== null} onClose={onClose} title="编辑来源" size="lg" centered>
+    <Modal opened={source !== null} onClose={onClose} title="编辑来源" size="lg" centered fullScreen={mobile}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -302,6 +305,7 @@ function EditSourceModal({
 }
 
 function InboxTab({ profile }: { profile: string }) {
+  const mobile = useMediaQuery('(max-width: 48em)') ?? false;
   const [status, setStatus] = useState('active');
   const [kind, setKind] = useState('');
   const [query, setQuery] = useState('');
@@ -351,11 +355,17 @@ function InboxTab({ profile }: { profile: string }) {
         description="所有类型的研究来源：网页、论文、代码库、数据集……只管理阅读状态与标签，不会自动变成证据。"
         right={<Button variant="default" size="xs" leftSection={<IconRefresh size={14} />} loading={list.isFetching} onClick={() => void list.refetch()}>刷新</Button>}
       />
-      <Group gap="sm" mb="md" align="flex-end">
+      <Group gap="sm" mb="md" align="flex-end" wrap="wrap">
         <SegmentedControl
+          fullWidth={mobile}
           value={status}
           onChange={setStatus}
-          data={[
+          data={mobile ? [
+            { value: 'active', label: '进行中' },
+            { value: 'archived', label: '已归档' },
+            { value: 'discarded', label: '已丢弃' },
+            { value: 'all', label: '全部' },
+          ] : [
             { value: 'active', label: `进行中 ${activeCount}` },
             { value: 'archived', label: `已归档 ${counts.archived ?? 0}` },
             { value: 'discarded', label: `已丢弃 ${counts.discarded ?? 0}` },
@@ -363,7 +373,7 @@ function InboxTab({ profile }: { profile: string }) {
           ]}
         />
         <NativeSelect aria-label="按类型筛选" value={kind} onChange={(event) => setKind(event.currentTarget.value)} data={[{ value: '', label: '全部类型' }, ...options(kinds, KIND_LABELS)]} />
-        <TextInput aria-label="搜索来源" placeholder="搜索标题、链接、摘要或标签" leftSection={<IconSearch size={14} />} value={query} onChange={(event) => setQuery(event.currentTarget.value)} style={{ flex: '1 1 220px' }} />
+        <TextInput aria-label="搜索来源" placeholder="搜索标题、链接、摘要或标签" leftSection={<IconSearch size={14} />} value={query} onChange={(event) => setQuery(event.currentTarget.value)} style={{ flex: mobile ? '1 1 160px' : '1 1 220px' }} />
       </Group>
       {list.isPending ? (
         <Center py="xl"><Loader /></Center>

@@ -45,7 +45,7 @@ import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 
 import {
   paperReaderPath,
-  readerTabTarget,
+  useReaderTabTarget,
   usePaperJob,
   usePaperOverview,
 } from '../api/paperHooks';
@@ -115,6 +115,7 @@ function coverageLabel(coverage: PaperCoverage | undefined, pageCount: number): 
 // --- Small building blocks ----------------------------------------------------
 
 function RefChips({ refs, profile, sourceId }: { refs: PaperRef[]; profile: string; sourceId: string }) {
+  const readerTarget = useReaderTabTarget();
   const pages = [...new Set(refs.map((ref) => ref.page).filter((page) => page > 0))].sort((a, b) => a - b);
   if (!pages.length) return null;
   const shown = pages.slice(0, 4);
@@ -125,7 +126,7 @@ function RefChips({ refs, profile, sourceId }: { refs: PaperRef[]; profile: stri
           key={page}
           component={Link}
           to={paperReaderPath(profile, sourceId, { page })}
-          target={readerTabTarget(sourceId)}
+          target={readerTarget(sourceId)}
           aria-label={`在阅读器中打开第 ${page} 页`}
           style={{
             fontFamily: 'inherit',
@@ -598,6 +599,7 @@ function StatusRow({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function SidePanels({ data, profile, sourceId }: { data: PaperOverview; profile: string; sourceId: string }) {
+  const readerTarget = useReaderTabTarget();
   const { pdf, progress, translation, notes } = data;
   const readPct = progress.page_count && progress.last_page
     ? Math.min(100, Math.round((progress.last_page / progress.page_count) * 100))
@@ -663,7 +665,7 @@ function SidePanels({ data, profile, sourceId }: { data: PaperOverview; profile:
                 )}
                 {note.note && <Text size="xs" c={chrome.text} mt={4} lineClamp={2}>{note.note}</Text>}
                 {note.page > 0 && (
-                  <Anchor component={Link} to={paperReaderPath(profile, sourceId, { page: note.page })} target={readerTabTarget(sourceId)} size="xs" c={chrome.goldText}>
+                  <Anchor component={Link} to={paperReaderPath(profile, sourceId, { page: note.page })} target={readerTarget(sourceId)} size="xs" c={chrome.goldText}>
                     第 {note.page} 页
                   </Anchor>
                 )}
@@ -734,6 +736,7 @@ function jobIdFor(data: PaperOverview | undefined, kind: PaperJobKind): string |
 
 export function PaperOverviewPage() {
   const { name = '', sourceId = '' } = useParams();
+  const readerTarget = useReaderTabTarget();
   const [searchParams] = useSearchParams();
   const overview = usePaperOverview(name, sourceId);
   const quickJob = usePaperJob(name, sourceId, 'paper-quick-analysis', jobIdFor(overview.data, 'paper-quick-analysis'));
@@ -794,7 +797,7 @@ export function PaperOverviewPage() {
               <Button
                 component={Link}
                 to={paperReaderPath(name, sourceId)}
-                target={readerTabTarget(sourceId)}
+                target={readerTarget(sourceId)}
                 color="brand"
                 leftSection={progress.last_page > 0 ? <IconPlayerPlay size={15} /> : <IconBook2 size={15} />}
                 disabled={readerDisabled}
@@ -806,7 +809,7 @@ export function PaperOverviewPage() {
             <Button
               component={Link}
               to={paperReaderPath(name, sourceId, { mode: 'compare' })}
-              target={readerTabTarget(sourceId)}
+              target={readerTarget(sourceId)}
               variant="default"
               leftSection={<IconLayoutColumns size={15} />}
               disabled={readerDisabled}

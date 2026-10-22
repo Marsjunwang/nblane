@@ -159,6 +159,29 @@ describe('PaperOverviewPage', () => {
     expect(within(card).getByText('项目相关性')).toBeInTheDocument();
   });
 
+  it('opens the reader in place on touch phones (no named tab)', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query.includes('pointer: coarse'),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
+    try {
+      renderOverview();
+      await screen.findByRole('heading', { name: 'Attention Is All You Need' });
+      const read = screen.getByRole('link', { name: /继续阅读 · 第 5 页/ });
+      expect(read).not.toHaveAttribute('target');
+      expect(read).toHaveAttribute('href', '/p/alice/research/papers/source%3Apaper%3Ademo/read');
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
   it('shows not-started states for missing analysis and deep read', async () => {
     renderOverview(undefined, { ...OVERVIEW, quick_analysis: null, deep_read: null, progress: { ...OVERVIEW.progress, last_page: 0 } });
     await screen.findByRole('heading', { name: 'Attention Is All You Need' });

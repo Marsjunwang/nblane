@@ -5,6 +5,7 @@
 
 import { Alert, Box, Button, Center, Group, Loader, Text } from '@mantine/core';
 import { IconArrowLeft, IconRefresh } from '@tabler/icons-react';
+import { useMediaQuery } from '@mantine/hooks';
 import { useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
@@ -30,6 +31,7 @@ function embedUrl(url: string): string {
 export function PaperLibraryPage() {
   const { name = '' } = useParams();
   const navigate = useNavigate();
+  const mobile = useMediaQuery('(max-width: 48em)') ?? false;
   const research = useResearchSidecar(name);
   const sidecar = research.data?.sidecar;
 
@@ -86,7 +88,7 @@ export function PaperLibraryPage() {
         {back}
         <Text size="sm" c={chrome.dim}>/</Text>
         <Text size="sm" c={chrome.text}>论文库</Text>
-        <Text size="xs" c={chrome.dim} ml="auto">打开论文会先进入论文概览</Text>
+        {!mobile && <Text size="xs" c={chrome.dim} ml="auto">打开论文会先进入论文概览</Text>}
       </Group>
       <Box style={{ flex: 1, minHeight: 0 }}>
         <SidecarFrame

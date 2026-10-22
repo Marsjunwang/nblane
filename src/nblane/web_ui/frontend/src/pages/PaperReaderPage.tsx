@@ -6,6 +6,7 @@
 
 import { ActionIcon, Alert, Anchor, Box, Button, Center, Group, Loader, Stack, Text, Tooltip } from '@mantine/core';
 import { IconArrowLeft, IconExternalLink, IconRefresh } from '@tabler/icons-react';
+import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
@@ -23,6 +24,7 @@ const BAR_HEIGHT_PX = 40;
 export function PaperReaderPage() {
   const { name = '', sourceId = '' } = useParams();
   const [searchParams] = useSearchParams();
+  const mobile = useMediaQuery('(max-width: 48em)') ?? false;
   // Light endpoint: sidecar coordinates + this paper's title/progress only —
   // the full research overview pays a per-paper library scan.
   const research = useResearchSidecar(name, sourceId);
@@ -155,17 +157,32 @@ export function PaperReaderPage() {
             <IconRefresh size={15} />
           </ActionIcon>
         </Tooltip>
-        <Anchor
-          href={externalPath}
-          target="_blank"
-          rel="noreferrer"
-          size="sm"
-          c={chrome.goldText}
-          style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
-        >
-          <IconExternalLink size={14} style={{ verticalAlign: 'middle', marginInlineEnd: 4 }} />
-          新标签打开
-        </Anchor>
+        {mobile ? (
+          <ActionIcon
+            component="a"
+            href={externalPath}
+            target="_blank"
+            rel="noreferrer"
+            variant="subtle"
+            color="gray"
+            aria-label="新标签打开"
+            style={{ flexShrink: 0 }}
+          >
+            <IconExternalLink size={16} />
+          </ActionIcon>
+        ) : (
+          <Anchor
+            href={externalPath}
+            target="_blank"
+            rel="noreferrer"
+            size="sm"
+            c={chrome.goldText}
+            style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
+          >
+            <IconExternalLink size={14} style={{ verticalAlign: 'middle', marginInlineEnd: 4 }} />
+            新标签打开
+          </Anchor>
+        )}
       </Group>
       <Box style={{ flex: 1, minHeight: 0 }}>
         <SidecarFrame

@@ -1274,10 +1274,36 @@ function PaperList({
   workspaceBusy = false,
 }) {
   const [exportFormat, setExportFormat] = useState("bibtex");
+  const longPressRef = useRef(null);
   const activeQuery = cleanText(payload.query || currentUrlQuery());
   const papers = asArray(payload.papers).filter((paper) => paperMatchesQuery(paper, activeQuery));
   const selected = selectedPaperIds;
   const selectedCount = selected.size;
+  // Touch: long-press a card for its menu (same menu as right-click / ⋯).
+  const cancelLongPress = () => {
+    const state = longPressRef.current;
+    if (state?.timer) window.clearTimeout(state.timer);
+    if (state && !state.fired) longPressRef.current = null;
+  };
+  const startLongPress = (event, paper, dragIds) => {
+    if (!event.touches || event.touches.length !== 1) return;
+    cancelLongPress();
+    const touch = event.touches[0];
+    const state = { x: touch.clientX, y: touch.clientY, fired: false, timer: 0 };
+    state.timer = window.setTimeout(() => {
+      state.fired = true;
+      onPaperMenu({ clientX: state.x, clientY: state.y }, paper, dragIds);
+    }, 500);
+    longPressRef.current = state;
+  };
+  // Narrow widths stack the detail pane below the list: a tap selects the
+  // paper and brings the pane into view (otherwise nothing visibly reacts).
+  const scrollDetailIntoView = () => {
+    if (typeof window === "undefined" || window.innerWidth > 520) return;
+    window.setTimeout(() => {
+      document.querySelector(".paper-detail-pane")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }, 60);
+  };
   useEffect(() => {
     if (!payload.detailId || !(payload.focus || payload.action)) {
       return;
@@ -1357,6 +1383,10 @@ function PaperList({
                   event.preventDefault();
                   onPaperMenu(event, paper, dragIds);
                 }}
+                onTouchStart={(event) => startLongPress(event, paper, dragIds)}
+                onTouchMove={cancelLongPress}
+                onTouchEnd={cancelLongPress}
+                onTouchCancel={cancelLongPress}
                 onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = "move";
                   event.dataTransfer.setData("text/plain", dragIds.join("\n"));
@@ -1375,7 +1405,15 @@ function PaperList({
                 <button
                   type="button"
                   className="paper-card-body"
-                  onClick={() => emit(makeEvent("paper_library_select_paper", { source_id: paperId }))}
+                  onClick={() => {
+                    // A long-press that just opened the menu must not also select.
+                    if (longPressRef.current?.fired) {
+                      longPressRef.current = null;
+                      return;
+                    }
+                    emit(makeEvent("paper_library_select_paper", { source_id: paperId }));
+                    scrollDetailIntoView();
+                  }}
                 >
                   <span className="paper-card-title-row">
                     <span className="paper-card-title">{cleanText(paper.title || paperId)}</span>
@@ -1393,6 +1431,21 @@ function PaperList({
                     ))}
                   </span>
                   {paper.metrics ? <span className="paper-card-metrics">{cleanText(paper.metrics)}</span> : null}
+                </button>
+                <button
+                  type="button"
+                  className="paper-card-menu-button"
+                  aria-label={label(payload.labels, "paper_actions", "Paper actions")}
+                  title={label(payload.labels, "paper_actions", "Paper actions")}
+                  draggable={false}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    onPaperMenu({ clientX: rect.right - 8, clientY: rect.bottom + 4 }, paper, dragIds);
+                  }}
+                  onContextMenu={(event) => event.preventDefault()}
+                >
+                  ⋯
                 </button>
                 {explanationLinks.length ? (
                   <div className="paper-card-reading-links">

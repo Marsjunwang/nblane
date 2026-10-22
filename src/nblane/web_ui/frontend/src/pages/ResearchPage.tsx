@@ -29,11 +29,12 @@ import {
   IconSearch,
   IconSparkles,
 } from '@tabler/icons-react';
+import { useMediaQuery } from '@mantine/hooks';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { useResearch } from '../api/hooks';
-import { paperLibraryPath, paperOverviewPath, paperReaderPath, readerTabTarget, researchSourcesPath } from '../api/paperHooks';
+import { paperLibraryPath, paperOverviewPath, paperReaderPath, researchSourcesPath, useReaderTabTarget } from '../api/paperHooks';
 import type { ResearchPaperItem } from '../api/types';
 import { chrome } from '../theme';
 
@@ -155,6 +156,8 @@ function PaperRow({ paper, profile }: { paper: ResearchPaperItem; profile: strin
 
 export function ResearchPage() {
   const { name = '' } = useParams();
+  const mobile = useMediaQuery('(max-width: 48em)') ?? false;
+  const readerTarget = useReaderTabTarget();
   const research = useResearch(name);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('all');
@@ -198,7 +201,7 @@ export function ResearchPage() {
       </Group>
 
       <Card withBorder radius="md" p="lg" style={{ background: `linear-gradient(135deg, ${chrome.panelBg}, ${chrome.cardBg})`, borderColor: 'rgba(220, 174, 85, 0.24)' }}>
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
+        <Group justify="space-between" align="flex-start" wrap={mobile ? 'wrap' : 'nowrap'}>
           <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
             <ThemeIcon size={42} radius="sm" color="brand" variant="light"><IconBook2 size={21} /></ThemeIcon>
             <div style={{ minWidth: 0 }}>
@@ -210,7 +213,7 @@ export function ResearchPage() {
           {nextPaper?.pdf_available ? (
             <Group gap="xs" wrap="nowrap">
               <Button component={Link} to={paperOverviewPath(name, nextPaper.id)} variant="default">论文概览</Button>
-              <Button component={Link} to={paperReaderPath(name, nextPaper.id)} target={readerTabTarget(nextPaper.id)} color="brand" leftSection={<IconPlayerPlay size={15} />}>继续阅读</Button>
+              <Button component={Link} to={paperReaderPath(name, nextPaper.id)} target={readerTarget(nextPaper.id)} color="brand" leftSection={<IconPlayerPlay size={15} />}>继续阅读</Button>
             </Group>
           ) : data.sidecar?.paper_library_url ? (
             <Button component={Link} to={paperLibraryPath(name)} variant="default" leftSection={<IconLibrary size={15} />}>选择论文</Button>
@@ -251,12 +254,19 @@ export function ResearchPage() {
       </SimpleGrid>
 
       <Card withBorder radius="md" p="lg" style={{ background: chrome.panelBg }}>
-        <Group justify="space-between" align="flex-end" mb="md">
+        <Group justify="space-between" align="flex-end" mb="md" wrap={mobile ? 'wrap' : 'nowrap'}>
           <div><Text fw={700}>论文索引</Text><Text size="xs" c={chrome.dim} mt={3}>这里只是当前 profile 的论文入口，完整整理在论文库。</Text></div>
-          <Group gap="xs">
-            <TextInput value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="搜索标题、摘要或标签" leftSection={<IconSearch size={14} />} />
-            <NativeSelect value={status} onChange={(event) => setStatus(event.currentTarget.value)} data={[{ value: 'all', label: '全部状态' }, ...Object.keys(data.summary?.status_counts ?? {}).map((value) => ({ value, label: statusLabel(value) }))]} />
-          </Group>
+          {mobile ? (
+            <SimpleGrid cols={1} spacing="xs" style={{ width: '100%' }}>
+              <TextInput value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="搜索标题、摘要或标签" leftSection={<IconSearch size={14} />} />
+              <NativeSelect value={status} onChange={(event) => setStatus(event.currentTarget.value)} data={[{ value: 'all', label: '全部状态' }, ...Object.keys(data.summary?.status_counts ?? {}).map((value) => ({ value, label: statusLabel(value) }))]} />
+            </SimpleGrid>
+          ) : (
+            <Group gap="xs">
+              <TextInput value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="搜索标题、摘要或标签" leftSection={<IconSearch size={14} />} />
+              <NativeSelect value={status} onChange={(event) => setStatus(event.currentTarget.value)} data={[{ value: 'all', label: '全部状态' }, ...Object.keys(data.summary?.status_counts ?? {}).map((value) => ({ value, label: statusLabel(value) }))]} />
+            </Group>
+          )}
         </Group>
         <Divider color="rgba(220,174,85,.14)" mb="md" />
         <Stack gap="sm">
