@@ -155,6 +155,44 @@ describe('ResearchPage', () => {
     expect(screen.getAllByText('未分析').length).toBeGreaterThan(0);
   });
 
+  it('sorts 最近读过 by last_read_at, newest first', async () => {
+    const paper = (id: string, title: string, lastReadAt: string) => ({
+      id: `source:paper:${id}`,
+      title,
+      status: 'finished',
+      pdf_available: true,
+      page_count: 10,
+      last_page: 10,
+      last_read_at: lastReadAt,
+      segment_count: 20,
+      translated_count: 5,
+      missing_count: 12,
+      stale_count: 3,
+      failed_count: 0,
+      translation_status: 'stale',
+      analysis: {},
+      tags: [],
+      summary: '',
+    });
+    renderPage({
+      ...RESEARCH,
+      papers: [
+        paper('old', 'Older Read', '2026-10-01T08:00:00+00:00'),
+        paper('new', 'Newer Read', '2026-10-20T08:00:00+00:00'),
+        paper('mid', 'Mid Read', '2026-10-10T08:00:00+00:00'),
+      ],
+    });
+    await screen.findByText('alice · 研究台');
+
+    const card = (await screen.findByText('最近读过')).closest('.mantine-Card-root')!;
+    const hrefs = Array.from(card.querySelectorAll('a[href*="/research/papers/"]')).map((a) => a.getAttribute('href'));
+    expect(hrefs).toEqual([
+      '/p/alice/research/papers/source%3Apaper%3Anew',
+      '/p/alice/research/papers/source%3Apaper%3Amid',
+      '/p/alice/research/papers/source%3Apaper%3Aold',
+    ]);
+  });
+
   it('shows a retryable alert when the desk fails to load', async () => {
     let calls = 0;
     vi.stubGlobal(

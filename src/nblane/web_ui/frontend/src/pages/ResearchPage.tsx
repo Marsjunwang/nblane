@@ -247,7 +247,12 @@ export function ResearchPage() {
         <Card withBorder radius="md" p="lg" style={{ background: chrome.panelBg }}>
           <Group justify="space-between" mb="md"><div><Text fw={700}>最近读过</Text><Text size="xs" c={chrome.dim} mt={3}>阅读位置会在 Reader 中自动保存。</Text></div><IconClock size={17} color={chrome.goldText} /></Group>
           <Stack gap="sm">
-            {(finished.length ? finished : papers.filter((paper) => paper.last_page > 0)).slice(0, 3).map((paper) => <PaperRow key={paper.id} paper={paper} profile={name} />)}
+            {/* 最近读过按 last_read_at 倒序（ISO 时间戳可直接字典序比较）。 */}
+            {(finished.length ? finished : papers.filter((paper) => paper.last_page > 0))
+              .slice()
+              .sort((a, b) => (b.last_read_at || '').localeCompare(a.last_read_at || ''))
+              .slice(0, 3)
+              .map((paper) => <PaperRow key={paper.id} paper={paper} profile={name} />)}
             {!finished.length && !papers.some((paper) => paper.last_page > 0) && <Text size="sm" c={chrome.dim}>还没有阅读记录。</Text>}
           </Stack>
         </Card>
