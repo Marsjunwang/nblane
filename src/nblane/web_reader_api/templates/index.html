@@ -728,6 +728,8 @@
       border-radius: 8px;
       background: var(--gutter);
       scroll-behavior: smooth;
+      /* Single-finger pans scroll; two-finger pinch is ours (no browser zoom). */
+      touch-action: pan-x pan-y;
     }
     .pr-continuous-document {
       display: grid;
@@ -1809,6 +1811,32 @@
       .pr-side.collapsed .pr-side-rail { display: inline-flex; }
       .pr-dock { grid-template-columns: 1fr; }
       .pr-dock-actions { justify-content: flex-start; }
+    }
+    @media (max-width: 720px) {
+      /* Phone tier: ≥40px touch targets, compact stacked toolbar, and the
+         PDF owns the first screen (rail/panel start collapsed in JS). */
+      .pr-shell { gap: 4px; padding: 4px; }
+      .pr-toolbar {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "title actions" "controls controls" "mode mode";
+        gap: 6px;
+        padding: 6px 8px;
+      }
+      .pr-title { font-size: .88rem; }
+      .pr-controls, .pr-mode { justify-content: flex-start; }
+      .pr-mode .pr-segmented { flex: 1; }
+      .pr-mode .pr-segmented .pr-button { flex: 1; padding: 0 4px; }
+      .pr-button, .pr-icon-button, .pr-input, .pr-select, .pr-textarea { min-height: 40px; }
+      .pr-icon-button { width: 40px; }
+      .pr-toolbar .pr-segmented .pr-button { min-height: 40px; }
+      .pr-rail-tab { min-height: 40px; }
+      .pr-page-input { width: 44px; }
+      .pr-controls .pr-zoom-select { width: auto; flex: 1 1 auto; min-width: 64px; }
+      .pr-menu-list { width: min(260px, calc(100vw - 24px)); }
+      .pr-left-rail:not(.collapsed) { max-height: 42vh; }
+      .pr-left-rail.collapsed { min-height: 40px; }
+      .pr-viewer { min-height: 60vh; }
+      .pr-translation-reader { min-height: 0; }
     }
   </style>
 </head>
@@ -6024,6 +6052,50 @@
             rerenderForScale();
           }, 120);
         }, { passive: false });
+        // Two-finger pinch zoom (phones): same clamp + custom-scale path as
+        // the toolbar/wheel zoom, re-render batched to one per 160ms and one
+        // final apply on gesture end. Single-finger touches never reach this.
+        let pinch = null;
+        const pinchDistance = (touches) => Math.max(1, Math.hypot(
+          touches[0].clientX - touches[1].clientX,
+          touches[0].clientY - touches[1].clientY,
+        ));
+        const applyPinchScale = () => {
+          if (!pinch || pinch.pendingScale == null) return;
+          customScale = pinch.pendingScale;
+          pinch.pendingScale = null;
+          scaleMode = "custom";
+          scheduleReaderStateChanged(true);
+          rerenderForScale();
+        };
+        viewer.addEventListener("touchstart", (event) => {
+          if (event.touches.length !== 2) return;
+          pinch = {
+            startDistance: pinchDistance(event.touches),
+            startScale: scaleForPage(currentPage),
+            pendingScale: null,
+            timer: 0,
+          };
+        }, { passive: true });
+        viewer.addEventListener("touchmove", (event) => {
+          if (!pinch || event.touches.length !== 2) return;
+          event.preventDefault();
+          const factor = pinchDistance(event.touches) / pinch.startDistance;
+          pinch.pendingScale = Math.max(.45, Math.min(3, Math.round(pinch.startScale * factor * 100) / 100));
+          if (pinch.timer) return;
+          pinch.timer = window.setTimeout(() => {
+            if (pinch) pinch.timer = 0;
+            applyPinchScale();
+          }, 160);
+        }, { passive: false });
+        const endPinch = (event) => {
+          if (!pinch || (event.touches && event.touches.length >= 2)) return;
+          if (pinch.timer) window.clearTimeout(pinch.timer);
+          applyPinchScale();
+          pinch = null;
+        };
+        viewer.addEventListener("touchend", endPinch);
+        viewer.addEventListener("touchcancel", endPinch);
       }
       document.getElementById("sideBody")?.addEventListener("click", (event) => {
         const button = event.target && event.target.closest ? event.target.closest("[data-review-action]") : null;
@@ -8714,6 +8786,13 @@
       leftRailCollapsed = settings().left_rail_collapsed != null
         ? truthySetting(settings().left_rail_collapsed, false)
         : Boolean(local.left_rail_collapsed);
+      // Phones: the first screen belongs to the PDF — rail and side panel
+      // start collapsed. The session-persisted layout choice (this browser
+      // tab's stored state) still wins when it exists.
+      if (window.innerWidth <= 720) {
+        if (typeof local.side_panel_collapsed !== "boolean") sidePanelCollapsed = true;
+        if (typeof local.left_rail_collapsed !== "boolean") leftRailCollapsed = true;
+      }
       activeLeftTab = text(settings().active_left_tab || local.active_left_tab || "outline") || "outline";
       if (!["outline", "pages", "search"].includes(activeLeftTab)) activeLeftTab = "outline";
       translationSourceVisible = settings().translation_source_visible != null
