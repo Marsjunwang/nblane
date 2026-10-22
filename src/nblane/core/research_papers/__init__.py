@@ -746,6 +746,34 @@ def paper_pdf_asset_path(profile: str | Path, source_id: str) -> Path:
     return path
 
 
+def paper_page_preview_cache_key(
+    profile: str | Path,
+    source_id: str,
+    page: int,
+    max_width: int,
+) -> str:
+    """Stable cache key for one rendered page preview (pdf stamp + params)."""
+
+    try:
+        stat = paper_pdf_asset_path(profile, source_id).stat()
+        pdf_stamp = f"{stat.st_mtime_ns:x}-{stat.st_size:x}"
+    except (OSError, ValueError):
+        pdf_stamp = "nopdf"
+    try:
+        page_number = max(1, int(page or 1))
+    except (TypeError, ValueError):
+        page_number = 1
+    try:
+        width_limit = max(320, min(2200, int(max_width or 1100)))
+    except (TypeError, ValueError):
+        width_limit = 1100
+    return f"{_slug(source_id)}-{pdf_stamp}-p{page_number}-w{width_limit}"
+
+
+def _page_preview_cache_path(profile: str | Path, cache_key: str) -> Path:
+    return research_asset_root(profile) / "page-previews" / f"{cache_key}.json"
+
+
 def render_paper_page_preview(
     profile: str | Path,
     source_id: str,
@@ -753,7 +781,12 @@ def render_paper_page_preview(
     *,
     max_width: int = 1100,
 ) -> dict[str, object]:
-    """Render one PDF page to a PNG data URL for Reader visual fallback."""
+    """Render one PDF page to a PNG data URL for Reader visual fallback.
+
+    Renders are cached on disk under the research asset root, keyed by
+    :func:`paper_page_preview_cache_key` (PDF mtime+size, page, width), so
+    repeat Reader loads do not re-run PyMuPDF for unchanged pages.
+    """
 
     try:
         page_number = max(1, int(page or 1))
@@ -763,6 +796,15 @@ def render_paper_page_preview(
         width_limit = max(320, min(2200, int(max_width or 1100)))
     except (TypeError, ValueError):
         width_limit = 1100
+    cache_key = paper_page_preview_cache_key(profile, source_id, page_number, width_limit)
+    cache_path = _page_preview_cache_path(profile, cache_key)
+    if cache_path.exists():
+        try:
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+            if isinstance(cached, dict) and cached.get("data_url"):
+                return cached
+        except Exception:
+            pass
     pdf_bytes = load_paper_pdf_bytes(profile, source_id)
     try:
         import fitz  # type: ignore[import-not-found]
@@ -779,13 +821,21 @@ def render_paper_page_preview(
         matrix = fitz.Matrix(zoom, zoom)
         pixmap = pdf_page.get_pixmap(matrix=matrix, alpha=False)
         png_bytes = pixmap.tobytes("png")
-    return {
+    result = {
         "page": safe_page,
         "width": int(pixmap.width),
         "height": int(pixmap.height),
         "mime": "image/png",
         "data_url": "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii"),
     }
+    try:
+        _atomic_write_bytes(
+            cache_path,
+            json.dumps(result, ensure_ascii=False).encode("utf-8"),
+        )
+    except OSError:
+        pass
+    return result
 
 
 def extract_paper_figures(
@@ -6598,9 +6648,14 @@ def translate_full_paper(
         ensure_paper_reading_artifacts(profile, source_id, prefer_grobid=True)
         segments = load_paper_segments(profile, source_id)
     pages = load_paper_pages(profile, source_id)
+    raw_structure_units = (
+        build_paper_structure_units(profile, source_id)
+        if clean_scope_strategy in {"auto", "structure"}
+        else []
+    )
     structure_units = (
         reader_translation_structure_units(
-            build_paper_structure_units(profile, source_id),
+            raw_structure_units,
             include_references=clean_include_references,
         )
         if clean_scope_strategy in {"auto", "structure"}
@@ -6612,7 +6667,7 @@ def translate_full_paper(
             "Run paper extraction successfully before translating."
         )
     if clean_scope_strategy == "structure":
-        readiness = paper_structure_translation_readiness(build_paper_structure_units(profile, source_id))
+        readiness = paper_structure_translation_readiness(raw_structure_units)
         if not bool(readiness.get("ready")):
             blockers = ", ".join(str(item) for item in readiness.get("blockers") or [])
             raise ValueError(
@@ -9105,6 +9160,7 @@ __all__ = [
     "reorder_paper_library_node",
     "research_asset_root",
     "render_paper_page_preview",
+    "paper_page_preview_cache_key",
     "restore_paper_library_node",
     "save_paper_analysis",
     "save_paper_annotations",

@@ -39,7 +39,6 @@ import {
   IconSparkles,
 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
-import 'katex/dist/katex.min.css';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
@@ -150,7 +149,8 @@ function RefChips({ refs, profile, sourceId }: { refs: PaperRef[]; profile: stri
 }
 
 async function loadKatex() {
-  const module = await import('katex');
+  // JS + CSS load together on demand so the main bundle carries neither.
+  const [module] = await Promise.all([import('katex'), import('katex/dist/katex.min.css')]);
   return module.default;
 }
 

@@ -527,6 +527,8 @@ export type ResearchPaperItem = Schemas['ResearchPaperItemModel'];
 /** ResearchResponse from web_api/schemas.py (M4 Research overview). */
 export type ResearchResponse = Schemas['ResearchResponse'];
 export type ResearchReaderResponse = Schemas['ResearchReaderResponse'];
+/** ResearchSidecarResponse from web_api/schemas.py (light sidecar coordinates). */
+export type ResearchSidecarResponse = Schemas['ResearchSidecarResponse'];
 
 // --- Phase 2 unified /projects ------------------------------------------------
 

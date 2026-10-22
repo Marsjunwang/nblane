@@ -76,6 +76,17 @@ describe('WorkshopPage', () => {
     expect(calls.find((call) => call.url.endsWith('/system/workshop/input'))?.body).toEqual({ text: '你好', submit: true });
   });
 
+  it('offers a host reconnect button that works when the terminal cannot receive Enter', async () => {
+    stubFetch(REACHABLE_PAYLOAD);
+    renderWithProviders(<WorkshopPage />, '/workshop');
+
+    const firstFrame = await screen.findByTestId('sidecar-frame');
+    fireEvent.click(screen.getByRole('button', { name: '快捷输入' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新连接终端' }));
+
+    await waitFor(() => expect(screen.getByTestId('sidecar-frame')).not.toBe(firstFrame));
+  });
+
   it('sends typed text on Enter and keeps Shift+Enter as a newline', async () => {
     const calls = stubFetch(REACHABLE_PAYLOAD);
     renderWithProviders(<WorkshopPage />, '/workshop');

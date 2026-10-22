@@ -9,7 +9,7 @@ import { IconArrowLeft, IconExternalLink, IconRefresh } from '@tabler/icons-reac
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
-import { useResearch, useResearchReader } from '../api/hooks';
+import { useResearchReader, useResearchSidecar } from '../api/hooks';
 import { paperOverviewPath, paperReaderPath, sidecarOrigin } from '../api/paperHooks';
 import { SidecarFrame } from '../components/SidecarFrame';
 import { chrome } from '../theme';
@@ -23,12 +23,14 @@ const BAR_HEIGHT_PX = 40;
 export function PaperReaderPage() {
   const { name = '', sourceId = '' } = useParams();
   const [searchParams] = useSearchParams();
-  const research = useResearch(name);
+  // Light endpoint: sidecar coordinates + this paper's title/progress only —
+  // the full research overview pays a per-paper library scan.
+  const research = useResearchSidecar(name, sourceId);
   const reader = useResearchReader(name, sourceId);
   const sidecarInfo = research.data?.sidecar;
   const requestedMode = searchParams.get('mode') ?? 'pdf';
   const mode = READER_MODES.includes(requestedMode) ? requestedMode : 'pdf';
-  const paper = (research.data?.papers ?? []).find((item) => item.id === sourceId);
+  const paper = research.data?.paper ?? null;
   const initialPage = Number(searchParams.get('page') || 0) || paper?.last_page || 0;
   const [readerState, setReaderState] = useState({ mode, page: initialPage, totalPages: paper?.page_count ?? 0 });
   const [reloadSignal, setReloadSignal] = useState(0);

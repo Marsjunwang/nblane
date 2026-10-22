@@ -6,9 +6,8 @@ import { PaperReaderPage } from './PaperReaderPage';
 
 const BODY = {
   profile: 'alice',
-  papers: [{ id: 'source:paper/1', title: 'A paper', pdf_available: true, tags: [], status: 'reading', summary: '', page_count: 12, last_page: 4 }],
-  summary: {},
   sidecar: { base: 'http://127.0.0.1:8502', configured: false, auth_enabled: false, handoff_token: '', paper_library_url: '' },
+  paper: { id: 'source:paper/1', title: 'A paper', last_page: 4, page_count: 12 },
 };
 const READER = {
   profile: 'alice',

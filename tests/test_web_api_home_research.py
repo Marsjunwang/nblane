@@ -351,6 +351,41 @@ class TestResearchEndpoint(_HomeResearchBase):
             "http://127.0.0.1:8502/paper-library?profile=alice",
         )
 
+    def test_research_sidecar_endpoint_is_light_and_finds_one_paper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_profile(root)
+            client = self._client(root, env={"NBLANE_READER_API_BASE": ""})
+
+            plain = client.get("/api/v1/profiles/alice/research/sidecar")
+            self.assertEqual(plain.status_code, 200, plain.text)
+            payload = plain.json()
+            self.assertEqual(payload["profile"], "alice")
+            self.assertEqual(
+                payload["sidecar"]["paper_library_url"],
+                "http://127.0.0.1:8502/paper-library?profile=alice",
+            )
+            self.assertIsNone(payload["paper"])
+
+            # The light path must not touch the per-paper library scan.
+            with patch(
+                "nblane.core.research_papers.load_paper_segments",
+                side_effect=AssertionError("segments parsed"),
+            ):
+                with_paper = client.get(
+                    "/api/v1/profiles/alice/research/sidecar?source_id=src:001"
+                )
+            self.assertEqual(with_paper.status_code, 200, with_paper.text)
+            paper = with_paper.json()["paper"]
+            self.assertEqual(paper["id"], "src:001")
+            self.assertEqual(paper["title"], "SLAM survey")
+
+            missing = client.get(
+                "/api/v1/profiles/alice/research/sidecar?source_id=src:nope"
+            )
+            self.assertEqual(missing.status_code, 404)
+            self.assertEqual(missing.json()["code"], "paper_not_found")
+
     def test_research_translation_progress_uses_canonical_structure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

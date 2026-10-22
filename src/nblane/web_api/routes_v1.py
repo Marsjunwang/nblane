@@ -329,7 +329,9 @@ from nblane.web_api.schemas import (
     ProfileSettingsResponse,
     ResearchResponse,
     ResearchPaperItemModel,
+    ResearchPaperRefModel,
     ResearchReaderResponse,
+    ResearchSidecarResponse,
     ResearchSourceItemModel,
     ResearchSummaryModel,
     SidecarInfoModel,
@@ -8654,6 +8656,48 @@ def get_profile_research_reader(
         source_id=source_id,
         reader_url=reader_url,
         token=token,
+    )
+
+
+@router.get(
+    "/profiles/{name}/research/sidecar",
+    response_model=ResearchSidecarResponse,
+    responses=ERROR_RESPONSES,
+)
+def get_profile_research_sidecar(
+    name: str,
+    source_id: str = Query(default=""),
+    user: CurrentUser = Depends(require_profile_access),
+) -> ResearchSidecarResponse:
+    """Sidecar coordinates without the research overview's library scan.
+
+    The in-SPA Paper Library and the reader page need only the sidecar
+    block (base URL + handoff token); ``source_id`` additionally returns the
+    one paper's title / reading progress for the reader bar, read straight
+    from the source inbox metadata (no segments/translations parsing).
+    """
+    pdir = _resolve_profile(name)
+    paper: ResearchPaperRefModel | None = None
+    if source_id.strip():
+        source = load_research_sources(pdir).by_id().get(source_id)
+        if source is None:
+            raise ApiError(404, "paper_not_found", f"Unknown paper: {source_id}")
+        metadata = dict(source.metadata or {})
+        page_count = int(metadata.get("page_count") or 0)
+        if not page_count:
+            from nblane.core.research_papers import load_paper_pages
+
+            page_count = len(load_paper_pages(pdir, source_id))
+        paper = ResearchPaperRefModel(
+            id=source.id,
+            title=str(source.title or source.id),
+            last_page=int(metadata.get("last_read_page") or 0),
+            page_count=page_count,
+        )
+    return ResearchSidecarResponse(
+        profile=pdir.name,
+        sidecar=_sidecar_info(pdir.name, user),
+        paper=paper,
     )
 
 

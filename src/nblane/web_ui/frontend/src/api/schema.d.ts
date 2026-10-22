@@ -2866,6 +2866,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{name}/research/sidecar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile Research Sidecar
+         * @description Sidecar coordinates without the research overview's library scan.
+         *
+         *     The in-SPA Paper Library and the reader page need only the sidecar
+         *     block (base URL + handoff token); ``source_id`` additionally returns the
+         *     one paper's title / reading progress for the reader bar, read straight
+         *     from the source inbox metadata (no segments/translations parsing).
+         */
+        get: operations["get_profile_research_sidecar_api_v1_profiles__name__research_sidecar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{name}/research/sources": {
         parameters: {
             query?: never;
@@ -11055,6 +11080,29 @@ export interface components {
             translation_status: string;
         };
         /**
+         * ResearchPaperRefModel
+         * @description Cheap single-paper reference for the reader page bar.
+         */
+        ResearchPaperRefModel: {
+            /** Id */
+            id: string;
+            /**
+             * Last Page
+             * @default 0
+             */
+            last_page: number;
+            /**
+             * Page Count
+             * @default 0
+             */
+            page_count: number;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /**
          * ResearchReaderResponse
          * @description Reader deep link minted for one profile paper.
          */
@@ -11089,6 +11137,20 @@ export interface components {
             /** Sources */
             sources?: components["schemas"]["ResearchSourceItemModel"][];
             summary?: components["schemas"]["ResearchSummaryModel"];
+        };
+        /**
+         * ResearchSidecarResponse
+         * @description Sidecar coordinates without the full research/library scan.
+         *
+         *     The reader page and the in-SPA Paper Library need only the sidecar block
+         *     (plus the paper's title/progress for the reader bar) — not the per-paper
+         *     segments/translations/annotations loop of the full research overview.
+         */
+        ResearchSidecarResponse: {
+            paper?: components["schemas"]["ResearchPaperRefModel"] | null;
+            /** Profile */
+            profile: string;
+            sidecar?: components["schemas"]["SidecarInfoModel"];
         };
         /**
          * ResearchSourceCreateRequest
@@ -21273,6 +21335,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResearchReaderResponse"];
+                };
+            };
+            /** @description Invalid profile name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile access denied. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_profile_research_sidecar_api_v1_profiles__name__research_sidecar_get: {
+        parameters: {
+            query?: {
+                source_id?: string;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchSidecarResponse"];
                 };
             };
             /** @description Invalid profile name. */

@@ -96,6 +96,7 @@ import type {
   PublicSiteWork,
   ResearchResponse,
   ResearchReaderResponse,
+  ResearchSidecarResponse,
   SkillNodePatchRequest,
   SkillNodePatchResponse,
   SkillTreeResponse,
@@ -2665,6 +2666,21 @@ export function useResearch(profile: string) {
     queryKey: ['profiles', profile, 'research'],
     queryFn: () =>
       apiGet<ResearchResponse>(`/profiles/${encodeURIComponent(profile)}/research`),
+    enabled: profile.length > 0,
+  });
+}
+
+/**
+ * Sidecar coordinates without the research overview's full library scan.
+ * The reader page passes sourceId to also get the paper title/progress.
+ */
+export function useResearchSidecar(profile: string, sourceId = '') {
+  return useQuery({
+    queryKey: ['profiles', profile, 'research', 'sidecar', sourceId],
+    queryFn: () =>
+      apiGet<ResearchSidecarResponse>(
+        `/profiles/${encodeURIComponent(profile)}/research/sidecar${sourceId ? `?source_id=${encodeURIComponent(sourceId)}` : ''}`,
+      ),
     enabled: profile.length > 0,
   });
 }

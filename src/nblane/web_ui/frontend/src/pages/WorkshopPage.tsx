@@ -122,7 +122,7 @@ function scrollTerminalPage(direction: 1 | -1) {
   if (viewport) viewport.scrollTop += direction * viewport.clientHeight * 0.9;
 }
 
-function KeyBar({ compact = false }: { compact?: boolean }) {
+function KeyBar({ compact = false, onReconnect }: { compact?: boolean; onReconnect: () => void }) {
   const send = useWorkshopKeys();
   const [pressed, setPressed] = useState<string | null>(null);
   const [showExtra, setShowExtra] = useState(false);
@@ -173,6 +173,18 @@ function KeyBar({ compact = false }: { compact?: boolean }) {
     <Stack gap={6} role="toolbar" aria-label="终端快捷键">
       <Group gap={6} wrap="wrap">
         {KEY_BAR.filter((item) => item.group === 'main').map((item) => renderKey(item))}
+        <Tooltip label="重新连接网页终端">
+          <Button
+            size="compact-md"
+            variant="light"
+            aria-label="重新连接终端"
+            onMouseDown={keepFocus}
+            onClick={onReconnect}
+            style={{ flexShrink: 0, minHeight: 44 }}
+          >
+            <IconRefresh size={16} />
+          </Button>
+        </Tooltip>
         {!compact && (
           <Button
             size="compact-md"
@@ -443,7 +455,7 @@ export function WorkshopPage() {
       </Box>
       {showBar && (
         <Stack gap={6}>
-          <KeyBar compact={compact} />
+          <KeyBar compact={compact} onReconnect={() => setReloadSignal((value) => value + 1)} />
           <InputBox />
         </Stack>
       )}

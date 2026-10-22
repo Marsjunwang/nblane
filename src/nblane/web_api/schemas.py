@@ -2716,6 +2716,28 @@ class ResearchReaderResponse(BaseModel):
     token: str = ""
 
 
+class ResearchPaperRefModel(BaseModel):
+    """Cheap single-paper reference for the reader page bar."""
+
+    id: str
+    title: str = ""
+    last_page: int = 0
+    page_count: int = 0
+
+
+class ResearchSidecarResponse(BaseModel):
+    """Sidecar coordinates without the full research/library scan.
+
+    The reader page and the in-SPA Paper Library need only the sidecar block
+    (plus the paper's title/progress for the reader bar) — not the per-paper
+    segments/translations/annotations loop of the full research overview.
+    """
+
+    profile: str
+    sidecar: SidecarInfoModel = Field(default_factory=SidecarInfoModel)
+    paper: ResearchPaperRefModel | None = None
+
+
 # --- Research source intake (SPA research desk: inbox / connectors / AI) -----
 
 

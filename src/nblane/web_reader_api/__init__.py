@@ -51,6 +51,7 @@ from nblane.core.research_papers import (
     load_paper_pages,
     mark_imported_paper_results,
     paper_pdf_asset_path,
+    paper_page_preview_cache_key,
     paper_translations_bulk,
     render_paper_page_preview,
     search_papers,
@@ -58,7 +59,8 @@ from nblane.core.research_papers import (
     upload_paper_library_pdf,
     export_library_papers,
 )
-from nblane.core.research_sources import add_research_source, load_research_sources, save_research_sources
+from nblane.core.research_sources import RESEARCH_DIRNAME, add_research_source, load_research_sources, save_research_sources
+from nblane.core.research_workspace import source_slug
 from nblane.core.reader_events import ANNOTATION_UPDATE
 
 COOKIE_NAME = "nblane_reader_session"
@@ -1120,54 +1122,6 @@ def _payload_full_document_default() -> bool:
     if raw in {"0", "false", "no", "off"}:
         return False
     return True
-
-
-def _payload_etag(payload: dict[str, object], *, target_lang: str) -> str:
-    """Stable ETag for /payload responses.
-
-    Mixes PDF fingerprint, total pages, segment/translation/annotation counts,
-    and a coarse 'last touched' marker so any meaningful change busts the cache.
-    """
-
-    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
-    metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
-    fingerprint = str(metadata.get("pdf_sha256") or metadata.get("pdf_asset_ref") or source.get("id") or "")
-    counters = (
-        len(payload.get("segments") or []),
-        len(payload.get("translations") or []),
-        len(payload.get("translation_units") or []),
-        len(payload.get("annotations") or []),
-        len(payload.get("chunks") or []),
-        len(payload.get("citations") or []),
-        len(payload.get("page_models") or []),
-        int((payload.get("settings") or {}).get("page_count") or 0),
-    )
-    last_touched = ""
-    changed_rows = (
-        payload.get("translations") or [],
-        payload.get("annotations") or [],
-        payload.get("chunks") or [],
-        payload.get("citations") or [],
-    )
-    for rows in changed_rows:
-        for row in rows:
-            if isinstance(row, dict):
-                value = str(row.get("created") or row.get("updated") or "")
-                if value > last_touched:
-                    last_touched = value
-    analysis = payload.get("analysis") if isinstance(payload.get("analysis"), dict) else {}
-    try:
-        analysis_marker = hashlib.sha1(
-            json.dumps(analysis, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-        ).hexdigest()[:16]
-    except Exception:
-        analysis_marker = "|".join(
-            str(analysis.get(key) or "")
-            for key in ("updated", "codex_deep_read_updated")
-        )
-    fingerprint_parts = [fingerprint, target_lang, last_touched, analysis_marker, *map(str, counters)]
-    digest = hashlib.sha1("|".join(fingerprint_parts).encode("utf-8")).hexdigest()[:16]
-    return f'W/"{digest}"'
 
 
 def _paper_page_text_layer(profile_path: Path, source_id: str, page: int) -> dict[str, object]:
@@ -2254,7 +2208,8 @@ async def paper_library_pdf_retry(request: Request, profile: str, source_id: str
 async def paper_library_paper(request: Request, profile: str, source_id: str):
     profile_path = _paper_library_profile_dir(profile, request)
     user = _paper_library_user(profile, request)
-    payload = build_paper_library_payload(
+    payload = await asyncio.to_thread(
+        build_paper_library_payload,
         profile_path,
         ui_lang=_paper_library_ui_lang(request),
         detail_id=source_id,
@@ -2591,23 +2546,81 @@ async def reader_payload(request: Request, source_id: str, page: int | None = No
         full_document = None  # default = honor env / always full
     else:
         full_document = _clean_bool(full_document_param, True)
-    payload = _payload_for_context(
+    ui_lang = request.query_params.get("ui_lang")
+    requested_pages = _query_pages(request)
+    # Cheap validator first (file mtimes/sizes + request inputs): unchanged
+    # polls 304 without rebuilding the payload (the build is PyMuPDF/YAML work).
+    etag = _reader_payload_etag(
         ctx,
         page=page,
-        ui_lang=request.query_params.get("ui_lang"),
-        requested_pages=_query_pages(request),
+        ui_lang=ui_lang,
+        requested_pages=requested_pages,
         full_translation=full_translation,
         full_document=full_document,
     )
-    target_lang = str((payload.get("settings") or {}).get("target_lang") or "zh")
-    etag = _payload_etag(payload, target_lang=target_lang)
     headers = {
         "ETag": etag,
         "Cache-Control": "private, max-age=0, must-revalidate",
     }
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)
+    payload = await asyncio.to_thread(
+        _payload_for_context,
+        ctx,
+        page=page,
+        ui_lang=ui_lang,
+        requested_pages=requested_pages,
+        full_translation=full_translation,
+        full_document=full_document,
+    )
     return JSONResponse(payload, headers=headers)
+
+
+def _reader_payload_etag(
+    ctx: ReaderActionContext,
+    *,
+    page: int | None,
+    ui_lang: str | None,
+    requested_pages: set[int],
+    full_translation: bool,
+    full_document: bool | None,
+) -> str:
+    """Validator for /payload computed from stat()s, before the full build.
+
+    Covers every input of the payload: the request parameters and the source
+    files (sources/citations/claims YAML, every artifact named after the
+    paper slug, the PDF asset). Any write goes through atomic replace, so
+    mtime_ns moves on change.
+    """
+    slug = source_slug(ctx.source_id)
+    parts = [
+        str(page or 0),
+        str(ui_lang or ""),
+        "1" if full_translation else "0",
+        "1" if full_document else "0",
+        ",".join(str(p) for p in sorted(requested_pages)),
+    ]
+
+    def stamp(path: Path) -> None:
+        try:
+            stat = path.stat()
+            parts.append(f"{path.name}:{stat.st_mtime_ns:x}:{stat.st_size:x}")
+        except OSError:
+            parts.append(f"{path.name}:missing")
+
+    research_root = ctx.profile_path / RESEARCH_DIRNAME
+    for filename in ("sources.yaml", "citations.yaml", "claims.yaml"):
+        stamp(research_root / filename)
+    if research_root.is_dir():
+        for path in sorted(research_root.rglob(f"{slug}.*")):
+            if path.is_file():
+                stamp(path)
+    try:
+        stamp(paper_pdf_asset_path(ctx.profile_path, ctx.source_id))
+    except (OSError, ValueError):
+        parts.append("pdf:missing")
+    digest = hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:16]
+    return f'W/"{digest}"'
 
 
 @app.get(f"{READER_PREFIX}/api/{{source_id}}/page-preview/{{page}}")
@@ -2620,9 +2633,18 @@ async def reader_page_preview(request: Request, source_id: str, page: int):
     except (TypeError, ValueError):
         max_width = 1800
     max_width = max(800, min(2200, max_width))
+    # Renders are disk-cached under the research asset root; the key (PDF
+    # mtime+size, page, width) doubles as the ETag, so repeats 304 cheaply.
+    cache_key = paper_page_preview_cache_key(ctx.profile_path, source_id, max(1, page), max_width)
+    etag = f'W/"pv-{cache_key}"'
+    headers = {"ETag": etag, "Cache-Control": "private, max-age=86400"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
     return JSONResponse(
-        render_paper_page_preview(ctx.profile_path, source_id, max(1, page), max_width=max_width),
-        headers={"Cache-Control": "private, max-age=86400"},
+        await asyncio.to_thread(
+            render_paper_page_preview, ctx.profile_path, source_id, max(1, page), max_width=max_width
+        ),
+        headers=headers,
     )
 
 
@@ -2630,7 +2652,7 @@ async def reader_page_preview(request: Request, source_id: str, page: int):
 async def reader_page_text_layer(request: Request, source_id: str, page: int):
     ctx = _request_context(request, source_id)
     return JSONResponse(
-        _paper_page_text_layer(ctx.profile_path, source_id, max(1, page)),
+        await asyncio.to_thread(_paper_page_text_layer, ctx.profile_path, source_id, max(1, page)),
         headers={"Cache-Control": "private, max-age=86400"},
     )
 
@@ -2639,14 +2661,19 @@ async def reader_page_text_layer(request: Request, source_id: str, page: int):
 async def reader_translations_bulk(request: Request, source_id: str):
     ctx = _request_context(request, source_id)
     target_lang = (request.query_params.get("target_lang") or "zh").strip() or "zh"
-    inbox = load_research_sources(ctx.profile_path)
-    source = inbox.by_id().get(ctx.source_id)
-    if source is None:
-        raise HTTPException(status_code=404, detail="source not found")
-    metadata = dict(source.metadata or {})
-    if not target_lang or target_lang == "zh":
-        target_lang = str(metadata.get("target_lang") or target_lang or "zh")
-    body, etag = paper_translations_bulk(ctx.profile_path, ctx.source_id, target_lang=target_lang)
+
+    def _bulk() -> tuple[dict[str, object], str]:
+        inbox = load_research_sources(ctx.profile_path)
+        source = inbox.by_id().get(ctx.source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="source not found")
+        metadata = dict(source.metadata or {})
+        lang = target_lang
+        if not lang or lang == "zh":
+            lang = str(metadata.get("target_lang") or lang or "zh")
+        return paper_translations_bulk(ctx.profile_path, ctx.source_id, target_lang=lang)
+
+    body, etag = await asyncio.to_thread(_bulk)
     headers = {
         "ETag": etag,
         "Cache-Control": "private, max-age=30",
@@ -2665,7 +2692,11 @@ async def _run_action_endpoint(
     _same_origin_mutation(request)
     ctx = _request_context(request, source_id)
     try:
-        result = handle_reader_action(ctx, action, body if body is not None else await _json_body(request))
+        # handle_reader_action runs LLM/PyMuPDF/YAML work; keep it off the
+        # event loop so SSE streams and PDF range requests stay responsive.
+        result = await asyncio.to_thread(
+            handle_reader_action, ctx, action, body if body is not None else await _json_body(request)
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse(result.to_dict())

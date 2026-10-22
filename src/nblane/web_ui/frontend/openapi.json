@@ -10677,6 +10677,35 @@
     "title": "ResearchPaperItemModel",
     "type": "object"
    },
+   "ResearchPaperRefModel": {
+    "description": "Cheap single-paper reference for the reader page bar.",
+    "properties": {
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "last_page": {
+      "default": 0,
+      "title": "Last Page",
+      "type": "integer"
+     },
+     "page_count": {
+      "default": 0,
+      "title": "Page Count",
+      "type": "integer"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "ResearchPaperRefModel",
+    "type": "object"
+   },
    "ResearchReaderResponse": {
     "description": "Reader deep link minted for one profile paper.",
     "properties": {
@@ -10738,6 +10767,33 @@
      "profile"
     ],
     "title": "ResearchResponse",
+    "type": "object"
+   },
+   "ResearchSidecarResponse": {
+    "description": "Sidecar coordinates without the full research/library scan.\n\nThe reader page and the in-SPA Paper Library need only the sidecar block\n(plus the paper's title/progress for the reader bar) — not the per-paper\nsegments/translations/annotations loop of the full research overview.",
+    "properties": {
+     "paper": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/ResearchPaperRefModel"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "profile": {
+      "title": "Profile",
+      "type": "string"
+     },
+     "sidecar": {
+      "$ref": "#/components/schemas/SidecarInfoModel"
+     }
+    },
+    "required": [
+     "profile"
+    ],
+    "title": "ResearchSidecarResponse",
     "type": "object"
    },
    "ResearchSourceCreateRequest": {
@@ -25331,6 +25387,86 @@
      }
     },
     "summary": "Get Profile Research Reader"
+   }
+  },
+  "/api/v1/profiles/{name}/research/sidecar": {
+   "get": {
+    "description": "Sidecar coordinates without the research overview's library scan.\n\nThe in-SPA Paper Library and the reader page need only the sidecar\nblock (base URL + handoff token); ``source_id`` additionally returns the\none paper's title / reading progress for the reader bar, read straight\nfrom the source inbox metadata (no segments/translations parsing).",
+    "operationId": "get_profile_research_sidecar_api_v1_profiles__name__research_sidecar_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "source_id",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Source Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResearchSidecarResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Invalid profile name."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile access denied."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Profile not found."
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Profile Research Sidecar"
    }
   },
   "/api/v1/profiles/{name}/research/sources": {

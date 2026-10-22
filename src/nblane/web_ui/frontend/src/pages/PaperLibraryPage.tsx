@@ -8,7 +8,7 @@ import { IconArrowLeft, IconRefresh } from '@tabler/icons-react';
 import { useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
-import { useResearch } from '../api/hooks';
+import { useResearchSidecar } from '../api/hooks';
 import { paperOverviewPath, sidecarOrigin } from '../api/paperHooks';
 import { SidecarFrame } from '../components/SidecarFrame';
 import { chrome } from '../theme';
@@ -30,7 +30,7 @@ function embedUrl(url: string): string {
 export function PaperLibraryPage() {
   const { name = '' } = useParams();
   const navigate = useNavigate();
-  const research = useResearch(name);
+  const research = useResearchSidecar(name);
   const sidecar = research.data?.sidecar;
 
   useEffect(() => {
