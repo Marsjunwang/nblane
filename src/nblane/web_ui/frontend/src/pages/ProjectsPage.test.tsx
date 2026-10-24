@@ -2022,4 +2022,58 @@ describe('ProjectsPage timeline 窗口平移 (hotfix)', () => {
     expect(toolbar).toHaveTextContent('2026-05-12 → 2026-11-30');
     expect(lastSearch).not.toContain('tws=');
   });
+
+  it('touch-friendly buttons pan by one window and return to today', async () => {
+    stubP1Fetch();
+    renderPage('/p/alice/projects?view=timeline');
+    const toolbar = await screen.findByTestId('timeline-toolbar');
+    await waitFor(() => expect(toolbar).toHaveTextContent('2026-05-12 → 2026-11-30'));
+    const initial = screen.getByTestId('timeline-today').textContent;
+
+    fireEvent.click(screen.getByTestId('timeline-older'));
+    await waitFor(() => expect(screen.getByTestId('timeline-today').textContent).not.toBe(initial));
+    const older = screen.getByTestId('timeline-today').textContent ?? '';
+    expect(older < (initial ?? '')).toBe(true);
+    expect(lastSearch).toContain('tws=');
+
+    fireEvent.click(screen.getByTestId('timeline-newer'));
+    await waitFor(() => expect(screen.getByTestId('timeline-today').textContent).toBe(initial));
+    fireEvent.click(screen.getByTestId('timeline-newer'));
+    await waitFor(() => expect(screen.getByTestId('timeline-today').textContent).not.toBe(initial));
+    expect((screen.getByTestId('timeline-today').textContent ?? '') > (initial ?? '')).toBe(true);
+
+    fireEvent.click(screen.getByTestId('timeline-today'));
+    await waitFor(() => expect(screen.getByTestId('timeline-today').textContent).toBe(initial));
+    expect(lastSearch).not.toContain('tws=');
+    expect(lastSearch).not.toContain('twe=');
+  });
+
+  it('回到今天 recenters after manual scrolling even when the window is unchanged', async () => {
+    stubP1Fetch();
+    renderPage('/p/alice/projects?view=timeline&tz=all');
+    const viewport = await screen.findByTestId('timeline-scrollport');
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 1000 });
+    viewport.scrollLeft = 1;
+
+    fireEvent.click(screen.getByTestId('timeline-today'));
+    expect(viewport.scrollLeft).toBeGreaterThan(1);
+  });
+
+  it('回到今天 also recenters when a custom window already matches the preset', async () => {
+    stubP1Fetch();
+    renderPage('/p/alice/projects?view=timeline');
+    const toolbar = await screen.findByTestId('timeline-toolbar');
+    await waitFor(() => expect(toolbar).toHaveTextContent('2026-05-12 → 2026-11-30'));
+    const initial = screen.getByTestId('timeline-today').textContent;
+    const viewport = screen.getByTestId('timeline-scrollport');
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 1000 });
+
+    fireEvent.click(screen.getByTestId('timeline-older'));
+    await waitFor(() => expect(screen.getByTestId('timeline-today').textContent).not.toBe(initial));
+    fireEvent.click(screen.getByTestId('timeline-newer'));
+    await waitFor(() => expect(screen.getByTestId('timeline-today').textContent).toBe(initial));
+    viewport.scrollLeft = 1;
+    fireEvent.click(screen.getByTestId('timeline-today'));
+    await waitFor(() => expect(viewport.scrollLeft).toBeGreaterThan(1));
+  });
 });

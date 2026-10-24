@@ -39,8 +39,13 @@ export interface BoardViewProps {
 
 function GoalGroupHeader({ group }: { group: LaneGroup }) {
   return (
-    <Group gap="sm" wrap="nowrap" data-testid={`lane-group-header-${group.id}`}>
-      <Text fw={700} size="lg" style={{ color: boardPalette.titleText }}>
+    <Group gap="xs" wrap="wrap" data-testid={`lane-group-header-${group.id}`}>
+      <Text
+        fw={700}
+        size="lg"
+        w={{ base: '100%', sm: 'auto' }}
+        style={{ color: boardPalette.titleText, minWidth: 0, overflowWrap: 'anywhere' }}
+      >
         {group.title}
       </Text>
       {group.target && (
@@ -53,7 +58,7 @@ function GoalGroupHeader({ group }: { group: LaneGroup }) {
         </Badge>
       )}
       {group.meta && (
-        <Text size="sm" style={{ color: boardPalette.dim }} lineClamp={1}>
+        <Text size="sm" style={{ color: boardPalette.dim, minWidth: 0, flex: 1 }} lineClamp={2}>
           {group.meta}
         </Text>
       )}

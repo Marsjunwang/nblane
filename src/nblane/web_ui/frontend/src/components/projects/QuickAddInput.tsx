@@ -44,12 +44,14 @@ export function QuickAddInput({
       <button
         type="button"
         data-testid={`quick-add-${laneId}`}
+        className="projects-quick-add"
         onClick={() => setOpen(true)}
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 6,
           width: '100%',
+          minHeight: 36,
           padding: '6px 8px',
           background: 'transparent',
           border: `1px dashed ${boardPalette.border}`,
@@ -67,7 +69,8 @@ export function QuickAddInput({
   return (
     <TextInput
       ref={inputRef}
-      size="xs"
+      size="sm"
+      className="projects-form projects-quick-add-input"
       placeholder="任务标题,回车创建"
       value={title}
       disabled={pending}

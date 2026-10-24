@@ -48,6 +48,8 @@ import {
 } from '../components/projects/lanes';
 import type { ProjectsGroupBy } from '../components/projects/lanes';
 import { boardPalette } from '../components/projects/palette';
+import { chrome } from '../theme';
+import '../components/projects/ProjectsPage.css';
 
 export type ProjectsView = 'kanban' | 'timeline' | 'story';
 
@@ -176,110 +178,151 @@ export function ProjectsPage() {
     );
   }
 
+  const heading = (
+    <Group gap="sm" wrap="nowrap" miw={0}>
+      <Title order={narrow ? 3 : 2} style={{ color: boardPalette.titleText }}>
+        {narrow ? '项目' : `${name} · 项目`}
+      </Title>
+      {data.north_star && (
+        <Tooltip label={data.north_star} openDelay={300} withArrow disabled={reveal}>
+          <Badge
+            variant="outline"
+            size={narrow ? 'md' : 'lg'}
+            style={{
+              borderColor: boardPalette.gold,
+              color: boardPalette.goldText,
+              maxWidth: narrow ? 200 : undefined,
+            }}
+            data-testid="north-star"
+          >
+            {reveal ? data.north_star : '北极星'}
+          </Badge>
+        </Tooltip>
+      )}
+    </Group>
+  );
+  const refreshControl = (
+    <Tooltip label="刷新" openDelay={300} withArrow>
+      <ActionIcon
+        variant="subtle"
+        size={narrow ? 'lg' : 'md'}
+        loading={board.isFetching}
+        onClick={onRefresh}
+        aria-label="刷新"
+      >
+        <IconRefresh size={16} />
+      </ActionIcon>
+    </Tooltip>
+  );
+  const viewControl = (
+    <SegmentedControl
+      value={view}
+      onChange={(value) => updateParams({ view: value })}
+      data={[
+        { label: narrow ? '看板' : '泳道看板', value: 'kanban' },
+        { label: '时间轴', value: 'timeline' },
+        { label: '大事记', value: 'story' },
+      ]}
+      size={narrow ? 'sm' : 'xs'}
+      fullWidth={narrow}
+      style={{
+        minHeight: narrow ? 44 : undefined,
+        alignSelf: narrow ? 'stretch' : 'flex-start',
+      }}
+      aria-label="项目视图"
+      data-testid="view-switch"
+    />
+  );
+  const groupControl = (
+    <SegmentedControl
+      value={group}
+      onChange={(value) => updateParams({ group: value })}
+      data={[
+        { label: narrow ? '目标' : '按目标', value: 'goal' },
+        { label: narrow ? '活动' : '按活动', value: 'activity' },
+      ]}
+      size={narrow ? 'sm' : 'xs'}
+      style={{ minHeight: narrow ? 44 : undefined, flex: narrow ? 1 : undefined, minWidth: 0 }}
+      aria-label="项目分组"
+      data-testid="group-switch"
+    />
+  );
+  const createControls = (
+    <Group gap="xs" wrap="nowrap">
+      <Button
+        variant="light"
+        size={narrow ? 'sm' : 'compact-sm'}
+        leftSection={<IconPlus size={14} />}
+        onClick={() => setCreateOpen(true)}
+        aria-label="新建项目"
+        style={{ minHeight: narrow ? 44 : undefined, flexShrink: 0 }}
+        data-testid="new-project-button"
+      >
+        {narrow ? '项目' : '新建项目'}
+      </Button>
+      <Button
+        variant="light"
+        size={narrow ? 'sm' : 'compact-sm'}
+        leftSection={<IconPlus size={14} />}
+        onClick={() => setPlanOpen(true)}
+        aria-label="新建计划"
+        style={{ minHeight: narrow ? 44 : undefined, flexShrink: 0 }}
+        data-testid="new-plan-button"
+      >
+        {narrow ? '计划' : '新建计划'}
+      </Button>
+    </Group>
+  );
+
   return (
-    // Full indigo page ground (concept mockup base #1d3450): the light
-    // AppShell main padding is negated so lanes, group headers and the
-    // timeline axis all sit on the dark field their tokens assume.
+    // Negate the AppShell padding so lanes, group headers and the timeline
+    // share the chart-indigo ground.
     <Stack
       gap="md"
       data-testid="projects-page"
+      className="projects-page"
       m={-16}
       p="md"
       mih="calc(100vh - 56px)"
-      style={{ background: '#1d3450', borderRadius: 4 }}
+      style={{ background: chrome.chartBg, borderRadius: 4 }}
     >
       <Paper
-        p="sm"
+        p={narrow ? 'sm' : 8}
         data-testid="projects-toolbar"
         style={{
-          // Sticky just below the fixed 56px AppShell header (top: 0 slid the
-          // toolbar under it). Phones: the wrapped toolbar is ~200px tall, so
-          // it scrolls away with the page instead of pinning a third of the screen.
+          // The compact phone toolbar scrolls with the page; desktop keeps it
+          // below the fixed AppShell header.
           position: narrow ? 'static' : 'sticky',
           top: 56,
-          // Above the detail-card modal overlay (200) while a card is open —
-          // the mockup keeps the topbar (and its shared-selection chip)
-          // reachable so the view/group switch never loses `?task=`. At the
-          // default zIndex the AppShell navbar (also 200) stays on top.
           zIndex: selected ? 210 : 10,
           background: boardPalette.ground,
           border: `1px solid ${boardPalette.border}`,
           borderRadius: 12,
         }}
       >
-        <Group justify="space-between" wrap="wrap" gap="sm">
-          <Group gap="sm" wrap="nowrap">
-            <Title order={2} style={{ color: boardPalette.titleText }}>
-              {name} · 项目
-            </Title>
-            {data.north_star && (
-              <Tooltip
-                label={data.north_star}
-                openDelay={300}
-                withArrow
-                disabled={reveal}
-              >
-                <Badge
-                  variant="outline"
-                  size="lg"
-                  style={{ borderColor: boardPalette.gold, color: boardPalette.goldText }}
-                  data-testid="north-star"
-                >
-                  {reveal ? data.north_star : '北极星'}
-                </Badge>
-              </Tooltip>
-            )}
+        {narrow ? (
+          <Stack gap="xs">
+            <Group justify="space-between" wrap="nowrap" gap="sm">
+              {heading}
+              {refreshControl}
+            </Group>
+            {viewControl}
+            <Group gap="xs" wrap="nowrap" w="100%">
+              {groupControl}
+              {createControls}
+            </Group>
+          </Stack>
+        ) : (
+          <Group justify="space-between" wrap="wrap" gap="sm">
+            {heading}
+            <Group gap="sm" wrap="wrap">
+              {viewControl}
+              {groupControl}
+              {createControls}
+              {refreshControl}
+            </Group>
           </Group>
-          <Group gap="sm" wrap="wrap">
-            <SegmentedControl
-              value={view}
-              onChange={(value) => updateParams({ view: value })}
-              data={[
-                { label: '泳道看板', value: 'kanban' },
-                { label: '时间轴', value: 'timeline' },
-                { label: '大事记', value: 'story' },
-              ]}
-              data-testid="view-switch"
-            />
-            <SegmentedControl
-              value={group}
-              onChange={(value) => updateParams({ group: value })}
-              data={[
-                { label: '按目标', value: 'goal' },
-                { label: '按活动', value: 'activity' },
-              ]}
-              data-testid="group-switch"
-            />
-            <Button
-              variant="light"
-              size="compact-sm"
-              leftSection={<IconPlus size={14} />}
-              onClick={() => setCreateOpen(true)}
-              data-testid="new-project-button"
-            >
-              新建项目
-            </Button>
-            <Button
-              variant="light"
-              size="compact-sm"
-              leftSection={<IconPlus size={14} />}
-              onClick={() => setPlanOpen(true)}
-              data-testid="new-plan-button"
-            >
-              新建计划
-            </Button>
-            <Tooltip label="刷新" openDelay={300} withArrow>
-              <ActionIcon
-                variant="subtle"
-                loading={board.isFetching}
-                onClick={onRefresh}
-                aria-label="刷新"
-              >
-                <IconRefresh size={16} />
-              </ActionIcon>
-            </Tooltip>
-          </Group>
-        </Group>
+        )}
       </Paper>
 
       {data.stats && (

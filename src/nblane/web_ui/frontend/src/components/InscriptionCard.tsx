@@ -33,7 +33,7 @@ export function InscriptionCard({
         fontFamily: inscription.bodyFontFamily,
       }}
     >
-      <Group justify="space-between" align="flex-start" wrap="nowrap" mb="sm">
+      <Group justify="space-between" align="flex-start" wrap="nowrap" mb="sm" miw={0}>
         <Text
           fw={600}
           size="lg"

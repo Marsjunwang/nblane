@@ -26,6 +26,7 @@ import {
   TextInput,
   Center,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { IconArchive, IconBulb, IconDeviceFloppy, IconPlus, IconTrash } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -351,6 +352,7 @@ function DeleteProjectZone({
         opened={open}
         onClose={() => setOpen(false)}
         title={`删除项目 · ${title}`}
+        classNames={{ content: 'projects-form' }}
         data-testid="delete-project-modal"
         // Render above the hosting edit drawer: both Drawer and Modal default
         // to the 200 modal tier, so the confirm dialog needs an explicit lift.
@@ -625,7 +627,7 @@ function BasicsTab({
 
   return (
     <Stack gap="sm">
-      <Group grow align="flex-start">
+      <Group grow align="flex-start" className="projects-form-grid">
         <TextInput
           label="标题"
           value={draft.title}
@@ -641,7 +643,7 @@ function BasicsTab({
           styles={{ input: { color: 'var(--mantine-color-dimmed)', cursor: 'default' } }}
         />
       </Group>
-      <Group grow align="flex-start">
+      <Group grow align="flex-start" className="projects-form-grid">
         <Select
           label="状态"
           data={labeledData(PROJECT_STATUS_LABELS, PROJECT_STATUSES)}
@@ -872,7 +874,7 @@ function MilestoneEditor({
 
   return (
     <Stack gap="xs">
-      <Group grow align="flex-start">
+      <Group grow align="flex-start" className="projects-form-grid">
         <TextInput
           label="标题"
           value={title}
@@ -885,7 +887,7 @@ function MilestoneEditor({
           onChange={(value) => setStatus(value ?? 'planned')}
         />
       </Group>
-      <Group grow align="flex-start">
+      <Group grow align="flex-start" className="projects-form-grid">
         <TextInput
           label="目标"
           value={target}
@@ -1034,7 +1036,7 @@ function MilestonesTab({
           <Text fw={500} size="sm">
             添加里程碑
           </Text>
-          <Group grow align="flex-start">
+          <Group grow align="flex-start" className="projects-form-grid">
             <TextInput
               label="标题"
               value={title}
@@ -1120,8 +1122,8 @@ function TasksTab({
         </Text>
       ) : (
         <Card withBorder radius="md" p={0}>
-          <Table.ScrollContainer minWidth={420}>
-            <Table highlightOnHover>
+          <Table.ScrollContainer minWidth={0} className="projects-task-table-scroll">
+            <Table highlightOnHover className="projects-task-table">
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>任务</Table.Th>
@@ -1170,7 +1172,7 @@ function TasksTab({
           <Text fw={500} size="sm">
             新建项目任务
           </Text>
-          <Group grow align="flex-start">
+          <Group grow align="flex-start" className="projects-form-grid">
             <TextInput
               label="标题"
               value={title}
@@ -1224,6 +1226,7 @@ export function ProjectEditDrawer({
 }) {
   const board = useProjectBoard(profile);
   const projectCase = (board.data?.data.cases ?? []).find((item) => item.id === projectId);
+  const narrow = useMediaQuery('(max-width: 48em)') ?? false;
   const [basicsDirty, setBasicsDirty] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
@@ -1246,7 +1249,9 @@ export function ProjectEditDrawer({
       opened={projectId !== null}
       onClose={requestClose}
       position="right"
-      size="xl"
+      size={narrow ? '100%' : 'xl'}
+      classNames={{ content: 'projects-form', body: 'projects-edit-drawer-body' }}
+      closeButtonProps={{ 'aria-label': '关闭项目编辑' }}
       title={projectCase ? `编辑项目 · ${projectCase.title || projectCase.id}` : '编辑项目'}
       data-testid="project-edit-drawer"
     >

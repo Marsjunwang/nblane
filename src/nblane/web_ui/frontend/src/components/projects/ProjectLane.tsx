@@ -38,7 +38,6 @@ import {
   Group,
   Modal,
   Progress,
-  ScrollArea,
   Stack,
   Text,
   TextInput,
@@ -461,8 +460,8 @@ export function TaskLaneDnd({
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <ScrollArea>
-        <Group align="flex-start" wrap="nowrap" gap="sm" pb="xs">
+      <Box className="projects-lane-columns-viewport">
+        <Group className="projects-lane-columns" align="flex-start" wrap="wrap" gap="sm">
           {(['queue', 'doing'] as const).map((column) => (
             <LaneColumn
               key={column}
@@ -508,7 +507,7 @@ export function TaskLaneDnd({
             </LaneColumn>
           ))}
         </Group>
-      </ScrollArea>
+      </Box>
       <DragOverlay>
         {activeTask ? (
           <div style={{ width: 252, cursor: 'grabbing' }}>
@@ -588,6 +587,7 @@ export function DeleteHabitPlanModal({
       opened={opened}
       onClose={close}
       title={`删除计划 · ${plan.title}`}
+      classNames={{ content: 'projects-form' }}
       data-testid={`delete-habit-plan-modal-${plan.id}`}
     >
       <Stack gap="sm">
@@ -877,11 +877,12 @@ export function ProjectLane({
             </Text>
           )}
         </Group>
-        <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+        <Group gap="xs" wrap="nowrap" className="projects-lane-actions" style={{ flexShrink: 0 }}>
           <Text
             size="xs"
             component="button"
             type="button"
+            className="projects-done-toggle"
             aria-expanded={doneOpen}
             disabled={project.done_count === 0}
             onClick={() => setDoneOpen((open) => !open)}

@@ -193,6 +193,7 @@ export function NewHabitPlanModal({
       centered
       title={`新建阶段计划 · ${habitTitle}`}
       size="lg"
+      classNames={{ content: 'projects-form' }}
     >
       <Stack gap="sm" data-testid={`new-habit-plan-modal-${habit.id}`}>
         <Text size="sm" c="dimmed">

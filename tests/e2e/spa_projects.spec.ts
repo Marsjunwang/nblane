@@ -235,12 +235,22 @@ test.describe("SPA /projects shared selection & views", () => {
   test("?task= deep link opens the detail card; the view switch keeps it", async ({ page }) => {
     const title = `e2e-link-${Date.now()}`;
     const cardId = await seedQueueCard(page, title);
+    const longContext = Array.from({ length: 80 }, (_, index) => `第 ${index + 1} 段详细上下文`).join("\n");
+    const expanded = await page.request.patch(api(`/kanban/cards/${cardId}`), {
+      data: { context: longContext },
+    });
+    expect(expanded.status()).toBeLessThan(300);
 
     // Deep link straight into the detail card.
     await page.goto(spa(`projects?task=${cardId}`));
     const detail = page.getByTestId("task-detail-card");
     await expect(detail).toBeVisible();
     await expect(detail).toContainText(title);
+    const toolbarBox = await page.getByTestId("projects-toolbar").boundingBox();
+    const editBox = await detail.getByTestId("detail-edit").boundingBox();
+    expect(toolbarBox).toBeTruthy();
+    expect(editBox).toBeTruthy();
+    expect(toolbarBox!.y + toolbarBox!.height).toBeLessThanOrEqual(editBox!.y);
 
     // Switch to the timeline: the selection (and the card) survives.
     await page.getByText("时间轴", { exact: true }).click();

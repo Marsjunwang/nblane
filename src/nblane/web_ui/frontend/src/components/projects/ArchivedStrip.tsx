@@ -33,8 +33,7 @@ function ReadOnlyColumn({
   return (
     <Box
       p="sm"
-      w={280}
-      miw={280}
+      className="projects-lane-column"
       data-testid={`lane-column-${laneId}-${column}`}
       style={{
         background: 'rgba(16, 29, 48, 0.6)',
@@ -155,6 +154,7 @@ function ArchivedLane({
         <Group
           gap="xs"
           wrap="nowrap"
+          className="projects-archive-actions"
           style={{ flexShrink: 0, opacity: 1 }}
           data-testid={`archived-actions-${project.id}`}
         >
@@ -183,29 +183,26 @@ function ArchivedLane({
       </Group>
       {/* 视觉降级:月白 40% on the card columns; the header/actions stay
           readable so 恢复 and the drawer remain L1-reachable. */}
-      <Group
-        align="flex-start"
-        wrap="nowrap"
-        gap="sm"
-        style={{ overflowX: 'auto', opacity: 0.4 }}
-      >
-        <ReadOnlyColumn
-          title="Queue"
-          tasks={project.queue}
-          laneId={`archived-${project.id}`}
-          column="queue"
-          selectedTaskId={selectedTaskId}
-          onSelectTask={onSelectTask}
-        />
-        <ReadOnlyColumn
-          title="Doing"
-          tasks={project.doing}
-          laneId={`archived-${project.id}`}
-          column="doing"
-          selectedTaskId={selectedTaskId}
-          onSelectTask={onSelectTask}
-        />
-      </Group>
+      <Box className="projects-lane-columns-viewport" style={{ opacity: 0.4 }}>
+        <Group className="projects-lane-columns" align="flex-start" wrap="wrap" gap="sm">
+          <ReadOnlyColumn
+            title="Queue"
+            tasks={project.queue}
+            laneId={`archived-${project.id}`}
+            column="queue"
+            selectedTaskId={selectedTaskId}
+            onSelectTask={onSelectTask}
+          />
+          <ReadOnlyColumn
+            title="Doing"
+            tasks={project.doing}
+            laneId={`archived-${project.id}`}
+            column="doing"
+            selectedTaskId={selectedTaskId}
+            onSelectTask={onSelectTask}
+          />
+        </Group>
+      </Box>
     </Stack>
   );
 }

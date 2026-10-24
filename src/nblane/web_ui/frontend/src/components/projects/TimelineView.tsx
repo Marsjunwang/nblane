@@ -210,7 +210,7 @@ function RowLabel({
           )}
           <Box style={{ minWidth: 0 }}>
             <Group gap={6} wrap="nowrap">
-              <Text size="sm" fw={600} lineClamp={1} style={{ color: boardPalette.titleText }}>
+              <Text size="sm" fw={600} lineClamp={1} title={title} style={{ color: boardPalette.titleText }}>
                 {title}
               </Text>
               {badge && (
@@ -1486,19 +1486,24 @@ export function TimelineView({
   // 1px). Runs ONLY on first load / preset switch / focus / reset — panning
   // and Ctrl+wheel never retrigger it (they own the window/scroll state).
   const centerOnScale = useRef(true);
-  useEffect(() => {
+  const centerViewportOnToday = () => {
     const viewport = viewportRef.current;
-    if (!viewport || !today || !centerOnScale.current) {
+    centerOnScale.current = false;
+    if (!viewport || !today) {
       return;
     }
-    centerOnScale.current = false;
     const inWindow = today >= scale.start && today <= scale.end;
     const target = inWindow
       ? dateToX(today, scale) + labelWidth - viewport.clientWidth * 0.75
       : 0;
     viewport.scrollLeft = Math.max(0, target);
+  };
+  useEffect(() => {
+    if (centerOnScale.current) {
+      centerViewportOnToday();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scale.start, scale.end, today]);
+  }, [scale.start, scale.end, today, customWindow, zoom]);
 
   const applyPreset = (value: string) => {
     setZoom(value as TimelineZoom);
@@ -1607,83 +1612,133 @@ export function TimelineView({
   return (
     <LabelWidthContext.Provider value={labelWidth}>
     <Stack gap="xs" data-testid="timeline-view">
-      {/* Toolbar: 历史/归档 toggles, zoom presets, 项目筛选, 重置视图. */}
-      <Group gap="md" wrap="wrap" data-testid="timeline-toolbar">
-        <Switch
-          size="sm"
-          label="历史"
-          checked={showHistory}
-          onChange={(event) => setShowHistory(event.currentTarget.checked)}
-          data-testid="timeline-history-toggle"
-          styles={{ label: { color: boardPalette.dim } }}
-        />
-        <Switch
-          size="sm"
-          label="归档项目"
-          checked={showArchived}
-          onChange={(event) => {
-            setShowArchived(event.currentTarget.checked);
-            saveArchivedVisible(window.localStorage, event.currentTarget.checked);
-          }}
-          data-testid="timeline-archived-toggle"
-          styles={{ label: { color: boardPalette.dim } }}
-        />
-        <SegmentedControl
-          size="xs"
-          value={customWindow ? '' : zoom}
-          onChange={applyPreset}
-          data={[
-            { label: '周', value: 'week' },
-            { label: '月', value: 'month' },
-            { label: '季', value: 'quarter' },
-            { label: '半年', value: 'half' },
-            { label: '全部', value: 'all' },
-          ]}
-          data-testid="timeline-zoom-toggle"
-        />
-        <MultiSelect
-          size="xs"
-          w={220}
-          data={allProjects.map((project) => ({
-            value: project.id,
-            label: project.title || project.id,
-          }))}
-          value={allProjectIds.filter((id) => selectedProjects.has(id))}
-          onChange={(values) => {
-            const next = new Set(values);
-            setFilterSelection(next);
-            saveProjectFilter(window.localStorage, next);
-          }}
-          placeholder="筛选项目"
-          searchable
-          rightSection={
-            <Text size="xs" style={{ color: boardPalette.dim, whiteSpace: 'nowrap' }} component="span">
-              {selectedProjects.size}/{allProjectIds.length}
-            </Text>
-          }
-          rightSectionWidth={52}
-          data-testid="timeline-project-filter"
-          styles={{
-            input: { background: boardPalette.groundSoft, borderColor: boardPalette.border },
-            // 紧凑: no pill wrap — selection count lives in the right section,
-            // toggling happens in the dropdown (options stay listed).
-            pill: { display: 'none' },
-          }}
-        />
-        <Text size="xs" style={{ color: boardPalette.dim }}>
-          {scale.start} → {scale.end}
-        </Text>
-        <Button
-          variant="subtle"
-          size="compact-sm"
-          leftSection={<IconRestore size={14} />}
-          onClick={resetView}
-          data-testid="timeline-reset-view"
-          style={{ color: boardPalette.dim }}
-        >
-          重置视图
-        </Button>
-      </Group>
+      <Stack gap="xs" data-testid="timeline-toolbar" className="projects-form">
+        <Group gap="xs" wrap="nowrap" data-testid="timeline-navigation">
+          <Tooltip label="向前翻页：较早的时间" withinPortal>
+            <ActionIcon
+              variant="subtle"
+              size={narrow ? 'lg' : 'md'}
+              aria-label="时间轴向前翻页"
+              onClick={() => panBy(-(daysBetween(scale.start, scale.end) + 1))}
+              data-testid="timeline-older"
+              style={{ color: boardPalette.goldText }}
+            >
+              <IconChevronRight size={18} style={{ transform: 'rotate(180deg)' }} />
+            </ActionIcon>
+          </Tooltip>
+          <Button
+            variant={customWindow ? 'light' : 'subtle'}
+            size={narrow ? 'sm' : 'compact-sm'}
+            onClick={() => {
+              setCustomWindow(null);
+              if (customWindow) {
+                centerOnScale.current = true;
+              } else {
+                centerViewportOnToday();
+              }
+            }}
+            aria-label="时间轴回到今天"
+            data-testid="timeline-today"
+            style={{ flex: 1, color: boardPalette.dim }}
+          >
+            {scale.start} → {scale.end}
+          </Button>
+          <Tooltip label="向后翻页：较新的时间" withinPortal>
+            <ActionIcon
+              variant="subtle"
+              size={narrow ? 'lg' : 'md'}
+              aria-label="时间轴向后翻页"
+              onClick={() => panBy(daysBetween(scale.start, scale.end) + 1)}
+              data-testid="timeline-newer"
+              style={{ color: boardPalette.goldText }}
+            >
+              <IconChevronRight size={18} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+        <Group gap={narrow ? 'xs' : 'md'} wrap="wrap">
+          <SegmentedControl
+            size={narrow ? 'sm' : 'xs'}
+            value={customWindow ? '' : zoom}
+            onChange={applyPreset}
+            data={[
+              { label: '周', value: 'week' },
+              { label: '月', value: 'month' },
+              { label: '季', value: 'quarter' },
+              { label: '半年', value: 'half' },
+              { label: '全部', value: 'all' },
+            ]}
+            style={{ flex: narrow ? 1 : undefined, minWidth: 0, minHeight: narrow ? 44 : undefined }}
+            aria-label="时间轴缩放"
+            data-testid="timeline-zoom-toggle"
+          />
+          <MultiSelect
+            size={narrow ? 'sm' : 'xs'}
+            w={narrow ? 132 : 220}
+            data={allProjects.map((project) => ({
+              value: project.id,
+              label: project.title || project.id,
+            }))}
+            value={allProjectIds.filter((id) => selectedProjects.has(id))}
+            onChange={(values) => {
+              const next = new Set(values);
+              setFilterSelection(next);
+              saveProjectFilter(window.localStorage, next);
+            }}
+            placeholder="筛选项目"
+            searchable
+            rightSection={
+              <Text size="xs" style={{ color: boardPalette.dim, whiteSpace: 'nowrap' }} component="span">
+                {selectedProjects.size}/{allProjectIds.length}
+              </Text>
+            }
+            rightSectionWidth={52}
+            data-testid="timeline-project-filter"
+            styles={{
+              input: {
+                background: boardPalette.groundSoft,
+                borderColor: boardPalette.border,
+                minHeight: narrow ? 44 : undefined,
+              },
+              pill: { display: 'none' },
+            }}
+          />
+        </Group>
+        <Group gap={narrow ? 'xs' : 'md'} wrap="wrap">
+          <Group gap={narrow ? 'xs' : 'md'} wrap="nowrap" style={{ flexShrink: 0 }}>
+            <Switch
+              size="sm"
+              label="历史"
+              checked={showHistory}
+              onChange={(event) => setShowHistory(event.currentTarget.checked)}
+              data-testid="timeline-history-toggle"
+              styles={{ root: { minHeight: narrow ? 44 : undefined }, label: { color: boardPalette.dim } }}
+            />
+            <Switch
+              size="sm"
+              label="归档项目"
+              checked={showArchived}
+              onChange={(event) => {
+                setShowArchived(event.currentTarget.checked);
+                saveArchivedVisible(window.localStorage, event.currentTarget.checked);
+              }}
+              data-testid="timeline-archived-toggle"
+              styles={{ root: { minHeight: narrow ? 44 : undefined }, label: { color: boardPalette.dim } }}
+            />
+          </Group>
+          <Button
+            variant="subtle"
+            size={narrow ? 'sm' : 'compact-sm'}
+            ml={narrow ? 'auto' : undefined}
+            leftSection={<IconRestore size={14} />}
+            onClick={resetView}
+            data-testid="timeline-reset-view"
+            style={{ color: boardPalette.dim }}
+          >
+            重置视图
+          </Button>
+        </Group>
+      </Stack>
 
       {/* Plain scrollport, not ScrollArea: overflowY hidden means the
           timeline never owns the vertical wheel — it chains straight to the
@@ -1701,6 +1756,7 @@ export function TimelineView({
             minWidth: labelWidth + width,
             cursor: panning ? 'grabbing' : undefined,
             userSelect: panning ? 'none' : undefined,
+            touchAction: 'pan-y pinch-zoom',
           }}
         >
           {/* Month axis */}
@@ -1795,18 +1851,19 @@ export function TimelineView({
             <Stack key={group.id} gap={0} data-testid={`timeline-group-${group.id}`}>
               <Group wrap="nowrap" gap={0}>
                 <Box
-                  w={labelWidth}
-                  miw={labelWidth}
+                  w={narrow ? '100%' : labelWidth}
+                  miw={narrow ? '100%' : labelWidth}
                   pl="sm"
-                  py={4}
+                  py={narrow ? 8 : 4}
                   style={{
                     position: 'sticky',
                     left: 0,
                     zIndex: 2,
+                    flexShrink: 0,
                     background: boardPalette.ground,
                   }}
                 >
-                  <Text fw={700} size="sm" style={{ color: boardPalette.goldText }}>
+                  <Text fw={700} size="sm" style={{ color: boardPalette.goldText, overflowWrap: 'anywhere' }}>
                     {group.title}
                   </Text>
                 </Box>

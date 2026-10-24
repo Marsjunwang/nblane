@@ -26,6 +26,7 @@ import {
   TextInput,
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { IconArrowRight, IconPencil, IconSparkles, IconTrash, IconX } from '@tabler/icons-react';
 import 'dayjs/locale/zh-cn';
@@ -237,6 +238,7 @@ export function TaskDetailCard({
   onClose: () => void;
   onRefresh: () => void;
 }) {
+  const narrow = useMediaQuery('(max-width: 48em)') ?? false;
   const moveCard = useMoveKanbanCard(profile);
   const doneCard = useDoneKanbanCard(profile);
   const scheduleCard = useScheduleKanbanCard(profile);
@@ -432,9 +434,11 @@ export function TaskDetailCard({
     <Modal
       opened
       onClose={onClose}
-      centered
-      size="lg"
+      centered={!narrow}
+      size={narrow ? '100%' : 'lg'}
+      fullScreen={narrow}
       withCloseButton={false}
+      classNames={{ content: 'projects-form projects-task-detail' }}
       styles={{
         content: { background: 'transparent' },
         body: { padding: 0 },
@@ -485,12 +489,13 @@ export function TaskDetailCard({
             </InscriptionRow>
           )}
           <InscriptionRow label="排期">
-            <Group gap="xs" wrap="nowrap">
+            <Group gap="xs" wrap="wrap" className="projects-schedule-fields">
               {/* Mantine DateInput: native type=date renders the browser
                   locale's mm/dd/yyyy for en-locale browsers; DateInput pins
                   the display to valueFormat regardless of browser locale. */}
               <DateInput
                 size="xs"
+                className="projects-schedule-date"
                 aria-label="排期开始"
                 valueFormat="YYYY-MM-DD"
                 placeholder="YYYY-MM-DD"
@@ -499,9 +504,10 @@ export function TaskDetailCard({
                 value={plannedStart || null}
                 onChange={(value) => setPlannedStart(value ?? '')}
               />
-              <Text size="sm">→</Text>
+              <Text size="sm" className="projects-schedule-arrow">→</Text>
               <DateInput
                 size="xs"
+                className="projects-schedule-date"
                 aria-label="排期结束"
                 valueFormat="YYYY-MM-DD"
                 placeholder="YYYY-MM-DD"

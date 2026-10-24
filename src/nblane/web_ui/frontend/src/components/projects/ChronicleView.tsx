@@ -15,8 +15,9 @@
 // the cursor date. Read-only: hover/click any mark opens the 铭文卡 with a
 // 去编辑 jump to the kanban view. No milestones, no zebra, no ground blocks.
 
-import { Box, Button, Group, MultiSelect, Popover, Stack, Text, Tooltip } from '@mantine/core';
-import { IconRestore } from '@tabler/icons-react';
+import { ActionIcon, Box, Button, Group, MultiSelect, Popover, Select, Stack, Text, Tooltip } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
+import { IconChevronDown, IconChevronUp, IconRestore, IconX } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
@@ -134,13 +135,13 @@ function placeEvents(events: ChronicleEvent[], scale: RowScale): PlacedEvent[] {
     }
     placed.push({ event, x0, x1, cx: (x0 + x1) / 2 });
   }
-  // Point marks (done 刻点 / someday 虚位) render AFTER range bars so they
-  // stay clickable/hoverable on days a bar also covers.
+  // Range bars sit below single-day tasks; done/someday point marks stay on
+  // the top layer so overlapping dates do not make them impossible to tap.
   placed
     .sort((a, b) => a.cx - b.cx)
     .sort((a, b) => {
-      const pa = a.event.kind === 'done' || a.event.kind === 'someday' ? 1 : 0;
-      const pb = b.event.kind === 'done' || b.event.kind === 'someday' ? 1 : 0;
+      const pa = a.event.kind === 'done' || a.event.kind === 'someday' ? 2 : a.event.start === a.event.end ? 1 : 0;
+      const pb = b.event.kind === 'done' || b.event.kind === 'someday' ? 2 : b.event.start === b.event.end ? 1 : 0;
       return pa - pb;
     });
   // 同日完成扇排: done events sharing one completion date fan out around the
@@ -436,6 +437,7 @@ function EventMark({
           <Box
             role="button"
             tabIndex={0}
+            className="chronicle-event-hit"
             aria-label={`大事记事件 ${event.title}`}
             data-testid={`chronicle-event-${event.id}`}
             data-kind={event.kind}
@@ -661,10 +663,9 @@ function InspectorRow({
 }
 
 /**
- * 上下文小窗 (inspector): fixed bottom-right floating panel, 石刻风 (ground
- * 底 + 细金边,半透不挡轴). Shows the selected event's mini 铭文卡 plus the
- * reading-order neighbors (前 3 / 后 3, current row highlighted); clicking a
- * neighbor jumps the selection. Auto-hides with no selection.
+ * 上下文小窗 (inspector): desktop floats bottom-right; phones place it below
+ * the canvas. Shows the selected event and reading-order neighbors, with an
+ * explicit close action. Auto-hides with no selection.
  */
 function ChronicleInspector({
   event,
@@ -673,7 +674,9 @@ function ChronicleInspector({
   after,
   eventById,
   projectTitles,
+  narrow,
   onJump,
+  onClose,
 }: {
   event: ChronicleEvent;
   projectTitle: string;
@@ -681,7 +684,9 @@ function ChronicleInspector({
   after: string[];
   eventById: Map<string, ChronicleEvent>;
   projectTitles: Map<string, string>;
+  narrow: boolean;
   onJump: (id: string) => void;
+  onClose: () => void;
 }) {
   const statusLine = [
     STATUS_LABELS[event.kind],
@@ -694,30 +699,41 @@ function ChronicleInspector({
   return (
     <Box
       data-testid="chronicle-inspector"
+      className="chronicle-inspector"
       style={{
-        position: 'fixed',
-        right: 20,
-        bottom: 20,
-        width: 320,
-        // Below Mantine's modal/drawer layer (200) so the detail card and the
-        // project drawer always cover it; above the board content.
-        zIndex: 150,
+        position: narrow ? 'relative' : 'fixed',
+        right: narrow ? 'auto' : 20,
+        bottom: narrow ? 'auto' : 20,
+        width: narrow ? '100%' : 320,
+        zIndex: narrow ? 'auto' : 150,
+        marginTop: narrow ? 8 : 0,
         background: boardPalette.ground,
         border: `1px solid ${inscription.borderColor}`,
         borderRadius: 10,
         padding: '10px 12px',
-        boxShadow: '0 6px 24px rgba(0, 0, 0, 0.45)',
+        boxShadow: narrow ? 'none' : '0 6px 24px rgba(0, 0, 0, 0.45)',
         opacity: 0.96,
       }}
     >
-      <Text size="xs" mb={6} style={{ color: DIM_DEEP, fontSize: 10 }} data-testid="chronicle-inspector-hint">
-        ←/→ 或 j/k 移动 · Enter 详情 · Esc 关闭
-      </Text>
+      <Group justify="space-between" wrap="nowrap" gap="xs" mb={6}>
+        <Text size="xs" style={{ color: DIM_DEEP, fontSize: 10 }} data-testid="chronicle-inspector-hint">
+          {narrow ? '点按相邻事件切换' : '←/→ 或 j/k 移动 · Enter 详情 · Esc 关闭'}
+        </Text>
+        <ActionIcon
+          variant="subtle"
+          size={narrow ? 'lg' : 'sm'}
+          aria-label="关闭大事记详情"
+          onClick={onClose}
+          data-testid="chronicle-inspector-close"
+        >
+          <IconX size={16} />
+        </ActionIcon>
+      </Group>
       <Stack gap={2} mb={6}>
         <Text
-          size="sm"
+          size={narrow ? 'md' : 'sm'}
           fw={600}
-          lineClamp={1}
+          lineClamp={narrow ? 2 : 1}
           style={{ color: inscription.titleColor, fontFamily: inscription.titleFontFamily }}
         >
           {event.glyph ? `${event.glyph} ` : ''}
@@ -780,6 +796,7 @@ export function ChronicleView({
   kanbanArchive,
   onEditTask,
 }: ChronicleViewProps) {
+  const narrow = useMediaQuery('(max-width: 48em)') ?? false;
   const today = board.today || '';
   const [searchParams, setSearchParams] = useSearchParams();
   const [initialUrl] = useState(() => decodeChronicleParams(searchParams));
@@ -847,7 +864,9 @@ export function ChronicleView({
     [laneProjects, unassigned, kanbanSections, kanbanArchive, today, selectedForEvents],
   );
 
-  // Canvas size drives both the plot width and the adaptive row count.
+  // Canvas size drives the plot width and row count. Desktop uses the actual
+  // space left below the toolbar; phones keep a comfortable partial-screen
+  // canvas so their inline inspector remains reachable by page scroll.
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
@@ -855,17 +874,24 @@ export function ChronicleView({
     if (!viewport) {
       return;
     }
-    const update = () =>
-      setViewportSize({ width: viewport.clientWidth, height: viewport.clientHeight });
+    const update = () => {
+      const height = narrow
+        ? Math.max(360, window.innerHeight * 0.52)
+        : Math.max(320, window.innerHeight - viewport.getBoundingClientRect().top - 24);
+      setViewportSize({ width: viewport.clientWidth, height });
+    };
     update();
+    window.addEventListener('resize', update);
     if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', update);
       return () => window.removeEventListener('resize', update);
     }
     const observer = new ResizeObserver(update);
     observer.observe(viewport);
-    return () => observer.disconnect();
-  }, []);
+    return () => {
+      window.removeEventListener('resize', update);
+      observer.disconnect();
+    };
+  }, [narrow, selectedProjects.size, allProjectIds.length, span]);
 
   const plotW = Math.max(240, viewportSize.width - PLOT_X - RIGHT_RESERVE);
   const rowCount = chronicleRowsForHeight(viewportSize.height);
@@ -1112,52 +1138,130 @@ export function ChronicleView({
 
   return (
     <Stack gap="xs" data-testid="chronicle-view">
-      {/* Toolbar: 项目筛选 (shared with the timeline), span readout, 重置视图. */}
-      <Group gap="md" wrap="wrap" data-testid="chronicle-toolbar">
-        <MultiSelect
-          size="xs"
-          w={220}
-          data={allProjects.map((project) => ({
-            value: project.id,
-            label: project.title || project.id,
-          }))}
-          value={allProjectIds.filter((id) => selectedProjects.has(id))}
-          onChange={(values) => {
-            const next = new Set(values);
-            setFilterSelection(next);
-            saveProjectFilter(window.localStorage, next, CHRONICLE_FILTER_KEY);
-          }}
-          placeholder="筛选项目"
-          searchable
-          rightSection={
-            <Text size="xs" style={{ color: boardPalette.dim, whiteSpace: 'nowrap' }} component="span">
-              {selectedProjects.size}/{allProjectIds.length}
-            </Text>
-          }
-          rightSectionWidth={52}
-          data-testid="chronicle-project-filter"
-          styles={{
-            input: { background: boardPalette.groundSoft, borderColor: boardPalette.border },
-            pill: { display: 'none' },
-          }}
-        />
-        <Text size="xs" style={{ color: boardPalette.dim }} data-testid="chronicle-span-readout">
-          每行 {span} 天 · {rows.length > 0 ? `${rows[rows.length - 1].start} → ${rows[0].end}` : ''}
-        </Text>
+      <Stack gap="xs" data-testid="chronicle-toolbar" className="projects-form">
+        <Group gap="xs" wrap="nowrap">
+          <MultiSelect
+            size={narrow ? 'sm' : 'xs'}
+            data={allProjects.map((project) => ({
+              value: project.id,
+              label: project.title || project.id,
+            }))}
+            value={allProjectIds.filter((id) => selectedProjects.has(id))}
+            onChange={(values) => {
+              const next = new Set(values);
+              setFilterSelection(next);
+              saveProjectFilter(window.localStorage, next, CHRONICLE_FILTER_KEY);
+            }}
+            placeholder="筛选项目"
+            searchable
+            rightSection={
+              <Text size="xs" style={{ color: boardPalette.dim, whiteSpace: 'nowrap' }} component="span">
+                {selectedProjects.size}/{allProjectIds.length}
+              </Text>
+            }
+            rightSectionWidth={52}
+            data-testid="chronicle-project-filter"
+            style={{ flex: 1, minWidth: 0 }}
+            styles={{
+              input: {
+                background: boardPalette.groundSoft,
+                borderColor: boardPalette.border,
+                minHeight: narrow ? 44 : undefined,
+              },
+              pill: { display: 'none' },
+            }}
+          />
+          <Select
+            size={narrow ? 'sm' : 'xs'}
+            w={narrow ? 132 : 140}
+            aria-label="每行天数"
+            data={Array.from(new Set([7, 30, 90, 180, 365, span]))
+              .sort((a, b) => a - b)
+              .map((value) => ({
+                value: String(value),
+                label: narrow ? `${value} 天/行` : `每行 ${value} 天`,
+              }))}
+            value={String(span)}
+            onChange={(value) => {
+              if (value) {
+                setSpan(clampChronicleSpan(Number(value)));
+                setOpenCardId(null);
+              }
+            }}
+            allowDeselect={false}
+            data-testid="chronicle-span-select"
+            styles={{
+              input: {
+                background: boardPalette.groundSoft,
+                borderColor: boardPalette.border,
+                minHeight: narrow ? 44 : undefined,
+              },
+            }}
+          />
+        </Group>
+        <Group grow gap="xs" wrap="nowrap" data-testid="chronicle-navigation">
+          <Button
+            variant="subtle"
+            size={narrow ? 'sm' : 'compact-sm'}
+            leftSection={<IconChevronUp size={15} />}
+            disabled={!today}
+            onClick={() => {
+              setAnchor(panChronicle(anchor, span, today));
+              setOpenCardId(null);
+            }}
+            data-testid="chronicle-newer"
+          >
+            较新
+          </Button>
+          <Button
+            variant="subtle"
+            size={narrow ? 'sm' : 'compact-sm'}
+            disabled={!today}
+            onClick={() => {
+              setAnchor(defaultChronicleAnchor(today, span));
+              setOpenCardId(null);
+            }}
+            data-testid="chronicle-today-button"
+          >
+            回到今天
+          </Button>
+          <Button
+            variant="subtle"
+            size={narrow ? 'sm' : 'compact-sm'}
+            rightSection={<IconChevronDown size={15} />}
+            disabled={!today}
+            onClick={() => {
+              setAnchor(panChronicle(anchor, -span, today));
+              setOpenCardId(null);
+            }}
+            data-testid="chronicle-older"
+          >
+            较早
+          </Button>
+        </Group>
+        <Group justify="space-between" wrap="nowrap" gap="xs">
+          <Text size="xs" style={{ color: boardPalette.dim, minWidth: 0 }} data-testid="chronicle-span-readout">
+            每行 {span} 天 · {rows.length > 0 ? `${rows[rows.length - 1].start} → ${rows[0].end}` : ''}
+          </Text>
+          <Tooltip label="重置视图" withinPortal>
+            <ActionIcon
+              variant="subtle"
+              size={narrow ? 'lg' : 'md'}
+              aria-label="重置大事记视图"
+              onClick={resetView}
+              data-testid="chronicle-reset-view"
+              style={{ color: boardPalette.dim, flexShrink: 0 }}
+            >
+              <IconRestore size={16} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
         <Text size="xs" style={{ color: DIM_DEEP }}>
-          刻点=完成(顶部图形=项目 ●◆■▲★✦◈✚) · 金条=进行 · 虚框=排期 · 虚点=虚位 · ///=断轴 · ▲=今天
+          {narrow
+            ? '刻点=完成 · 金条=进行 · 虚框=排期 · 虚点=虚位'
+            : '刻点=完成(顶部图形=项目 ●◆■▲★✦◈✚) · 金条=进行 · 虚框=排期 · 虚点=虚位 · ///=断轴 · ▲=今天'}
         </Text>
-        <Button
-          variant="subtle"
-          size="compact-sm"
-          leftSection={<IconRestore size={14} />}
-          onClick={resetView}
-          data-testid="chronicle-reset-view"
-          style={{ color: boardPalette.dim }}
-        >
-          重置视图
-        </Button>
-      </Group>
+      </Stack>
 
       {allProjectIds.length > 0 && selectedProjects.size === 0 && (
         <Group gap="sm" data-testid="chronicle-filter-empty">
@@ -1182,12 +1286,20 @@ export function ChronicleView({
         ref={viewportRef}
         data-testid="chronicle-scrollport"
         tabIndex={0}
-        h="calc(100vh - 236px)"
-        mih={320}
+        mih={narrow ? 360 : 320}
         onKeyDown={onViewportKeyDown}
         onClick={onViewportClick}
         className="chronicle-scrollport"
-        style={{ overflow: 'hidden', position: 'relative' }}
+        style={{
+          overflow: 'hidden',
+          position: 'relative',
+          height:
+            viewportSize.height > 0
+              ? viewportSize.height
+              : narrow
+                ? '52dvh'
+                : 'calc(100vh - 236px)',
+        }}
       >
         {rows.map((row, rowIndex) => {
           const scale = rowScales[rowIndex];
@@ -1503,9 +1615,14 @@ export function ChronicleView({
               after={after}
               eventById={eventById}
               projectTitles={projectTitles}
+              narrow={narrow}
               onJump={(id) => {
                 setSelectedEventId(id);
                 viewportRef.current?.focus();
+              }}
+              onClose={() => {
+                setSelectedEventId(null);
+                setOpenCardId(null);
               }}
             />
           );

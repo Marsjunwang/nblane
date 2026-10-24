@@ -100,7 +100,14 @@ export function NewProjectModal({
   };
 
   return (
-    <Modal opened={opened} onClose={onClose} centered title="新建项目" size="lg">
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      centered
+      title="新建项目"
+      size="lg"
+      classNames={{ content: 'projects-form' }}
+    >
       <Stack gap="sm" data-testid="create-case-form">
         <Group grow align="flex-start">
           <TextInput

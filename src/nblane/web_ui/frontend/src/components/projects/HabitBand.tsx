@@ -427,6 +427,7 @@ function DeleteHabitModal({
       opened={opened}
       onClose={close}
       title={`删除习惯 · ${title}`}
+      classNames={{ content: 'projects-form' }}
       data-testid={`delete-habit-modal-${habit.id}`}
     >
       <Stack gap="sm">

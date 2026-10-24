@@ -6,9 +6,6 @@ import type { ReactNode } from 'react';
 import type { ProjectsBoardTask } from '../../api/types';
 import { boardPalette } from './palette';
 
-/** Column card-list cap (px): roughly 8 cards before it scrolls in place. */
-export const LANE_COLUMN_MAX_HEIGHT = 560;
-
 /** Droppable id for one lane column (unique per lane + column). */
 export function laneColumnDroppableId(laneId: string, column: string): string {
   return `lane::${laneId}::${column}`;
@@ -40,8 +37,7 @@ export function LaneColumn({
       ref={setNodeRef}
       radius="md"
       p="sm"
-      w={280}
-      miw={280}
+      className="projects-lane-column"
       data-testid={`lane-column-${laneId}-${column}`}
       data-drop-target={highlighted ? 'true' : undefined}
       style={{
@@ -66,15 +62,13 @@ export function LaneColumn({
       </Group>
       <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
         {quickAdd && <div style={{ marginBottom: 8 }}>{quickAdd}</div>}
-        {/* mih keeps empty columns reachable as drop targets; the max height
-            stops one long column (a 46-card 未归属 Queue) from stretching the
-            page by thousands of px — it scrolls in place instead (dnd-kit
-            auto-scrolls the column while dragging). */}
+        {/* Empty columns stay reachable as drop targets. Wide screens cap long
+            lists in CSS; phones use the page's natural vertical scroll. */}
         <Stack
           gap="xs"
           mih={48}
+          className="projects-lane-list"
           data-testid={`lane-scroll-${laneId}-${column}`}
-          style={{ maxHeight: LANE_COLUMN_MAX_HEIGHT, overflowY: 'auto', overscrollBehavior: 'contain' }}
         >
           {children}
         </Stack>

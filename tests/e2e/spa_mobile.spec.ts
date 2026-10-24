@@ -5,35 +5,23 @@ import type { APIRequestContext, Page } from "@playwright/test";
  * Mobile viewport (375×812, iPhone) spot-checks for the SPA — the automated
  * arm of the SPA manual (docs/zh/guides/web-ui.md),
  * against the isolated sandbox (`scripts/dev-web.sh --isolated`, profile=dev).
- * 10 tests across five groups:
- *
  * Coverage:
  *  a) navigation: hamburger open/close, every menu entry clickable, 项目
  *     navigates and collapses the drawer;
- *  b) the wide-content pages (项目抽屉/研究台 keep wide tables; 证据 is
- *     now the Phase 1 single page with the five-stage nav): tables stay
- *     inside their Table.ScrollContainer and the document never overflows
- *     horizontally;
- *  c) projects lane touch drag: a real CDP touch gesture (press-and-hold past
- *     the dnd-kit TouchSensor 250ms delay, then drag) moves a card
- *     Queue→Doing inside its lane, plus the detail-card 移至 Doing fallback
- *     over tap;
+ *  b) project editor: full-width form fields and adaptive task rows fit the
+ *     phone without horizontal overflow;
+ *  c) project touch journeys: quick-add and edit-save, vertical Queue→Doing
+ *     long-press drag, the detail-card fallback, and touch navigation in the
+ *     timeline and chronicle;
  *  d) content editor: top bar stays inside 375px (lesser controls in the ⋯
  *     overflow menu), 发布 opens its dialog, autosave is observable on the
  *     compact save icon, and desktop-pinned panels never auto-open drawers.
  *
- * Touch-drag geometry notes (hard-won, do not "simplify"):
- *  - The dragged card is seeded via API and moved to the Queue HEAD: the
- *    columns are only as tall as their content, so at the tail card's scroll
- *    depth the shorter columns' boxes have long ended and the pointer hovers
- *    dead space (collision resolves nowhere). At the column head all four
- *    column boxes coexist on the first screen.
- *  - Seeding via API (not the UI form) avoids the success notification
- *    overlaying the card and swallowing the touchstart.
- *  - Doing and Queue never share a 375px viewport (Doing 16..296, Queue
- *    608..888), so the drag parks near the left edge with a small jiggle and
- *    lets dnd-kit auto-scroll the column strip until Doing slides under the
- *    pointer (observed: highlight fires around scrollLeft≈250).
+ * Touch-drag geometry notes:
+ *  - A dedicated one-card project keeps the empty Doing column below Queue
+ *    inside the same viewport, so the CDP gesture tests the real vertical drop.
+ *  - Seeding via API avoids a success notification covering the touchstart;
+ *    the press-and-hold exceeds dnd-kit's 250ms TouchSensor delay.
  *
  * Every entity the suite creates carries a unique `e2e-mob-<ts>` prefix so
  * reruns never collide with existing sandbox data or other specs.
@@ -76,37 +64,20 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   ).toBeLessThanOrEqual(metrics.inner + 2);
 }
 
-/**
- * Every table on the page must live inside a Mantine Table.ScrollContainer
- * whose viewport clips the overflow (scrollWidth > clientWidth at 375px) and
- * actually scrolls horizontally.
- */
-async function expectTablesScrollable(page: Page, minContainers = 1): Promise<void> {
-  const containers = page.locator(".mantine-TableScrollContainer-scrollContainer");
-  const count = await containers.count();
-  expect(count, "page should render its table(s) inside Table.ScrollContainer").toBeGreaterThanOrEqual(
-    minContainers,
-  );
-  for (let i = 0; i < count; i++) {
-    const result = await containers.nth(i).evaluate((el) => {
-      const viewport = el.querySelector("[class*='ScrollArea-viewport']") as HTMLElement | null;
-      const target = viewport ?? (el as HTMLElement);
-      const wider = target.scrollWidth > target.clientWidth;
-      let scrolled = true;
-      if (wider) {
-        target.scrollLeft = 80;
-        scrolled = target.scrollLeft > 0;
-        target.scrollLeft = 0;
-      }
-      return { wider, scrolled, scrollWidth: target.scrollWidth, clientWidth: target.clientWidth };
-    });
-    expect(
-      result.wider,
-      `table scroll container ${i} should be wider than its ${result.clientWidth}px viewport ` +
-        `(scrollWidth=${result.scrollWidth}) — the wide-table scenario this test exists for`,
-    ).toBe(true);
-    expect(result.scrolled, `table scroll container ${i} must scroll horizontally`).toBe(true);
-  }
+async function expectDrawerFits(page: Page): Promise<void> {
+  const drawer = page.locator(".mantine-Drawer-content");
+  await expect
+    .poll(() =>
+      drawer.evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        return (
+          rect.left >= -1 &&
+          rect.right <= window.innerWidth + 1 &&
+          el.scrollWidth <= el.clientWidth + 1
+        );
+      }),
+    )
+    .toBe(true);
 }
 
 /** Seed a kanban card via the API (no UI notification overlaying the board). */
@@ -114,11 +85,12 @@ async function seedKanbanCard(
   request: APIRequestContext,
   title: string,
   section = "Queue",
-): Promise<void> {
+): Promise<string> {
   const response = await request.post(api("/kanban/cards"), {
     data: { title, section, context: "" },
   });
   expect(response.status(), "kanban card seed should succeed").toBe(201);
+  return ((await response.json()) as { card: { id: string } }).card.id;
 }
 
 /** Navbar slide state: Mantine collapses with translateX(-width), display stays flex. */
@@ -199,7 +171,7 @@ test.describe("SPA mobile 375px — 导航", () => {
   });
 });
 
-test.describe("SPA mobile 375px — 宽表格五页", () => {
+test.describe("SPA mobile 375px — 窄屏页面与编辑布局", () => {
   test("证据页(单页五阶段): 阶段导航可见且文档不溢出", async ({ page }) => {
     await page.goto(spa("evidence"));
     // Phase 1 single page: card list + stage nav instead of a wide table.
@@ -216,32 +188,59 @@ test.describe("SPA mobile 375px — 宽表格五页", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("项目页编辑抽屉: 案例任务表格横向滚动且文档不溢出", async ({ page, request }) => {
-    // Seed a case with one task so the drawer 任务 tab renders its table.
+  test("项目页编辑抽屉: 全宽表单、任务行自适应且文档不溢出", async ({ page, request }) => {
     const run = Date.now();
+    const caseTitle = `e2e-mob-case-${run}`;
+    const taskTitle = `e2e-mob-task-${run}`;
     const create = await request.post(api("/project-board/cases"), {
-      data: { title: `e2e-mob-case-${run}` },
+      data: { title: caseTitle },
     });
     expect(create.status(), "project case seed should succeed").toBe(201);
     const caseId: string = (await create.json()).case.id;
-    const task = await request.post(api(`/project-board/cases/${caseId}/tasks`), {
-      data: { title: `e2e-mob-task-${run}`, section: "Queue", milestone_id: "", context: "", date: "" },
-    });
-    expect(task.status(), "project task seed should succeed").toBe(201);
+    let taskId = "";
+    try {
+      const task = await request.post(api(`/project-board/cases/${caseId}/tasks`), {
+        data: { title: taskTitle, section: "Queue", milestone_id: "", context: "", date: "" },
+      });
+      expect(task.status(), "project task seed should succeed").toBe(201);
+      taskId = (await task.json()).card.id;
 
-    await page.goto(spa("projects"));
-    const lane = page.getByTestId(`project-lane-${caseId}`);
-    await expect(lane).toBeVisible();
-    await lane.getByRole("button", { name: `编辑项目 e2e-mob-case-${run}` }).tap();
-    const detail = page.getByTestId("case-detail");
-    await expect(detail).toBeVisible();
-    await detail.getByRole("tab", { name: "任务" }).tap();
-    await expect(page.locator("table").first()).toBeVisible();
-    await expect(
-      page.locator("[data-testid^='project-task-']").getByText(`e2e-mob-task-${run}`),
-    ).toBeVisible();
-    await expectTablesScrollable(page);
-    await expectNoHorizontalOverflow(page);
+      await page.goto(spa("projects"));
+      const lane = page.getByTestId(`project-lane-${caseId}`);
+      await expect(lane).toBeVisible();
+      await lane.getByRole("button", { name: `编辑项目 ${caseTitle}` }).tap();
+      const detail = page.getByTestId("case-detail");
+      await expect(detail).toBeVisible();
+      await expectDrawerFits(page);
+
+      const titleInput = detail.getByRole("textbox", { name: "标题", exact: true });
+      await expect(titleInput).toHaveCSS("font-size", "16px");
+      expect(await titleInput.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(300);
+      await detail.getByRole("tab", { name: "任务" }).tap();
+      const row = page.locator("[data-testid^='project-task-']").filter({ hasText: taskTitle });
+      await expect(row).toHaveCSS("display", "grid");
+      const taskSelect = row.getByRole("combobox", { name: `移动 ${taskTitle}` });
+      await expect(taskSelect).toBeVisible();
+      await expect(taskSelect).toHaveCSS("font-size", "16px");
+      await expectDrawerFits(page);
+      await expectNoHorizontalOverflow(page);
+
+      await detail.getByRole("tab", { name: "基本信息" }).tap();
+      await page.getByTestId("delete-project-button").tap();
+      const confirmInput = page.getByTestId("delete-confirm-title");
+      await expect(confirmInput).toBeVisible();
+      await expect(confirmInput).toHaveCSS("font-size", "16px");
+      await page.getByRole("button", { name: "取消", exact: true }).tap();
+    } finally {
+      if (taskId) {
+        await request.delete(api(`/kanban/cards/${encodeURIComponent(taskId)}`), {
+          data: { record_chronicle: false },
+        });
+      }
+      await request.delete(api(`/project-board/cases/${caseId}`), {
+        data: { confirm_title: caseTitle, record_chronicle: false },
+      });
+    }
   });
 
   test("研究台页: 阅读台卡片与论文索引筛选不溢出", async ({ page }) => {
@@ -307,99 +306,211 @@ test.describe("SPA mobile 375px — 内容编辑器", () => {
   });
 });
 
-test.describe("SPA mobile 375px — 项目泳道触屏", () => {
-  test("触屏长按拖拽把 Queue 卡移到 Doing(真 CDP touch + auto-scroll)", async ({
+test.describe("SPA mobile 375px — 项目触屏", () => {
+  test("Queue/Doing 上下排列，快速添加后可在详情中编辑保存", async ({ page, request }) => {
+    const run = Date.now();
+    const caseTitle = `e2e-mob-flow-${run}`;
+    const taskTitle = `e2e-mob-flow-task-${run}`;
+    const create = await request.post(api("/project-board/cases"), { data: { title: caseTitle } });
+    expect(create.status()).toBe(201);
+    const caseId: string = (await create.json()).case.id;
+    let taskId = "";
+    try {
+      await page.goto(spa("projects"));
+      const lane = page.getByTestId(`project-lane-${caseId}`);
+      await expect(lane).toBeVisible();
+      await lane.getByTestId(`quick-add-${caseId}`).tap();
+      const input = lane.getByTestId(`quick-add-input-${caseId}`);
+      await expect(input).toHaveCSS("font-size", "16px");
+      await input.fill(taskTitle);
+      const addResponse = page.waitForResponse(
+        (res) => res.url().includes(`/project-board/cases/${encodeURIComponent(caseId)}/tasks`) && res.request().method() === "POST",
+      );
+      await input.press("Enter");
+      const added = await addResponse;
+      expect(added.status()).toBeLessThan(300);
+      taskId = (await added.json()).card.id;
+
+      const detail = page.getByTestId("task-detail-card");
+      await expect(detail).toBeVisible();
+      await detail.getByTestId("detail-edit").tap();
+      const contextInput = detail.getByTestId("edit-context");
+      await expect(contextInput).toHaveCSS("font-size", "16px");
+      await contextInput.fill("手机端补充的上下文");
+      const patchResponse = page.waitForResponse(
+        (res) => res.url().includes(`/kanban/cards/${taskId}`) && res.request().method() === "PATCH",
+      );
+      await detail.getByTestId("edit-save").tap();
+      expect((await patchResponse).status()).toBeLessThan(300);
+      await expect(detail.getByText("手机端补充的上下文", { exact: true })).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+      await detail.getByRole("button", { name: "关闭详情" }).tap();
+      await expect(lane.getByText(taskTitle, { exact: true })).toBeVisible();
+    } finally {
+      if (taskId) {
+        await request.delete(api(`/kanban/cards/${encodeURIComponent(taskId)}`), {
+          data: { record_chronicle: false },
+        });
+      }
+      await request.delete(api(`/project-board/cases/${caseId}`), {
+        data: { confirm_title: caseTitle, record_chronicle: false },
+      });
+    }
+  });
+
+  test("触屏长按拖拽把 Queue 卡移到下方的 Doing(真 CDP touch)", async ({
     page,
     context,
     request,
   }) => {
-    const title = `e2e-mob-dnd-${Date.now()}`;
-    await seedKanbanCard(request, title);
-    // Move to the Queue head: at the tail card's scroll depth the shorter
-    // column's box has ended and the pointer would hover dead space.
-    const toHead = await request.post(api(`/kanban/cards/${encodeURIComponent(title)}/move`), {
-      data: { target_section: "Queue", to_index: 0 },
-    });
-    expect(toHead.status()).toBeLessThan(300);
-
-    // Seeded without a project → the 未归属 lane (Queue left, Doing right).
-    await page.goto(spa("projects"));
-    await page.getByTestId("lane-column-unassigned-queue").getByText(title).first().waitFor();
-    const handle = page.getByRole("button", { name: `拖拽卡片 ${title}` }).first();
-    await handle.scrollIntoViewIfNeeded();
-    const handleBox = await handle.boundingBox();
-    expect(handleBox, "drag handle must be laid out").toBeTruthy();
-    const startX = handleBox!.x + handleBox!.width / 2;
-    const startY = handleBox!.y + handleBox!.height / 2;
-
-    const moveResponse = page.waitForResponse(
-      (res) => res.url().includes("/move") && res.request().method() === "POST",
-    );
-    const session = await context.newCDPSession(page);
+    const run = Date.now();
+    const caseTitle = `e2e-mob-dnd-case-${run}`;
+    const title = `e2e-mob-dnd-${run}`;
+    const create = await request.post(api("/project-board/cases"), { data: { title: caseTitle } });
+    expect(create.status()).toBe(201);
+    const caseId: string = (await create.json()).case.id;
+    let taskId = "";
     try {
-      await session.send("Input.dispatchTouchEvent", {
-        type: "touchStart",
-        touchPoints: [{ x: startX, y: startY, id: 1 }],
+      const task = await request.post(api(`/project-board/cases/${caseId}/tasks`), {
+        data: { title, section: "Queue", milestone_id: "", context: "", date: "" },
       });
-      // Press-and-hold past the TouchSensor activation delay (250ms).
-      await page.waitForTimeout(450);
-      await expect(handle, "long-press should lift the card (TouchSensor active)").toHaveAttribute(
-        "aria-pressed",
-        "true",
+      expect(task.status()).toBe(201);
+      taskId = (await task.json()).card.id;
+      await page.goto(spa("projects"));
+      const queue = page.getByTestId(`lane-column-${caseId}-queue`);
+      const doing = page.getByTestId(`lane-column-${caseId}-doing`);
+      await expect(queue.getByText(title)).toBeVisible();
+      const handle = page.getByRole("button", { name: `拖拽卡片 ${title}` });
+      await handle.scrollIntoViewIfNeeded();
+      const handleBox = await handle.boundingBox();
+      const doingBox = await doing.boundingBox();
+      expect(handleBox, "drag handle must be laid out").toBeTruthy();
+      expect(doingBox, "Doing must be below Queue in the same touch viewport").toBeTruthy();
+      expect(doingBox!.y).toBeGreaterThan(handleBox!.y + handleBox!.height);
+      expect(doingBox!.y).toBeLessThan(812);
+      const startX = handleBox!.x + handleBox!.width / 2;
+      const startY = handleBox!.y + handleBox!.height / 2;
+      const targetX = doingBox!.x + doingBox!.width / 2;
+      const targetY = doingBox!.y + doingBox!.height / 2;
+
+      const moveResponse = page.waitForResponse(
+        (res) => res.url().includes("/move") && res.request().method() === "POST",
       );
+      const session = await context.newCDPSession(page);
+      try {
+        await session.send("Input.dispatchTouchEvent", {
+          type: "touchStart",
+          touchPoints: [{ x: startX, y: startY, id: 1 }],
+        });
+        await page.waitForTimeout(450);
+        await expect(handle).toHaveAttribute("aria-pressed", "true");
+        for (let step = 1; step <= 12; step++) {
+          await session.send("Input.dispatchTouchEvent", {
+            type: "touchMove",
+            touchPoints: [{
+              x: startX + ((targetX - startX) * step) / 12,
+              y: startY + ((targetY - startY) * step) / 12,
+              id: 1,
+            }],
+          });
+          await page.waitForTimeout(60);
+        }
+        await expect(doing).toHaveAttribute("data-drop-target", "true", { timeout: 6_000 });
+        await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      } finally {
+        await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }).catch(() => undefined);
+        await session.detach();
+      }
 
-      // Drag briskly toward the right edge, then jiggle: dnd-kit auto-scrolls
-      // the lane strip until Doing slides under the parked pointer.
-      for (let x = startX; x < 350; x += 30) {
-        await session.send("Input.dispatchTouchEvent", {
-          type: "touchMove",
-          touchPoints: [{ x, y: startY, id: 1 }],
-        });
-        await page.waitForTimeout(60);
-      }
-      const doingHighlight = page.locator("[data-drop-target='true']");
-      let highlighted = false;
-      for (let i = 0; i < 40 && !highlighted; i++) {
-        await session.send("Input.dispatchTouchEvent", {
-          type: "touchMove",
-          touchPoints: [{ x: 345 - (i % 2 === 0 ? 0 : 6), y: startY, id: 1 }],
-        });
-        await page.waitForTimeout(120);
-        highlighted =
-          (await doingHighlight.getAttribute("data-testid")) === "lane-column-unassigned-doing";
-      }
-      expect(highlighted, "auto-scroll should bring the Doing column under the pointer").toBe(true);
-      await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      const response = await moveResponse;
+      expect(response.status(), "touch drop should POST a successful move").toBeLessThan(300);
+      expect((response.request().postDataJSON() as { target_section?: string }).target_section).toBe("Doing");
+      await expect(doing.getByText(title)).toBeVisible();
+      await expect(queue.getByText(title)).toHaveCount(0);
     } finally {
-      await session.detach();
+      if (taskId) {
+        await request.delete(api(`/kanban/cards/${encodeURIComponent(taskId)}`), {
+          data: { record_chronicle: false },
+        });
+      }
+      await request.delete(api(`/project-board/cases/${caseId}`), {
+        data: { confirm_title: caseTitle, record_chronicle: false },
+      });
     }
-
-    const response = await moveResponse;
-    expect(response.status(), "touch drop should POST a successful move").toBeLessThan(300);
-    expect((response.request().postDataJSON() as { target_section?: string }).target_section).toBe(
-      "Doing",
-    );
-    await expect(page.getByTestId("lane-column-unassigned-doing").getByText(title)).toBeVisible();
-    await expect(page.getByTestId("lane-column-unassigned-queue").getByText(title)).toHaveCount(0);
   });
 
   test("详情卡「移至 Doing」在触屏上可用(无拖拽回退路径)", async ({ page, request }) => {
     const title = `e2e-mob-menu-${Date.now()}`;
-    await seedKanbanCard(request, title);
-    await page.goto(spa("projects"));
-    await page.getByTestId("lane-column-unassigned-queue").getByText(title).waitFor();
+    const taskId = await seedKanbanCard(request, title);
+    try {
+      await page.goto(spa("projects"));
+      await page.getByTestId("lane-column-unassigned-queue").getByText(title).waitFor();
+      const card = page.getByTestId("lane-column-unassigned-queue").getByText(title);
+      await card.scrollIntoViewIfNeeded();
+      await card.tap();
+      const detail = page.getByTestId("task-detail-card");
+      await expect(detail).toBeVisible();
+      const moveResponse = page.waitForResponse(
+        (res) => res.url().includes("/move") && res.request().method() === "POST",
+      );
+      await detail.getByRole("button", { name: "移至 Doing" }).tap();
+      expect((await moveResponse).status()).toBeLessThan(300);
+      await expect(page.getByTestId("lane-column-unassigned-doing").getByText(title)).toBeVisible();
+    } finally {
+      await request.delete(api(`/kanban/cards/${encodeURIComponent(taskId)}`), {
+        data: { record_chronicle: false },
+      });
+    }
+  });
 
-    // Tap the card (not a drag) → the inscription detail card opens.
-    const card = page.getByTestId("lane-column-unassigned-queue").getByText(title);
-    await card.scrollIntoViewIfNeeded();
-    await card.tap();
-    await expect(page.getByTestId("task-detail-card")).toBeVisible();
+  test("时间轴与大事记提供触屏翻页、回今天和缩放", async ({ page, request }) => {
+    const boardResponse = await request.get(api("/projects-board"));
+    expect(boardResponse.status()).toBe(200);
+    const today = ((await boardResponse.json()) as { today: string }).today;
+    const title = `e2e-mob-views-${Date.now()}`;
+    const create = await request.post(api("/kanban/cards"), {
+      data: { title, section: "Queue", context: "", planned_start: today, planned_end: today },
+    });
+    expect(create.status()).toBe(201);
+    const taskId: string = (await create.json()).card.id;
+    try {
+      await page.goto(spa("projects?view=timeline&tz=month"));
+      const timelineToday = page.getByTestId("timeline-today");
+      await expect(timelineToday).toBeVisible();
+      const initialWindow = await timelineToday.textContent();
+      await page.getByTestId("timeline-older").tap();
+      await expect(timelineToday).not.toHaveText(initialWindow ?? "");
+      await expect(page).toHaveURL(/tws=/);
+      await page.getByTestId("timeline-newer").tap();
+      await expect(timelineToday).toHaveText(initialWindow ?? "");
+      const zoomControl = page.getByTestId("timeline-zoom-toggle");
+      expect(await zoomControl.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(150);
+      await zoomControl.getByText("周", { exact: true }).tap();
+      await expect(page).toHaveURL(/tz=week/);
+      await expectNoHorizontalOverflow(page);
 
-    const moveResponse = page.waitForResponse(
-      (res) => res.url().includes("/move") && res.request().method() === "POST",
-    );
-    await page.getByRole("button", { name: "移至 Doing" }).tap();
-    expect((await moveResponse).status()).toBeLessThan(300);
-    await expect(page.getByTestId("lane-column-unassigned-doing").getByText(title)).toBeVisible();
+      await page.goto(spa("projects?view=story"));
+      const readout = page.getByTestId("chronicle-span-readout");
+      await expect(readout).toBeVisible();
+      const initialChronicle = await readout.textContent();
+      await page.getByTestId("chronicle-older").tap();
+      await expect(readout).not.toHaveText(initialChronicle ?? "");
+      await page.getByTestId("chronicle-newer").tap();
+      await expect(readout).toHaveText(initialChronicle ?? "");
+      await page.getByRole("textbox", { name: "每行天数" }).tap();
+      await page.getByRole("option", { name: "30 天/行" }).tap();
+      await expect(readout).toContainText("每行 30 天");
+      await page.getByTestId(`chronicle-event-${taskId}`).tap();
+      const inspector = page.getByTestId("chronicle-inspector");
+      await expect(inspector).toBeVisible();
+      await expect(inspector).toHaveCSS("position", "relative");
+      await page.getByTestId("chronicle-inspector-close").tap();
+      await expect(inspector).toHaveCount(0);
+      await expectNoHorizontalOverflow(page);
+    } finally {
+      await request.delete(api(`/kanban/cards/${encodeURIComponent(taskId)}`), {
+        data: { record_chronicle: false },
+      });
+    }
   });
 });

@@ -97,7 +97,14 @@ export function NewPlanModal({
   };
 
   return (
-    <Modal opened={opened} onClose={onClose} centered title="新建计划" size="lg">
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      centered
+      title="新建计划"
+      size="lg"
+      classNames={{ content: 'projects-form' }}
+    >
       <Stack gap="sm" data-testid="new-plan-modal">
         <Text size="sm" c="dimmed">
           选择一个习惯计划模板,实例化为项目泳道 + 习惯打卡。
@@ -169,7 +176,7 @@ export function NewPlanModal({
             </Group>
           </Stack>
         )}
-        <Group grow align="flex-start">
+        <Group grow align="flex-start" className="projects-form-grid">
           <TextInput
             label="计划标题(留空用模板名)"
             value={title}
