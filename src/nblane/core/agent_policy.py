@@ -77,6 +77,7 @@ ACTION_TIERS: dict[str, str] = {
     "goal.add": T1,
     "research_source.add": T1,
     "research_source.patch": T1,
+    "research.paper_analysis": T1,
     # T2 — destructive or identity-level.
     "checkin.delete": T2,
     "kanban.card.delete": T2,
@@ -109,7 +110,121 @@ ACTION_TIERS: dict[str, str] = {
     "method_draft.write": T1,
     "interaction.log": T1,
     "agent_task.report": T1,
+    # Reader / Paper Library. Raw route, event and Reader-action mappings are
+    # below; unknown Reader writes use reader.unsupported and fail closed.
+    "reader.auth": T0,
+    "reader.search": T0,
+    "reader.ai.ask": T0,
+    "reader.ai.explain": T0,
+    "reader.navigate": T0,
+    "reader.token": T0,
+    "reader.job.control": T0,
+    "reader.cache_warm": T0,
+    "reader.progress": T1,
+    "reader.annotation.create": T1,
+    "reader.annotation.update": T1,
+    "reader.chunk.create": T1,
+    "reader.citation.create": T1,
+    "reader.citation.export": T1,
+    "reader.translation": T1,
+    "reader.analysis": T1,
+    "reader.artifacts.prepare": T1,
+    "reader.collection.edit": T1,
+    "reader.source.edit": T1,
+    "reader.pdf.save": T1,
+    "reader.annotation.delete": T2,
+    "reader.collection.trash": T2,
+    "reader.collection.purge": T2,
+    "reader.source.discard": T2,
+    "reader.paper.delete": T2,
+    "reader.paper.purge": T2,
+    "reader.pdf.delete": T2,
+    "reader.artifacts.delete": T2,
+    "reader.unsupported": T3,
 }
+
+# Effective Reader action -> shared policy action. The execution layer uses
+# this same registry to reject new, unclassified actions for every account.
+READER_ACTIONS: dict[str, str] = {
+    "save_progress": "reader.progress",
+    "prepare_reader_artifacts": "reader.artifacts.prepare",
+    "annotation_create": "reader.annotation.create",
+    "create_annotation": "reader.annotation.create",
+    "annotation_update": "reader.annotation.update",
+    "annotation_delete": "reader.annotation.delete",
+    "create_chunk_from_selection": "reader.chunk.create",
+    "create_chunk": "reader.chunk.create",
+    "create_citation": "reader.citation.create",
+    "translate_full_paper": "reader.translation",
+    "translate_visible_pages": "reader.translation",
+    "retry_translation_scope": "reader.translation",
+    "translate_selection": "reader.translation",
+    "translate_segment": "reader.translation",
+    "explain_selection": "reader.ai.explain",
+    "ask_paper": "reader.ai.ask",
+    "analyze_paper": "reader.analysis",
+    "codex_deep_read": "reader.analysis",
+    "generate_review_card": "reader.analysis",
+    "request_page_previews": "reader.cache_warm",
+    "selection_created": "reader.navigate",
+    "page_changed": "reader.navigate",
+    "viewport_changed": "reader.navigate",
+    "reader_state_changed": "reader.navigate",
+    "request_reader_context": "reader.navigate",
+}
+
+READER_TASK_ACTIONS: frozenset[str] = frozenset({
+    "ask_paper",
+    "explain_selection",
+    "retry_translation_scope",
+    "translate_full_paper",
+    "translate_selection",
+    "translate_visible_pages",
+    "analyze_paper",
+    "codex_deep_read",
+    "generate_review_card",
+    "prepare_reader_artifacts",
+})
+
+PAPER_LIBRARY_EVENT_ACTIONS: dict[str, str] = {
+    "paper_library_select_view": "reader.navigate",
+    "paper_library_select_collection": "reader.navigate",
+    "paper_library_select_paper": "reader.navigate",
+    "paper_library_sync_reader_tab": "reader.navigate",
+    "paper_library_delete_paper_preview": "reader.navigate",
+    "paper_library_create_collection": "reader.collection.edit",
+    "paper_library_rename_collection": "reader.collection.edit",
+    "paper_library_move_collection": "reader.collection.edit",
+    "paper_library_reorder_collection": "reader.collection.edit",
+    "paper_library_trash_collection": "reader.collection.trash",
+    "paper_library_purge_collection": "reader.collection.purge",
+    "paper_library_restore_collection": "reader.collection.edit",
+    "paper_library_add_selected_papers_to_collection": "reader.source.edit",
+    "paper_library_move_selected_papers_to_collection": "reader.source.edit",
+    "paper_library_drop_papers_to_collection": "reader.source.edit",
+    "paper_library_remove_papers_from_collection": "reader.source.edit",
+    "paper_library_update_papers_status": "reader.source.edit",
+    "paper_library_rename_paper": "reader.source.edit",
+    "paper_library_download_pdf": "reader.pdf.save",
+    "paper_library_run_extraction": "reader.artifacts.prepare",
+    "paper_library_retry_translation": "reader.translation",
+    "paper_library_auto_chunk": "reader.chunk.create",
+    "paper_library_delete_paper_record": "reader.paper.delete",
+    "paper_library_delete_paper_asset": "reader.pdf.delete",
+    "paper_library_delete_paper_artifacts": "reader.artifacts.delete",
+    "paper_library_purge_discarded_papers": "reader.paper.purge",
+}
+
+
+def paper_library_event_action(event: dict[str, Any]) -> str:
+    """Resolve the effective policy action, including destructive status edits."""
+    raw = str(event.get("action") or "").strip()
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    if raw == "paper_library_update_papers_status" and str(
+        payload.get("status") or ""
+    ).strip() == "discarded":
+        return "reader.source.discard"
+    return PAPER_LIBRARY_EVENT_ACTIONS.get(raw, "reader.unsupported")
 
 
 # Chat-facing labels (confirmation summaries, journal rows).
@@ -145,12 +260,42 @@ ACTION_LABELS: dict[str, str] = {
     "project_milestone.delete": "删除项目里程碑",
     "research_source.add": "添加资料",
     "research_source.patch": "修改资料",
+    "research.paper_analysis": "生成论文分析",
     "research.import": "批量导入资料",
     "growth_log.append": "记一条成长日志",
     "method_draft.write": "写方法草稿",
     "interaction.log": "记录问答",
     "agent_task.report": "回报 agent 任务",
     "skill_evidence.add": "给技能点添加证据",
+    "reader.auth": "Reader 会话控制",
+    "reader.search": "搜索论文",
+    "reader.ai.ask": "论文问答",
+    "reader.ai.explain": "解释论文选区",
+    "reader.navigate": "论文库导航",
+    "reader.token": "创建 Reader 访问令牌",
+    "reader.job.control": "控制 Reader 后台任务",
+    "reader.cache_warm": "预热 Reader 缓存",
+    "reader.progress": "保存阅读进度",
+    "reader.annotation.create": "新建论文标注",
+    "reader.annotation.update": "修改论文标注",
+    "reader.annotation.delete": "删除论文标注",
+    "reader.chunk.create": "保存论文引文片段",
+    "reader.citation.create": "创建论文引用",
+    "reader.citation.export": "导出论文引用",
+    "reader.translation": "保存论文翻译",
+    "reader.analysis": "生成论文分析",
+    "reader.artifacts.prepare": "提取论文阅读产物",
+    "reader.collection.edit": "编辑论文集合",
+    "reader.collection.trash": "将论文集合移入回收站",
+    "reader.collection.purge": "彻底删除论文集合",
+    "reader.source.edit": "修改论文资料",
+    "reader.source.discard": "弃用论文资料",
+    "reader.paper.delete": "删除论文记录",
+    "reader.paper.purge": "彻底清理已弃用论文",
+    "reader.pdf.save": "上传或下载论文 PDF",
+    "reader.pdf.delete": "物理删除论文 PDF",
+    "reader.artifacts.delete": "删除 Reader 阅读产物",
+    "reader.unsupported": "未登记的 Reader 写操作",
     "unknown": "执行未登记的写操作",
 }
 

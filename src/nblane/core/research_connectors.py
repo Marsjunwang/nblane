@@ -33,7 +33,7 @@ from nblane.core.research_sources import (
     ResearchSourceInbox,
     add_research_source,
     load_research_sources,
-    save_research_sources,
+    mutate_research_sources,
 )
 from nblane.core.yaml_io import _load_yaml_dict
 
@@ -959,41 +959,40 @@ def import_connector_items(
     result.discovered = len(items)
     result.items = [item.to_dict() for item in items]
     result.warnings.extend(warnings)
-    inbox = load_research_sources(_profile_root(profile))
-    lookup = _source_fingerprint_lookup(inbox)
     privacy = _clean_text(row.get("privacy_default")) or "private"
     clean_target = target if isinstance(target, dict) else {}
     target_node = _clean_text(clean_target.get("node_id"))
     target_kind = _clean_text(clean_target.get("kind")) or ("collection" if target_node else "source_inbox")
-    imported_any = False
-    for item in items:
-        fingerprint = item.fingerprint()
-        if fingerprint not in selected:
-            continue
-        canonical = _canonical_url(item.url)
-        external_key = f"{item.provider}|{item.external_id}" if item.provider and item.external_id else ""
-        duplicate = lookup.get(fingerprint) or (lookup.get(canonical) if canonical else None) or (lookup.get(external_key) if external_key else None)
-        if duplicate is not None:
-            result.skipped += 1
-            continue
-        kwargs = item.to_source_kwargs(privacy_default=privacy)
-        if target_node:
-            kwargs["library_node_refs"] = [target_node]
-        metadata = dict(kwargs.get("metadata") or {})
-        metadata["connector_id"] = connector_id
-        metadata["import_target_kind"] = target_kind
-        if target_kind == "metadata_only":
-            metadata["metadata_only"] = True
-        kwargs["metadata"] = metadata
-        source = add_research_source(inbox, **kwargs)
-        result.imported += 1
-        result.imported_source_ids.append(source.id)
-        imported_any = True
-        lookup[fingerprint] = {"source_id": source.id, "reason": "same_fingerprint"}
-        if canonical:
-            lookup[canonical] = {"source_id": source.id, "reason": "same_url"}
-    if imported_any:
-        save_research_sources(_profile_root(profile), inbox)
+
+    def apply(inbox: ResearchSourceInbox) -> None:
+        lookup = _source_fingerprint_lookup(inbox)
+        for item in items:
+            fingerprint = item.fingerprint()
+            if fingerprint not in selected:
+                continue
+            canonical = _canonical_url(item.url)
+            external_key = f"{item.provider}|{item.external_id}" if item.provider and item.external_id else ""
+            duplicate = lookup.get(fingerprint) or (lookup.get(canonical) if canonical else None) or (lookup.get(external_key) if external_key else None)
+            if duplicate is not None:
+                result.skipped += 1
+                continue
+            kwargs = item.to_source_kwargs(privacy_default=privacy)
+            if target_node:
+                kwargs["library_node_refs"] = [target_node]
+            metadata = dict(kwargs.get("metadata") or {})
+            metadata["connector_id"] = connector_id
+            metadata["import_target_kind"] = target_kind
+            if target_kind == "metadata_only":
+                metadata["metadata_only"] = True
+            kwargs["metadata"] = metadata
+            source = add_research_source(inbox, **kwargs)
+            result.imported += 1
+            result.imported_source_ids.append(source.id)
+            lookup[fingerprint] = {"source_id": source.id, "reason": "same_fingerprint"}
+            if canonical:
+                lookup[canonical] = {"source_id": source.id, "reason": "same_url"}
+
+    mutate_research_sources(_profile_root(profile), apply)
     row["status"] = "ok"
     row["last_run"] = _now()
     row["last_result"] = {
@@ -1033,37 +1032,38 @@ def import_manual_connector_items(
     items = _manual_items_from_config(clean_provider, {"manual_items": raw_items})
     result.discovered = len(items)
     result.items = [item.to_dict() for item in items]
-    inbox = load_research_sources(_profile_root(profile))
-    lookup = _source_fingerprint_lookup(inbox)
     clean_target = target if isinstance(target, dict) else {}
     target_node = _clean_text(clean_target.get("node_id"))
     target_kind = _clean_text(clean_target.get("kind")) or ("collection" if target_node else "source_inbox")
-    for item in items:
-        fingerprint = item.fingerprint()
-        if fingerprint not in selected:
-            continue
-        canonical = _canonical_url(item.url)
-        external_key = f"{item.provider}|{item.external_id}" if item.provider and item.external_id else ""
-        duplicate = lookup.get(fingerprint) or (lookup.get(canonical) if canonical else None) or (lookup.get(external_key) if external_key else None)
-        if duplicate is not None:
-            result.skipped += 1
-            continue
-        kwargs = item.to_source_kwargs(privacy_default=privacy_default)
-        if target_node:
-            kwargs["library_node_refs"] = [target_node]
-        metadata = dict(kwargs.get("metadata") or {})
-        metadata["import_target_kind"] = target_kind
-        if target_kind == "metadata_only":
-            metadata["metadata_only"] = True
-        kwargs["metadata"] = metadata
-        source = add_research_source(inbox, **kwargs)
-        result.imported += 1
-        result.imported_source_ids.append(source.id)
-        lookup[fingerprint] = {"source_id": source.id, "reason": "same_fingerprint"}
-        if canonical:
-            lookup[canonical] = {"source_id": source.id, "reason": "same_url"}
-    if result.imported:
-        save_research_sources(_profile_root(profile), inbox)
+
+    def apply(inbox: ResearchSourceInbox) -> None:
+        lookup = _source_fingerprint_lookup(inbox)
+        for item in items:
+            fingerprint = item.fingerprint()
+            if fingerprint not in selected:
+                continue
+            canonical = _canonical_url(item.url)
+            external_key = f"{item.provider}|{item.external_id}" if item.provider and item.external_id else ""
+            duplicate = lookup.get(fingerprint) or (lookup.get(canonical) if canonical else None) or (lookup.get(external_key) if external_key else None)
+            if duplicate is not None:
+                result.skipped += 1
+                continue
+            kwargs = item.to_source_kwargs(privacy_default=privacy_default)
+            if target_node:
+                kwargs["library_node_refs"] = [target_node]
+            metadata = dict(kwargs.get("metadata") or {})
+            metadata["import_target_kind"] = target_kind
+            if target_kind == "metadata_only":
+                metadata["metadata_only"] = True
+            kwargs["metadata"] = metadata
+            source = add_research_source(inbox, **kwargs)
+            result.imported += 1
+            result.imported_source_ids.append(source.id)
+            lookup[fingerprint] = {"source_id": source.id, "reason": "same_fingerprint"}
+            if canonical:
+                lookup[canonical] = {"source_id": source.id, "reason": "same_url"}
+
+    mutate_research_sources(_profile_root(profile), apply)
     return result
 
 
@@ -1107,29 +1107,33 @@ def sync_connector(
         items = adapter.discover(config)
         result.discovered = len(items)
         result.items = [item.to_dict() for item in items]
-        inbox = load_research_sources(_profile_root(profile))
-        existing = _source_fingerprints(inbox)
         privacy = _clean_text(row.get("privacy_default")) or "private"
-        for item in items:
-            fingerprint = item.fingerprint()
-            canonical = _canonical_url(item.url)
-            if fingerprint in existing or (canonical and canonical in existing):
-                result.skipped += 1
-                continue
-            if dry_run:
+
+        def apply(inbox: ResearchSourceInbox) -> None:
+            existing = _source_fingerprints(inbox)
+            for item in items:
+                fingerprint = item.fingerprint()
+                canonical = _canonical_url(item.url)
+                if fingerprint in existing or (canonical and canonical in existing):
+                    result.skipped += 1
+                    continue
+                if dry_run:
+                    result.imported += 1
+                    continue
+                source = add_research_source(
+                    inbox,
+                    **item.to_source_kwargs(privacy_default=privacy),
+                )
                 result.imported += 1
-                continue
-            source = add_research_source(
-                inbox,
-                **item.to_source_kwargs(privacy_default=privacy),
-            )
-            result.imported += 1
-            result.imported_source_ids.append(source.id)
-            existing.add(fingerprint)
-            if canonical:
-                existing.add(canonical)
-        if not dry_run and result.imported:
-            save_research_sources(_profile_root(profile), inbox)
+                result.imported_source_ids.append(source.id)
+                existing.add(fingerprint)
+                if canonical:
+                    existing.add(canonical)
+
+        if dry_run:
+            apply(load_research_sources(_profile_root(profile)))
+        else:
+            mutate_research_sources(_profile_root(profile), apply)
         row["status"] = "ok"
         row["last_run"] = _now()
         row["last_result"] = {

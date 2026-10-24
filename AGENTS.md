@@ -209,7 +209,10 @@ See [`docs/zh/product/design-language.md`](docs/zh/product/design-language.md)
 - New mutating `/api/v1` routes must get an entry in
   `web_api/agent_guard.py` `ROUTE_ACTIONS` (unmapped routes default to T2
   for agent accounts) and, if journaled, an entity kind in
-  `core/agent_journal.py`.
+  `core/agent_journal.py`. Reader mutations must also be classified in
+  `web_reader_api/agent_guard.py` (unknown routes/actions are T3); background
+  writes transfer the reservation to the worker and journal real commit
+  segments rather than diffing at enqueue time.
 - Backend contract changes: run `scripts/dump-openapi.sh`, then
   `npm run gen:api` in the SPA frontend; never hand-edit `schema.d.ts`.
 - Docs discipline (from `docs/zh/README.md`): active docs keep front matter
@@ -233,8 +236,9 @@ See [`docs/zh/product/design-language.md`](docs/zh/product/design-language.md)
   them; machine clients use revocable
   `nbl_…` Bearer tokens. Roles are `admin` and `member` (member
   sees only its own profiles); an account with `agent: true` is an agent
-  service account whose writes go through `web_api/agent_guard.py`
-  (journal + undo, 428 chat confirmation, 403 for web-only actions).
+  service account whose writes go through `web_api/agent_guard.py` or
+  `web_reader_api/agent_guard.py` (journal + undo, 428 chat confirmation,
+  403 for web-only or unclassified actions; worker-local journaling for jobs).
 - MCP stdio has no login and no ACL; keep it local.
 - Production: systemd + Caddy, ports bound to `127.0.0.1`; never expose
   `8502`/`8504`/GROBID `8070` directly.

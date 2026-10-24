@@ -929,7 +929,7 @@ if __name__ == "__main__":
 
 
 class TestJobCancel(JobsTestBase):
-    """DELETE /profiles/{name}/jobs/{job_id} ends a job and drops its late result."""
+    """DELETE requests a stop; only the worker publishes the real terminal state."""
 
     def _register_slow(self, gate: "threading.Event") -> None:
         def runner(profile, job_input, report):
@@ -941,7 +941,7 @@ class TestJobCancel(JobsTestBase):
         self.addCleanup(patcher.stop)
         patcher.start()
 
-    def test_cancel_running_job_is_terminal_and_drops_result(self) -> None:
+    def test_cancel_running_job_waits_for_worker_and_drops_result(self) -> None:
         import threading
 
         gate = threading.Event()
@@ -956,12 +956,11 @@ class TestJobCancel(JobsTestBase):
             job_id = client.post("/api/v1/profiles/alice/jobs", json={"kind": "test-slow", "input": {}}).json()["job_id"]
             cancelled = client.delete(f"/api/v1/profiles/alice/jobs/{job_id}")
             self.assertEqual(cancelled.status_code, 200)
-            self.assertEqual(cancelled.json()["job"]["status"], "failed")
-            self.assertEqual(cancelled.json()["job"]["error"]["code"], "job_cancelled")
+            self.assertEqual(cancelled.json()["job"]["status"], "running")
+            self.assertTrue(cancelled.json()["job"]["cancel_requested"])
+            self.assertIsNone(cancelled.json()["job"]["error"])
             gate.set()
-            time.sleep(0.2)
-            final = client.get(f"/api/v1/profiles/alice/jobs/{job_id}").json()
-            # Idempotent: cancelling a finished job changes nothing.
+            final = self._wait_final(client, job_id)
             again = client.delete(f"/api/v1/profiles/alice/jobs/{job_id}")
         self.assertEqual(final["job"]["error"]["code"], "job_cancelled")
         self.assertIsNone(final["result"])
@@ -977,6 +976,331 @@ class TestJobCancel(JobsTestBase):
             client = self._client(root, schemas)
             response = client.delete("/api/v1/profiles/alice/jobs/job-missing")
         self.assertEqual(response.status_code, 404)
+
+
+class TestJobCommitBoundaries(JobsTestBase):
+    def _register_commit_kind(self, name: str, runner, *, timeout: float = 0.0) -> None:
+        spec = jobs_module.JobKind(
+            name=name,
+            validate=lambda job_input: dict(job_input),
+            run=runner,
+            effect="write",
+            action="research_source.patch",
+            context_runner=True,
+            timeout_seconds=timeout,
+        )
+        patcher = patch.dict(jobs_module._KINDS, {name: spec})
+        self.addCleanup(patcher.stop)
+        patcher.start()
+
+    def test_cancel_before_commit_never_writes(self) -> None:
+        import threading
+
+        started = threading.Event()
+        release = threading.Event()
+        self.addCleanup(release.set)
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            profile = _write_profile(root, tree=SKILL_TREE)
+            target = profile / "late-commit.txt"
+
+            def runner(_profile, _job_input, _report, ctx):
+                started.set()
+                release.wait(5)
+                ctx.apply(lambda: target.write_text("late", encoding="utf-8"))
+
+            self._register_commit_kind("test-cancel-before-commit", runner)
+            client = self._client(root, _write_schemas(base))
+            job_id = client.post(
+                "/api/v1/profiles/alice/jobs",
+                json={"kind": "test-cancel-before-commit", "input": {}},
+            ).json()["job_id"]
+            self.assertTrue(started.wait(2))
+            stopped = client.delete(f"/api/v1/profiles/alice/jobs/{job_id}")
+            self.assertEqual(stopped.json()["job"]["status"], "running")
+            release.set()
+            final = self._wait_final(client, job_id)
+            target_exists = target.exists()
+
+        self.assertEqual(final["job"]["error"]["code"], "job_cancelled")
+        self.assertFalse(final["job"]["write_committed"])
+        self.assertFalse(target_exists)
+
+    def test_cancel_during_commit_finishes_segment_and_reports_partial_write(self) -> None:
+        import threading
+
+        committing = threading.Event()
+        release = threading.Event()
+        self.addCleanup(release.set)
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            profile = _write_profile(root, tree=SKILL_TREE)
+            target = profile / "committed.txt"
+
+            def runner(_profile, _job_input, _report, ctx):
+                def commit():
+                    committing.set()
+                    release.wait(5)
+                    target.write_text("retained", encoding="utf-8")
+
+                ctx.apply(commit, summary="第一段")
+                return {"ignored": True}
+
+            self._register_commit_kind("test-cancel-during-commit", runner)
+            client = self._client(root, _write_schemas(base))
+            job_id = client.post(
+                "/api/v1/profiles/alice/jobs",
+                json={"kind": "test-cancel-during-commit", "input": {}},
+            ).json()["job_id"]
+            self.assertTrue(committing.wait(2))
+            stopped = client.delete(f"/api/v1/profiles/alice/jobs/{job_id}")
+            self.assertEqual(stopped.json()["job"]["status"], "running")
+            self.assertTrue(stopped.json()["job"]["cancel_requested"])
+            release.set()
+            final = self._wait_final(client, job_id)
+            committed_text = target.read_text(encoding="utf-8")
+
+        self.assertEqual(final["job"]["error"]["code"], "job_cancelled")
+        self.assertTrue(final["job"]["write_committed"])
+        self.assertEqual(final["job"]["commit_summary"], "第一段")
+        self.assertIn("已保留部分写入：第一段", final["job"]["error"]["message"])
+        self.assertEqual(committed_text, "retained")
+
+    def test_kind_watchdog_timeout_prevents_late_commit_without_polling(self) -> None:
+        import threading
+
+        started = threading.Event()
+        release = threading.Event()
+        self.addCleanup(release.set)
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "profiles"
+            profile = _write_profile(root, tree=SKILL_TREE)
+            target = profile / "timeout-commit.txt"
+
+            def runner(_profile, _job_input, _report, ctx):
+                started.set()
+                release.wait(5)
+                ctx.apply(lambda: target.write_text("late", encoding="utf-8"))
+
+            self._register_commit_kind("test-kind-timeout", runner, timeout=0.2)
+            client = self._client(root, _write_schemas(base))
+            job_id = client.post(
+                "/api/v1/profiles/alice/jobs",
+                json={"kind": "test-kind-timeout", "input": {}},
+            ).json()["job_id"]
+            self.assertTrue(started.wait(2))
+            deadline = time.monotonic() + 3
+            while True:
+                with jobs_module._LOCK:
+                    requested = bool(jobs_module._JOBS[job_id]["cancel_requested"])
+                if requested:
+                    break
+                self.assertLess(time.monotonic(), deadline, "kind watchdog did not fire")
+                time.sleep(0.02)
+            release.set()
+            final = self._wait_final(client, job_id)
+            target_exists = target.exists()
+
+        self.assertEqual(final["job"]["error"]["code"], "job_timeout")
+        self.assertFalse(final["job"]["write_committed"])
+        self.assertFalse(target_exists)
+
+    def test_ttl_prunes_only_terminal_jobs(self) -> None:
+        running = {"status": "running", "created_at": 1.0, "finished_at": 0.0}
+        done = {"status": "done", "created_at": 1.0, "finished_at": 1.0}
+        with patch.dict(
+            jobs_module._JOBS,
+            {"test-old-running": running, "test-old-done": done},
+            clear=False,
+        ):
+            jobs_module._prune_jobs()
+            self.assertIn("test-old-running", jobs_module._JOBS)
+            self.assertNotIn("test-old-done", jobs_module._JOBS)
+
+
+class TestJobKindPolicies(unittest.TestCase):
+    EXPECTED = {
+        "project-suggest-refs",
+        "evidence-crystallize",
+        "content-rewrite",
+        "content-meta",
+        "content-cover",
+        "content-social",
+        "content-image",
+        "career-match",
+        "career-tailor",
+        "career-structure",
+        "research-connector-preview",
+        "research-connector-import",
+        "paper-quick-analysis",
+        "paper-deep-read",
+    }
+
+    def test_all_fourteen_kinds_have_explicit_effect_action_and_tier(self) -> None:
+        self.assertEqual(set(jobs_module._JOB_CLASSIFICATIONS), self.EXPECTED)
+        self.assertLessEqual(self.EXPECTED, set(jobs_module._KINDS))
+        for kind in self.EXPECTED:
+            spec = jobs_module._KINDS[kind]
+            policy = jobs_module.job_policy(kind)
+            self.assertTrue(spec.effect, kind)
+            self.assertTrue(spec.action, kind)
+            self.assertEqual(policy.tier, jobs_module.agent_policy.tier_for(spec.action), kind)
+        self.assertEqual(jobs_module.job_policy("research-connector-import").tier, "T2")
+        self.assertEqual(jobs_module.job_policy("paper-quick-analysis").tier, "T1")
+        self.assertEqual(jobs_module.job_policy("paper-deep-read").tier, "T1")
+
+    def test_unclassified_kind_fails_closed_for_agents(self) -> None:
+        spec = jobs_module.JobKind(
+            name="test-unclassified",
+            validate=lambda job_input: dict(job_input),
+            run=lambda *_args: {},
+        )
+        with patch.dict(jobs_module._KINDS, {"test-unclassified": spec}):
+            with self.assertRaises(jobs_module.UnclassifiedJobKindError):
+                jobs_module.job_policy("test-unclassified")
+
+
+class TestPaperJobCommitSegments(unittest.TestCase):
+    class Context:
+        def __init__(self, events: list[str]) -> None:
+            self.events = events
+
+        def checkpoint(self) -> None:
+            return None
+
+        def cancel_requested(self) -> bool:
+            return False
+
+        def apply(self, fn, *, kinds=None, summary=""):
+            self.events.append(f"commit:{summary}")
+            return fn()
+
+    def test_analysis_journal_kinds_cover_all_derived_jsonl(self) -> None:
+        from nblane.core import agent_journal
+        from nblane.core.research_workspace import source_slug
+        from nblane.web_api import research_papers as module
+
+        source_id = "source:paper:demo"
+        slug = source_slug(source_id)
+        expected = {
+            "research_source",
+            agent_journal.file_kind(f"research/analysis/{slug}.yaml"),
+            *(
+                agent_journal.jsonl_kind(f"research/{dirname}/{slug}.jsonl")
+                for dirname in (
+                    "paper-pages",
+                    "paper-segments",
+                    "paper-structure",
+                    "translations",
+                )
+            ),
+        }
+        self.assertEqual(set(module._analysis_journal_kinds(Path("/tmp/profile"), source_id)), expected)
+
+    def test_quick_analysis_model_runs_outside_prepare_and_save_commits(self) -> None:
+        from types import SimpleNamespace
+
+        from nblane.web_api import research_papers as module
+
+        source_id = "source:paper:demo"
+        events: list[str] = []
+        context = {
+            "paper_markdown": "md",
+            "chunks": [],
+            "annotations": [],
+            "paper_context": {},
+            "aliases": {},
+        }
+        ai_result = AIActionResult(
+            ok=True,
+            action="research.paper_review_card",
+            backend="fake",
+            run_id="run-test",
+            structured={"tldr": "ok", "key_points": [{"text": "kp"}]},
+        )
+
+        def model(*_args, **_kwargs):
+            events.append("model")
+            return ai_result
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(module.reader_action_core, "ensure_paper_reading_artifacts", return_value={"warnings": []}),
+            patch.object(module, "load_paper_segments", return_value=[]),
+            patch.object(module, "load_paper_annotations", return_value=[]),
+            patch.object(module, "load_chunks", return_value=[]),
+            patch.object(
+                module,
+                "load_research_sources",
+                return_value=SimpleNamespace(by_id=lambda: {source_id: SimpleNamespace()}),
+            ),
+            patch.object(module.reader_action_core, "_compact_paper_for_analysis", return_value=context),
+            patch.object(module.reader_action_core, "_compact_source_for_deep_read", return_value={}),
+            patch.object(module.reader_action_core, "generate_paper_review_card", side_effect=model),
+            patch.object(module.reader_action_core, "_should_save_quick_analysis", return_value=True),
+            patch.object(module, "save_paper_analysis"),
+        ):
+            result = module._run_quick_analysis(
+                "alice", Path(tmp), source_id, lambda *_args, **_kwargs: None, self.Context(events), ()
+            )
+
+        self.assertTrue(result.ok)
+        self.assertLess(events.index("commit:准备论文阅读产物"), events.index("model"))
+        self.assertLess(events.index("model"), events.index("commit:保存论文快速分析"))
+
+    def test_deep_read_model_runs_outside_prepare_and_save_commits(self) -> None:
+        from types import SimpleNamespace
+
+        from nblane.web_api import research_papers as module
+
+        source_id = "source:paper:demo"
+        events: list[str] = []
+        paper_md = SimpleNamespace(
+            aliases={},
+            markdown="md",
+            stats={"segments": 1},
+            directory=None,
+            image_paths=lambda limit: [],
+        )
+        ai_result = AIActionResult(
+            ok=True,
+            action="research.paper_deep_read_codex",
+            backend="fake",
+            run_id="run-test",
+            structured={"verdict": {"summary": "ok"}, "sections": [{"section": "s", "summary": "x"}]},
+        )
+
+        def model(*_args, **_kwargs):
+            events.append("model")
+            return ai_result
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(module.reader_action_core, "ensure_paper_reading_artifacts", return_value={"warnings": []}),
+            patch.object(module.reader_action_core, "build_paper_markdown", return_value=paper_md),
+            patch.object(module, "load_paper_annotations", return_value=[]),
+            patch.object(
+                module,
+                "load_research_sources",
+                return_value=SimpleNamespace(by_id=lambda: {source_id: SimpleNamespace()}),
+            ),
+            patch.object(module.reader_action_core, "_compact_source_for_deep_read", return_value={}),
+            patch.object(module.reader_action_core, "_deep_read_project_context", return_value=[]),
+            patch.object(module.reader_action_core, "_deep_read_library_context", return_value=[]),
+            patch.object(module.reader_action_core, "deep_read_paper_codex", side_effect=model),
+            patch.object(module, "load_paper_analysis", return_value={}),
+            patch.object(module, "save_paper_analysis"),
+        ):
+            result = module._run_deep_read(
+                "alice", Path(tmp), source_id, lambda *_args, **_kwargs: None, self.Context(events), ()
+            )
+
+        self.assertTrue(result.ok)
+        self.assertLess(events.index("commit:准备论文阅读产物"), events.index("model"))
+        self.assertLess(events.index("model"), events.index("commit:保存论文深度研读"))
 
 
 class TestContentJobTimeoutBudget(unittest.TestCase):

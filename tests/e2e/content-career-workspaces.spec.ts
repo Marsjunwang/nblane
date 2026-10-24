@@ -188,6 +188,7 @@ test.describe("SPA content and career workspaces", () => {
     await page.keyboard.type("第二段保持不变。");
 
     // Rewrite: select paragraph 1 → toolbar AI → 润色 → diff → accept.
+    await expect(page.getByTestId("content-save-state")).toHaveText(/已保存/, { timeout: 10_000 });
     await page.locator('.bn-editor [data-content-type="paragraph"]').first().click({ clickCount: 3 });
     await page.locator(".nb-ai-toolbar-button").click();
     await page.getByRole("menuitem", { name: "润色" }).click();

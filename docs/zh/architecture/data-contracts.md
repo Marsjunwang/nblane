@@ -271,16 +271,16 @@ private profile facts
 ### Agent Journal 撤销日志
 
 ```text
-Agent 账号写请求
-  -> agent_write_guard：动作分级（T1 直写 / T2 先确认 / T3 拒绝）
-  -> 执行前快照相关实体
-  -> handler 写入
-  -> 执行后快照，diff
+Agent 账号写请求（SPA / Reader）
+  -> 对应 agent_write_guard：动作分级（T1 直写 / T2 先确认 / T3 拒绝）
+  -> 同步写入前，或后台 worker 的每个真实提交段前，快照相关实体
+  -> 领域写入
+  -> 提交后快照，diff
   -> agent-journal.yaml entries[]
   -> 助手页「撤销日志」或 nblane_api undo
 ```
 
-`profiles/<name>/agent-journal.yaml` 是 Agent 写入的短期操作日志，用于撤销，不是业务事实源，不参与 public build。实现在 `core/agent_journal.py`。
+`profiles/<name>/agent-journal.yaml` 是 Agent 写入的短期操作日志，用于撤销，不是业务事实源，不参与 public build。实现在 `core/agent_journal.py`；Reader 的 JSONL 与 PDF 快照适配在 `core/research_journal.py`。后台任务不在入队 / 202 响应时做空 diff，取消或异常也不会丢掉已经发生的部分写入记录。
 
 条目形态：
 
@@ -302,16 +302,17 @@ entries:
     undone_by: ""
 ```
 
-实体类型（`ENTITY_KINDS`）：`kanban_card`；`activity-log.yaml` 中的 `checkin` / `habit_plan` / `habit`；列表文档行 `goal` / `project_case` / `evidence` / `skill_node` / `research_source` / `learning_resource`；`north_star`（SKILL.md Identity 三行）；`file:<相对路径>`（整文件文本，用于 Growth Log 等无行结构的写入）。
+实体类型：`kanban_card`；`activity-log.yaml` 中的 `checkin` / `habit_plan` / `habit`；列表文档行 `goal` / `project_case` / `evidence` / `skill_node` / `research_source` / `learning_resource`；`north_star`（SKILL.md Identity 三行）；`file:<相对路径>`（整文件文本）；`jsonl:<相对路径>`（annotations / chunks / translations / pages / segments / structure 的行级快照）；`asset:<pdf-ref>` 与 `asset:*`（PDF 的 hash / size / snapshot ref）。PDF 字节保存在机器本地 agent state 的 content-addressed 快照区，不写进 YAML，也不进入公开层。
 
 不变量：
 
-- 只记 Agent 账号的写入；人类账号不记。请求没有实际改变（412、422、no-op）时不写条目。
-- 保留 30 天、最多 500 条（`RETENTION_DAYS` / `MAX_ENTRIES`），写入时修剪。
-- 撤销把每个实体的 `before` 经所属领域写入器写回，并整体回滚相关文件；只有当前状态仍等于 `after` 时才允许，否则拒绝（`journal_undo_conflict`），不覆盖后来的修改。
+- 只记 Agent 账号的写入；人类账号不记。请求没有实际改变（412、422、no-op）时不写条目。handler 异常前已经发生的写入仍要记账；快照 / journal 故障必须显式失败，不能假称安全完成。
+- 保留 30 天、最多 500 条（`RETENTION_DAYS` / `MAX_ENTRIES`），写入时修剪；不再被保留条目引用的 PDF 快照同步清理。
+- 撤销把每个实体的 `before` 经所属领域写入器写回，并整体回滚相关文件与 PDF；只有当前状态仍等于 `after` 时才允许，否则拒绝（`journal_undo_conflict`），不覆盖后来的修改。research source 和 JSONL 会在各自文件锁内再次复核，撤销新增 PDF 时不会删除仍被其他 source 引用的共享资产。
+- 后台 Job / Reader task 的取消和超时是协作停止，不等于立即无写入：取消先到则后续提交不发生；提交先到则当前段完成并记账。最终状态公开 `cancel_requested` / `write_committed`（Reader task 同义字段）和保留写入说明。
 - 每条只能撤销一次；撤销后记录 `undone_at` / `undone_by`。`recent` 给每条附 `status`：`undoable`、`conflict`、`undone`。
-- chronicle.yaml、计划模板使用历史等追加型叙事副作用不回滚。
-- 日志与撤销都经 Git 备份；git 提交 actor 为当前用户（`GitActorMiddleware`），与日志 `actor` 互证。
+- chronicle.yaml、计划模板使用历史等追加型叙事副作用，以及 AI 运行审计、可重建页面预览缓存，不作为业务撤销对象。
+- 日志与撤销都经 Git 备份；同步请求的 git actor 由 `GitActorMiddleware` 提供，后台 worker 显式接收 actor，与日志 `actor` 互证。外部 PDF 快照本身不进 Git。
 
 API：`GET /api/v1/profiles/{name}/agent/journal`、`POST /api/v1/profiles/{name}/agent/journal/{entry_id}/undo`。分级与确认流程见 [AI 架构](ai-architecture.md#个人助手接入)。
 

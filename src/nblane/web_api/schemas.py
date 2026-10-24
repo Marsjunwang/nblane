@@ -768,6 +768,9 @@ class JobModel(BaseModel):
     started_at: float = 0.0
     finished_at: float = 0.0
     elapsed_ms: int = 0
+    cancel_requested: bool = False
+    write_committed: bool = False
+    commit_summary: str = ""
     error: JobErrorModel | None = None
 
 

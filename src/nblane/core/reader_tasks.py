@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
+from nblane.core import agent_ops, agent_policy, reader_ops
 from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
 from nblane.core.reader_events import (
     ANALYZE_PAPER,
@@ -23,20 +24,7 @@ from nblane.core.reader_events import (
 
 TERMINAL_STATUSES = {"done", "failed", "cancelled"}
 
-ALLOWED_READER_TASK_ACTIONS: frozenset[str] = frozenset(
-    {
-        ASK_PAPER,
-        EXPLAIN_SELECTION,
-        RETRY_TRANSLATION_SCOPE,
-        TRANSLATE_FULL_PAPER,
-        TRANSLATE_SELECTION,
-        TRANSLATE_VISIBLE_PAGES,
-        ANALYZE_PAPER,
-        "codex_deep_read",
-        "generate_review_card",
-        PREPARE_READER_ARTIFACTS,
-    }
-)
+ALLOWED_READER_TASK_ACTIONS: frozenset[str] = agent_policy.READER_TASK_ACTIONS
 
 _TASKS: dict[str, dict[str, Any]] = {}
 _LOCK = threading.RLock()
@@ -59,12 +47,19 @@ def start(
     payload: dict[str, Any] | None = None,
     *,
     task_id: str = "",
+    reservation: agent_ops.AgentWrite | None = None,
 ) -> dict[str, Any]:
     """Start a background Reader action and return its initial snapshot."""
 
     clean_action = str(action or "").strip()
     if clean_action not in ALLOWED_READER_TASK_ACTIONS:
         raise ValueError(f"Unsupported reader task action: {clean_action}")
+    if reservation is not None and (
+        reservation.action != agent_policy.READER_ACTIONS[clean_action]
+        or reservation.actor != ctx.user_id
+        or reservation.pdir.resolve() != ctx.profile_path.resolve()
+    ):
+        raise ValueError("Reader task reservation identity mismatch")
     clean_task_id = str(task_id or "").strip() or f"reader-task-{uuid.uuid4().hex[:12]}"
     data = dict(payload or {})
     _validate_payload_identity(ctx, data)
@@ -72,6 +67,11 @@ def start(
     started_at = time.time()
     timeout_seconds = _task_timeout_seconds(clean_action, data)
     with _COND:
+        existing = _TASKS.get(clean_task_id)
+        if isinstance(existing, dict):
+            _assert_context_allowed(existing, ctx)
+            if str(existing.get("status") or "") not in TERMINAL_STATUSES:
+                raise ValueError(f"Reader task already exists: {clean_task_id}")
         _TASKS[clean_task_id] = {
             "task_id": clean_task_id,
             "action": clean_action,
@@ -94,72 +94,91 @@ def start(
             },
             "started_at": started_at,
             "updated_at": started_at,
+            "finished_at": 0.0,
             "timeout_seconds": timeout_seconds,
             "cancel_event": cancel_event,
+            "cancel_requested": False,
+            "write_committed": False,
+            "timed_out": False,
+            "timeout_error": "",
         }
         _COND.notify_all()
 
+    def set_committing(value: bool) -> None:
+        with _COND:
+            task = _TASKS.get(clean_task_id)
+            if isinstance(task, dict):
+                task["_committing"] = value
+                _COND.notify_all()
+
     def run() -> None:
+        commit = None
+        if reservation is not None:
+            base_commit = reader_ops.worker_commit(
+                reservation,
+                cancel_event.is_set,
+                boundary_lock=_COND,
+                set_committing=set_committing,
+            )
+
+            def tracked_commit(apply: Any, kinds: tuple[str, ...] | None = None) -> Any:
+                try:
+                    return base_commit(apply, kinds) if kinds is not None else base_commit(apply)
+                finally:
+                    with _COND:
+                        task = _TASKS.get(clean_task_id)
+                        if isinstance(task, dict) and reservation.write_committed:
+                            task["write_committed"] = True
+                            task["updated_at"] = time.time()
+                            _COND.notify_all()
+
+            commit = tracked_commit
         try:
-            if cancel_event.is_set():
-                _finish_cancelled(clean_task_id)
-                return
+            reader_ops.checkpoint(cancel_event.is_set)
             result = handle_reader_action(
                 ctx,
                 clean_action,
                 data,
                 progress_callback=_progress_callback(clean_task_id, clean_action),
                 cancel_callback=cancel_event.is_set,
+                commit=commit,
             )
+            if cancel_event.is_set():
+                _finish_stop(clean_task_id, "Reader action cancelled.")
+                return
             with _COND:
                 task = _TASKS.get(clean_task_id)
                 if not isinstance(task, dict):
+                    return
+                if cancel_event.is_set():
+                    _finish_stop_locked(task, "Reader action cancelled.")
                     return
                 result_dict = result.to_dict()
-                if cancel_event.is_set() or str(task.get("status") or "") == "cancelled":
-                    task["status"] = "cancelled"
-                    task["progress"] = {
-                        "phase": "cancelled",
-                        "label": "Cancelled",
-                        "current": 0,
-                        "total": 0,
-                        "saved": 0,
-                    }
-                elif result.ok is False:
+                task["result"] = result_dict
+                task["message"] = result.message
+                task["warnings"] = list(result.warnings)
+                task["changed_ids"] = dict(result.changed_ids)
+                task["progress"] = _progress_for_result(clean_action, result_dict)
+                if result.ok is False:
                     task["status"] = "failed"
-                    task["result"] = result_dict
                     task["error"] = result.message or "Reader action failed."
-                    task["message"] = result.message
-                    task["warnings"] = list(result.warnings)
-                    task["changed_ids"] = dict(result.changed_ids)
-                    task["progress"] = _progress_for_result(clean_action, result_dict)
                 else:
                     task["status"] = "done"
-                    task["result"] = result_dict
-                    task["message"] = result.message
-                    task["warnings"] = list(result.warnings)
-                    task["changed_ids"] = dict(result.changed_ids)
-                    task["progress"] = _progress_for_result(clean_action, result_dict)
+                    task["error"] = ""
                 task["updated_at"] = time.time()
                 task["finished_at"] = task["updated_at"]
                 _COND.notify_all()
+        except reader_ops.ReaderCancelled as exc:
+            _finish_stop(clean_task_id, str(exc))
         except Exception as exc:
-            with _COND:
-                task = _TASKS.get(clean_task_id)
-                if not isinstance(task, dict):
-                    return
-                task["status"] = "cancelled" if cancel_event.is_set() else "failed"
-                task["error"] = str(exc)
-                task["progress"] = {
-                    "phase": task["status"],
-                    "label": str(exc),
-                    "current": 0,
-                    "total": 0,
-                    "saved": 0,
-                }
-                task["updated_at"] = time.time()
-                task["finished_at"] = task["updated_at"]
-                _COND.notify_all()
+            _finish_stop(
+                clean_task_id,
+                str(exc),
+                cancelled=cancel_event.is_set(),
+            )
+        finally:
+            if reservation is not None:
+                agent_ops.abort(reservation)
 
     thread = threading.Thread(
         target=run,
@@ -176,6 +195,30 @@ def start(
     watchdog.start()
     cleanup(started_at)
     return snapshot(clean_task_id, ctx=ctx)
+
+
+def _finish_stop(task_id: str, error: str, *, cancelled: bool = True) -> None:
+    with _COND:
+        task = _TASKS.get(task_id)
+        if isinstance(task, dict):
+            _finish_stop_locked(task, error, cancelled=cancelled)
+
+
+def _finish_stop_locked(task: dict[str, Any], error: str, *, cancelled: bool = True) -> None:
+    timed_out = bool(task.get("timed_out"))
+    status = "failed" if timed_out or not cancelled else "cancelled"
+    message = str(task.get("timeout_error") if timed_out else error or "Reader action cancelled.")
+    if task.get("write_committed"):
+        message += " Partial writes were committed and kept."
+    task["status"] = status
+    task["error"] = "" if status == "cancelled" else message
+    task["message"] = message
+    progress = dict(task.get("progress") or {})
+    progress.update({"phase": status, "label": message})
+    task["progress"] = progress
+    task["updated_at"] = time.time()
+    task["finished_at"] = task["updated_at"]
+    _COND.notify_all()
 
 
 def snapshot(task_id: str, *, ctx: ReaderActionContext | None = None) -> dict[str, Any]:
@@ -205,20 +248,16 @@ def cancel(task_id: str, *, ctx: ReaderActionContext | None = None) -> dict[str,
         if not isinstance(task, dict):
             return _lost_snapshot(clean_id, ctx=ctx, now=time.time())
         _assert_context_allowed(task, ctx)
-        cancel_event = task.get("cancel_event")
-        if isinstance(cancel_event, threading.Event):
-            cancel_event.set()
         if str(task.get("status") or "") not in TERMINAL_STATUSES:
-            task["status"] = "cancelled"
-            task["progress"] = {
-                "phase": "cancelled",
-                "label": "Cancelled",
-                "current": 0,
-                "total": 0,
-                "saved": 0,
-            }
+            cancel_event = task.get("cancel_event")
+            if isinstance(cancel_event, threading.Event):
+                cancel_event.set()
+            task["cancel_requested"] = True
+            task["status"] = "cancelling"
+            progress = dict(task.get("progress") or {})
+            progress.update({"phase": "cancelling", "label": "Cancelling; committed writes are kept."})
+            task["progress"] = progress
             task["updated_at"] = time.time()
-            task["finished_at"] = task["updated_at"]
         _COND.notify_all()
         return _snapshot_locked(task)
 
@@ -350,24 +389,6 @@ def _progress_callback(task_id: str, action: str):
     return update
 
 
-def _finish_cancelled(task_id: str) -> None:
-    with _COND:
-        task = _TASKS.get(task_id)
-        if not isinstance(task, dict):
-            return
-        task["status"] = "cancelled"
-        task["progress"] = {
-            "phase": "cancelled",
-            "label": "Cancelled",
-            "current": 0,
-            "total": 0,
-            "saved": 0,
-        }
-        task["updated_at"] = time.time()
-        task["finished_at"] = task["updated_at"]
-        _COND.notify_all()
-
-
 def _snapshot_locked(task: dict[str, Any]) -> dict[str, Any]:
     return {
         "task_id": str(task.get("task_id") or ""),
@@ -382,6 +403,8 @@ def _snapshot_locked(task: dict[str, Any]) -> dict[str, Any]:
         "message": str(task.get("message") or ""),
         "warnings": list(task.get("warnings") or []),
         "changed_ids": dict(task.get("changed_ids") or {}),
+        "cancel_requested": bool(task.get("cancel_requested")),
+        "write_committed": bool(task.get("write_committed")),
         "progress": task.get("progress") if isinstance(task.get("progress"), dict) else _progress_for_result(
             str(task.get("action") or ""),
             task.get("result") if isinstance(task.get("result"), dict) else {},
@@ -412,6 +435,8 @@ def _lost_snapshot(
         "message": "",
         "warnings": [],
         "changed_ids": {},
+        "cancel_requested": False,
+        "write_committed": False,
         "progress": {
             "phase": "failed",
             "label": "Reader task was lost. Start the action again.",
@@ -509,7 +534,7 @@ def _refresh_for_task(task: dict[str, Any]) -> dict[str, Any]:
     summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
     action = str(task.get("action") or "")
     return {
-        "payload": str(task.get("status") or "") == "done",
+        "payload": str(task.get("status") or "") == "done" or bool(task.get("write_committed")),
         "pages": list(summary.get("requested_pages") or []),
         "target_lang": str(summary.get("target_lang") or ""),
         "action": action,
@@ -572,7 +597,7 @@ def _task_timeout_seconds(action: str, payload: dict[str, Any]) -> float:
 
 
 def _mark_timeout_locked(task_id: str, task: dict[str, Any], now: float) -> None:
-    if str(task.get("status") or "") != "running":
+    if str(task.get("status") or "") not in {"running", "cancelling"}:
         return
     started = float(task.get("started_at", 0.0) or 0.0)
     timeout_seconds = _positive_float(task.get("timeout_seconds")) or float(_TIMEOUT_SECONDS)
@@ -581,17 +606,14 @@ def _mark_timeout_locked(task_id: str, task: dict[str, Any], now: float) -> None
     cancel_event = task.get("cancel_event")
     if isinstance(cancel_event, threading.Event):
         cancel_event.set()
-    task["status"] = "failed"
-    task["error"] = f"Reader task timed out after {int(timeout_seconds)} seconds."
-    task["progress"] = {
-        "phase": "failed",
-        "label": task["error"],
-        "current": 0,
-        "total": 0,
-        "saved": 0,
-    }
+    task["cancel_requested"] = True
+    task["timed_out"] = True
+    task["timeout_error"] = f"Reader task timed out after {int(timeout_seconds)} seconds."
+    task["status"] = "cancelling"
+    progress = dict(task.get("progress") or {})
+    progress.update({"phase": "cancelling", "label": task["timeout_error"]})
+    task["progress"] = progress
     task["updated_at"] = now
-    task["finished_at"] = now
     _COND.notify_all()
 
 

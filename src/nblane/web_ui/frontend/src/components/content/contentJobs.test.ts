@@ -42,7 +42,15 @@ function mockFetch(statusReplies: Array<() => Response>) {
       const method = init?.method ?? 'GET';
       calls.push({ url, method });
       if (method === 'POST') return jsonResponse(202, { job_id: 'job-1', job: { job_id: 'job-1', status: 'queued' } });
-      if (method === 'DELETE') return jsonResponse(200, { job: { job_id: 'job-1', status: 'failed' }, result: null });
+      if (method === 'DELETE') return jsonResponse(200, {
+        job: {
+          job_id: 'job-1',
+          status: 'failed',
+          cancel_requested: true,
+          error: { code: 'job_cancelled', message: '已取消。' },
+        },
+        result: null,
+      });
       const reply = statusReplies.shift();
       return reply ? reply() : jsonResponse(200, { job: { job_id: 'job-1', status: 'running' }, result: null });
     }),
@@ -128,23 +136,26 @@ describe('runContentJob', () => {
     expect((await outcome as ContentJobError).code).toBe('job_stream_error');
   });
 
-  it('cancel closes the stream and asks the server to end the job', async () => {
+  it('cancel waits for the server terminal state and closes the stream', async () => {
     const calls = mockFetch([]);
     const job = runContentJob('alice', 'content-rewrite', {});
+    const outcome = job.result.catch((error: unknown) => error);
     await flush();
-    job.cancel();
-    await flush();
+    await job.cancel();
     expect(MockEventSource.instances[0].closed).toBe(true);
     expect(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/jobs/job-1'))).toBe(true);
+    expect((await outcome as ContentJobError).code).toBe('job_cancelled');
   });
 
-  it('cancel before the job is created still deletes it once the id arrives', async () => {
+  it('cancel before the job is created still deletes and follows it once the id arrives', async () => {
     const calls = mockFetch([]);
     const job = runContentJob('alice', 'content-rewrite', {});
-    job.cancel();
-    await flush();
-    expect(MockEventSource.instances).toHaveLength(0);
+    const outcome = job.result.catch((error: unknown) => error);
+    await job.cancel();
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(MockEventSource.instances[0].closed).toBe(true);
     expect(calls.some((call) => call.method === 'DELETE')).toBe(true);
+    expect((await outcome as ContentJobError).code).toBe('job_cancelled');
   });
 });
 
@@ -170,12 +181,76 @@ describe('followJob', () => {
     expect(calls.some((call) => call.method === 'DELETE')).toBe(false);
   });
 
-  it('cancel deletes the server job', async () => {
+  it('cancel deletes the server job and waits for its terminal response', async () => {
     const calls = mockFetch([]);
     const job = followJob('alice', 'job-9');
-    job.cancel();
-    await flush();
+    const outcome = job.result.catch((error: unknown) => error);
+    await job.cancel();
     expect(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/jobs/job-9'))).toBe(true);
+    expect((await outcome as ContentJobError).code).toBe('job_cancelled');
+  });
+
+  it('cancel keeps following a committing job and forwards partial-write status', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'DELETE') {
+        return jsonResponse(200, {
+          job: {
+            job_id: 'job-9',
+            status: 'running',
+            phase: 'cancelling',
+            message: '正在停止；当前提交段会完成。',
+            cancel_requested: true,
+            write_committed: true,
+            commit_summary: '第一段',
+          },
+          result: null,
+        });
+      }
+      throw new TypeError('unexpected fetch');
+    }));
+    const onProgress = vi.fn();
+    const job = followJob('alice', 'job-9', { onProgress });
+    const outcome = job.result.catch((error: unknown) => error);
+    let cancelFinished = false;
+    const cancelling = Promise.resolve(job.cancel()).then(() => { cancelFinished = true; });
+    await flush();
+    expect(cancelFinished).toBe(false);
+    expect(MockEventSource.instances).toHaveLength(2);
+    expect(onProgress).toHaveBeenCalledWith(expect.stringContaining('第一段'), 'cancelling');
+    MockEventSource.instances[1].emit('error', {
+      ok: false,
+      error: { code: 'job_cancelled', message: '已取消；已保留部分写入：第一段。' },
+    });
+    await cancelling;
+    expect((await outcome as ContentJobError).message).toContain('已保留部分写入：第一段');
+  });
+
+  it('cancel does not stop listening before the DELETE response arrives', async () => {
+    let answerDelete: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'DELETE') {
+        return new Promise<Response>((resolve) => {
+          answerDelete = () => resolve(jsonResponse(200, {
+            job: {
+              job_id: 'job-9',
+              status: 'failed',
+              error: { code: 'job_cancelled', message: '已取消。' },
+            },
+            result: null,
+          }));
+        });
+      }
+      throw new TypeError('unexpected fetch');
+    }));
+    const job = followJob('alice', 'job-9');
+    const outcome = job.result.catch((error: unknown) => error);
+    const cancelling = job.cancel();
+    await flush();
+    expect(MockEventSource.instances[0].closed).toBe(false);
+    answerDelete?.();
+    await cancelling;
+    expect(MockEventSource.instances[0].closed).toBe(true);
+    expect((await outcome as ContentJobError).code).toBe('job_cancelled');
   });
 
   it('re-attaches after a dropped stream like runContentJob', async () => {

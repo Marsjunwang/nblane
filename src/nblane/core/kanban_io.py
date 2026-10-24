@@ -1058,22 +1058,24 @@ def _render_kanban_archive_text(
 
 
 def append_kanban_archive(
-    name: str,
+    name: str | Path,
     tasks: list[KanbanTask],
 ) -> None:
     """Append Done tasks to kanban-archive.md under today's heading."""
     if not tasks:
         return
-    path = profile_dir(name) / KANBAN_ARCHIVE_FILENAME
-    atomic_write_text(path, _render_kanban_archive_text(name, path, tasks))
+    profile_path = name if isinstance(name, Path) else profile_dir(name)
+    profile_name = profile_path.name
+    path = profile_path / KANBAN_ARCHIVE_FILENAME
+    atomic_write_text(path, _render_kanban_archive_text(profile_name, path, tasks))
     git_backup.record_change(
         [path],
-        action=f"append {name}/kanban-archive.md",
+        action=f"append {profile_name}/kanban-archive.md",
     )
 
 
 def archive_kanban_done_tasks(
-    name: str,
+    name: str | Path,
     sections: dict[str, list[KanbanTask]],
     done_indexes: list[int],
 ) -> dict[str, list[KanbanTask]]:
@@ -1083,7 +1085,9 @@ def archive_kanban_done_tasks(
     The kanban file is only replaced after the archive write succeeds, so a
     failed archive append cannot silently delete Done tasks.
     """
-    normalized = ensure_kanban_task_ids(sections, name)
+    profile_path = name if isinstance(name, Path) else profile_dir(name)
+    profile_name = profile_path.name
+    normalized = ensure_kanban_task_ids(sections, profile_name)
     done_tasks = list(normalized.get(KANBAN_DONE, []))
     valid_indexes: list[int] = []
     for raw_index in done_indexes:
@@ -1108,20 +1112,19 @@ def archive_kanban_done_tasks(
         if i not in index_set
     ]
 
-    profile_path = profile_dir(name)
     archive_path = profile_path / KANBAN_ARCHIVE_FILENAME
-    kanban_path = profile_path / "kanban.md"
+    board_path = profile_path / "kanban.md"
     archive_text = _render_kanban_archive_text(
-        name,
+        profile_name,
         archive_path,
         to_archive,
     )
-    kanban_text = render_kanban(name, updated_sections)
+    kanban_text = render_kanban(profile_name, updated_sections)
 
     atomic_write_text(archive_path, archive_text)
-    atomic_write_text(kanban_path, kanban_text)
+    atomic_write_text(board_path, kanban_text)
     git_backup.record_change(
-        [archive_path, kanban_path],
-        action=f"archive {name}/Done tasks",
+        [archive_path, board_path],
+        action=f"archive {profile_name}/Done tasks",
     )
     return updated_sections

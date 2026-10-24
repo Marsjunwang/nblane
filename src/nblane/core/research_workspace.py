@@ -9,18 +9,20 @@ claims remain in ``evidence-pool.yaml.claims``.
 from __future__ import annotations
 
 import copy
-import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
 
 from nblane.core import git_backup
+from nblane.core.file_state import FileSnapshot
 from nblane.core.file_write import atomic_write_text
 from nblane.core.profile_io import profile_dir
+from nblane.core.research_jsonl import load_jsonl, mutate_jsonl, replace_jsonl
 from nblane.core.research_sources import (
     RESEARCH_DIRNAME,
     ResearchSource,
@@ -363,34 +365,64 @@ def load_chunks(profile: str | Path, source_id: str = "") -> list[ResearchChunk]
     paths = [_chunk_path(profile, source_id)] if source_id else sorted(root.glob("*.jsonl"))
     chunks: list[ResearchChunk] = []
     for path in paths:
-        if not path.exists():
-            continue
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                parsed = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            chunk = ResearchChunk.from_dict(parsed)
+        for row in load_jsonl(path):
+            chunk = ResearchChunk.from_dict(row)
             if chunk is not None:
                 chunks.append(chunk)
     return chunks
 
 
-def save_chunks(profile: str | Path, source_id: str, chunks: list[ResearchChunk | dict]) -> Path:
+def save_chunks(
+    profile: str | Path,
+    source_id: str,
+    chunks: list[ResearchChunk | dict],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> Path:
     """Persist all chunks for one source as JSONL."""
     path = _chunk_path(profile, source_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, object]] = []
     for item in chunks:
         chunk = item if isinstance(item, ResearchChunk) else ResearchChunk.from_dict(item)
         if chunk is not None:
             rows.append(chunk.to_dict())
-    text = "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows)
-    atomic_write_text(path, text)
-    git_backup.record_change([path], action=f"update research chunks for {source_id}")
-    return path
+    return replace_jsonl(
+        path,
+        rows,
+        expected_snapshot=expected_snapshot,
+        action=f"update research chunks for {source_id}",
+    )
+
+
+_T = TypeVar("_T")
+
+
+def mutate_chunks(
+    profile: str | Path,
+    source_id: str,
+    fn: Callable[[list[ResearchChunk]], _T],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> _T:
+    """Apply a callback to the latest typed chunks under the shared file lock."""
+    path = _chunk_path(profile, source_id)
+
+    def apply(rows: list[dict]) -> _T:
+        chunks = [
+            chunk
+            for row in rows
+            if (chunk := ResearchChunk.from_dict(row)) is not None
+        ]
+        result = fn(chunks)
+        rows[:] = [chunk.to_dict() for chunk in chunks]
+        return result
+
+    return mutate_jsonl(
+        path,
+        apply,
+        expected_snapshot=expected_snapshot,
+        action=f"update research chunks for {source_id}",
+    )
 
 
 def _next_chunk_id(existing: list[ResearchChunk], source_id: str) -> str:
@@ -427,24 +459,26 @@ def create_chunk(
     clean_text = _clean_text(text)
     if not clean_text:
         raise ValueError("Research chunk text cannot be blank.")
-    chunks = load_chunks(profile, clean_source)
-    existing_ids = {chunk.id for chunk in chunks}
-    clean_id = _clean_text(chunk_id) or _next_chunk_id(chunks, clean_source)
-    if clean_id in existing_ids:
-        raise ValueError(f"Duplicate research chunk id: {clean_id}")
-    chunk = ResearchChunk(
-        id=clean_id,
-        source_id=clean_source,
-        text=clean_text,
-        kind=_choice(kind, RESEARCH_CHUNK_KINDS, "excerpt"),
-        title=_clean_text(title),
-        locator=_clean_text(locator),
-        created=_now(),
-        metadata=_clean_mapping(metadata),
-    )
-    chunks.append(chunk)
-    save_chunks(profile, clean_source, chunks)
-    return chunk
+
+    def append(chunks: list[ResearchChunk]) -> ResearchChunk:
+        existing_ids = {chunk.id for chunk in chunks}
+        clean_id = _clean_text(chunk_id) or _next_chunk_id(chunks, clean_source)
+        if clean_id in existing_ids:
+            raise ValueError(f"Duplicate research chunk id: {clean_id}")
+        chunk = ResearchChunk(
+            id=clean_id,
+            source_id=clean_source,
+            text=clean_text,
+            kind=_choice(kind, RESEARCH_CHUNK_KINDS, "excerpt"),
+            title=_clean_text(title),
+            locator=_clean_text(locator),
+            created=_now(),
+            metadata=_clean_mapping(metadata),
+        )
+        chunks.append(chunk)
+        return chunk
+
+    return mutate_chunks(profile, clean_source, append)
 
 
 def _load_list_doc(profile: str | Path, filename: str, key: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:

@@ -24,7 +24,7 @@ from nblane.core.project_board import (
 )
 from nblane.core.research_sources import (
     load_research_sources,
-    save_research_sources,
+    mutate_research_sources,
 )
 
 
@@ -247,10 +247,23 @@ def sync_project_case_workspace(
         )
         result.changed_paths.append(pdir / "evidence-pool.yaml")
     if sources_before != sources.to_dict():
-        save_research_sources(
-            profile, sources, expected_snapshot=snaps.get("sources")
+        def apply_source_refs(latest) -> bool:
+            before = latest.to_dict()
+            for source in latest.sources:
+                source.project_refs = _set_project_ref(
+                    source.project_refs,
+                    project_id,
+                    source.id in desired_sources,
+                )
+            return before != latest.to_dict()
+
+        sources_changed = mutate_research_sources(
+            profile,
+            apply_source_refs,
+            expected_snapshot=snaps.get("sources"),
         )
-        result.changed_paths.append(pdir / "research" / "sources.yaml")
+        if sources_changed:
+            result.changed_paths.append(pdir / "research" / "sources.yaml")
 
     return result
 

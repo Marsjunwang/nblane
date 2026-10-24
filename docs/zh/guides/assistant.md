@@ -48,10 +48,9 @@ source_of_truth: false
 
 重要操作的确认码 10 分钟内有效，只能用一次，换了参数就失效。
 
-规则只有一份，改规则只改这两处：
+助手侧使用说明在 [`scripts/openclaw/skills/nblane/SKILL.md`](../../../scripts/openclaw/skills/nblane/SKILL.md)，接入时同步到 OpenClaw 工作区。服务端 T0–T3 分级、批量阈值和中文摘要集中在 [`src/nblane/core/agent_policy.py`](../../../src/nblane/core/agent_policy.py)：主 API 未登记的 profile 写操作按 T2，Reader 未登记写路由或动作按 T3 拒绝。两个 HTTP 入口分别由 `web_api/agent_guard.py` 与 `web_reader_api/agent_guard.py` 做动作映射，共用确认和撤销实现。
 
-- 助手侧：[`scripts/openclaw/skills/nblane/SKILL.md`](../../../scripts/openclaw/skills/nblane/SKILL.md)，接入时同步到 OpenClaw 工作区。
-- 服务端：[`src/nblane/core/agent_policy.py`](../../../src/nblane/core/agent_policy.py) 的分级表（T0 只读、T1 直写、T2 确认、T3 页面专属）。表里没登记的写操作按 T2 处理。
+Reader 与 Paper Library 也遵守同一张分级表：阅读进度、标注增改、chunk / citation、集合编辑和派生产物准备等按 T1；删除、discard / purge 和批量导入按 T2；正文请求体里的动态 action 不能绕过 URL 看起来较低的分级。后台任务在真实提交段记账，取消 / 超时可能保留已完成且可撤销的部分写入，页面会区分「正在停止」和最终状态。
 
 本机 MCP 不归助手用，见 [MCP 参考](../reference/mcp.md)。
 
@@ -60,9 +59,10 @@ source_of_truth: false
 ## 撤销
 
 - 在助手页「最近操作」里点「撤销」。也可以在聊天里说「撤销刚才那个」。
-- 记录保存在 `profiles/<name>/agent-journal.yaml`，只记助手账号的写入，保留 30 天、最多 500 条。
-- 撤销前会检查那条内容之后有没有被改过。改过就显示「已被改动」并拒绝撤销，不会覆盖你后来的修改。
-- 编年史这类只追加的记录不回滚。
+- 记录保存在 `profiles/<name>/agent-journal.yaml`，只记助手账号的写入，保留 30 天、最多 500 条。研究 JSONL 按行记录；PDF 只把 hash 和快照引用写进日志，旧字节保存在本机 agent state，随日志保留期清理。
+- 撤销前会检查那条内容之后有没有被改过。改过就显示「已被改动」并拒绝撤销，不会覆盖你后来的修改。研究 source 和 JSONL 还会在文件锁内复核；共享 PDF 仍有引用时不会被误删。
+- 后台任务取消或失败时，已完成提交会留在「最近操作」里，可以撤销；没提交的晚到结果不会写入。
+- 编年史、AI 运行审计和可重建的页面预览缓存不作为业务撤销对象。
 
 ## 定时任务
 

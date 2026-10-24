@@ -12,14 +12,13 @@ from pathlib import Path
 import yaml
 
 from nblane.core import git_backup
-from nblane.core.file_state import FileConflictError, snapshot_file
+from nblane.core.file_state import snapshot_file
 from nblane.core.file_write import atomic_write_text
 from nblane.core.research_sources import (
-    RESEARCH_DIRNAME,
     ResearchSource,
     ResearchSourceInbox,
     load_research_sources,
-    save_research_sources,
+    mutate_research_sources,
 )
 from nblane.core.research_workspace import (
     ResearchCitation,
@@ -27,7 +26,7 @@ from nblane.core.research_workspace import (
     load_chunks,
     load_research_citations,
     load_research_claims,
-    save_chunks,
+    mutate_chunks,
     source_slug,
 )
 
@@ -38,6 +37,7 @@ from ._constants import (
 from ._paths import (
     _md_path,
     _profile_root,
+    _research_chunk_path,
     _research_root,
 )
 from ._utils import (
@@ -225,24 +225,13 @@ def assign_citation_keys(
 
 
 def _persist_citation_keys(profile: str | Path, source_ids: list[str]) -> tuple[ResearchSourceInbox, dict[str, str]]:
-    """Load sources, assign missing keys, and save under a conflict check."""
+    """Assign missing citation keys against the latest locked sources document."""
 
-    root = _profile_root(profile)
-    path = root / RESEARCH_DIRNAME / "sources.yaml"
-    for attempt in range(3):
-        snapshot = snapshot_file(path)
-        inbox = load_research_sources(root)
-        keys, created = assign_citation_keys(inbox, source_ids)
-        if not created:
-            return inbox, keys
-        try:
-            save_research_sources(root, inbox, expected_snapshot=snapshot)
-        except FileConflictError:
-            if attempt == 2:
-                raise
-            continue
+    def apply(inbox: ResearchSourceInbox) -> tuple[ResearchSourceInbox, dict[str, str]]:
+        keys, _created = assign_citation_keys(inbox, source_ids)
         return inbox, keys
-    raise RuntimeError("unreachable")  # pragma: no cover
+
+    return mutate_research_sources(_profile_root(profile), apply)
 
 
 def _paper_venue_kind(source: ResearchSource) -> str:
@@ -835,9 +824,13 @@ def auto_chunk_paper(
     """Create citable chunks from paper segments for text-mode Reader workflows."""
 
     _source_by_id(profile, source_id)
-    existing = load_chunks(_profile_root(profile), source_id)
+    root = _profile_root(profile)
+    existing = load_chunks(root, source_id)
     if existing and not overwrite:
         return existing
+    expected_snapshot = (
+        snapshot_file(_research_chunk_path(root, source_id)) if overwrite else None
+    )
     segments = load_paper_segments(profile, source_id)
     chunks: list[ResearchChunk] = []
     for index, segment in enumerate(segments, start=1):
@@ -858,5 +851,16 @@ def auto_chunk_paper(
                 },
             )
         )
-    save_chunks(_profile_root(profile), source_id, chunks)
-    return chunks
+
+    def commit(latest: list[ResearchChunk]) -> list[ResearchChunk]:
+        if latest and not overwrite:
+            return latest
+        latest[:] = chunks
+        return latest
+
+    return mutate_chunks(
+        root,
+        source_id,
+        commit,
+        expected_snapshot=expected_snapshot,
+    )

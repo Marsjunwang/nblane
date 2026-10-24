@@ -13,6 +13,23 @@ const overviewReturnURL = spaPageURL("/research");
 // (.dev-data for the isolated dev instance, repo root otherwise).
 const profileDir = path.join(e2eDataRoot(), "profiles", profileName);
 const researchDir = path.join(profileDir, "research");
+const repoRoot = path.basename(e2eDataRoot()) === ".dev-data" ? path.dirname(e2eDataRoot()) : e2eDataRoot();
+const assetRoot = process.env.NBLANE_E2E_RESEARCH_ASSET_ROOT || path.join(repoRoot, ".dev-assets", "research");
+const assetProfileDir = path.join(assetRoot, "profiles", profileName);
+const fixturePdf = Buffer.from(`%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>
+endobj
+trailer
+<< /Root 1 0 R >>
+%%EOF
+`);
 
 function yamlString(value: string): string {
   return JSON.stringify(value);
@@ -20,7 +37,12 @@ function yamlString(value: string): string {
 
 function resetFixtureProfile() {
   fs.rmSync(profileDir, { recursive: true, force: true });
+  fs.rmSync(assetProfileDir, { recursive: true, force: true });
   fs.mkdirSync(researchDir, { recursive: true });
+  fs.mkdirSync(path.join(assetProfileDir, "papers"), { recursive: true });
+  for (const name of ["e2e-ready.pdf", "discarded-preview.pdf"]) {
+    fs.writeFileSync(path.join(assetProfileDir, "papers", name), fixturePdf);
+  }
   fs.writeFileSync(
     path.join(researchDir, "library-tree.yaml"),
     `# Paper library tree for ${profileName}
@@ -135,6 +157,7 @@ sources:
 
 function cleanupFixtureProfile() {
   fs.rmSync(profileDir, { recursive: true, force: true });
+  fs.rmSync(assetProfileDir, { recursive: true, force: true });
 }
 
 function paperLibraryUrl(params: Record<string, string> = {}): string {
@@ -372,7 +395,7 @@ test("Paper Library shows retry translation job progress", async ({ page }) => {
   }, { profileName, sourceId });
 
   let pollCount = 0;
-  await page.route("**/api/research/**/paper-library/events/jobs", async (route) => {
+  await page.route(/\/api\/research\/[^/]+\/paper-library\/events\/jobs(?:\?.*)?$/, async (route) => {
     if (route.request().method() !== "POST") {
       await route.fallback();
       return;
@@ -401,7 +424,7 @@ test("Paper Library shows retry translation job progress", async ({ page }) => {
       }),
     });
   });
-  await page.route("**/api/research/**/paper-library/events/jobs/mock-translation-job", async (route) => {
+  await page.route(/\/api\/research\/[^/]+\/paper-library\/events\/jobs\/mock-translation-job(?:\?.*)?$/, async (route) => {
     pollCount += 1;
     const done = pollCount >= 2;
     await route.fulfill({
@@ -452,7 +475,7 @@ test("Paper Library shows retry translation job progress", async ({ page }) => {
   await expect(page.locator(".paper-workspace-task-progress")).toContainText("Translating batch 1/3.", { timeout: 6_000 });
   await expect(page.locator(".paper-workspace-task-progress")).toContainText("1/3 batches");
   await expect(page.locator(".paper-workspace-task-progress")).toContainText("2/6 units");
-  await expect(page.locator(".paper-workspace-notice")).toContainText("Mock translation finished.", { timeout: 8_000 });
+  await expect(page.locator(".paper-workspace-task-progress")).toContainText("Mock translation finished.", { timeout: 8_000 });
   await expect(page.locator(".paper-workspace-task-progress")).toContainText("3/3 batches");
   await expect(page.locator(".paper-workspace-task-progress")).toContainText("6/6 units");
   await expect(page.locator(".paper-workspace-task-progress")).toContainText("3 updated");
@@ -482,7 +505,7 @@ test("Paper Library shows run extraction fallback-ready progress", async ({ page
   }, { profileName, sourceId });
 
   let pollCount = 0;
-  await page.route("**/api/research/**/paper-library/events/jobs", async (route) => {
+  await page.route(/\/api\/research\/[^/]+\/paper-library\/events\/jobs(?:\?.*)?$/, async (route) => {
     if (route.request().method() !== "POST") {
       await route.fallback();
       return;
@@ -507,7 +530,7 @@ test("Paper Library shows run extraction fallback-ready progress", async ({ page
       }),
     });
   });
-  await page.route("**/api/research/**/paper-library/events/jobs/mock-extraction-job", async (route) => {
+  await page.route(/\/api\/research\/[^/]+\/paper-library\/events\/jobs\/mock-extraction-job(?:\?.*)?$/, async (route) => {
     pollCount += 1;
     const done = pollCount >= 2;
     await route.fulfill({
@@ -551,7 +574,7 @@ test("Paper Library shows run extraction fallback-ready progress", async ({ page
   await expect(page.locator(".paper-workspace-task-progress")).toContainText("Using current fallback text");
   await expect(page.locator(".paper-workspace-task-progress")).toContainText("2/3 steps");
   await expect(page.locator(".paper-workspace-task-progress")).toContainText("18 saved");
-  await expect(page.locator(".paper-workspace-notice")).toContainText("Fallback text ready", { timeout: 8_000 });
+  await expect(page.locator(".paper-workspace-task-progress")).toContainText("Fallback text ready", { timeout: 8_000 });
   await expect(page.locator(".paper-workspace-task-progress")).toContainText("3/3 steps");
   await expect(page.locator(".paper-detail-title")).toContainText("Extremely Long English Paper Title");
   await expect(page.locator(".paper-workbench")).toBeVisible();
@@ -575,7 +598,7 @@ test("Paper Library force GROBID upgrade sends explicit override", async ({ page
   }, { profileName, sourceId });
 
   let sawForceOverride = false;
-  await page.route("**/api/research/**/paper-library/events/jobs", async (route) => {
+  await page.route(/\/api\/research\/[^/]+\/paper-library\/events\/jobs(?:\?.*)?$/, async (route) => {
     if (route.request().method() !== "POST") {
       await route.fallback();
       return;
@@ -601,7 +624,7 @@ test("Paper Library force GROBID upgrade sends explicit override", async ({ page
       }),
     });
   });
-  await page.route("**/api/research/**/paper-library/events/jobs/mock-grobid-upgrade-job", async (route) => {
+  await page.route(/\/api\/research\/[^/]+\/paper-library\/events\/jobs\/mock-grobid-upgrade-job(?:\?.*)?$/, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -639,7 +662,7 @@ test("Paper Library force GROBID upgrade sends explicit override", async ({ page
   await forceButton.click();
 
   await expect(page.locator(".paper-workspace-task-progress")).toContainText("Running GROBID...");
-  await expect(page.locator(".paper-workspace-notice")).toContainText("Extraction ready", { timeout: 8_000 });
+  await expect(page.locator(".paper-workspace-task-progress")).toContainText("Extraction ready", { timeout: 8_000 });
   expect(sawForceOverride).toBe(true);
 });
 

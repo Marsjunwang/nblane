@@ -3733,7 +3733,10 @@ def get_profile_crystallize_candidates(name: str) -> CrystallizeCandidatesRespon
     dependencies=PROFILE_DEPENDENCY,
 )
 def draft_profile_crystallize(
-    name: str, body: CrystallizeDraftRequest
+    name: str,
+    body: CrystallizeDraftRequest,
+    request: Request,
+    user: CurrentUser = Depends(require_profile_access),
 ) -> CrystallizeDraftResponse | JSONResponse:
     """Draft evidence from selected Done tasks (wizard step 2).
 
@@ -3744,18 +3747,23 @@ def draft_profile_crystallize(
     whose result carries the same payload shape with ``backend="llm"``.
     """
     from nblane.core.kanban_io import materialize_kanban_task_ids
+    from nblane.web_api import agent_guard
 
     pdir = _resolve_profile(name)
     if body.use_llm:
+        reservation = agent_guard.job_reservation(request, jobs.KIND_EVIDENCE_CRYSTALLIZE)
         try:
             snapshot = jobs.create_job(
                 pdir.name,
                 jobs.KIND_EVIDENCE_CRYSTALLIZE,
                 {"task_ids": body.task_ids, "titles": body.titles},
                 profile_scope=pdir,
+                agent_write=reservation,
+                actor=user.id,
             )
         except jobs.JobInputError as exc:
             raise ApiError(422, exc.code, exc.message) from exc
+        agent_guard.consume_job_reservation(request, reservation)
         payload = JobCreateResponse(
             job_id=snapshot["job_id"], job=JobModel(**snapshot)
         )
@@ -3879,28 +3887,32 @@ JOB_RESPONSES = {
     responses=JOB_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def create_profile_job(name: str, body: JobCreateRequest) -> JobCreateResponse:
-    """Create an async job for one profile (LLM long tasks).
+def create_profile_job(
+    name: str,
+    body: JobCreateRequest,
+    request: Request,
+    user: CurrentUser = Depends(require_profile_access),
+) -> JobCreateResponse:
+    """Authorize the actual kind, then enqueue its worker-owned execution."""
+    from nblane.web_api import agent_guard
 
-    Kinds are registered in ``nblane.web_api.jobs`` (e.g.
-    ``project-suggest-refs``, ``content-*``, ``career-*``). The job runs on a daemon
-    thread inside this single-worker process, tracked by the in-memory
-    registry (same design as the reader sidecar's paper-library search
-    jobs): poll ``GET .../jobs/{job_id}`` or subscribe to
-    ``GET .../jobs/{job_id}/stream`` (SSE) for progress and the result.
-    """
     pdir = _resolve_profile(name)
+    kind = body.kind.strip()
+    reservation = agent_guard.job_reservation(request, kind)
     try:
         snapshot = jobs.create_job(
             pdir.name,
-            body.kind,
+            kind,
             body.input,
             profile_scope=pdir,
+            agent_write=reservation,
+            actor=user.id,
         )
     except jobs.UnknownJobKindError as exc:
         raise ApiError(422, "unknown_job_kind", str(exc)) from exc
     except jobs.JobInputError as exc:
         raise ApiError(422, exc.code, exc.message) from exc
+    agent_guard.consume_job_reservation(request, reservation)
     return JobCreateResponse(job_id=snapshot["job_id"], job=JobModel(**snapshot))
 
 
@@ -3943,11 +3955,11 @@ def get_profile_job(name: str, job_id: str) -> JobStatusResponse:
     dependencies=PROFILE_DEPENDENCY,
 )
 def cancel_profile_job(name: str, job_id: str) -> JobStatusResponse:
-    """Cancel a queued/running job: it ends as ``failed`` / ``job_cancelled``.
+    """Request cancellation and return the current, possibly still-running state.
 
-    Idempotent: a job that already finished is returned unchanged. The
-    in-flight provider call cannot be interrupted, but its result is dropped
-    so nothing is applied after the user cancelled.
+    Idempotent: a job that already finished is returned unchanged. A commit
+    already in progress finishes and is journaled; the worker publishes the
+    terminal state and any retained partial writes at the next boundary.
     """
     _resolve_profile_job(name, job_id)
     jobs.cancel_job(job_id)

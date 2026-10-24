@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
-from nblane.core import io as io_facade
 from nblane.core.evidence_review import evidence_status_risks
 from nblane.core.experience import load_experience_book
 from nblane.core.io import (
@@ -79,10 +79,9 @@ def _issue(
     )
 
 
-def _validate_issues(profile_name: str) -> tuple[list[HealthIssue], bool]:
+def _validate_issues(profile_path: Path) -> tuple[list[HealthIssue], bool]:
     """Run validate and return issues plus publish-blocking flag."""
-    pdir = profile_dir(profile_name)
-    errors, warnings = validate_one(pdir, check_sync=False)
+    errors, warnings = validate_one(profile_path, check_sync=False)
     issues: list[HealthIssue] = []
     for err in errors:
         issues.append(
@@ -107,11 +106,11 @@ def _validate_issues(profile_name: str) -> tuple[list[HealthIssue], bool]:
     return issues, bool(errors)
 
 
-def _sync_issues(profile_name: str) -> tuple[list[HealthIssue], bool]:
+def _sync_issues(profile_path: Path) -> tuple[list[HealthIssue], bool]:
     """Report generated block drift as sync issues."""
-    pdir = profile_dir(profile_name)
+    profile_name = profile_path.name
     try:
-        drifted = get_drifted_blocks(pdir)
+        drifted = get_drifted_blocks(profile_path)
     except ValueError as exc:
         return [
             _issue(
@@ -223,12 +222,10 @@ def _evidence_v2_issues(profile_path) -> list[HealthIssue]:
     return issues
 
 
-def _kanban_issues(profile_name: str, profile_path) -> list[HealthIssue]:
+def _kanban_issues(profile_path: Path) -> list[HealthIssue]:
     """Surface inconsistent Kanban crystallization state."""
-    old_profile_dir = io_facade.profile_dir
     try:
-        io_facade.profile_dir = lambda _name: profile_path
-        sections = parse_kanban(profile_name)
+        sections = parse_kanban(profile_path)
     except OSError as exc:
         return [
             _issue(
@@ -239,8 +236,6 @@ def _kanban_issues(profile_name: str, profile_path) -> list[HealthIssue]:
                 "Check kanban.md permissions and format.",
             )
         ]
-    finally:
-        io_facade.profile_dir = old_profile_dir
     issues: list[HealthIssue] = []
     non_done_crystallized: list[str] = []
     for section, tasks in sections.items():
@@ -456,23 +451,24 @@ def _ref_integrity_issues(profile_path) -> list[HealthIssue]:
     return issues
 
 
-def analyze_profile_health(name: str) -> HealthReport:
+def analyze_profile_health(name: str | Path) -> HealthReport:
     """Analyze one profile without writing any files."""
-    pdir = profile_dir(name)
+    pdir = name if isinstance(name, Path) else profile_dir(name)
+    profile_name = pdir.name
     issues: list[HealthIssue] = []
-    validate_issues, validate_blocks = _validate_issues(name)
-    sync_issues, sync_blocks = _sync_issues(name)
+    validate_issues, validate_blocks = _validate_issues(pdir)
+    sync_issues, sync_blocks = _sync_issues(pdir)
     issues.extend(validate_issues)
     issues.extend(sync_issues)
 
     tree_raw = load_skill_tree_raw(pdir)
     issues.extend(_tree_shape_issues(tree_raw))
     issues.extend(_evidence_issues(pdir, tree_raw))
-    issues.extend(_kanban_issues(name, pdir))
+    issues.extend(_kanban_issues(pdir))
     issues.extend(_ref_integrity_issues(pdir))
 
     return HealthReport(
-        profile=name,
+        profile=profile_name,
         issues=issues,
         can_publish_context=not (validate_blocks or sync_blocks),
     )

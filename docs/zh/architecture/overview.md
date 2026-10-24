@@ -83,14 +83,15 @@ SPA (TanStack Query, fetch credentials: include)
 
 ## Agent 写入守卫
 
-`create_app` 给所有路由挂一个应用级依赖 `web_api/agent_guard.py::agent_write_guard`，只对 Agent 账号的写请求生效：
+SPA 的 `create_app` 挂载 `web_api/agent_guard.py::agent_write_guard`，Reader 挂载 `web_reader_api/agent_guard.py::agent_write_guard`。两个入口只对 Agent 账号的写请求生效，并共用 `core/agent_policy.py`、`core/agent_ops.py` 与 `core/agent_journal.py`：
 
-1. 路由模板 + 方法映射为动作（`ROUTE_ACTIONS`）；未映射的 profile 路由按 T2，系统 / 设置 / 权限前缀按 T3。
-2. 动作分级查 `core/agent_policy.py`：T0 只读放行；T1 直写；T2 需聊天确认；T3 返回 403 `agent_forbidden`。
+1. 路由模板 + 方法映射为动作；Reader 的 Paper Library event 和 Reader action 还按请求体里的有效动作分类。主 API 未映射的 profile 路由按 T2，Reader 未登记写路由 / 动作按 T3，系统 / 设置 / 权限前缀按 T3。
+2. 动作分级：T0 只读放行；T1 直写；T2 需聊天确认；T3 返回 403 `agent_forbidden`。通用 `/jobs` 按实际 JobKind 的副作用确定级别，不再统一视为 AI 草稿。
 3. T2 首次请求返回 428 + `confirm_id` 和人话摘要；助手转述，用户同意后带 `X-Nblane-Confirm` 重发同一请求。确认码一次性、10 分钟有效、绑定调用者与 method + path + body 指纹。
-4. T1 / T2 执行前后对相关实体做快照，diff 写入 `agent-journal.yaml`（`core/agent_journal.py`），可在助手页撤销；没有实际变化的请求不留记录并退还确认码。
+4. 同步 T1 / T2 在写入前后做实体快照，diff 写入 `agent-journal.yaml`；handler 抛错前已发生的部分写入也会记账。没有实际变化的请求不留记录并退还确认码。
+5. 后台任务把授权 reservation 交给 worker，在每个真实提交段前后快照并记账。取消 / 超时只请求协作停止：取消先到则不提交，提交先到则当前段完成并记账，最终状态明确是否保留了部分写入。
 
-共享流程在 `core/agent_ops.py`，MCP 也复用它。分级细节和用户侧说明见 [个人助手](../guides/assistant.md)；撤销日志语义见 [数据契约](data-contracts.md#agent-journal-撤销日志)。
+`core/reader_ops.py` 提供 Reader 提交与取消边界，MCP 复用 `core/agent_ops.py`。分级细节和用户侧说明见 [个人助手](../guides/assistant.md)；撤销日志语义见 [数据契约](data-contracts.md#agent-journal-撤销日志)。
 
 ## 核心层
 

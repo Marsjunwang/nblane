@@ -8,9 +8,11 @@ import yaml
 
 from nblane.core import git_backup
 from nblane.core.file_write import atomic_write_text
+from nblane.core.research_jsonl import delete_jsonl
 from nblane.core.research_sources import (
+    ResearchSourceInbox,
     load_research_sources,
-    save_research_sources,
+    mutate_research_sources,
     update_research_source,
 )
 from nblane.core.research_workspace import (
@@ -102,6 +104,8 @@ def _relative_preview_path(path: Path, root: Path) -> str:
 
 
 def _delete_existing_file(path: Path, *, action: str, record_change: bool = True) -> bool:
+    if path.suffix == ".jsonl":
+        return delete_jsonl(path, action=action, record_backup=record_change)
     if not path.exists():
         return False
     if not path.is_file():
@@ -325,7 +329,6 @@ def delete_paper_record(
     preview = build_paper_delete_preview(profile_path, source_ids)
     _assert_preview_allows_delete(preview)
     clean_ids = set(_clean_list(preview.get("source_ids")))
-    inbox = load_research_sources(profile_path)
 
     deleted_assets: list[str] = []
     if delete_pdf_asset:
@@ -350,10 +353,12 @@ def delete_paper_record(
                 if _delete_existing_file(path, action=f"delete paper {kind} for {source_id}"):
                     deleted_artifacts.append(_relative_preview_path(path, profile_path))
 
-    remaining_sources = [source for source in inbox.sources if source.id not in clean_ids]
-    deleted_sources = [source.id for source in inbox.sources if source.id in clean_ids]
-    inbox.sources = remaining_sources
-    save_research_sources(profile_path, inbox)
+    def remove_sources(latest: ResearchSourceInbox) -> list[str]:
+        deleted_sources = [source.id for source in latest.sources if source.id in clean_ids]
+        latest.sources = [source for source in latest.sources if source.id not in clean_ids]
+        return deleted_sources
+
+    deleted_sources = mutate_research_sources(profile_path, remove_sources)
     return {
         "deleted_sources": deleted_sources,
         "deleted_pdf_assets": deleted_assets,
@@ -378,12 +383,16 @@ def delete_paper_pdf_asset(profile: str | Path, source_id: str) -> dict[str, obj
     path = _asset_path(profile_path, asset_ref)
     deleted = _delete_existing_file(path, action=f"delete paper PDF asset {asset_ref}", record_change=False)
     if deleted:
-        inbox, source = _source_by_id(profile_path, source_id)
-        metadata = dict(source.metadata or {})
-        for key in ("pdf_asset_ref", "pdf_sha256", "pdf_byte_size", "pdf_filename"):
-            metadata.pop(key, None)
-        update_research_source(inbox, source.id, metadata=metadata)
-        save_research_sources(profile_path, inbox)
+        def clear_asset_metadata(inbox: ResearchSourceInbox) -> None:
+            source = inbox.by_id().get(source_id)
+            if source is None:
+                raise ValueError(f"Unknown research source: {source_id}")
+            metadata = dict(source.metadata or {})
+            for key in ("pdf_asset_ref", "pdf_sha256", "pdf_byte_size", "pdf_filename"):
+                metadata.pop(key, None)
+            update_research_source(inbox, source.id, metadata=metadata)
+
+        mutate_research_sources(profile_path, clear_asset_metadata)
     return {"deleted_pdf_assets": [asset_ref] if deleted else [], "preview": preview}
 
 

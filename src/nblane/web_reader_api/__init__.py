@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -37,7 +37,8 @@ from nblane.core.paper_library_workspace import (
 from nblane.core.profile_io import list_profiles, profile_dir
 from nblane.core.web_preferences import load_web_preferences
 from nblane.core.reader_actions import ReaderActionContext, handle_reader_action
-from nblane.core import reader_tasks
+from nblane.core import agent_ops, reader_ops, reader_tasks
+from nblane.web_reader_api import agent_guard as reader_agent_guard
 from nblane.core.research_papers import (
     PAPER_SEARCH_PROVIDERS,
     PaperImportError,
@@ -102,7 +103,15 @@ async def _lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="nblane Paper Reader API", lifespan=_lifespan)
+app = FastAPI(
+    title="nblane Paper Reader API",
+    lifespan=_lifespan,
+    dependencies=[Depends(reader_agent_guard.agent_write_guard)],
+)
+app.add_exception_handler(
+    reader_agent_guard.ReaderAgentError,
+    reader_agent_guard.reader_agent_error_handler,
+)
 # Paper-library JSON compresses well. SSE (text/event-stream) is excluded by
 # Starlette's GZipMiddleware; PDF responses opt out via Content-Encoding:
 # identity in _range_response so range requests keep valid byte offsets.
@@ -186,6 +195,7 @@ async def paper_library_embed_cors(request: Request, call_next):
     if cors_headers and request.method.upper() == "OPTIONS":
         return Response(status_code=204, headers=cors_headers)
     response = await call_next(request)
+    response = await reader_agent_guard.finish_sync_response(request, response)
     # A Paper Library page carries a short-lived handoff token because an
     # embedded sidecar iframe may not retain the bootstrap cookie. API calls
     # can be the first authenticated request that actually reaches the
@@ -1300,7 +1310,12 @@ async def paper_library_events(request: Request, profile: str):
     if request.query_params.get("ui_lang") and not body.get("ui_lang"):
         body["ui_lang"] = request.query_params.get("ui_lang")
     try:
-        result = await asyncio.to_thread(handle_paper_library_event, profile_path, body)
+        result = await asyncio.to_thread(
+            handle_paper_library_event,
+            profile_path,
+            body,
+            commit=reader_agent_guard.sync_commit(request),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result.ok:
@@ -1315,7 +1330,8 @@ def _prune_paper_library_event_jobs() -> None:
         stale = [
             job_id
             for job_id, job in _PAPER_LIBRARY_EVENT_JOBS.items()
-            if float(job.get("created_at") or 0) < cutoff
+            if _clean_text(job.get("status")) in {"done", "failed", "cancelled"}
+            and float(job.get("finished_at") or 0) < cutoff
         ]
         for job_id in stale:
             _PAPER_LIBRARY_EVENT_JOBS.pop(job_id, None)
@@ -1395,6 +1411,39 @@ def _paper_library_event_progress_callback(job_id: str) -> Callable[[dict[str, o
     return progress
 
 
+def _finish_paper_library_event_job(
+    job_id: str,
+    status: str,
+    message: str,
+    *,
+    error: str = "",
+    result: object = None,
+    warnings: list[str] | None = None,
+) -> None:
+    with _PAPER_LIBRARY_EVENT_JOBS_LOCK:
+        job = _PAPER_LIBRARY_EVENT_JOBS.get(job_id)
+        if not job:
+            return
+        cancel_event = job.get("_cancel_event")
+        if status == "done" and isinstance(cancel_event, threading.Event) and cancel_event.is_set():
+            status = "cancelled"
+            message = "Paper Library action cancelled."
+        if job.get("write_committed") and status in {"failed", "cancelled"}:
+            message += " Partial writes were committed and kept."
+        job["status"] = status
+        job["phase"] = status
+        job["message"] = message
+        job["error"] = error if status == "failed" else ""
+        if result is not None:
+            job["result"] = result
+        if warnings is not None:
+            job["warnings"] = warnings
+            if warnings:
+                job["warning_count"] = len(warnings)
+        job["finished_at"] = time.time()
+        job["_finished_monotonic"] = time.monotonic()
+
+
 @app.post("/api/research/{profile}/paper-library/events/jobs")
 async def paper_library_event_start_job(request: Request, profile: str):
     _same_origin_mutation(request)
@@ -1406,13 +1455,18 @@ async def paper_library_event_start_job(request: Request, profile: str):
     action = _clean_text(body.get("action"))
     if not action:
         raise HTTPException(status_code=400, detail="action is required")
+    reservation = reader_agent_guard.job_reservation(
+        request, "/api/research/{profile}/paper-library/events/jobs"
+    )
     _prune_paper_library_event_jobs()
     job_id = uuid.uuid4().hex
     now = time.time()
     job_labels = paper_library_labels(_paper_library_ui_lang(request, body))
+    cancel_event = threading.Event()
     job: dict[str, object] = {
         "job_id": job_id,
         "profile": profile,
+        "user_id": user.id,
         "event_action": action,
         "status": "queued",
         "phase": "queued",
@@ -1435,6 +1489,9 @@ async def paper_library_event_start_job(request: Request, profile: str):
         "warning_count": 0,
         "warnings": [],
         "error": "",
+        "cancel_requested": False,
+        "write_committed": False,
+        "_cancel_event": cancel_event,
         "_started_monotonic": 0.0,
         "_finished_monotonic": 0.0,
     }
@@ -1451,53 +1508,77 @@ async def paper_library_event_start_job(request: Request, profile: str):
             started_at=time.time(),
             _started_monotonic=started,
         )
+        commit = None
+        if reservation is not None:
+            def set_committing(value: bool) -> None:
+                job["_committing"] = value
+
+            base_commit = reader_ops.worker_commit(
+                reservation,
+                cancel_event.is_set,
+                boundary_lock=_PAPER_LIBRARY_EVENT_JOBS_LOCK,
+                set_committing=set_committing,
+            )
+
+            def tracked_commit(apply: Callable[[], object], kinds: tuple[str, ...] | None = None) -> object:
+                try:
+                    return base_commit(apply, kinds) if kinds is not None else base_commit(apply)
+                finally:
+                    if reservation.write_committed:
+                        _update_paper_library_event_job(job_id, write_committed=True)
+
+            commit = tracked_commit
         try:
+            reader_ops.checkpoint(cancel_event.is_set)
             result = handle_paper_library_event(
                 profile_path,
                 dict(body),
                 progress_callback=_paper_library_event_progress_callback(job_id),
+                cancel_callback=cancel_event.is_set,
+                commit=commit,
             )
+            reader_ops.checkpoint(cancel_event.is_set)
             if not result.ok:
-                _update_paper_library_event_job(
+                _finish_paper_library_event_job(
                     job_id,
-                    status="failed",
-                    phase="failed",
-                    message=result.message or "Paper Library action failed.",
+                    "failed",
+                    result.message or "Paper Library action failed.",
                     error=result.message or "Paper Library action failed.",
                     result=result.to_dict(),
-                    finished_at=time.time(),
-                    _finished_monotonic=time.monotonic(),
                 )
                 return
             response = _paper_library_event_response(profile_path, dict(body), result, user.id)
-        except Exception as exc:
-            _update_paper_library_event_job(
-                job_id,
-                status="failed",
-                phase="failed",
-                message=str(exc),
-                error=str(exc),
-                finished_at=time.time(),
-                _finished_monotonic=time.monotonic(),
-            )
+        except reader_ops.ReaderCancelled as exc:
+            _finish_paper_library_event_job(job_id, "cancelled", str(exc))
             return
+        except Exception as exc:
+            if cancel_event.is_set():
+                _finish_paper_library_event_job(job_id, "cancelled", str(exc))
+            else:
+                _finish_paper_library_event_job(
+                    job_id, "failed", str(exc), error=str(exc)
+                )
+            return
+        finally:
+            if reservation is not None:
+                agent_ops.abort(reservation)
         warnings = response.get("result", {}).get("warnings", []) if isinstance(response.get("result"), dict) else []
         warning_rows = warnings if isinstance(warnings, list) else []
-        warning_updates: dict[str, object] = {"warnings": warning_rows}
-        if warning_rows:
-            warning_updates["warning_count"] = len(warning_rows)
-        _update_paper_library_event_job(
+        _finish_paper_library_event_job(
             job_id,
-            status="done",
-            phase="done",
-            message=response.get("result", {}).get("message") if isinstance(response.get("result"), dict) else "Done.",
+            "done",
+            response.get("result", {}).get("message") if isinstance(response.get("result"), dict) else "Done.",
             result=response,
-            finished_at=time.time(),
-            _finished_monotonic=time.monotonic(),
-            **warning_updates,
+            warnings=warning_rows,
         )
 
-    threading.Thread(target=worker, name=f"paper-event-{job_id[:8]}", daemon=True).start()
+    try:
+        threading.Thread(target=worker, name=f"paper-event-{job_id[:8]}", daemon=True).start()
+    except Exception:
+        with _PAPER_LIBRARY_EVENT_JOBS_LOCK:
+            _PAPER_LIBRARY_EVENT_JOBS.pop(job_id, None)
+        raise
+    reader_agent_guard.consume_job_reservation(request, reservation)
     with _PAPER_LIBRARY_EVENT_JOBS_LOCK:
         snapshot = _paper_library_event_job_snapshot(_PAPER_LIBRARY_EVENT_JOBS[job_id])
     return JSONResponse({"ok": True, "job": snapshot, "job_id": job_id})
@@ -1506,13 +1587,35 @@ async def paper_library_event_start_job(request: Request, profile: str):
 @app.get("/api/research/{profile}/paper-library/events/jobs/{job_id}")
 async def paper_library_event_job_status(request: Request, profile: str, job_id: str):
     _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     with _PAPER_LIBRARY_EVENT_JOBS_LOCK:
         job = _PAPER_LIBRARY_EVENT_JOBS.get(job_id)
-        if not job or job.get("profile") != profile:
+        if not job or job.get("profile") != profile or job.get("user_id") != user.id:
             raise HTTPException(status_code=404, detail="event job not found")
         snapshot = _paper_library_event_job_snapshot(job)
-        result = job.get("result") if job.get("status") in {"done", "failed"} else None
+        result = job.get("result") if job.get("status") in {"done", "failed", "cancelled"} else None
     return JSONResponse({"ok": True, "job": snapshot, "result": result})
+
+
+@app.post("/api/research/{profile}/paper-library/events/jobs/{job_id}/cancel")
+async def paper_library_event_job_cancel(request: Request, profile: str, job_id: str):
+    _same_origin_mutation(request)
+    _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
+    with _PAPER_LIBRARY_EVENT_JOBS_LOCK:
+        job = _PAPER_LIBRARY_EVENT_JOBS.get(job_id)
+        if not job or job.get("profile") != profile or job.get("user_id") != user.id:
+            raise HTTPException(status_code=404, detail="event job not found")
+        if _clean_text(job.get("status")) not in {"done", "failed", "cancelled"}:
+            cancel_event = job.get("_cancel_event")
+            if isinstance(cancel_event, threading.Event):
+                cancel_event.set()
+            job["cancel_requested"] = True
+            job["status"] = "cancelling"
+            job["phase"] = "cancelling"
+            job["message"] = "Cancelling Paper Library action; committed writes are kept."
+        snapshot = _paper_library_event_job_snapshot(job)
+    return JSONResponse({"ok": True, "job": snapshot, "job_id": job_id})
 
 
 def _paper_library_search_response(
@@ -1685,7 +1788,8 @@ def _prune_paper_library_search_jobs() -> None:
         stale = [
             job_id
             for job_id, job in _PAPER_LIBRARY_SEARCH_JOBS.items()
-            if float(job.get("created_at") or 0) < cutoff
+            if _clean_text(job.get("status")) in {"done", "failed", "cancelled"}
+            and float(job.get("finished_at") or 0) < cutoff
         ]
         for job_id in stale:
             _PAPER_LIBRARY_SEARCH_JOBS.pop(job_id, None)
@@ -1791,6 +1895,7 @@ async def paper_library_search(request: Request, profile: str):
 async def paper_library_search_start_job(request: Request, profile: str):
     _same_origin_mutation(request)
     profile_path = _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     body = await _json_body(request)
     if not _clean_text(body.get("query")):
         raise HTTPException(status_code=400, detail="query is required")
@@ -1801,6 +1906,7 @@ async def paper_library_search_start_job(request: Request, profile: str):
     job: dict[str, object] = {
         "job_id": job_id,
         "profile": profile,
+        "user_id": user.id,
         "status": "queued",
         "phase": "queued",
         "message": "Queued paper search.",
@@ -1912,9 +2018,10 @@ async def paper_library_search_start_job(request: Request, profile: str):
 @app.get("/api/research/{profile}/paper-library/search/jobs/{job_id}")
 async def paper_library_search_job_status(request: Request, profile: str, job_id: str):
     _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     with _PAPER_LIBRARY_SEARCH_JOBS_LOCK:
         job = _PAPER_LIBRARY_SEARCH_JOBS.get(job_id)
-        if not job or job.get("profile") != profile:
+        if not job or job.get("profile") != profile or job.get("user_id") != user.id:
             raise HTTPException(status_code=404, detail="search job not found")
         snapshot = _paper_library_search_job_snapshot(job)
         result = job.get("result") if job.get("status") == "done" else None
@@ -1924,9 +2031,10 @@ async def paper_library_search_job_status(request: Request, profile: str, job_id
 @app.get("/api/research/{profile}/paper-library/search/jobs/{job_id}/stream")
 async def paper_library_search_job_stream(request: Request, profile: str, job_id: str):
     _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     with _PAPER_LIBRARY_SEARCH_JOBS_LOCK:
         job = _PAPER_LIBRARY_SEARCH_JOBS.get(job_id)
-        if not job or job.get("profile") != profile:
+        if not job or job.get("profile") != profile or job.get("user_id") != user.id:
             raise HTTPException(status_code=404, detail="search job not found")
 
     async def event_generator():
@@ -1935,7 +2043,7 @@ async def paper_library_search_job_stream(request: Request, profile: str, job_id
         while True:
             with _PAPER_LIBRARY_SEARCH_JOBS_LOCK:
                 current = _PAPER_LIBRARY_SEARCH_JOBS.get(job_id)
-                if not current or current.get("profile") != profile:
+                if not current or current.get("profile") != profile or current.get("user_id") != user.id:
                     yield _sse_event("error", {"ok": False, "error": "search job not found"})
                     break
                 snapshot = _paper_library_search_job_snapshot(current)
@@ -1988,9 +2096,10 @@ async def paper_library_search_job_stream(request: Request, profile: str, job_id
 async def paper_library_search_job_cancel(request: Request, profile: str, job_id: str):
     _same_origin_mutation(request)
     _paper_library_profile_dir(profile, request)
+    user = _paper_library_user(profile, request)
     with _PAPER_LIBRARY_SEARCH_JOBS_LOCK:
         job = _PAPER_LIBRARY_SEARCH_JOBS.get(job_id)
-        if not job or job.get("profile") != profile:
+        if not job or job.get("profile") != profile or job.get("user_id") != user.id:
             raise HTTPException(status_code=404, detail="search job not found")
         status = _clean_text(job.get("status"))
         if status in {"done", "failed", "cancelled"}:
@@ -2036,8 +2145,12 @@ def _paper_library_import_upload_pdf(
     payload: bytes,
     filename: str,
     options: dict[str, object],
+    *,
+    commit: reader_ops.Commit | None = None,
 ) -> dict[str, object]:
-    return upload_paper_library_pdf(profile_path, payload, filename, options)
+    return upload_paper_library_pdf(
+        profile_path, payload, filename, options, commit=commit
+    )
 
 
 @app.post("/api/research/{profile}/paper-library/import")
@@ -2082,6 +2195,7 @@ async def paper_library_import(request: Request, profile: str):
                 "download_pdf": bool(body.get("download_pdf", True)),
                 "replace_existing": _clean_bool(body.get("replace_existing"), True),
             },
+            commit=reader_agent_guard.sync_commit(request),
         )
     except ValueError as exc:
         raise HTTPException(
@@ -2162,6 +2276,7 @@ async def paper_library_import_url(request: Request, profile: str):
                 "project_refs": _clean_list(body.get("project_refs")),
                 "download_pdf": bool(body.get("download_pdf", True)),
             },
+            commit=reader_agent_guard.sync_commit(request),
         )
     except ValueError as exc:
         raise HTTPException(
@@ -2216,6 +2331,7 @@ async def paper_library_pdf_retry(request: Request, profile: str, source_id: str
             source_id,
             pdf_url=override_url,
             error_prefix="PDF retry failed",
+            commit=reader_agent_guard.sync_commit(request),
         )
     except ValueError as exc:
         raise HTTPException(
@@ -2345,6 +2461,7 @@ async def paper_library_upload_pdf(
                 "status": status,
                 "allow_duplicates": _clean_text(allow_duplicates).lower() in {"1", "true", "yes"},
             },
+            commit=reader_agent_guard.sync_commit(request),
         )
     except PaperImportError as exc:
         raise HTTPException(
@@ -2403,6 +2520,7 @@ async def paper_library_pdf_upload(
             source_id,
             payload,
             filename,
+            commit=reader_agent_guard.sync_commit(request),
         )
     except FileNotFoundError as exc:
         raise HTTPException(
@@ -2732,7 +2850,11 @@ async def _run_action_endpoint(
         # handle_reader_action runs LLM/PyMuPDF/YAML work; keep it off the
         # event loop so SSE streams and PDF range requests stay responsive.
         result = await asyncio.to_thread(
-            handle_reader_action, ctx, action, body if body is not None else await _json_body(request)
+            handle_reader_action,
+            ctx,
+            action,
+            body if body is not None else await _json_body(request),
+            commit=reader_agent_guard.sync_commit(request),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2826,15 +2948,22 @@ async def reader_task_start(request: Request, source_id: str):
             if key not in {"action", "task_id", "profile", "profile_name", "user_id"}
         }
     payload.setdefault("source_id", source_id)
+    reservation = reader_agent_guard.job_reservation(
+        request, "/reader/api/{source_id}/tasks"
+    )
     try:
         snap = reader_tasks.start(
             ctx,
             action,
             payload,
             task_id=str(body.get("task_id") or ""),
+            reservation=reservation,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    reader_agent_guard.consume_job_reservation(request, reservation)
     return JSONResponse({"ok": True, "task": snap}, status_code=202)
 
 

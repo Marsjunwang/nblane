@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 from pathlib import Path
 from typing import Any
 
 
-from nblane.core import git_backup
-from nblane.core.file_write import atomic_write_text
+from nblane.core.file_state import FileSnapshot
 from nblane.core.profile_io import profile_dir, validate_profile_name
+from nblane.core.research_jsonl import load_jsonl, replace_jsonl
 from nblane.core.research_sources import (
     RESEARCH_DIRNAME,
 )
@@ -54,30 +53,22 @@ def _research_chunk_path(profile: str | Path, source_id: str) -> Path:
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    if not path.exists():
-        return rows
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            rows.append(parsed)
-    return rows
+    return load_jsonl(path)
 
 
-def _write_jsonl(path: Path, rows: list[dict[str, Any]], *, action: str) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    text = "".join(
-        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
-        for row in rows
+def _write_jsonl(
+    path: Path,
+    rows: list[dict[str, Any]],
+    *,
+    action: str,
+    expected_snapshot: FileSnapshot | None = None,
+) -> Path:
+    return replace_jsonl(
+        path,
+        rows,
+        action=action,
+        expected_snapshot=expected_snapshot,
     )
-    atomic_write_text(path, text)
-    git_backup.record_change([path], action=action)
-    return path
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:

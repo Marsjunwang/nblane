@@ -281,6 +281,64 @@ class TestResearchConnectors(unittest.TestCase):
         self.assertEqual(source.metadata["import_target_kind"], "metadata_only")
         self.assertTrue(source.metadata["metadata_only"])
 
+    def test_web_import_discovers_once_then_commits_without_network(self) -> None:
+        from nblane.web_api import research as research_api
+
+        class CountingAdapter(FakeAdapter):
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def discover(self, config: dict[str, object]) -> list[ConnectorItem]:
+                self.calls += 1
+                return super().discover(config)
+
+        class CommitContext:
+            def __init__(self) -> None:
+                self.checkpoints = 0
+                self.commits = 0
+
+            def checkpoint(self) -> None:
+                self.checkpoints += 1
+
+            def apply(self, fn, **_kwargs):
+                self.commits += 1
+                return fn()
+
+        adapter = CountingAdapter()
+        ctx = CommitContext()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            profile = root / "alice"
+            profile.mkdir(parents=True)
+            with patch("nblane.core.research_connectors.git_backup.record_change"):
+                row = upsert_connector(profile, provider="github", query="octo/demo")
+            with (
+                patch("nblane.core.profile_io.PROFILES_DIR", root),
+                patch("nblane.core.io.PROFILES_DIR", root),
+                patch.dict("nblane.core.research_connectors.ADAPTERS", {"github": adapter}),
+                patch("nblane.core.research_sources.git_backup.record_change"),
+                patch("nblane.core.research_connectors.git_backup.record_change"),
+            ):
+                result = research_api._run_connector_import(
+                    "alice",
+                    {
+                        "connector_id": str(row["id"]),
+                        "fingerprints": [],
+                        "target": {"kind": "source_inbox", "node_id": ""},
+                    },
+                    lambda **_kwargs: None,
+                    ctx,
+                )
+                sources = load_research_sources(profile)
+                saved = load_connectors(profile)
+
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(ctx.commits, 1)
+        self.assertGreaterEqual(ctx.checkpoints, 3)
+        self.assertEqual(result["imported"], 1)
+        self.assertEqual([source.title for source in sources.sources], ["octo/demo"])
+        self.assertEqual(saved["connectors"][0]["last_result"]["imported"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

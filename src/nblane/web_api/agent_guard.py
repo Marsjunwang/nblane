@@ -1,24 +1,16 @@
 """Agent write guard: one app-level dependency enforcing core/agent_policy.
 
-Instead of wiring every mutation route by hand, every mutating ``/api/v1``
-request from an agent account passes through ``agent_write_guard``:
+Synchronous routes use the route template + ``ROUTE_ACTIONS`` and strict
+before/after journaling around the handler. Generic and dedicated async-job
+entries instead resolve the actual ``JobKind``: T0 passes, T3 is refused,
+and T1/T2 creates a reservation that the successfully enqueued worker owns.
+T2 confirmation remains bound to method + path + body + actor; no after-diff
+is attempted when the 202 response is sent.
 
-1. The route template (``request.scope["route"].path``) + method map to an
-   action (``ROUTE_ACTIONS``); unmapped routes count as ``unknown`` (T2).
-2. T0 passes untouched; T3 answers 403.
-3. For T1/T2 the entity kinds the action may touch (``ACTION_KINDS``) are
-   snapshotted. T2 then requires the chat confirmation handshake
-   (428 → ``X-Nblane-Confirm``).
-4. After the handler returns, the same kinds are snapshotted again; the
-   diff becomes one undo-journal entry. A request that changed nothing
-   (412, 422, no-op) records nothing and refunds a spent confirmation.
-
-Human accounts never reach steps 2–4. The before/after diff is
-attribution by time window: a human edit landing in the same few
-milliseconds would be journaled with the agent's write (undo would then
-see it as part of the agent's change). Single-user deployments make this
-practically moot; it is the price of not threading snapshots through
-every domain writer.
+Human accounts bypass this guard. Async snapshots and journal writes happen
+only in worker ``ctx.apply`` segments. For synchronous routes, the before/after
+diff remains attribution by time window; single-user deployments make the
+corresponding concurrent-human-edit caveat practically moot.
 """
 
 from __future__ import annotations
@@ -32,6 +24,10 @@ from starlette.requests import HTTPConnection
 from starlette.concurrency import run_in_threadpool
 
 from nblane.core import agent_journal, agent_ops, agent_policy, profile_io
+from nblane.web_api import jobs
+
+
+JOB_RESERVATION_SCOPE = "nblane.agent_job_reservation"
 
 
 MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -95,12 +91,11 @@ ROUTE_ACTIONS: dict[tuple[str, str], str] = {
     ("POST", f"{P}/project-board/cases/{{case_id}}/suggest-refs"): "ai.draft",
     ("POST", f"{P}/research/connectors/manual/preview"): "ai.draft",
     ("POST", f"{P}/research/connectors/{{connector_id}}/preview"): "ai.draft",
-    ("POST", f"{P}/research/papers/{{source_id}}/analysis-jobs"): "ai.draft",
+    ("POST", f"{P}/research/papers/{{source_id}}/analysis-jobs"): "research.paper_analysis",
     ("POST", f"{P}/agent/journal/{{entry_id}}/undo"): "journal.undo",
     # AI exception triage
     ("POST", f"{P}/ai-exceptions/dismiss"): "review.decide",
     ("POST", f"{P}/content/images/reference"): "ai.draft",
-    ("POST", f"{P}/content/images/accept"): "ai.draft",
     ("POST", f"{P}/content/images/discard"): "ai.draft",
     ("DELETE", f"{P}/content/blog/{{slug:path}}"): "public.publish",
 }
@@ -160,6 +155,7 @@ ACTION_KINDS: dict[str, tuple[str, ...]] = {
     "project_milestone.delete": _PROJECT,
     "research_source.add": ("research_source",),
     "research_source.patch": ("research_source", "kanban_card"),
+    "research.paper_analysis": ("research_source",),
     "research.import": ("research_source",),
     "growth_log.append": (agent_journal.file_kind("SKILL.md"),),
 }
@@ -248,13 +244,96 @@ def _profile_dir(name: str) -> Path | None:
     return profile_io.profile_dir(clean)
 
 
-async def agent_write_guard(connection: HTTPConnection) -> AsyncIterator[None]:
-    """App-level dependency; a no-op for humans, reads and WebSockets.
+def _job_kind_for(method: str, template: str, body: Any) -> str:
+    if method != "POST" or not isinstance(body, dict):
+        return ""
+    if template == f"{P}/jobs":
+        return str(body.get("kind") or "").strip()
+    if template == f"{P}/research/connectors/{{connector_id}}/preview":
+        return "research-connector-preview"
+    if template == f"{P}/research/connectors/{{connector_id}}/import":
+        return "research-connector-import"
+    if template == f"{P}/research/papers/{{source_id}}/analysis-jobs":
+        return str(body.get("kind") or "").strip()
+    if template == f"{P}/crystallize/draft" and body.get("use_llm"):
+        return jobs.KIND_EVIDENCE_CRYSTALLIZE
+    return ""
 
-    Typed as ``HTTPConnection`` because app-level dependencies also run on
-    WebSocket routes (the workshop terminal), where ``Request`` cannot be
-    injected.
-    """
+
+def job_reservation(request: Request, kind: str) -> agent_ops.AgentWrite | None:
+    """Return the matching reservation without transferring ownership yet."""
+    clean_kind = str(kind or "").strip()
+    reservation = request.scope.get(JOB_RESERVATION_SCOPE)
+    if not isinstance(reservation, dict):
+        return None
+    if str(reservation.get("kind") or "").strip() != clean_kind:
+        return None
+    write = reservation.get("write")
+    return write if isinstance(write, agent_ops.AgentWrite) else None
+
+
+def consume_job_reservation(request: Request, write: agent_ops.AgentWrite | None) -> None:
+    """Transfer a successfully enqueued reservation from the request to its worker."""
+    if write is None:
+        return
+    reservation = request.scope.get(JOB_RESERVATION_SCOPE)
+    if isinstance(reservation, dict) and reservation.get("write") is write:
+        request.scope.pop(JOB_RESERVATION_SCOPE, None)
+
+
+def reserve_job_for_request(
+    request: Request,
+    pdir: Path,
+    kind: str,
+    body: Any,
+    *,
+    actor: str,
+) -> agent_ops.AgentWrite | None:
+    """Authorize a new job when a guard-detected reattach loses its race."""
+    kind = str(kind or "").strip()
+    existing = job_reservation(request, kind)
+    if existing is not None:
+        return existing
+    policy = jobs.job_policy(kind)
+    if policy.tier == agent_policy.T0:
+        return None
+    if policy.tier == agent_policy.T3:
+        raise agent_ops.AgentForbidden(policy.action)
+    path_params = dict(request.path_params)
+    count = _batch_count(body)
+    write = agent_ops.reserve(
+        pdir,
+        actor=actor,
+        action=policy.action,
+        kinds=policy.journal,
+        fingerprint=agent_policy.fingerprint(request.method, request.url.path, body),
+        describe=lambda before: describe(policy.action, path_params, before, body, count),
+        count=count,
+        confirm_id=request.headers.get(agent_policy.CONFIRM_HEADER, ""),
+    )
+    request.scope[JOB_RESERVATION_SCOPE] = {"kind": kind, "write": write}
+    return write
+
+
+def _abort_request_reservation(request: Request, write: agent_ops.AgentWrite) -> None:
+    reservation = request.scope.get(JOB_RESERVATION_SCOPE)
+    if isinstance(reservation, dict) and reservation.get("write") is write:
+        request.scope.pop(JOB_RESERVATION_SCOPE, None)
+        agent_ops.abort(write)
+
+
+def _paper_reattach(pdir: Path, template: str, path_params: dict[str, str], kind: str) -> bool:
+    if template != f"{P}/research/papers/{{source_id}}/analysis-jobs":
+        return False
+    from nblane.web_api import research_papers
+
+    return research_papers.find_active_job(
+        pdir, str(path_params.get("source_id") or ""), kind
+    ) is not None
+
+
+async def agent_write_guard(connection: HTTPConnection) -> AsyncIterator[None]:
+    """Enforce synchronous writes and transfer async-job reservations to workers."""
     if not isinstance(connection, Request) or connection.method not in MUTATING_METHODS:
         yield
         return
@@ -266,7 +345,6 @@ async def agent_write_guard(connection: HTTPConnection) -> AsyncIterator[None]:
     ):
         yield
         return
-    # Local import: auth imports routes_v1 helpers indirectly.
     from nblane.web_api.auth import _resolve_request_user
     from nblane.web_api.routes_v1 import ApiError
 
@@ -274,8 +352,23 @@ async def agent_write_guard(connection: HTTPConnection) -> AsyncIterator[None]:
     if user is None or not agent_policy.is_agent(user):
         yield
         return
-    action = action_for(request.method, template)
-    tier = agent_policy.tier_for(action)
+    body = await _read_body(request)
+    kind = _job_kind_for(request.method, template, body)
+    policy: jobs.JobPolicy | None = None
+    if kind:
+        try:
+            policy = jobs.job_policy(kind)
+        except jobs.UnknownJobKindError:
+            yield
+            return
+        except jobs.UnclassifiedJobKindError:
+            raise ApiError(
+                403,
+                "agent_forbidden",
+                "这个后台任务尚未登记助手权限，已拒绝执行。",
+            ) from None
+    action = policy.action if policy is not None else action_for(request.method, template)
+    tier = policy.tier if policy is not None else agent_policy.tier_for(action)
     if tier == agent_policy.T0:
         yield
         return
@@ -287,19 +380,22 @@ async def agent_write_guard(connection: HTTPConnection) -> AsyncIterator[None]:
         )
     pdir = _profile_dir(str(request.path_params.get("name", "")))
     if pdir is None:
-        # Let the route answer 400/404 itself.
         yield
         return
-    body = await _read_body(request)
     path_params = dict(request.path_params)
+    if policy is not None and _paper_reattach(pdir, template, path_params, kind):
+        yield
+        return
     count = _batch_count(body)
+    kinds = policy.journal if policy is not None else ACTION_KINDS.get(action, ())
+    operation = agent_ops.reserve if policy is not None else agent_ops.begin
     try:
         write = await run_in_threadpool(
-            lambda: agent_ops.begin(
+            lambda: operation(
                 pdir,
                 actor=user.id,
                 action=action,
-                kinds=ACTION_KINDS.get(action, ()),
+                kinds=kinds,
                 fingerprint=agent_policy.fingerprint(request.method, request.url.path, body),
                 describe=lambda before: describe(action, path_params, before, body, count),
                 count=count,
@@ -319,9 +415,23 @@ async def agent_write_guard(connection: HTTPConnection) -> AsyncIterator[None]:
             extra={"confirmation": pending.public()},
         ) from None
 
+    if policy is not None:
+        request.scope[JOB_RESERVATION_SCOPE] = {"kind": kind, "write": write}
     try:
         yield
     except Exception:
-        agent_ops.abort(write)
+        if policy is not None:
+            _abort_request_reservation(request, write)
+        else:
+            try:
+                await run_in_threadpool(agent_ops.finish_after_failure, write)
+            except agent_ops.AgentJournalError as exc:
+                raise ApiError(500, "agent_journal_failed", str(exc)) from exc
         raise
-    await run_in_threadpool(agent_ops.finish, write)
+    if policy is not None:
+        _abort_request_reservation(request, write)
+    else:
+        try:
+            await run_in_threadpool(agent_ops.finish, write)
+        except agent_ops.AgentJournalError as exc:
+            raise ApiError(500, "agent_journal_failed", str(exc)) from exc

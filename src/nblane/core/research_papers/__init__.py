@@ -37,8 +37,9 @@ from pathlib import Path
 from typing import Any
 
 
-from nblane.core import git_backup
+from nblane.core import agent_ops, git_backup, reader_ops
 from nblane.core import llm as llm_client
+from nblane.core.file_state import snapshot_file
 from nblane.core.research_sources import (
     SOURCE_STATUSES,
     SOURCE_VISIBILITIES,
@@ -46,7 +47,7 @@ from nblane.core.research_sources import (
     ResearchSourceInbox,
     add_research_source,
     load_research_sources,
-    save_research_sources,
+    mutate_research_sources,
     update_research_source,
 )
 from nblane.core.research_workspace import (
@@ -54,6 +55,7 @@ from nblane.core.research_workspace import (
     load_chunks,
     load_research_citations,
     load_research_claims,
+    mutate_chunks,
     save_chunks,
     source_slug,
 )
@@ -141,11 +143,13 @@ from ._io import (
     save_paper_structure_units,
     load_paper_annotations,
     save_paper_annotations,
+    mutate_paper_annotations,
     _next_annotation_id,
     _next_chunk_id,
     _segment_hash_map,
     load_paper_translations,
     save_paper_translations,
+    mutate_paper_translations,
     _next_translation_id,
 )
 from ._metadata import (
@@ -334,6 +338,22 @@ def _source_by_id(profile: str | Path, source_id: str) -> tuple[ResearchSourceIn
     return inbox, source
 
 
+def _reader_commit(
+    commit: reader_ops.Commit | None,
+    apply: Any,
+    *,
+    cancel_callback: Any | None = None,
+    asset_ref: str = "",
+) -> Any:
+    reader_ops.checkpoint(cancel_callback)
+    write = reader_ops.commit_or_direct(commit)
+    if asset_ref:
+        from nblane.core import agent_journal
+
+        return write(apply, (agent_journal.asset_kind(asset_ref),))
+    return write(apply)
+
+
 def _update_source_metadata(
     profile: str | Path,
     source_id: str,
@@ -342,17 +362,22 @@ def _update_source_metadata(
     status: str = "",
     library_node_refs: object = None,
 ) -> ResearchSource:
-    inbox, source = _source_by_id(profile, source_id)
-    merged = dict(source.metadata or {})
-    merged.update(_clean_mapping(metadata))
-    fields: dict[str, object] = {"metadata": merged, "kind": "paper"}
-    if status:
-        fields["status"] = status
-    if library_node_refs is not None:
-        fields["library_node_refs"] = library_node_refs
-    update_research_source(inbox, source.id, **fields)
-    save_research_sources(_profile_root(profile), inbox)
-    return inbox.by_id()[source.id]
+    clean_metadata = _clean_mapping(metadata)
+
+    def apply(inbox: ResearchSourceInbox) -> ResearchSource:
+        source = inbox.by_id().get(_clean_text(source_id))
+        if source is None:
+            raise ValueError(f"Unknown research source: {_clean_text(source_id)}")
+        merged = dict(source.metadata or {})
+        merged.update(clean_metadata)
+        fields: dict[str, object] = {"metadata": merged, "kind": "paper"}
+        if status:
+            fields["status"] = status
+        if library_node_refs is not None:
+            fields["library_node_refs"] = library_node_refs
+        return update_research_source(inbox, source.id, **fields)
+
+    return mutate_research_sources(_profile_root(profile), apply)
 
 
 def _update_source_metadata_if_changed(
@@ -362,20 +387,24 @@ def _update_source_metadata_if_changed(
     *,
     status: str = "",
 ) -> ResearchSource:
-    inbox, source = _source_by_id(profile, source_id)
-    merged = dict(source.metadata or {})
-    clean = _clean_mapping(metadata)
-    next_metadata = dict(merged)
-    next_metadata.update(clean)
-    status_changed = bool(status) and source.status != status
-    if next_metadata == merged and not status_changed:
-        return source
-    fields: dict[str, object] = {"metadata": next_metadata, "kind": "paper"}
-    if status:
-        fields["status"] = status
-    update_research_source(inbox, source.id, **fields)
-    save_research_sources(_profile_root(profile), inbox)
-    return inbox.by_id()[source.id]
+    clean_metadata = _clean_mapping(metadata)
+
+    def apply(inbox: ResearchSourceInbox) -> ResearchSource:
+        source = inbox.by_id().get(_clean_text(source_id))
+        if source is None:
+            raise ValueError(f"Unknown research source: {_clean_text(source_id)}")
+        merged = dict(source.metadata or {})
+        next_metadata = dict(merged)
+        next_metadata.update(clean_metadata)
+        status_changed = bool(status) and source.status != status
+        if next_metadata == merged and not status_changed:
+            return source
+        fields: dict[str, object] = {"metadata": next_metadata, "kind": "paper"}
+        if status:
+            fields["status"] = status
+        return update_research_source(inbox, source.id, **fields)
+
+    return mutate_research_sources(_profile_root(profile), apply)
 
 
 
@@ -393,6 +422,8 @@ def import_paper_pdf(
     filename: str,
     *,
     pdf_url: str = "",
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
 ) -> PaperAsset:
     """Save a PDF outside the profile Git tree and update source metadata."""
 
@@ -406,7 +437,12 @@ def import_paper_pdf(
     page_count, warnings = _pdf_page_count(payload)
     asset_ref = f"papers/{digest[:12]}-{_slug(Path(clean_name).stem, fallback='paper')}.pdf"
     path = _asset_path(profile, asset_ref)
-    _atomic_write_bytes(path, payload)
+    _reader_commit(
+        commit,
+        lambda: _atomic_write_bytes(path, payload),
+        cancel_callback=cancel_callback,
+        asset_ref=asset_ref,
+    )
     asset = PaperAsset(
         source_id=_clean_text(source_id),
         asset_ref=asset_ref,
@@ -421,7 +457,11 @@ def import_paper_pdf(
     metadata["pdf_imported_at"] = _now()
     metadata["pdf_download_status"] = "downloaded"
     metadata["pdf_download_error"] = ""
-    _update_source_metadata(profile, source_id, metadata)
+    _reader_commit(
+        commit,
+        lambda: _update_source_metadata(profile, source_id, metadata),
+        cancel_callback=cancel_callback,
+    )
     return asset
 
 
@@ -446,6 +486,9 @@ def upload_paper_library_pdf(
     payload: bytes,
     filename: str,
     options: dict[str, object] | None = None,
+    *,
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
 ) -> dict[str, object]:
     """Upload a PDF, creating a new paper source unless an existing one matches.
 
@@ -482,35 +525,73 @@ def upload_paper_library_pdf(
         }
     clean_filename = Path(_clean_text(filename) or "paper.pdf").name
     title = _clean_text(options.get("title")) or Path(clean_filename).stem or "Uploaded PDF"
-    inbox = load_research_sources(profile_path)
-    source = add_research_source(
-        inbox,
-        title,
-        kind="paper",
-        status=_clean_text(options.get("status")) or "reading",
-        tags=_clean_list(options.get("tags")),
-        visibility=_clean_text(options.get("visibility")) or "private",
-        origin="manual",
-        goal_refs=_clean_list(options.get("goal_refs")),
-        project_refs=_clean_list(options.get("project_refs")),
-        library_node_refs=_clean_list(options.get("library_node_refs")),
-        metadata={"manual_import": "pdf_upload", "uploaded_filename": clean_filename},
+    source_kwargs = {
+        "kind": "paper",
+        "status": _clean_text(options.get("status")) or "reading",
+        "tags": _clean_list(options.get("tags")),
+        "visibility": _clean_text(options.get("visibility")) or "private",
+        "origin": "manual",
+        "goal_refs": _clean_list(options.get("goal_refs")),
+        "project_refs": _clean_list(options.get("project_refs")),
+        "library_node_refs": _clean_list(options.get("library_node_refs")),
+        "metadata": {"manual_import": "pdf_upload", "uploaded_filename": clean_filename},
+    }
+
+    def create(inbox: ResearchSourceInbox) -> tuple[ResearchSource, bool]:
+        if not allow_duplicates:
+            for existing in inbox.sources:
+                existing_digest = _clean_text(
+                    (existing.metadata or {}).get("pdf_sha256")
+                ).lower()
+                if existing.kind == "paper" and existing_digest == digest.lower():
+                    return existing, True
+        return add_research_source(inbox, title, **source_kwargs), False
+
+    source, duplicate = _reader_commit(
+        commit,
+        lambda: mutate_research_sources(profile_path, create),
+        cancel_callback=cancel_callback,
     )
-    save_research_sources(profile_path, inbox)
+    if duplicate:
+        return {
+            "source_id": source.id,
+            "duplicate": True,
+            "asset_ref": _clean_text((source.metadata or {}).get("pdf_asset_ref")),
+        }
     try:
-        asset = import_paper_pdf(profile_path, source.id, payload_bytes, clean_filename)
+        asset = import_paper_pdf(
+            profile_path,
+            source.id,
+            payload_bytes,
+            clean_filename,
+            commit=commit,
+            cancel_callback=cancel_callback,
+        )
     except ValueError as exc:
-        latest = load_research_sources(profile_path)
-        latest.sources = [item for item in latest.sources if item.id != source.id]
+        def remove_created(latest: ResearchSourceInbox) -> None:
+            latest.sources = [item for item in latest.sources if item.id != source.id]
+
         try:
-            save_research_sources(profile_path, latest)
+            _reader_commit(
+                commit,
+                lambda: mutate_research_sources(profile_path, remove_created),
+                cancel_callback=cancel_callback,
+            )
         except Exception:
-            pass
+            if commit is not None:
+                raise
         raise PaperImportError(str(exc), code="pdf_save_failed", retryable=False) from exc
     return {"source_id": source.id, "duplicate": False, "asset_ref": asset.asset_ref}
 
 
-def download_paper_pdf(profile: str | Path, source_id: str, pdf_url: str) -> PaperAsset:
+def download_paper_pdf(
+    profile: str | Path,
+    source_id: str,
+    pdf_url: str,
+    *,
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
+) -> PaperAsset:
     """Download an open-access PDF into the external asset root."""
 
     clean_url = _clean_text(pdf_url)
@@ -528,6 +609,7 @@ def download_paper_pdf(profile: str | Path, source_id: str, pdf_url: str) -> Pap
     socket_timeout = max(1.0, min(idle_timeout_seconds, timeout_seconds))
     started = time.monotonic()
     expected_bytes: int | None = None
+    reader_ops.checkpoint(cancel_callback)
     with urllib.request.urlopen(request, timeout=socket_timeout) as response:
         content_length = _clean_text(response.headers.get("content-length"))
         try:
@@ -537,6 +619,7 @@ def download_paper_pdf(profile: str | Path, source_id: str, pdf_url: str) -> Pap
         chunks: list[bytes] = []
         total = 0
         while True:
+            reader_ops.checkpoint(cancel_callback)
             elapsed = time.monotonic() - started
             if elapsed > timeout_seconds:
                 progress = _format_download_progress(total, expected_bytes)
@@ -552,7 +635,16 @@ def download_paper_pdf(profile: str | Path, source_id: str, pdf_url: str) -> Pap
                 raise ValueError("Downloaded PDF exceeds NBLANE_RESEARCH_PDF_MAX_BYTES.")
             chunks.append(chunk)
     filename = Path(parsed.path).name or f"{source_slug(source_id)}.pdf"
-    return import_paper_pdf(profile, source_id, b"".join(chunks), filename, pdf_url=clean_url)
+    reader_ops.checkpoint(cancel_callback)
+    return import_paper_pdf(
+        profile,
+        source_id,
+        b"".join(chunks),
+        filename,
+        pdf_url=clean_url,
+        commit=commit,
+        cancel_callback=cancel_callback,
+    )
 
 
 def _source_pdf_download_url(source: ResearchSource, override_url: str = "") -> str:
@@ -571,8 +663,17 @@ def ensure_paper_pdf_downloaded(
     *,
     pdf_url: str = "",
     error_prefix: str = "PDF download failed",
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
 ) -> dict[str, object]:
     """Download a source's open-access PDF and persist a user-visible status."""
+
+    def update_metadata(metadata: dict[str, object]) -> Any:
+        return _reader_commit(
+            commit,
+            lambda: _update_source_metadata(profile, clean_source_id, metadata),
+            cancel_callback=cancel_callback,
+        )
 
     _, source = _source_by_id(profile, source_id)
     clean_source_id = _clean_text(source_id)
@@ -584,9 +685,7 @@ def ensure_paper_pdf_downloaded(
         except ValueError:
             existing_path = None
         if existing_path is not None and existing_path.is_file() and existing_path.stat().st_size > 0:
-            _update_source_metadata(
-                profile,
-                clean_source_id,
+            update_metadata(
                 {
                     "pdf_download_status": "downloaded",
                     "pdf_download_error": "",
@@ -604,9 +703,7 @@ def ensure_paper_pdf_downloaded(
     attempted_at = _now()
     if not clean_url:
         message = "No open-access PDF URL is recorded for this paper."
-        _update_source_metadata(
-            profile,
-            clean_source_id,
+        update_metadata(
             {
                 "pdf_download_status": "skipped_no_pdf_url",
                 "pdf_download_attempted_at": attempted_at,
@@ -621,22 +718,27 @@ def ensure_paper_pdf_downloaded(
         }
     # An unchecked link is not skipped: the download is the check
     # (non-PDF bytes are rejected), and success clears the flag below.
-    _update_source_metadata(
-        profile,
-        clean_source_id,
+    update_metadata(
         {
             "pdf_download_status": "downloading",
             "pdf_download_attempted_at": attempted_at,
             "pdf_download_error": "",
         },
     )
+    reader_ops.checkpoint(cancel_callback)
     try:
-        asset = download_paper_pdf(profile, clean_source_id, clean_url)
-    except Exception as exc:
-        message = f"{error_prefix}: {exc}"
-        _update_source_metadata(
+        asset = download_paper_pdf(
             profile,
             clean_source_id,
+            clean_url,
+            commit=commit,
+            cancel_callback=cancel_callback,
+        )
+    except (reader_ops.ReaderCancelled, agent_ops.AgentJournalError):
+        raise
+    except Exception as exc:
+        message = f"{error_prefix}: {exc}"
+        update_metadata(
             {
                 "pdf_download_status": "failed",
                 "pdf_download_attempted_at": _now(),
@@ -649,9 +751,7 @@ def ensure_paper_pdf_downloaded(
             "pdf_url": clean_url,
             "error": message,
         }
-    _update_source_metadata(
-        profile,
-        clean_source_id,
+    update_metadata(
         {
             "pdf_download_status": "downloaded",
             "pdf_download_attempted_at": _now(),
@@ -1058,12 +1158,17 @@ def extract_paper_pages(
     source_id: str,
     *,
     backend: str = "auto",
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
 ) -> list[PaperPage]:
     """Extract page text with PyMuPDF when available, else a safe fallback."""
 
     clean_backend = _clean_text(backend).lower() or "auto"
     if clean_backend not in {"auto", "pymupdf", "fallback"}:
         raise ValueError(f"Unknown paper page extraction backend: {backend}")
+    expected_snapshot = snapshot_file(
+        _jsonl_path(profile, PAPER_PAGES_DIRNAME, source_id)
+    )
     pdf_bytes = load_paper_pdf_bytes(profile, source_id)
     extracted_at = _now()
     warnings: list[str] = []
@@ -1109,7 +1214,16 @@ def extract_paper_pages(
         if not warnings:
             warnings.append("No text backend was available; saved blank page placeholders.")
 
-    save_paper_pages(profile, source_id, pages)
+    _reader_commit(
+        commit,
+        lambda: save_paper_pages(
+            profile,
+            source_id,
+            pages,
+            expected_snapshot=expected_snapshot,
+        ),
+        cancel_callback=cancel_callback,
+    )
     metadata = {
         "page_count": len(pages),
         "text_extraction_backend": "pymupdf" if pages and pages[0].metadata.get("backend") == "pymupdf" else "fallback",
@@ -1118,7 +1232,11 @@ def extract_paper_pages(
     }
     if warnings:
         metadata["text_extraction_warnings"] = warnings
-    _update_source_metadata(profile, source_id, metadata)
+    _reader_commit(
+        commit,
+        lambda: _update_source_metadata(profile, source_id, metadata),
+        cancel_callback=cancel_callback,
+    )
     return pages
 
 
@@ -1127,6 +1245,8 @@ def extract_paper_segments(
     source_id: str,
     *,
     backend: str = "auto",
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
 ) -> list[PaperSegment]:
     """Extract stable reading/translation segments from pages or GROBID TEI."""
 
@@ -1135,6 +1255,9 @@ def extract_paper_segments(
         clean_backend = "fallback"
     if clean_backend not in {"auto", "grobid", "fallback"}:
         raise ValueError(f"Unknown paper segment extraction backend: {backend}")
+    expected_snapshot = snapshot_file(
+        _jsonl_path(profile, PAPER_SEGMENTS_DIRNAME, source_id)
+    )
     warnings: list[str] = []
     notices: list[str] = []
     grobid_status: dict[str, object] = {}
@@ -1146,7 +1269,9 @@ def extract_paper_segments(
         grobid_status = grobid_readiness()
     if clean_backend in {"auto", "grobid"} and grobid_status.get("available"):
         try:
+            reader_ops.checkpoint(cancel_callback)
             doc = process_grobid_fulltext(profile, source_id)
+            reader_ops.checkpoint(cancel_callback)
             segments = grobid_tei_to_segments(source_id, doc.tei_xml)
             references = grobid_tei_to_bibliography(source_id, doc.tei_xml)
             if segments:
@@ -1163,30 +1288,39 @@ def extract_paper_segments(
                     page_refinement_failed_at = _now()
                     page_refinement_error_detail = f"PyMuPDF page refinement failed: {exc}"
                     page_texts = []
-                save_paper_segments(profile, source_id, segments)
-                _update_source_metadata(
-                    profile,
-                    source_id,
-                    {
-                        "structure_backend": "grobid",
-                        "structured_extracted_at": _now(),
-                        "structured_references": references,
-                        "structured_references_count": len(references),
-                        "structured_extraction_warnings": warnings,
-                        "structured_extraction_notices": notices,
-                        "structured_page_refined_segments": page_refined_count,
-                        "page_refinement_failed_at": page_refinement_failed_at,
-                        "page_refinement_error_detail": page_refinement_error_detail,
-                        "grobid_status": "available",
-                        "grobid_available": True,
-                        "grobid_last_error": "",
-                        "grobid_last_error_detail": "",
-                        "grobid_last_failed_at": "",
-                        "grobid_failure_pdf_sha256": "",
-                    },
+                _reader_commit(
+                    commit,
+                    lambda: save_paper_segments(
+                        profile, source_id, segments, expected_snapshot=expected_snapshot
+                    ),
+                    cancel_callback=cancel_callback,
+                )
+                metadata = {
+                    "structure_backend": "grobid",
+                    "structured_extracted_at": _now(),
+                    "structured_references": references,
+                    "structured_references_count": len(references),
+                    "structured_extraction_warnings": warnings,
+                    "structured_extraction_notices": notices,
+                    "structured_page_refined_segments": page_refined_count,
+                    "page_refinement_failed_at": page_refinement_failed_at,
+                    "page_refinement_error_detail": page_refinement_error_detail,
+                    "grobid_status": "available",
+                    "grobid_available": True,
+                    "grobid_last_error": "",
+                    "grobid_last_error_detail": "",
+                    "grobid_last_failed_at": "",
+                    "grobid_failure_pdf_sha256": "",
+                }
+                _reader_commit(
+                    commit,
+                    lambda: _update_source_metadata(profile, source_id, metadata),
+                    cancel_callback=cancel_callback,
                 )
                 return segments
             notices.append("GROBID 未返回可用段落，已自动切换到文本降级方案。")
+        except (reader_ops.ReaderCancelled, agent_ops.AgentJournalError):
+            raise
         except Exception as exc:
             grobid_failure = _grobid_failure_message(exc)
             grobid_failure_detail = f"GROBID extraction failed: {exc}"
@@ -1202,9 +1336,22 @@ def extract_paper_segments(
         notices.append("已使用页面文本降级方案生成结构化段落。")
     pages = load_paper_pages(profile, source_id)
     if not pages:
-        pages = extract_paper_pages(profile, source_id, backend="auto")
+        pages = extract_paper_pages(
+            profile,
+            source_id,
+            backend="auto",
+            commit=commit,
+            cancel_callback=cancel_callback,
+        )
+    reader_ops.checkpoint(cancel_callback)
     segments = _segments_from_page_text(source_id, pages, profile=profile)
-    save_paper_segments(profile, source_id, segments)
+    _reader_commit(
+        commit,
+        lambda: save_paper_segments(
+            profile, source_id, segments, expected_snapshot=expected_snapshot
+        ),
+        cancel_callback=cancel_callback,
+    )
     if not warnings and not notices:
         notices.append("GROBID 当前不可用或未返回可用段落，已自动切换到文本降级方案。")
     metadata: dict[str, object] = {
@@ -1242,7 +1389,11 @@ def extract_paper_segments(
             "available" if grobid_status.get("available") else "unavailable"
         )
         metadata["grobid_available"] = bool(grobid_status.get("available"))
-    _update_source_metadata(profile, source_id, metadata)
+    _reader_commit(
+        commit,
+        lambda: _update_source_metadata(profile, source_id, metadata),
+        cancel_callback=cancel_callback,
+    )
     return segments
 
 
@@ -1342,6 +1493,8 @@ def ensure_paper_reading_artifacts(
     force_grobid: bool = False,
     target_lang: str = "",
     progress_callback: Any | None = None,
+    cancel_callback: Any | None = None,
+    commit: reader_ops.Commit | None = None,
 ) -> dict[str, object]:
     """Ensure page text and reading segments exist for the PDF reader.
 
@@ -1361,6 +1514,8 @@ def ensure_paper_reading_artifacts(
             force_grobid=force_grobid,
             target_lang=target_lang,
             progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+            commit=commit,
         )
 
 
@@ -1372,6 +1527,8 @@ def _ensure_paper_reading_artifacts_run(
     force_grobid: bool = False,
     target_lang: str = "",
     progress_callback: Any | None = None,
+    cancel_callback: Any | None = None,
+    commit: reader_ops.Commit | None = None,
 ) -> dict[str, object]:
     """Run body of :func:`ensure_paper_reading_artifacts` (backup deferred)."""
 
@@ -1460,7 +1617,15 @@ def _ensure_paper_reading_artifacts_run(
     if needs_pages:
         emit_progress("extracting_pages", "Extracting page text...", 1, saved=0)
         try:
-            pages = extract_paper_pages(profile, source_id, backend="auto")
+            pages = extract_paper_pages(
+                profile,
+                source_id,
+                backend="auto",
+                commit=commit,
+                cancel_callback=cancel_callback,
+            )
+        except (reader_ops.ReaderCancelled, agent_ops.AgentJournalError):
+            raise
         except Exception as exc:
             warnings.append(f"Page extraction failed: {exc}")
 
@@ -1490,28 +1655,55 @@ def _ensure_paper_reading_artifacts_run(
             saved=len(segments),
         )
         try:
-            segments = extract_paper_segments(profile, source_id, backend=segment_backend)
+            segments = extract_paper_segments(
+                profile,
+                source_id,
+                backend=segment_backend,
+                commit=commit,
+                cancel_callback=cancel_callback,
+            )
+        except (reader_ops.ReaderCancelled, agent_ops.AgentJournalError):
+            raise
         except Exception as exc:
             warnings.append("结构化提取遇到问题，已自动切换到文本降级方案。")
             structured_extraction_error_detail = f"Structured extraction failed: {exc}"
             if not segments:
                 try:
                     emit_progress("saving_segments", "Saving fallback text...", 2, saved=0)
-                    segments = extract_paper_segments(profile, source_id, backend="fallback")
+                    segments = extract_paper_segments(
+                        profile,
+                        source_id,
+                        backend="fallback",
+                        commit=commit,
+                        cancel_callback=cancel_callback,
+                    )
+                except (reader_ops.ReaderCancelled, agent_ops.AgentJournalError):
+                    raise
                 except Exception as fallback_exc:
                     warnings.append("文本降级方案也未能完成段落生成，请稍后重试。")
                     structured_extraction_error_detail += f"; Page-text fallback failed: {fallback_exc}"
             try:
-                _update_source_metadata_if_changed(
-                    profile,
-                    source_id,
-                    {"structured_extraction_error_detail": structured_extraction_error_detail},
+                _reader_commit(
+                    commit,
+                    lambda: _update_source_metadata_if_changed(
+                        profile,
+                        source_id,
+                        {"structured_extraction_error_detail": structured_extraction_error_detail},
+                    ),
+                    cancel_callback=cancel_callback,
                 )
             except Exception:
-                pass
+                if commit is not None:
+                    raise
 
     migration_lang = _clean_text(target_lang) or _clean_text(source_metadata.get("target_lang")) or "zh"
-    migration_summary = migrate_legacy_translations_to_segments(profile, source_id, target_lang=migration_lang)
+    migration_summary = migrate_legacy_translations_to_segments(
+        profile,
+        source_id,
+        target_lang=migration_lang,
+        commit=commit,
+        cancel_callback=cancel_callback,
+    )
 
     _, source = _source_by_id(profile, source_id)
     metadata = dict(source.metadata or {})
@@ -1525,9 +1717,16 @@ def _ensure_paper_reading_artifacts_run(
         try:
             structure_rect_count = sum(
                 1
-                for unit in build_paper_structure_units(profile, source_id)
+                for unit in build_paper_structure_units(
+                    profile,
+                    source_id,
+                    commit=commit,
+                    cancel_callback=cancel_callback,
+                )
                 if unit.rects
             )
+        except (reader_ops.ReaderCancelled, agent_ops.AgentJournalError):
+            raise
         except Exception:
             structure_anchor_warnings.append(
                 "版面结构锚点检测未完成，导航将回退到页级锚点。"
@@ -1574,7 +1773,12 @@ def _ensure_paper_reading_artifacts_run(
         ready_metadata["reading_artifacts_notices"] = combined_notices
     elif metadata.get("reading_artifacts_notices"):
         ready_metadata["reading_artifacts_notices"] = []
-    _update_source_metadata_if_changed(profile, source_id, ready_metadata)
+    _reader_commit(
+        commit,
+        lambda: _update_source_metadata_if_changed(profile, source_id, ready_metadata),
+        cancel_callback=cancel_callback,
+    )
+    reader_ops.checkpoint(cancel_callback)
     emit_progress(
         "done" if status != "failed" else "failed",
         _reader_preparation_label(status, structure_backend),
@@ -2300,25 +2504,27 @@ def create_paper_annotation(
     clean_text = _clean_text(selected_text)
     if not clean_text and not _clean_text(note):
         raise ValueError("Paper annotation needs selected text or a note.")
-    annotations = load_paper_annotations(profile, source_id)
-    ann = PaperAnnotation(
-        id=_next_annotation_id(annotations, source_id),
-        source_id=source_id,
-        kind=_choice(kind, PAPER_ANNOTATION_KINDS, "highlight"),
-        page=max(0, int(page or 0)),
-        locator=_clean_text(locator) or (f"p. {page}" if page else ""),
-        selected_text=clean_text,
-        selected_text_hash=text_hash(clean_text),
-        note=_clean_text(note),
-        color=_clean_text(color) or "yellow",
-        rects=[copy.deepcopy(row) for row in (rects or []) if isinstance(row, dict)],
-        tags=_clean_list(tags),
-        segment_refs=_clean_list(segment_refs),
-        created=_now(),
-        updated=_now(),
-    )
-    annotations.append(ann)
-    save_paper_annotations(profile, source_id, annotations)
+    def append(annotations: list[PaperAnnotation]) -> PaperAnnotation:
+        ann = PaperAnnotation(
+            id=_next_annotation_id(annotations, source_id),
+            source_id=source_id,
+            kind=_choice(kind, PAPER_ANNOTATION_KINDS, "highlight"),
+            page=max(0, int(page or 0)),
+            locator=_clean_text(locator) or (f"p. {page}" if page else ""),
+            selected_text=clean_text,
+            selected_text_hash=text_hash(clean_text),
+            note=_clean_text(note),
+            color=_clean_text(color) or "yellow",
+            rects=[copy.deepcopy(row) for row in (rects or []) if isinstance(row, dict)],
+            tags=_clean_list(tags),
+            segment_refs=_clean_list(segment_refs),
+            created=_now(),
+            updated=_now(),
+        )
+        annotations.append(ann)
+        return ann
+
+    ann = mutate_paper_annotations(profile, source_id, append)
     _update_source_metadata(profile, source_id, {"last_read_at": _now()})
     return ann
 
@@ -2335,32 +2541,47 @@ def create_chunk_from_annotation(
     clean_id = _clean_text(annotation_id)
     for source in load_research_sources(_profile_root(profile)).sources:
         annotations = load_paper_annotations(profile, source.id)
-        ann = next((row for row in annotations if row.id == clean_id), None)
-        if ann is None:
+        if not any(row.id == clean_id for row in annotations):
             continue
-        chunk = ResearchChunk(
-            id="",
-            source_id=source.id,
-            text=ann.selected_text or ann.note,
-            kind=kind,
-            title=_clean_text(title),
-            locator=ann.locator,
-            metadata={
-                "annotation_id": ann.id,
-                "segment_refs": list(ann.segment_refs),
-                "page": ann.page,
-                "rects": copy.deepcopy(ann.rects),
-                "selected_text_hash": ann.selected_text_hash,
-            },
-        )
-        existing = load_chunks(profile, source.id)
-        chunk.id = _next_chunk_id(existing, source.id)
-        existing.append(chunk)
-        save_chunks(profile, source.id, existing)
-        if chunk.id not in ann.chunk_refs:
-            ann.chunk_refs.append(chunk.id)
-            ann.updated = _now()
-            save_paper_annotations(profile, source.id, annotations)
+
+        def current_annotation(rows: list[PaperAnnotation]) -> PaperAnnotation:
+            ann = next((row for row in rows if row.id == clean_id), None)
+            if ann is None:
+                raise ValueError(f"Unknown paper annotation: {clean_id}")
+            return copy.deepcopy(ann)
+
+        ann = mutate_paper_annotations(profile, source.id, current_annotation)
+
+        def append_chunk(chunks: list[ResearchChunk]) -> ResearchChunk:
+            chunk = ResearchChunk(
+                id=_next_chunk_id(chunks, source.id),
+                source_id=source.id,
+                text=ann.selected_text or ann.note,
+                kind=kind,
+                title=_clean_text(title),
+                locator=ann.locator,
+                metadata={
+                    "annotation_id": ann.id,
+                    "segment_refs": list(ann.segment_refs),
+                    "page": ann.page,
+                    "rects": copy.deepcopy(ann.rects),
+                    "selected_text_hash": ann.selected_text_hash,
+                },
+            )
+            chunks.append(chunk)
+            return chunk
+
+        chunk = mutate_chunks(profile, source.id, append_chunk)
+
+        def link_chunk(rows: list[PaperAnnotation]) -> None:
+            latest = next((row for row in rows if row.id == clean_id), None)
+            if latest is None:
+                raise ValueError(f"Unknown paper annotation: {clean_id}")
+            if chunk.id not in latest.chunk_refs:
+                latest.chunk_refs.append(chunk.id)
+                latest.updated = _now()
+
+        mutate_paper_annotations(profile, source.id, link_chunk)
         return chunk
     raise ValueError(f"Unknown paper annotation: {clean_id}")
 
@@ -2549,49 +2770,53 @@ def upsert_paper_translations(
 ) -> list[PaperTranslation]:
     """Merge accepted translation rows without overwriting stale translations."""
 
-    segments = _segment_hash_map(profile, source_id)
-    existing = load_paper_translations(profile, source_id)
-    by_key = {_translation_merge_key(row): row for row in existing}
-    merged = [row for row in existing]
-    for item in rows:
-        incoming = _translation_from_input(
-            item,
-            source_id=source_id,
-            fallback_id=_next_translation_id(merged, source_id),
-        )
-        if incoming is None:
-            continue
-        incoming.source_id = source_id
-        if not incoming.id or incoming.id == "pending":
-            incoming.id = _next_translation_id(merged, source_id)
-        incoming.scope_type, incoming.scope_ref = _translation_storage_scope(incoming)
-        if incoming.scope_type == "segment" and incoming.segment_id and not incoming.scope_ref:
-            incoming.scope_ref = incoming.segment_id
-        segment = segments.get(incoming.segment_id) if incoming.scope_type == "segment" else None
-        if incoming.scope_type == "segment" and incoming.segment_id and segment is None:
-            incoming.status = "stale"
-            incoming.warnings.append("Skipped: segment no longer exists.")
-            merged.append(incoming)
-            continue
-        if incoming.scope_type == "segment" and segment is not None and incoming.source_hash != segment.text_hash:
-            incoming.status = "stale"
-            incoming.warnings.append("Skipped: source_hash does not match current segment.")
-            merged.append(incoming)
-            continue
-        key = _translation_merge_key(incoming)
-        old = by_key.get(key)
-        if old is None:
-            merged.append(incoming)
-            by_key[key] = incoming
-            continue
-        for index, row in enumerate(merged):
-            if row.id == old.id:
-                incoming.id = old.id
-                merged[index] = incoming
+    def apply(
+        existing: list[PaperTranslation],
+        segments: dict[str, PaperSegment],
+    ) -> list[PaperTranslation]:
+        by_key = {_translation_merge_key(row): row for row in existing}
+        merged = [row for row in existing]
+        for item in rows:
+            incoming = _translation_from_input(
+                item,
+                source_id=source_id,
+                fallback_id=_next_translation_id(merged, source_id),
+            )
+            if incoming is None:
+                continue
+            incoming.source_id = source_id
+            if not incoming.id or incoming.id == "pending":
+                incoming.id = _next_translation_id(merged, source_id)
+            incoming.scope_type, incoming.scope_ref = _translation_storage_scope(incoming)
+            if incoming.scope_type == "segment" and incoming.segment_id and not incoming.scope_ref:
+                incoming.scope_ref = incoming.segment_id
+            segment = segments.get(incoming.segment_id) if incoming.scope_type == "segment" else None
+            if incoming.scope_type == "segment" and incoming.segment_id and segment is None:
+                incoming.status = "stale"
+                incoming.warnings.append("Skipped: segment no longer exists.")
+                merged.append(incoming)
+                continue
+            if incoming.scope_type == "segment" and segment is not None and incoming.source_hash != segment.text_hash:
+                incoming.status = "stale"
+                incoming.warnings.append("Skipped: source_hash does not match current segment.")
+                merged.append(incoming)
+                continue
+            key = _translation_merge_key(incoming)
+            old = by_key.get(key)
+            if old is None:
+                merged.append(incoming)
                 by_key[key] = incoming
-                break
-    save_paper_translations(profile, source_id, merged)
-    return merged
+                continue
+            for index, row in enumerate(merged):
+                if row.id == old.id:
+                    incoming.id = old.id
+                    merged[index] = incoming
+                    by_key[key] = incoming
+                    break
+        existing[:] = merged
+        return merged
+
+    return mutate_paper_translations(profile, source_id, apply)
 
 
 def _translation_match_text(value: str) -> str:
@@ -2620,6 +2845,9 @@ def migrate_legacy_translations_to_segments(
     profile: str | Path,
     source_id: str,
     target_lang: str = "zh",
+    *,
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
 ) -> dict[str, object]:
     """Copy safe page/layout translation cache rows onto current segment scopes."""
 
@@ -2702,7 +2930,11 @@ def migrate_legacy_translations_to_segments(
         migrated_ids.append(row.id)
         existing_current.add(picked.segment_id)
     if savable:
-        upsert_paper_translations(profile, source_id, savable)
+        _reader_commit(
+            commit,
+            lambda: upsert_paper_translations(profile, source_id, savable),
+            cancel_callback=cancel_callback,
+        )
     return {
         "migrated": len(savable),
         "skipped": skipped,
@@ -5479,6 +5711,8 @@ def build_paper_structure_units(
     source_id: str,
     *,
     force: bool = False,
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
 ) -> list[PaperStructureUnit]:
     """Build cached, layout-grounded paper structure units for Reader translation."""
 
@@ -5497,7 +5731,12 @@ def build_paper_structure_units(
             for unit in cached
         ):
             return cached
+    expected_snapshot = snapshot_file(
+        _jsonl_path(profile, PAPER_STRUCTURE_DIRNAME, source_id)
+    )
+    reader_ops.checkpoint(cancel_callback)
     layout_units = build_paper_layout_units(profile, source_id)
+    reader_ops.checkpoint(cancel_callback)
     if not layout_units:
         # Existing located structures remain readable if the PDF engine or
         # asset is temporarily unavailable. Never replace them with emptiness.
@@ -5518,7 +5757,16 @@ def build_paper_structure_units(
     for unit in units:
         unit.metadata["structure_input_signature"] = input_signature
     if units:
-        save_paper_structure_units(profile, source_id, units)
+        _reader_commit(
+            commit,
+            lambda: save_paper_structure_units(
+                profile,
+                source_id,
+                units,
+                expected_snapshot=expected_snapshot,
+            ),
+            cancel_callback=cancel_callback,
+        )
     return units
 
 
@@ -6374,33 +6622,26 @@ def _persist_translation_batch(
     rows: list[dict[str, object]],
     persisted_count: int,
     warnings: list[str],
+    *,
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
 ) -> int:
     if len(rows) <= persisted_count:
         return persisted_count
-    lock = _translation_persist_lock(profile, source_id)
-    with lock:
-        try:
-            upsert_paper_translations(profile, source_id, rows[persisted_count:])
-        except Exception as exc:
-            warnings.append(f"Saving translation batch failed: {exc}")
-            return persisted_count
-        return len(rows)
-
-
-_TRANSLATION_PERSIST_LOCKS: dict[tuple[str, str], threading.RLock] = {}
-_TRANSLATION_PERSIST_LOCKS_GUARD = threading.Lock()
-
-
-def _translation_persist_lock(profile: str | Path, source_id: str) -> threading.RLock:
-    """Per-(profile, source) lock that serializes JSONL read-modify-write."""
-
-    key = (str(profile), str(source_id))
-    with _TRANSLATION_PERSIST_LOCKS_GUARD:
-        lock = _TRANSLATION_PERSIST_LOCKS.get(key)
-        if lock is None:
-            lock = threading.RLock()
-            _TRANSLATION_PERSIST_LOCKS[key] = lock
-        return lock
+    try:
+        _reader_commit(
+            commit,
+            lambda: upsert_paper_translations(
+                profile, source_id, rows[persisted_count:]
+            ),
+            cancel_callback=cancel_callback,
+        )
+    except (reader_ops.ReaderCancelled, agent_ops.AgentJournalError):
+        raise
+    except Exception as exc:
+        warnings.append(f"Saving translation batch failed: {exc}")
+        return persisted_count
+    return len(rows)
 
 
 def _translation_concurrency() -> int:
@@ -6455,6 +6696,7 @@ def _process_translation_batches(
     handle_result: Any,  # Callable[[batch, result_or_None, exc_or_None], None]
     progress_lock: threading.Lock,
     stream_callback: Any = None,  # Callable[[batch, str_chunk], None] | None
+    cancel_callback: Any | None = None,
 ) -> None:
     """Run translation batches with optional concurrency.
 
@@ -6545,6 +6787,7 @@ def _process_translation_batches(
         return replace(base, structured={"translations": rows}, warnings=warnings, error="")
 
     def deliver(tag: str, payload: object, b: list[dict[str, object]]) -> None:
+        reader_ops.checkpoint(cancel_callback)
         if tag == "ok":
             handle_result(b, payload, None)
         elif tag == "split":
@@ -6559,11 +6802,13 @@ def _process_translation_batches(
 
     if concurrency <= 1:
         for batch in batches:
+            reader_ops.checkpoint(cancel_callback)
             tag, payload, b = run_one(batch)
             with progress_lock:
                 deliver(tag, payload, b)
         return
 
+    reader_ops.checkpoint(cancel_callback)
     with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="translate-batch") as executor:
         futures = {executor.submit(run_one, batch): batch for batch in batches}
         for fut in as_completed(futures):
@@ -6587,6 +6832,8 @@ def translate_full_paper(
     ai_profile: str | None = None,
     require_review: bool = True,
     progress_callback: Any | None = None,
+    cancel_callback: Any | None = None,
+    commit: reader_ops.Commit | None = None,
 ) -> dict[str, object]:
     """Translate a paper at segment granularity and persist valid rows.
 
@@ -6610,6 +6857,8 @@ def translate_full_paper(
             ai_profile=ai_profile,
             require_review=require_review,
             progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+            commit=commit,
         )
 
 
@@ -6625,6 +6874,8 @@ def _translate_full_paper_run(
     ai_profile: str | None = None,
     require_review: bool = True,
     progress_callback: Any | None = None,
+    cancel_callback: Any | None = None,
+    commit: reader_ops.Commit | None = None,
 ) -> dict[str, object]:
     """Run body of :func:`translate_full_paper` (backup deferred)."""
 
@@ -6646,11 +6897,22 @@ def _translate_full_paper_run(
 
     segments = load_paper_segments(profile, source_id)
     if not segments:
-        ensure_paper_reading_artifacts(profile, source_id, prefer_grobid=True)
+        ensure_paper_reading_artifacts(
+            profile,
+            source_id,
+            prefer_grobid=True,
+            commit=commit,
+            cancel_callback=cancel_callback,
+        )
         segments = load_paper_segments(profile, source_id)
     pages = load_paper_pages(profile, source_id)
     raw_structure_units = (
-        build_paper_structure_units(profile, source_id)
+        build_paper_structure_units(
+            profile,
+            source_id,
+            commit=commit,
+            cancel_callback=cancel_callback,
+        )
         if clean_scope_strategy in {"auto", "structure"}
         else []
     )
@@ -6824,6 +7086,8 @@ def _translate_full_paper_run(
                     accepted_rows,
                     persisted_count,
                     warnings,
+                    commit=commit,
+                    cancel_callback=cancel_callback,
                 )
                 batches_completed += 1
                 units_processed += len(batch)
@@ -6837,6 +7101,7 @@ def _translate_full_paper_run(
                 require_review=require_review,
                 handle_result=handle_layout_result,
                 progress_lock=progress_lock,
+                cancel_callback=cancel_callback,
             )
         persisted_count = _persist_translation_batch(
             profile,
@@ -6844,6 +7109,8 @@ def _translate_full_paper_run(
             accepted_rows,
             persisted_count,
             warnings,
+            commit=commit,
+            cancel_callback=cancel_callback,
         )
         final_translations = load_paper_translations(profile, source_id)
         counts = _layout_translation_status_counts(
@@ -7040,6 +7307,8 @@ def _translate_full_paper_run(
                     accepted_rows,
                     persisted_count,
                     warnings,
+                    commit=commit,
+                    cancel_callback=cancel_callback,
                 )
                 batches_completed += 1
                 pages_processed += len(batch)
@@ -7053,6 +7322,7 @@ def _translate_full_paper_run(
                 require_review=require_review,
                 handle_result=handle_page_result,
                 progress_lock=progress_lock,
+                cancel_callback=cancel_callback,
             )
         persisted_count = _persist_translation_batch(
             profile,
@@ -7060,6 +7330,8 @@ def _translate_full_paper_run(
             accepted_rows,
             persisted_count,
             warnings,
+            commit=commit,
+            cancel_callback=cancel_callback,
         )
         final_translations = load_paper_translations(profile, source_id)
         counts = _page_translation_status_counts(pages, final_translations, target_lang=clean_lang)
@@ -7227,6 +7499,8 @@ def _translate_full_paper_run(
                 accepted_rows,
                 persisted_count,
                 warnings,
+                commit=commit,
+                cancel_callback=cancel_callback,
             )
             batches_completed += 1
             segments_processed += len(batch)
@@ -7240,6 +7514,7 @@ def _translate_full_paper_run(
             require_review=require_review,
             handle_result=handle_segment_result,
             progress_lock=progress_lock,
+            cancel_callback=cancel_callback,
         )
 
     persisted_count = _persist_translation_batch(
@@ -7248,6 +7523,8 @@ def _translate_full_paper_run(
         accepted_rows,
         persisted_count,
         warnings,
+        commit=commit,
+        cancel_callback=cancel_callback,
     )
     final_translations = load_paper_translations(profile, source_id)
     counts = _translation_status_counts(translation_segments, final_translations, target_lang=clean_lang)
@@ -8717,7 +8994,14 @@ def _result_from_url(url: str, *, enrich: bool = True) -> PaperSearchResult:
     )
 
 
-def import_paper_url(profile: str | Path, url: str, options: dict) -> str:
+def import_paper_url(
+    profile: str | Path,
+    url: str,
+    options: dict,
+    *,
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
+) -> str:
     """Create a metadata-only paper source from a DOI/arXiv/PDF URL candidate."""
 
     result = _result_from_url(url)
@@ -8725,7 +9009,14 @@ def import_paper_url(profile: str | Path, url: str, options: dict) -> str:
     if title:
         result.title = title
     row = result.to_dict()
-    imported = import_paper_search_results(profile, [row], [_clean_text(row.get("candidate_id"))], options)
+    imported = import_paper_search_results(
+        profile,
+        [row],
+        [_clean_text(row.get("candidate_id"))],
+        options,
+        commit=commit,
+        cancel_callback=cancel_callback,
+    )
     if not imported:
         raise ValueError("Paper URL was not imported, likely because it is a duplicate.")
     return imported[0]
@@ -8912,6 +9203,9 @@ def import_paper_search_results(
     results: list[dict],
     selected_ids: list[str],
     options: dict,
+    *,
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
 ) -> list[str]:
     """Import selected search candidates into ``research/sources.yaml``."""
 
@@ -8919,13 +9213,6 @@ def import_paper_search_results(
     selected = set(_clean_list(selected_ids))
     if not selected:
         return []
-    inbox = load_research_sources(_profile_root(profile))
-    existing_keys: dict[str, str] = {}
-    for source in inbox.sources:
-        if source.kind == "paper":
-            for key in _duplicate_keys_for_source(source):
-                existing_keys[key] = source.id
-    imported: list[str] = []
     visibility = _choice((options or {}).get("visibility"), SOURCE_VISIBILITIES, "private")
     status = _choice((options or {}).get("status"), SOURCE_STATUSES, "inbox")
     base_tags = _clean_list((options or {}).get("tags"))
@@ -8935,34 +9222,70 @@ def import_paper_search_results(
     allow_duplicates = bool((options or {}).get("allow_duplicates"))
     replace_existing = bool((options or {}).get("replace_existing") or (options or {}).get("update_existing"))
     download_pdf = bool((options or {}).get("download_pdf"))
-    title_index = _existing_paper_title_index(inbox)
-    for result in candidates:
-        if result.candidate_id not in selected and result.title not in selected:
-            continue
-        sources_by_id = inbox.by_id()
-        duplicate = result.imported_source_id if result.imported_source_id in sources_by_id else ""
-        for key in _duplicate_keys_for_result(result):
-            if not duplicate and key in existing_keys:
-                duplicate = existing_keys[key]
-                break
-        if not duplicate:
-            duplicate = _title_similarity_match(result.title, result.year, title_index)
-        if duplicate and not allow_duplicates:
-            if not replace_existing:
+
+    def apply(inbox: ResearchSourceInbox) -> list[str]:
+        existing_keys: dict[str, str] = {}
+        for source in inbox.sources:
+            if source.kind == "paper":
+                for key in _duplicate_keys_for_source(source):
+                    existing_keys[key] = source.id
+        imported: list[str] = []
+        title_index = _existing_paper_title_index(inbox)
+        for result in candidates:
+            if result.candidate_id not in selected and result.title not in selected:
                 continue
-            source = _update_existing_paper_from_search_result(
+            sources_by_id = inbox.by_id()
+            duplicate = result.imported_source_id if result.imported_source_id in sources_by_id else ""
+            for key in _duplicate_keys_for_result(result):
+                if not duplicate and key in existing_keys:
+                    duplicate = existing_keys[key]
+                    break
+            if not duplicate:
+                duplicate = _title_similarity_match(result.title, result.year, title_index)
+            if duplicate and not allow_duplicates:
+                if not replace_existing:
+                    continue
+                source = _update_existing_paper_from_search_result(
+                    inbox,
+                    duplicate,
+                    result,
+                    base_tags=base_tags,
+                    node_refs=node_refs,
+                    goal_refs=goal_refs,
+                    project_refs=project_refs,
+                )
+                imported.append(source.id)
+                for key in _duplicate_keys_for_source(source):
+                    existing_keys[key] = source.id
+                title_index = [row for row in title_index if row[0] != source.id]
+                title_index.append(
+                    (
+                        source.id,
+                        _normalize_title_for_similarity(source.title),
+                        _published_year(source.published),
+                    )
+                )
+                continue
+            source = add_research_source(
                 inbox,
-                duplicate,
-                result,
-                base_tags=base_tags,
-                node_refs=node_refs,
+                result.title,
+                kind="paper",
+                url=result.canonical_url,
+                status=status,
+                authors=result.authors,
+                published=result.year,
+                tags=[*base_tags, *result.tags],
                 goal_refs=goal_refs,
                 project_refs=project_refs,
+                library_node_refs=node_refs,
+                summary=result.abstract,
+                visibility=visibility,
+                origin="connector" if result.provider_refs else "manual",
+                metadata=result.source_metadata(),
             )
             imported.append(source.id)
             for key in _duplicate_keys_for_source(source):
                 existing_keys[key] = source.id
-            title_index = [row for row in title_index if row[0] != source.id]
             title_index.append(
                 (
                     source.id,
@@ -8970,37 +9293,16 @@ def import_paper_search_results(
                     _published_year(source.published),
                 )
             )
-            continue
-        source = add_research_source(
-            inbox,
-            result.title,
-            kind="paper",
-            url=result.canonical_url,
-            status=status,
-            authors=result.authors,
-            published=result.year,
-            tags=[*base_tags, *result.tags],
-            goal_refs=goal_refs,
-            project_refs=project_refs,
-            library_node_refs=node_refs,
-            summary=result.abstract,
-            visibility=visibility,
-            origin="connector" if result.provider_refs else "manual",
-            metadata=result.source_metadata(),
-        )
-        imported.append(source.id)
-        for key in _duplicate_keys_for_source(source):
-            existing_keys[key] = source.id
-        title_index.append(
-            (
-                source.id,
-                _normalize_title_for_similarity(source.title),
-                _published_year(source.published),
-            )
-        )
-    save_research_sources(_profile_root(profile), inbox)
+        return imported
+
+    imported = _reader_commit(
+        commit,
+        lambda: mutate_research_sources(_profile_root(profile), apply),
+        cancel_callback=cancel_callback,
+    )
     if download_pdf:
         for source_id in imported:
+            reader_ops.checkpoint(cancel_callback)
             source = load_research_sources(_profile_root(profile)).by_id().get(source_id)
             if source is None:
                 continue
@@ -9011,6 +9313,8 @@ def import_paper_search_results(
                     source_id,
                     pdf_url=pdf_url,
                     error_prefix="PDF download failed during import",
+                    commit=commit,
+                    cancel_callback=cancel_callback,
                 )
     return imported
 

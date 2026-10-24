@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from nblane.core import git_backup
+from nblane.core import agent_policy, git_backup, reader_ops
 from nblane.core import local_dict
 from nblane.core.ai import (
     answer_paper_question,
@@ -33,7 +33,7 @@ from nblane.core.research_papers import (
     reader_translation_layout_units,
     reader_translation_structure_units,
     save_paper_analysis,
-    save_paper_annotations,
+    mutate_paper_annotations,
     text_hash,
     translate_full_paper,
     translation_text_from_row,
@@ -41,7 +41,7 @@ from nblane.core.research_papers import (
 )
 from nblane.core.research_sources import (
     load_research_sources,
-    save_research_sources,
+    mutate_research_sources,
     update_research_source,
 )
 from nblane.core.research_workspace import (
@@ -869,6 +869,9 @@ def _fast_translation_result(
     selected_text: str,
     target_lang: str,
     payload: dict[str, Any],
+    *,
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
 ) -> "ReaderActionResult | None":
     """Return a cached or dictionary translation without calling the LLM.
 
@@ -934,9 +937,13 @@ def _fast_translation_result(
     if source == "local_dict":
         # Persist dictionary glosses so later edits/reviews see a durable row.
         try:
-            upsert_paper_translations(profile, source_id, [row])
+            reader_ops.checkpoint(cancel_callback)
+            reader_ops.commit_or_direct(commit)(
+                lambda: upsert_paper_translations(profile, source_id, [row])
+            )
         except Exception:
-            pass
+            if commit is not None:
+                raise
     return ReaderActionResult(
         data={
             "structured": {"translations": [row]},
@@ -1061,53 +1068,53 @@ def _update_or_delete_paper_annotation(
     annotation_id = _payload_text(payload, "annotation_id", "id")
     if not annotation_id:
         raise ValueError("Reader annotation update needs annotation_id.")
-    annotations = load_paper_annotations(profile_path, source_id)
-    updated = ""
-    for ann in annotations:
-        if ann.id != annotation_id:
-            continue
-        if delete:
-            ann.status = "deleted"
-        else:
-            selected_text = _payload_text(payload, "selected_text", "selection_text", "text", "quote")
-            if selected_text:
-                ann.selected_text = selected_text
-                ann.selected_text_hash = _payload_text(payload, "selected_text_hash") or text_hash(selected_text)
-            if "note" in payload:
-                ann.note = str(payload.get("note") or "").strip()
-            color = _payload_text(payload, "color")
-            if color:
-                ann.color = color
-            locator = _payload_text(payload, "locator")
-            if locator:
-                ann.locator = locator
-            ann.page = _payload_int(payload, "page", ann.page)
-            tags = _payload_list(payload, "tags")
-            if tags:
-                ann.tags = tags
-            segment_refs = _payload_list(payload, "segment_refs", "segment_ids", "segment_id")
-            if segment_refs:
-                ann.segment_refs = segment_refs
-            if isinstance(payload.get("rects"), list):
-                ann.rects = payload["rects"]
-        ann.updated = datetime.now().astimezone().isoformat(timespec="seconds")
-        updated = ann.id
-        break
-    if not updated:
+    def apply(annotations) -> str:
+        for ann in annotations:
+            if ann.id != annotation_id:
+                continue
+            if delete:
+                ann.status = "deleted"
+            else:
+                selected_text = _payload_text(payload, "selected_text", "selection_text", "text", "quote")
+                if selected_text:
+                    ann.selected_text = selected_text
+                    ann.selected_text_hash = _payload_text(payload, "selected_text_hash") or text_hash(selected_text)
+                if "note" in payload:
+                    ann.note = str(payload.get("note") or "").strip()
+                color = _payload_text(payload, "color")
+                if color:
+                    ann.color = color
+                locator = _payload_text(payload, "locator")
+                if locator:
+                    ann.locator = locator
+                ann.page = _payload_int(payload, "page", ann.page)
+                tags = _payload_list(payload, "tags")
+                if tags:
+                    ann.tags = tags
+                segment_refs = _payload_list(payload, "segment_refs", "segment_ids", "segment_id")
+                if segment_refs:
+                    ann.segment_refs = segment_refs
+                if isinstance(payload.get("rects"), list):
+                    ann.rects = payload["rects"]
+            ann.updated = datetime.now().astimezone().isoformat(timespec="seconds")
+            return ann.id
         raise ValueError(f"Unknown paper annotation: {annotation_id}")
-    save_paper_annotations(profile_path, source_id, annotations)
-    return updated
+
+    return mutate_paper_annotations(profile_path, source_id, apply)
 
 
-def save_reader_progress(ctx: ReaderActionContext, payload: dict[str, Any]) -> ReaderActionResult:
+def save_reader_progress(
+    ctx: ReaderActionContext,
+    payload: dict[str, Any],
+    *,
+    commit: reader_ops.Commit | None = None,
+    cancel_callback: Any | None = None,
+) -> ReaderActionResult:
     page = max(1, _payload_int(payload, "page", _payload_int(payload, "primary_page", 1)))
-    inbox = load_research_sources(ctx.profile_path)
-    src = inbox.by_id().get(ctx.source_id)
-    if src is None:
-        raise ValueError(f"Unknown research source: {ctx.source_id}")
-    metadata = dict(src.metadata or {})
-    metadata["last_read_page"] = page
-    metadata["last_read_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    metadata_updates: dict[str, object] = {
+        "last_read_page": page,
+        "last_read_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
     for key in (
         "reader_mode",
         "scale_mode",
@@ -1120,22 +1127,33 @@ def save_reader_progress(ctx: ReaderActionContext, payload: dict[str, Any]) -> R
     ):
         value = _payload_text(payload, key)
         if value:
-            metadata[key] = value
+            metadata_updates[key] = value
     for key, default in (("compare_split_ratio", 50), ("panel_width", 340)):
         if key in payload:
-            metadata[key] = _payload_int(payload, key, default)
+            metadata_updates[key] = _payload_int(payload, key, default)
     for key, default in (
         ("side_panel_collapsed", True),
         ("left_rail_collapsed", False),
         ("translation_source_visible", True),
     ):
         if key in payload:
-            metadata[key] = _payload_bool(payload, key, default)
+            metadata_updates[key] = _payload_bool(payload, key, default)
     visible_pages = clean_page_list(payload.get("visible_pages") or payload.get("last_visible_pages"))
     if visible_pages:
-        metadata["last_visible_pages"] = visible_pages
-    update_research_source(inbox, ctx.source_id, metadata=metadata, status="reading")
-    save_research_sources(ctx.profile_path, inbox)
+        metadata_updates["last_visible_pages"] = visible_pages
+
+    def apply(inbox) -> None:
+        src = inbox.by_id().get(ctx.source_id)
+        if src is None:
+            raise ValueError(f"Unknown research source: {ctx.source_id}")
+        metadata = dict(src.metadata or {})
+        metadata.update(metadata_updates)
+        update_research_source(inbox, ctx.source_id, metadata=metadata, status="reading")
+
+    reader_ops.checkpoint(cancel_callback)
+    reader_ops.commit_or_direct(commit)(
+        lambda: mutate_research_sources(ctx.profile_path, apply)
+    )
     return ReaderActionResult(
         data={"page": page},
         changed_ids={"source_id": ctx.source_id},
@@ -1150,12 +1168,15 @@ def handle_reader_action(
     *,
     progress_callback: Any | None = None,
     cancel_callback: Any | None = None,
+    commit: reader_ops.Commit | None = None,
 ) -> ReaderActionResult:
     """Run one Reader action and return a JSON-friendly result."""
 
     clean_action = str(action or "").strip()
     if not clean_action:
         raise ValueError("Reader action cannot be blank.")
+    if clean_action not in agent_policy.READER_ACTIONS:
+        raise ValueError(f"Unsupported reader action: {clean_action}")
     data = dict(payload or {})
     payload_source = _payload_text(data, "source_id")
     if payload_source and payload_source != ctx.source_id:
@@ -1168,6 +1189,7 @@ def handle_reader_action(
         data,
         progress_callback=progress_callback,
         cancel_callback=cancel_callback,
+        commit=commit,
     )
     result.warnings.extend(_backup_warnings())
     return result
@@ -1180,15 +1202,22 @@ def _handle_reader_action_inner(
     *,
     progress_callback: Any | None = None,
     cancel_callback: Any | None = None,
+    commit: reader_ops.Commit | None = None,
 ) -> ReaderActionResult:
     profile = ctx.profile_path
     source_id = ctx.source_id
+    write = reader_ops.commit_or_direct(commit)
     segment_rows = load_paper_segments(profile, source_id)
     annotation_rows = load_paper_annotations(profile, source_id)
     chunk_rows = load_chunks(profile, source_id)
 
     if action == SAVE_PROGRESS:
-        return save_reader_progress(ctx, payload)
+        return save_reader_progress(
+            ctx,
+            payload,
+            commit=commit,
+            cancel_callback=cancel_callback,
+        )
 
     if action == PREPARE_READER_ARTIFACTS:
         prefer_grobid = payload.get("prefer_grobid", True)
@@ -1200,6 +1229,8 @@ def _handle_reader_action_inner(
             prefer_grobid=bool(prefer_grobid),
             target_lang=_payload_text(payload, "target_lang", "language") or "zh",
             progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+            commit=commit,
         )
         status = str(summary.get("status") or "")
         if status == "missing_pdf":
@@ -1218,7 +1249,8 @@ def _handle_reader_action_inner(
         )
 
     if action in {ANNOTATION_CREATE, "create_annotation"}:
-        ann = create_paper_annotation(
+        reader_ops.checkpoint(cancel_callback)
+        ann = write(lambda: create_paper_annotation(
             profile,
             source_id,
             _payload_text(payload, "selected_text", "selection_text", "text", "quote"),
@@ -1230,7 +1262,7 @@ def _handle_reader_action_inner(
             tags=_payload_list(payload, "tags"),
             segment_refs=_payload_list(payload, "segment_refs", "segment_ids", "segment_id"),
             rects=payload.get("rects") if isinstance(payload.get("rects"), list) else [],
-        )
+        ))
         return ReaderActionResult(
             data={"annotation": ann.to_dict()},
             changed_ids={"annotation_id": ann.id},
@@ -1238,16 +1270,21 @@ def _handle_reader_action_inner(
         )
 
     if action == ANNOTATION_UPDATE:
-        annotation_id = _update_or_delete_paper_annotation(profile, source_id, payload)
+        reader_ops.checkpoint(cancel_callback)
+        annotation_id = write(lambda: _update_or_delete_paper_annotation(profile, source_id, payload))
         return ReaderActionResult(changed_ids={"annotation_id": annotation_id}, message="Saved")
 
     if action == ANNOTATION_DELETE:
-        annotation_id = _update_or_delete_paper_annotation(profile, source_id, payload, delete=True)
+        reader_ops.checkpoint(cancel_callback)
+        annotation_id = write(lambda: _update_or_delete_paper_annotation(
+            profile, source_id, payload, delete=True
+        ))
         return ReaderActionResult(changed_ids={"annotation_id": annotation_id}, message="Saved")
 
     if action in {CREATE_CHUNK_FROM_SELECTION, "create_chunk"}:
         selected_text = _selection_text(payload, segment_rows)
-        chunk = create_chunk(
+        reader_ops.checkpoint(cancel_callback)
+        chunk = write(lambda: create_chunk(
             profile,
             source_id,
             selected_text,
@@ -1261,7 +1298,7 @@ def _handle_reader_action_inner(
                 "annotation_id": _payload_text(payload, "annotation_id"),
                 "source": "reader_sidecar",
             },
-        )
+        ))
         return ReaderActionResult(
             data={"chunk": chunk.to_dict()},
             changed_ids={"chunk_id": chunk.id},
@@ -1272,7 +1309,8 @@ def _handle_reader_action_inner(
         selected_text = _selection_text(payload, segment_rows)
         chunk_id = _payload_text(payload, "chunk_id", "chunk_ref")
         if not chunk_id and selected_text:
-            chunk = create_chunk(
+            reader_ops.checkpoint(cancel_callback)
+            chunk = write(lambda: create_chunk(
                 profile,
                 source_id,
                 selected_text,
@@ -1285,14 +1323,15 @@ def _handle_reader_action_inner(
                     "annotation_id": _payload_text(payload, "annotation_id"),
                     "source": "reader_sidecar",
                 },
-            )
+            ))
             chunk_id = chunk.id
         claim_id = _payload_text(payload, "claim_id", "research_claim_id")
         if not claim_id:
             claim_text = _payload_text(payload, "claim_text", "text") or selected_text
             if not claim_text:
                 raise ValueError("Reader citation needs a claim id, selected text, or claim text.")
-            claim = upsert_research_claim(
+            reader_ops.checkpoint(cancel_callback)
+            claim = write(lambda: upsert_research_claim(
                 profile,
                 claim_text,
                 status="draft",
@@ -1302,9 +1341,10 @@ def _handle_reader_action_inner(
                 confidence="medium",
                 rationale="Created from Reader selection; review before promotion.",
                 generated_by="reader_sidecar",
-            )
+            ))
             claim_id = claim.id
-        citation = create_citation(
+        reader_ops.checkpoint(cancel_callback)
+        citation = write(lambda: create_citation(
             profile,
             claim_id,
             source_id=source_id,
@@ -1313,7 +1353,7 @@ def _handle_reader_action_inner(
             quote=_payload_text(payload, "quote", "selected_text", "selection_text", "text"),
             bibliography=_payload_text(payload, "bibliography"),
             note=_payload_text(payload, "note"),
-        )
+        ))
         return ReaderActionResult(
             data={"citation": citation.to_dict()},
             changed_ids={"citation_id": citation.id, "claim_id": claim_id, "chunk_id": chunk_id},
@@ -1330,6 +1370,8 @@ def _handle_reader_action_inner(
             ai_profile=ctx.profile_name,
             require_review=False,
             progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+            commit=commit,
         )
         return ReaderActionResult(
             data={"summary": summary},
@@ -1377,9 +1419,15 @@ def _handle_reader_action_inner(
         positioned_scope_type = ""
         if visible_pages and scope_strategy in {"structure", "auto"} and (not refs or scope_refs):
             emit_translation_progress("extracting_structure", "Building paper structure...")
+            reader_ops.checkpoint(cancel_callback)
             structure_units = [
                 unit
-                for unit in reader_translation_structure_units(build_paper_structure_units(profile, source_id))
+                for unit in reader_translation_structure_units(build_paper_structure_units(
+                    profile,
+                    source_id,
+                    commit=commit,
+                    cancel_callback=cancel_callback,
+                ))
                 if bool(unit.get("translatable", True))
                 and (
                     int(unit.get("page") or 0) in visible_pages
@@ -1410,6 +1458,7 @@ def _handle_reader_action_inner(
             and (not refs or scope_refs)
         ):
             emit_translation_progress("extracting_layout", "Extracting page layout...")
+            reader_ops.checkpoint(cancel_callback)
             layout_units = [
                 unit
                 for unit in reader_translation_layout_units(build_paper_layout_units(profile, source_id, pages=visible_pages))
@@ -1505,6 +1554,7 @@ def _handle_reader_action_inner(
                 current=processed,
                 total=len(segment_payloads),
             )
+            reader_ops.checkpoint(cancel_callback)
             ai_result = translate_paper_segments(
                 ctx.profile_name,
                 source_id,
@@ -1513,6 +1563,7 @@ def _handle_reader_action_inner(
                 require_review=False,
                 scope="visible",
             )
+            reader_ops.checkpoint(cancel_callback)
             batch_warnings = [str(item) for item in ai_result.warnings]
             warnings.extend(batch_warnings)
             if getattr(ai_result, "error", ""):
@@ -1741,7 +1792,8 @@ def _handle_reader_action_inner(
                 )
                 saved += 1
         if savable:
-            upsert_paper_translations(profile, source_id, savable)
+            reader_ops.checkpoint(cancel_callback)
+            write(lambda: upsert_paper_translations(profile, source_id, savable))
         summary = _visible_translation_summary(
             scope=scope,
             requested_pages=requested_pages,
@@ -1785,7 +1837,13 @@ def _handle_reader_action_inner(
         # Fast paths for single-selection translation: reuse a prior cached
         # translation, or an offline dictionary gloss, to avoid the LLM.
         fast = _fast_translation_result(
-            profile, source_id, selected_text, target_lang, payload
+            profile,
+            source_id,
+            selected_text,
+            target_lang,
+            payload,
+            commit=commit,
+            cancel_callback=cancel_callback,
         )
         if fast is not None:
             return fast
@@ -1797,6 +1855,7 @@ def _handle_reader_action_inner(
         segments = _selection_segments(translation_payload, segment_rows)
         if not segments:
             raise ValueError("Reader translation needs selected text or segment refs.")
+        reader_ops.checkpoint(cancel_callback)
         ai_result = translate_paper_segments(
             ctx.profile_name,
             source_id,
@@ -1805,6 +1864,7 @@ def _handle_reader_action_inner(
             require_review=False,
             scope="selection",
         )
+        reader_ops.checkpoint(cancel_callback)
         translations = []
         if isinstance(ai_result.structured, dict):
             translations = [
@@ -1858,7 +1918,8 @@ def _handle_reader_action_inner(
         if backend_warning and backend_warning not in warnings:
             warnings.append(backend_warning)
         if savable and not no_backend_text:
-            upsert_paper_translations(profile, source_id, savable)
+            reader_ops.checkpoint(cancel_callback)
+            write(lambda: upsert_paper_translations(profile, source_id, savable))
         return ReaderActionResult(
             data={
                 "structured": ai_result.structured or {},
@@ -1951,6 +2012,8 @@ def _handle_reader_action_inner(
             prefer_grobid=True,
             target_lang=_payload_text(payload, "target_lang", "language") or "zh",
             progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+            commit=commit,
         )
         segment_rows = load_paper_segments(profile, source_id)
         artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
@@ -1968,6 +2031,7 @@ def _handle_reader_action_inner(
             total=5,
         )
         analysis_context = _compact_paper_for_analysis(profile, source_id, chunk_rows, annotation_rows)
+        reader_ops.checkpoint(cancel_callback)
         ai_result = generate_paper_review_card(
             ctx.profile_name,
             source_id,
@@ -1978,6 +2042,7 @@ def _handle_reader_action_inner(
             paper_context=analysis_context["paper_context"],
             require_review=False,
         )
+        reader_ops.checkpoint(cancel_callback)
         if isinstance(ai_result.structured, dict):
             ai_result.structured = expand_analysis_refs(ai_result.structured, analysis_context["aliases"])
         emit_analysis_progress("normalizing", "Normalizing analysis output…", current=3, total=5)
@@ -1992,7 +2057,8 @@ def _handle_reader_action_inner(
             artifact_warnings.append(ANALYSIS_FALLBACK_KEPT_WARNING)
         if structured:
             emit_analysis_progress("saving", "Saving analysis…", current=4, total=5)
-            save_paper_analysis(profile, source_id, analysis)
+            reader_ops.checkpoint(cancel_callback)
+            write(lambda: save_paper_analysis(profile, source_id, analysis))
         emit_analysis_progress("done", "Analysis saved" if structured else "Analysis incomplete", current=5, total=5)
         if kept_previous:
             message = ANALYSIS_FALLBACK_KEPT_WARNING
@@ -2025,6 +2091,8 @@ def _handle_reader_action_inner(
             prefer_grobid=True,
             target_lang=_payload_text(payload, "target_lang", "language") or "zh",
             progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+            commit=commit,
         )
         artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
         emit_deepread_progress("exporting", "Exporting full paper with tables and figures…", current=1)
@@ -2085,6 +2153,7 @@ def _handle_reader_action_inner(
             require_review=True,
             cancel_callback=cancel_callback,
         )
+        reader_ops.checkpoint(cancel_callback)
         emit_deepread_progress("structuring", "Structuring the study notes…", current=3)
         structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
         # A rule-based skeleton must never replace a real study report.
@@ -2099,7 +2168,8 @@ def _handle_reader_action_inner(
             analysis["codex_deep_read_updated"] = datetime.now().astimezone().isoformat(
                 timespec="seconds"
             )
-            save_paper_analysis(profile, source_id, analysis)
+            reader_ops.checkpoint(cancel_callback)
+            write(lambda: save_paper_analysis(profile, source_id, analysis))
         emit_deepread_progress(
             "done",
             "Deep read candidate ready" if usable else "Deep read incomplete",
@@ -2131,11 +2201,14 @@ def _handle_reader_action_inner(
             prefer_grobid=True,
             target_lang=_payload_text(payload, "target_lang", "language") or "zh",
             progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+            commit=commit,
         )
         segment_rows = load_paper_segments(profile, source_id)
         artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
         source = load_research_sources(profile).by_id().get(source_id)
         analysis_context = _compact_paper_for_analysis(profile, source_id, chunk_rows, annotation_rows)
+        reader_ops.checkpoint(cancel_callback)
         ai_result = generate_paper_review_card(
             ctx.profile_name,
             source_id,
@@ -2146,6 +2219,7 @@ def _handle_reader_action_inner(
             paper_context=analysis_context["paper_context"],
             require_review=False,
         )
+        reader_ops.checkpoint(cancel_callback)
         if isinstance(ai_result.structured, dict):
             ai_result.structured = expand_analysis_refs(ai_result.structured, analysis_context["aliases"])
         structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
@@ -2155,7 +2229,8 @@ def _handle_reader_action_inner(
             structured = {}
             artifact_warnings.append(ANALYSIS_FALLBACK_KEPT_WARNING)
         if structured:
-            save_paper_analysis(profile, source_id, analysis)
+            reader_ops.checkpoint(cancel_callback)
+            write(lambda: save_paper_analysis(profile, source_id, analysis))
         return ReaderActionResult(
             ok=bool(getattr(ai_result, "ok", True) and structured),
             data={

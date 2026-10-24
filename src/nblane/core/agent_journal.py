@@ -2,7 +2,7 @@
 
 A journaled agent write is recorded as entity-level ``before`` / ``after``
 states, found by diffing snapshots of the entity kinds the operation may
-touch (``snapshot`` before, ``snapshot`` after, ``diff``). Undo writes each
+touch (``prepare`` + ``snapshot`` before, ``snapshot`` after, ``diff``). Undo writes each
 ``before`` back through the owning domain writer, but only when every
 entity still equals its ``after`` — if a human or another write touched it
 since, the undo is refused instead of clobbering newer edits.
@@ -21,6 +21,9 @@ Entity kinds (``ENTITY_KINDS``):
 - ``north_star`` — the three North Star identity bullets in SKILL.md
 - ``file:<relative path>`` — one whole text file (``{"item": {"text"}}``),
   for writers without row-level structure (Growth Log table, method drafts)
+- ``jsonl:<relative path>`` — keyed rows in supported Reader JSONL files
+- ``asset:<pdf-ref>`` / ``asset:*`` — PDF hashes and content-addressed
+  binary snapshots stored outside the YAML journal
 
 Narrative side effects (chronicle.yaml entries, plan-template usage
 history) are append-only and are not reverted.
@@ -30,6 +33,8 @@ from __future__ import annotations
 
 import json
 import secrets
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -37,9 +42,9 @@ from typing import Any, Callable
 
 import yaml
 
-from nblane.core import activity_log, file_state, git_backup
+from nblane.core import activity_log, file_state, git_backup, research_journal
 from nblane.core.file_lock import locked_profile_write
-from nblane.core.file_write import atomic_write_text, rollback_profile_files
+from nblane.core.file_write import atomic_write_text
 from nblane.core.kanban_io import kanban_path, parse_kanban
 from nblane.core.kanban_merge import copy_kanban_sections, save_kanban_with_merge
 from nblane.core.models import KanbanSubtask, KanbanTask, KanbanTodo
@@ -177,10 +182,23 @@ _KIND_FILES["evidence"] = ("evidence-pool.yaml", "SKILL.md")
 
 
 FILE_KIND_PREFIX = "file:"
+JSONL_KIND_PREFIX = research_journal.JSONL_KIND_PREFIX
+ASSET_KIND_PREFIX = research_journal.ASSET_KIND_PREFIX
+ASSET_WILDCARD = research_journal.ASSET_WILDCARD
 
 
 def file_kind(relative: str) -> str:
     return FILE_KIND_PREFIX + relative
+
+
+def jsonl_kind(relative: str) -> str:
+    """Return the row-level journal kind for a supported Reader JSONL path."""
+    return JSONL_KIND_PREFIX + relative
+
+
+def asset_kind(ref: str) -> str:
+    """Return a PDF asset kind; ``asset_kind('*')`` covers all current PDFs."""
+    return ASSET_KIND_PREFIX + ref
 
 
 def _file_target(pdir: Path, kind: str) -> tuple[str, Path]:
@@ -194,9 +212,13 @@ def _file_target(pdir: Path, kind: str) -> tuple[str, Path]:
 
 
 def kind_files(pdir: Path, kind: str) -> tuple[str, ...]:
-    """Files an undo of *kind* may rewrite (relative to *pdir*)."""
+    """Profile text files an undo of *kind* may rewrite."""
     if kind.startswith(FILE_KIND_PREFIX):
         return (_file_target(pdir, kind)[0],)
+    if kind.startswith(JSONL_KIND_PREFIX):
+        return (research_journal.jsonl_target(pdir, kind)[0],)
+    if kind.startswith(ASSET_KIND_PREFIX):
+        return ()
     return _KIND_FILES[kind]
 
 
@@ -261,6 +283,10 @@ def _kind_states(pdir: Path, kind: str, log: activity_log.ActivityLog | None = N
         return kanban_states(pdir)
     if kind == "north_star":
         return _north_star_state(pdir)
+    if kind.startswith(JSONL_KIND_PREFIX):
+        return research_journal.jsonl_states(pdir, kind)
+    if kind.startswith(ASSET_KIND_PREFIX):
+        return research_journal.asset_states(pdir, kind)
     if kind.startswith(FILE_KIND_PREFIX):
         relative, target = _file_target(pdir, kind)
         if not target.is_file():
@@ -285,7 +311,7 @@ def _kind_states(pdir: Path, kind: str, log: activity_log.ActivityLog | None = N
 
 
 def prepare(pdir: Path, kinds: tuple[str, ...] | list[str]) -> None:
-    """Make every entity of *kinds* addressable before the first snapshot.
+    """Materialize row ids and retain old PDF bytes before a write.
 
     Kanban cards without a persisted id are invisible to ``kanban_states``;
     the write itself would mint their ids, and the diff would then read
@@ -296,10 +322,11 @@ def prepare(pdir: Path, kinds: tuple[str, ...] | list[str]) -> None:
         from nblane.core.kanban_io import materialize_kanban_task_ids
 
         materialize_kanban_task_ids(pdir)
+    research_journal.prepare_asset_snapshots(pdir, kinds)
 
 
 def snapshot(pdir: Path, kinds: tuple[str, ...] | list[str]) -> Snapshot:
-    """Current state of every entity of *kinds* (one read per file)."""
+    """Read current states without creating new binary snapshots."""
     log = activity_log.load(pdir) if any(kind in _ACTIVITY_LISTS for kind in kinds) else None
     return {kind: _kind_states(pdir, kind, log) for kind in dict.fromkeys(kinds)}
 
@@ -403,6 +430,32 @@ def _restore_list(pdir: Path, kind: str, targets: list[tuple[str, State | None]]
     doc.save(pdir, raw)
 
 
+def _restore_sources(
+    pdir: Path,
+    targets: list[tuple[str, State | None, State | None]],
+) -> None:
+    from nblane.core.research_sources import ResearchSource, mutate_research_sources
+
+    def apply(inbox) -> None:
+        current: dict[str, State] = {}
+        for index, row in enumerate(_rows(_sources_load(pdir), "sources")):
+            source_id = str(row.get("id", "") or "").strip()
+            if source_id and source_id not in current:
+                current[source_id] = {"index": index, "item": row}
+        for source_id, _before, after in targets:
+            if not same_state("research_source", current.get(source_id), after):
+                raise research_journal.RestoreConflictError("research_source")
+        ids = {source_id for source_id, _before, _after in targets}
+        restored = [source for source in inbox.sources if source.id not in ids]
+        states = [before for _source_id, before, _after in targets if before is not None]
+        for state in sorted(states, key=lambda item: int(item.get("index") or 0)):
+            index = max(0, min(int(state.get("index") or 0), len(restored)))
+            restored.insert(index, ResearchSource.from_dict(state["item"]))
+        inbox.sources = restored
+
+    mutate_research_sources(pdir, apply)
+
+
 def _restore_north_star(pdir: Path, state: State | None) -> None:
     from nblane.core import north_star as north_star_core
 
@@ -417,23 +470,36 @@ def _restore_north_star(pdir: Path, state: State | None) -> None:
     )
 
 
-def _restore_file(pdir: Path, kind: str, state: State | None) -> None:
+def _restore_file(
+    pdir: Path,
+    kind: str,
+    before: State | None,
+    after: State | None,
+) -> None:
     from nblane.core.file_lock import locked_profile_write
 
     _relative, target = _file_target(pdir, kind)
     with locked_profile_write(target.parent, target.name):
-        if state is None:
+        current = (
+            {"item": {"text": target.read_text(encoding="utf-8")}}
+            if target.is_file()
+            else None
+        )
+        if not same_state(kind, current, after):
+            raise research_journal.RestoreConflictError(kind)
+        if before is None:
             target.unlink(missing_ok=True)
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(target, str((state.get("item") or {}).get("text", "")))
+            atomic_write_text(target, str((before.get("item") or {}).get("text", "")))
     git_backup.record_change([target], action=f"undo agent write to {target.name}")
 
 
 def _apply_restore(pdir: Path, changes: list[dict[str, Any]]) -> None:
     """Write every change's ``before`` back, kind by kind."""
+    ordered = list(reversed(changes))
     by_kind: dict[str, list[tuple[str, State | None]]] = {}
-    for change in reversed(changes):
+    for change in ordered:
         by_kind.setdefault(change["entity"], []).append((change["id"], change.get("before")))
     activity_targets = [
         (kind, entity_id, state)
@@ -447,19 +513,39 @@ def _apply_restore(pdir: Path, changes: list[dict[str, Any]]) -> None:
     # Lists after kanban: a restored project case (with its own task refs)
     # wins over the refs the kanban re-sync just derived.
     for kind in _LIST_DOCS:
-        if kind in by_kind:
+        if kind not in by_kind:
+            continue
+        if kind == "research_source":
+            targets = [
+                (change["id"], change.get("before"), change.get("after"))
+                for change in ordered
+                if change["entity"] == kind
+            ]
+            _restore_sources(pdir, targets)
+        else:
             _restore_list(pdir, kind, by_kind[kind])
     if "north_star" in by_kind:
         for _id, state in by_kind["north_star"]:
             _restore_north_star(pdir, state)
-    for kind, targets in by_kind.items():
+    for kind in by_kind:
         if kind.startswith(FILE_KIND_PREFIX):
-            for _id, state in targets:
-                _restore_file(pdir, kind, state)
+            for change in ordered:
+                if change["entity"] == kind:
+                    _restore_file(pdir, kind, change.get("before"), change.get("after"))
+        elif kind.startswith(JSONL_KIND_PREFIX):
+            jsonl_targets = [
+                (change["id"], change.get("before"), change.get("after"))
+                for change in ordered
+                if change["entity"] == kind
+            ]
+            research_journal.restore_jsonl(pdir, kind, jsonl_targets)
     if ({"skill_node", "evidence"} & by_kind.keys()) and (pdir / "SKILL.md").exists():
         from nblane.core.sync import write_generated_blocks
 
         write_generated_blocks(pdir)
+    asset_changes = [change for change in ordered if change["entity"].startswith(ASSET_KIND_PREFIX)]
+    if asset_changes:
+        research_journal.restore_assets(pdir, asset_changes)
 
 
 # ------------------------------------------------------------ journal file
@@ -491,6 +577,15 @@ def _prune(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return kept[-MAX_ENTRIES:]
 
 
+def _prune_with_removed(
+    entries: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    kept = _prune(entries)
+    retained_ids = {id(item) for item in kept}
+    removed = [item for item in entries if id(item) not in retained_ids]
+    return kept, removed
+
+
 def _write(pdir: Path, entries: list[dict[str, Any]], action: str) -> None:
     path = journal_path(pdir)
     header = (
@@ -502,6 +597,39 @@ def _write(pdir: Path, entries: list[dict[str, Any]], action: str) -> None:
     )
     atomic_write_text(path, header + body)
     git_backup.record_change([path], action=action)
+
+
+@contextmanager
+def _rollback_undo_files(pdir: Path, filenames: tuple[str, ...]) -> Iterator[None]:
+    """Rollback undo writes without reverting a locked conflict's racing edit."""
+    before = {
+        name: (pdir / name).read_text(encoding="utf-8") if (pdir / name).exists() else None
+        for name in filenames
+    }
+    try:
+        yield
+    except Exception as original:
+        skip: set[str] = set()
+        if isinstance(original, research_journal.RestoreConflictError):
+            skip = set(kind_files(pdir, original.kind))
+        failures = []
+        for name, text in before.items():
+            if name in skip:
+                continue
+            path = pdir / name
+            try:
+                current = path.read_text(encoding="utf-8") if path.exists() else None
+                if current == text:
+                    continue
+                if text is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    atomic_write_text(path, text)
+            except OSError as exc:
+                failures.append(f"{path.name}: {exc}")
+        if failures:
+            raise OSError(f"{original}; rollback failed: {'; '.join(failures)}") from original
+        raise
 
 
 def record(
@@ -535,9 +663,10 @@ def record(
         "undone_by": "",
     }
     with locked_profile_write(pdir, JOURNAL_FILENAME):
-        entries = _prune(load_entries(pdir))
-        entries.append(entry)
+        existing = load_entries(pdir)
+        entries, removed = _prune_with_removed([*existing, entry])
         _write(pdir, entries, f"agent journal {action}")
+        research_journal.prune_asset_snapshots(pdir, removed, entries)
     return entry
 
 
@@ -574,7 +703,8 @@ def recent(pdir: Path, limit: int = 20) -> list[dict[str, Any]]:
 def undo(pdir: Path, entry_id: str, *, actor: str) -> dict[str, Any]:
     """Revert one entry; raises ``UndoError`` when refused."""
     with locked_profile_write(pdir, JOURNAL_FILENAME):
-        entries = _prune(load_entries(pdir))
+        existing = load_entries(pdir)
+        entries, removed = _prune_with_removed(existing)
         entry = next((item for item in entries if item.get("id") == entry_id), None)
         if entry is None:
             raise UndoError("journal_entry_not_found", f"找不到操作记录 {entry_id}（可能已超过 {RETENTION_DAYS} 天）。")
@@ -586,10 +716,29 @@ def undo(pdir: Path, entry_id: str, *, actor: str) -> dict[str, Any]:
                 "journal_undo_conflict",
                 "之后又有人改过这条内容，自动撤销会覆盖新的修改，请到页面上手动处理。",
             )
-        files = tuple(dict.fromkeys(name for change in changes for name in kind_files(pdir, change["entity"])))
-        with git_backup.defer_changes(f"undo agent {entry.get('action')}"), rollback_profile_files(pdir, files):
-            _apply_restore(pdir, changes)
+        files = tuple(
+            dict.fromkeys(name for change in changes for name in kind_files(pdir, change["entity"]))
+        )
+        asset_changes = [change for change in changes if change["entity"].startswith(ASSET_KIND_PREFIX)]
+        try:
+            with (
+                git_backup.defer_changes(f"undo agent {entry.get('action')}"),
+                _rollback_undo_files(pdir, files),
+                research_journal.rollback_assets(pdir, asset_changes),
+            ):
+                _apply_restore(pdir, changes)
+        except research_journal.RestoreConflictError as exc:
+            raise UndoError(
+                "journal_undo_conflict",
+                "之后又有人改过这条内容，自动撤销会覆盖新的修改，请到页面上手动处理。",
+            ) from exc
+        except research_journal.SnapshotIntegrityError as exc:
+            raise UndoError(
+                "journal_snapshot_invalid",
+                "撤销所需的 PDF 快照缺失或损坏，未继续覆盖当前文件。",
+            ) from exc
         entry["undone_at"] = _now().isoformat()
         entry["undone_by"] = actor
         _write(pdir, entries, f"agent journal undo {entry.get('action')}")
+        research_journal.prune_asset_snapshots(pdir, removed, entries)
     return entry

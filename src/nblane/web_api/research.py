@@ -23,7 +23,7 @@ user-editable fields (passive Reader progress metadata excluded, so a
 paper being read in another tab does not invalidate an edit). ``PATCH``
 honors ``If-Match`` against it (412 with the current source on mismatch);
 every write passes its request-start file snapshot to
-``save_research_sources`` so a concurrent write landing before the lock
+``mutate_research_sources`` so a concurrent write landing before the lock
 also answers 412 (additive creates retry instead).
 """
 
@@ -33,22 +33,27 @@ import hashlib
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Query, Response
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from nblane.core import codex_adapter, file_state
 from nblane.core import llm as llm_client
+from nblane.core.file_lock import locked_profile_write
 from nblane.core.research_connectors import (
     AUTO_PROVIDERS,
     CONNECTOR_PROVIDERS,
     SECRET_KEY_FRAGMENTS,
+    ConnectorItem,
+    ConnectorSyncResult,
+    _canonical_url,
+    _now,
+    _source_fingerprint_lookup,
     discover_connector_items,
     find_duplicate_source,
-    import_connector_items,
     import_manual_connector_items,
     load_connectors,
     preview_manual_connector_items,
-    sync_connector,
+    save_connectors,
     upsert_connector,
 )
 from nblane.core.research_sources import (
@@ -61,7 +66,7 @@ from nblane.core.research_sources import (
     ResearchSource,
     add_research_source,
     load_research_sources,
-    save_research_sources,
+    mutate_research_sources,
     update_research_source,
 )
 from nblane.core.web_preferences import (
@@ -420,22 +425,16 @@ def create_research_source(
     status = _choice(body.status, SOURCE_STATUSES, "status")
     visibility = _choice(body.visibility, SOURCE_VISIBILITIES, "visibility")
     path = _sources_path(pdir)
-    # Additive write: a concurrent change (e.g. Reader progress) between the
-    # load and the in-lock re-check just re-runs the load, never clobbers.
+    # Additive write: retry with a fresh snapshot, then deduplicate and allocate
+    # the id against the latest document while holding the sources lock.
     for _attempt in range(3):
         snapshot = file_state.snapshot_file(path)
-        inbox = load_research_sources(pdir)
-        duplicate = find_duplicate_source(inbox, body.url)
-        if duplicate is not None:
-            existing = inbox.by_id().get(duplicate["source_id"])
-            return _source_error(
-                409,
-                "duplicate_research_source",
-                f"Source URL already in the inbox: {duplicate['source_id']}",
-                existing,
-                duplicate_source_id=duplicate["source_id"],
-            )
-        try:
+
+        def create(inbox):
+            duplicate = find_duplicate_source(inbox, body.url)
+            if duplicate is not None:
+                existing = inbox.by_id().get(duplicate["source_id"])
+                return None, duplicate, existing
             source = add_research_source(
                 inbox,
                 body.title,
@@ -450,12 +449,26 @@ def create_research_source(
                 visibility=visibility,
                 origin="manual",
             )
+            return source, None, None
+
+        try:
+            source, duplicate, existing = mutate_research_sources(
+                pdir,
+                create,
+                expected_snapshot=snapshot,
+            )
         except ValueError as exc:
             raise ApiError(422, "invalid_research_source", str(exc)) from exc
-        try:
-            save_research_sources(pdir, inbox, expected_snapshot=snapshot)
         except file_state.FileConflictError:
             continue
+        if duplicate is not None:
+            return _source_error(
+                409,
+                "duplicate_research_source",
+                f"Source URL already in the inbox: {duplicate['source_id']}",
+                existing,
+                duplicate_source_id=duplicate["source_id"],
+            )
         break
     else:
         return _source_error(
@@ -510,30 +523,41 @@ def patch_research_source(
         fields["status"] = _choice(fields["status"], SOURCE_STATUSES, "status")
     if "visibility" in fields:
         fields["visibility"] = _choice(fields["visibility"], SOURCE_VISIBILITIES, "visibility")
-    if "url" in fields and fields["url"].strip() and fields["url"].strip() != source.url:
-        others = type(inbox)(sources=[item for item in inbox.sources if item.id != source.id])
-        duplicate = find_duplicate_source(others, fields["url"])
-        if duplicate is not None:
-            return _source_error(
-                409,
-                "duplicate_research_source",
-                f"Source URL already in the inbox: {duplicate['source_id']}",
-                source,
-                duplicate_source_id=duplicate["source_id"],
-            )
     if not fields:
         response.headers["ETag"] = _source_etag(source)
         return ResearchSourceMutationResponse(ok=True, source=_source_model(source))
+
+    def apply(latest):
+        current = latest.by_id().get(source_id)
+        if current is None:
+            raise ApiError(404, "research_source_not_found", f"Unknown research source: {source_id}")
+        if "url" in fields and fields["url"].strip() and fields["url"].strip() != current.url:
+            others = type(latest)(sources=[item for item in latest.sources if item.id != source_id])
+            duplicate = find_duplicate_source(others, fields["url"])
+            if duplicate is not None:
+                return current, duplicate
+        return update_research_source(latest, source_id, **fields), None
+
     try:
-        update_research_source(inbox, source_id, **fields)
+        saved, duplicate = mutate_research_sources(
+            pdir,
+            apply,
+            expected_snapshot=snapshot,
+        )
     except ValueError as exc:
         raise ApiError(422, "invalid_research_source", str(exc)) from exc
-    try:
-        save_research_sources(pdir, inbox, expected_snapshot=snapshot)
     except file_state.FileConflictError:
         current = load_research_sources(pdir).by_id().get(source_id)
         return _source_error(
             412, "etag_mismatch", "research/sources.yaml changed while saving; reload before retrying.", current
+        )
+    if duplicate is not None:
+        return _source_error(
+            409,
+            "duplicate_research_source",
+            f"Source URL already in the inbox: {duplicate['source_id']}",
+            saved,
+            duplicate_source_id=duplicate["source_id"],
         )
     _record_agent_writeback(
         user,
@@ -544,7 +568,6 @@ def patch_research_source(
         refs={"research_sources": [source_id]},
         changed_paths=[path],
     )
-    saved = load_research_sources(pdir).by_id().get(source_id) or source
     response.headers["ETag"] = _source_etag(saved)
     return ResearchSourceMutationResponse(ok=True, source=_source_model(saved))
 
@@ -667,11 +690,28 @@ def import_manual_connector(name: str, body: ResearchManualImportRequest) -> Res
     return _import_model(result)
 
 
-def _start_connector_job(pdir, kind: str, job_input: dict[str, Any]) -> JobCreateResponse:
+def _start_connector_job(
+    pdir,
+    kind: str,
+    job_input: dict[str, Any],
+    request: Request,
+    user: CurrentUser,
+) -> JobCreateResponse:
+    from nblane.web_api import agent_guard
+
+    reservation = agent_guard.job_reservation(request, kind)
     try:
-        snapshot = jobs.create_job(pdir.name, kind, job_input, profile_scope=pdir)
+        snapshot = jobs.create_job(
+            pdir.name,
+            kind,
+            job_input,
+            profile_scope=pdir,
+            agent_write=reservation,
+            actor=user.id,
+        )
     except jobs.JobInputError as exc:
         raise ApiError(422, exc.code, exc.message) from exc
+    agent_guard.consume_job_reservation(request, reservation)
     return JobCreateResponse(job_id=snapshot["job_id"], job=JobModel(**snapshot))
 
 
@@ -682,11 +722,18 @@ def _start_connector_job(pdir, kind: str, job_input: dict[str, Any]) -> JobCreat
     responses=CONNECTOR_JOB_RESPONSES,
     dependencies=PROFILE_DEPENDENCY,
 )
-def preview_research_connector(name: str, connector_id: str) -> JobCreateResponse:
+def preview_research_connector(
+    name: str,
+    connector_id: str,
+    request: Request,
+    user: CurrentUser = Depends(require_profile_access),
+) -> JobCreateResponse:
     """Start a dry-run discovery job; result is a ResearchConnectorPreviewModel."""
     pdir = _resolve_profile(name)
     _require_connector(pdir, connector_id)
-    return _start_connector_job(pdir, KIND_CONNECTOR_PREVIEW, {"connector_id": connector_id})
+    return _start_connector_job(
+        pdir, KIND_CONNECTOR_PREVIEW, {"connector_id": connector_id}, request, user
+    )
 
 
 @router.post(
@@ -697,13 +744,13 @@ def preview_research_connector(name: str, connector_id: str) -> JobCreateRespons
     dependencies=PROFILE_DEPENDENCY,
 )
 def import_research_connector(
-    name: str, connector_id: str, body: ResearchConnectorImportRequest
+    name: str,
+    connector_id: str,
+    body: ResearchConnectorImportRequest,
+    request: Request,
+    user: CurrentUser = Depends(require_profile_access),
 ) -> JobCreateResponse:
-    """Start an import job; result is a ResearchConnectorImportResultModel.
-
-    Selected fingerprints are re-discovered and imported (duplicates
-    skipped); an empty selection runs the whole connector.
-    """
+    """Discover once, then import selected candidates in a short commit segment."""
     pdir = _resolve_profile(name)
     _require_connector(pdir, connector_id)
     target = _validate_target(pdir, body.target.model_dump())
@@ -711,6 +758,8 @@ def import_research_connector(
         pdir,
         KIND_CONNECTOR_IMPORT,
         {"connector_id": connector_id, "fingerprints": list(body.fingerprints), "target": target},
+        request,
+        user,
     )
 
 
@@ -744,34 +793,147 @@ def _connector_failure(exc: Exception) -> jobs.JobFailedError:
     )
 
 
-def _run_connector_preview(profile: str, job_input: dict[str, Any], report) -> Any:
+def _run_connector_preview(
+    profile: str,
+    job_input: dict[str, Any],
+    report,
+    ctx: jobs.JobExecutionContext,
+) -> Any:
     from nblane.core import profile_io
 
     report(phase="discovering", message="正在向外部来源查询候选。")
+    ctx.checkpoint()
     try:
         preview = discover_connector_items(profile_io.profile_dir(profile), job_input["connector_id"])
     except Exception as exc:  # noqa: BLE001 - adapters raise network errors of any type
         raise _connector_failure(exc) from exc
+    ctx.checkpoint()
     return _preview_model(preview).model_dump()
 
 
-def _run_connector_import(profile: str, job_input: dict[str, Any], report) -> Any:
+def _connector_item(raw: dict[str, Any]) -> ConnectorItem:
+    return ConnectorItem(
+        provider=str(raw.get("provider") or ""),
+        title=str(raw.get("title") or ""),
+        url=str(raw.get("url") or ""),
+        kind=str(raw.get("kind") or "web"),
+        external_id=str(raw.get("external_id") or ""),
+        authors=[str(item) for item in raw.get("authors") or []],
+        published=str(raw.get("published") or ""),
+        summary=str(raw.get("summary") or ""),
+        tags=[str(item) for item in raw.get("tags") or []],
+        metadata=dict(raw.get("metadata") or {}),
+    )
+
+
+def _commit_connector_import(
+    pdir,
+    connector_id: str,
+    preview: dict[str, Any],
+    fingerprints: list[str],
+    target: dict[str, str],
+) -> ConnectorSyncResult:
+    candidates = [row for row in preview.get("candidates") or [] if isinstance(row, dict)]
+    items = [_connector_item(dict(row.get("item") or {})) for row in candidates]
+    selected = set(fingerprints) if fingerprints else {
+        str(row.get("fingerprint") or "") for row in candidates
+    }
+    result = ConnectorSyncResult(
+        profile=pdir.name,
+        connector_id=connector_id,
+        provider=str(preview.get("provider") or ""),
+        discovered=int(preview.get("discovered") or len(items)),
+        items=[item.to_dict() for item in items],
+        warnings=[str(item) for item in preview.get("warnings") or []],
+    )
+    book = load_connectors(pdir)
+    connector = next(
+        (row for row in book.get("connectors") or [] if str(row.get("id") or "") == connector_id),
+        {},
+    )
+    privacy = str(connector.get("privacy_default") or "private")
+    target_node = str(target.get("node_id") or "")
+    target_kind = str(target.get("kind") or "") or ("collection" if target_node else "source_inbox")
+
+    def import_latest(inbox):
+        lookup = _source_fingerprint_lookup(inbox)
+        for item in items:
+            fingerprint = item.fingerprint()
+            if fingerprint not in selected:
+                continue
+            canonical = _canonical_url(item.url)
+            external_key = f"{item.provider}|{item.external_id}" if item.provider and item.external_id else ""
+            duplicate = lookup.get(fingerprint) or (lookup.get(canonical) if canonical else None) or (lookup.get(external_key) if external_key else None)
+            if duplicate is not None:
+                result.skipped += 1
+                continue
+            kwargs = item.to_source_kwargs(privacy_default=privacy)
+            if target_node:
+                kwargs["library_node_refs"] = [target_node]
+            metadata = dict(kwargs.get("metadata") or {})
+            metadata["connector_id"] = connector_id
+            metadata["import_target_kind"] = target_kind
+            if target_kind == "metadata_only":
+                metadata["metadata_only"] = True
+            kwargs["metadata"] = metadata
+            source = add_research_source(inbox, **kwargs)
+            result.imported += 1
+            result.imported_source_ids.append(source.id)
+            lookup[fingerprint] = {"source_id": source.id, "reason": "same_fingerprint"}
+            if canonical:
+                lookup[canonical] = {"source_id": source.id, "reason": "same_url"}
+        return result
+
+    mutate_research_sources(pdir, import_latest)
+    path = pdir / RESEARCH_DIRNAME / "connectors.yaml"
+    with locked_profile_write(path.parent, path.name):
+        latest = load_connectors(pdir)
+        rows = list(latest.get("connectors") or [])
+        row = next((item for item in rows if str(item.get("id") or "") == connector_id), None)
+        if row is not None:
+            row["status"] = "ok"
+            row["last_run"] = _now()
+            row["last_result"] = {
+                "discovered": result.discovered,
+                "imported": result.imported,
+                "skipped": result.skipped,
+                "warnings": list(result.warnings),
+                **({"selected": len(selected)} if fingerprints else {}),
+            }
+            latest["connectors"] = rows
+            save_connectors(pdir, latest)
+    return result
+
+
+def _run_connector_import(
+    profile: str,
+    job_input: dict[str, Any],
+    report,
+    ctx: jobs.JobExecutionContext,
+) -> Any:
     from nblane.core import profile_io
 
     pdir = profile_io.profile_dir(profile)
     connector_id = job_input["connector_id"]
-    report(phase="importing", message="正在导入选中的候选。")
+    report(phase="discovering", message="正在向外部来源查询候选。")
+    ctx.checkpoint()
     try:
-        if job_input["fingerprints"]:
-            result = import_connector_items(
-                pdir, connector_id, job_input["fingerprints"], target=job_input["target"]
-            )
-        else:
-            result = sync_connector(pdir, connector_id, dry_run=False)
-    except Exception as exc:  # noqa: BLE001
+        preview = discover_connector_items(pdir, connector_id)
+    except Exception as exc:  # noqa: BLE001 - adapters raise network errors of any type
         raise _connector_failure(exc) from exc
-    if result.error:
-        raise jobs.JobFailedError("connector_unreachable", f"连接器请求失败：{result.error}")
+    ctx.checkpoint()
+    report(phase="importing", message="正在导入选中的候选。")
+    result = ctx.apply(
+        lambda: _commit_connector_import(
+            pdir,
+            connector_id,
+            preview,
+            job_input["fingerprints"],
+            job_input["target"],
+        ),
+        summary=f"连接器 {connector_id} 导入",
+    )
+    ctx.checkpoint()
     return _import_model(result).model_dump()
 
 

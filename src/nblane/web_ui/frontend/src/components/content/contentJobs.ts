@@ -4,9 +4,10 @@
 // followJob: a dropped stream (phone backgrounded, flaky network) is not a
 // failed job — the server keeps running it, so we poll GET .../jobs/{id} and
 // re-subscribe with backoff instead of reporting 「连接中断」 and losing the
-// result. cancel() also asks the server to end the job (DELETE) so it is not
-// applied or kept billing; detach() only stops listening, for jobs whose
-// result the server persists and a later visit can re-attach to.
+// result. cancel() requests a stop (DELETE), waits for the server's actual
+// terminal state, and forwards stopping / retained-partial-write messages;
+// detach() only stops listening, for jobs whose result the server persists
+// and a later visit can re-attach to.
 //
 // runContentJob: POST .../jobs, then followJob.
 
@@ -26,7 +27,7 @@ export type ContentJobKind =
 
 export interface ContentJobHandle<T> {
   result: Promise<T>;
-  cancel: () => void;
+  cancel: () => void | Promise<void>;
 }
 
 export interface FollowedJob<T> extends ContentJobHandle<T> {
@@ -60,8 +61,16 @@ const DISCONNECTED_MESSAGE = '与服务器的连接中断，任务可能仍在�
 
 const jobsBase = (profile: string) => `/profiles/${encodeURIComponent(profile)}/jobs`;
 
-function deleteJob(profile: string, jobId: string): void {
-  void apiDelete(`${jobsBase(profile)}/${encodeURIComponent(jobId)}`).catch(() => undefined);
+type JobLifecycleModel = JobModel & {
+  cancel_requested?: boolean;
+  write_committed?: boolean;
+  commit_summary?: string;
+};
+
+function lifecycleMessage(job: JobLifecycleModel, fallback: string): string {
+  const message = job.message || fallback;
+  if (!job.write_committed || message.includes('部分写入')) return message;
+  return `${message} 已有部分写入：${job.commit_summary || '已完成的提交段'}。`;
 }
 
 /** Follow an existing job until it is done or failed. */
@@ -71,6 +80,8 @@ export function followJob<T>(profile: string, jobId: string, handlers: FollowJob
   let timer: ReturnType<typeof setTimeout> | null = null;
   let settled = false;
   let stopped = false;
+  let subscribe = () => undefined;
+  let settleFromStatus = (_status: JobStatusResponse) => undefined;
 
   const stop = () => {
     stopped = true;
@@ -86,10 +97,29 @@ export function followJob<T>(profile: string, jobId: string, handlers: FollowJob
       unsubscribe?.();
       fn();
     };
-    const fail = (code: string, message: string) => finish(() => reject(new ContentJobError(code, message)));
+    const fail = (code: string, message: string) => {
+      if (code === 'job_cancelled' || code === 'job_timeout' || message.includes('部分写入')) {
+        handlers.onProgress?.(message, 'failed');
+      }
+      finish(() => reject(new ContentJobError(code, message)));
+    };
 
     let attempt = 0;
     let lostAt = 0;
+
+    settleFromStatus = (status: JobStatusResponse) => {
+      if (settled || stopped) return;
+      const job = status.job as JobLifecycleModel;
+      handlers.onSnapshot?.(job);
+      if (job.status === 'done') {
+        finish(() => resolve((status.result ?? {}) as T));
+      } else if (job.status === 'failed') {
+        const error = job.error;
+        fail(error?.code ?? 'job_failed', error?.message ?? 'AI 任务失败，请重试。');
+      } else if (job.cancel_requested || job.write_committed) {
+        handlers.onProgress?.(lifecycleMessage(job, '正在停止…'), job.phase || 'cancelling');
+      }
+    };
 
     const reconnect = () => {
       if (settled || stopped) return;
@@ -102,19 +132,11 @@ export function followJob<T>(profile: string, jobId: string, handlers: FollowJob
       attempt += 1;
       timer = setTimeout(() => {
         timer = null;
-        // Ask the server before re-subscribing: the job may have finished
-        // while we were offline, or may be gone (process restart / GC).
         apiGet<JobStatusResponse>(`${base}/${encodeURIComponent(jobId)}`)
           .then((status) => {
             if (settled || stopped) return;
-            if (status.job.status === 'done') {
-              finish(() => resolve((status.result ?? {}) as T));
-            } else if (status.job.status === 'failed') {
-              const error = status.job.error;
-              fail(error?.code ?? 'job_failed', error?.message ?? 'AI 任务失败，请重试。');
-            } else {
-              subscribe();
-            }
+            settleFromStatus(status);
+            if (!settled && !stopped) subscribe();
           })
           .catch((error: unknown) => {
             if (error instanceof ApiError && error.status === 404) {
@@ -128,7 +150,8 @@ export function followJob<T>(profile: string, jobId: string, handlers: FollowJob
       }, delay);
     };
 
-    const subscribe = () => {
+    subscribe = () => {
+      if (settled || stopped) return;
       unsubscribe?.();
       unsubscribe = streamJob(profile, jobId, {
         onJob: (frame) => {
@@ -147,7 +170,6 @@ export function followJob<T>(profile: string, jobId: string, handlers: FollowJob
           if (error) {
             fail(error.code ?? 'job_failed', error.message ?? 'AI 任务失败，请重试。');
           } else {
-            // Transport error without a server frame: re-attach, don't fail.
             reconnect();
           }
         },
@@ -157,17 +179,42 @@ export function followJob<T>(profile: string, jobId: string, handlers: FollowJob
     subscribe();
   });
 
+  let cancelPromise: Promise<void> | null = null;
+  const cancel = (): Promise<void> => {
+    if (cancelPromise) return cancelPromise;
+    if (settled || stopped) return Promise.resolve();
+    cancelPromise = (async () => {
+      try {
+        const status = await apiDelete<JobStatusResponse>(`${base}/${encodeURIComponent(jobId)}`);
+        settleFromStatus(status);
+        if (!settled && !stopped) subscribe();
+      } catch (error: unknown) {
+        if (error instanceof ApiError && error.status === 404) {
+          settleFromStatus({
+            ok: false,
+            job: {
+              job_id: jobId,
+              status: 'failed',
+              error: { code: 'job_not_found', message: '任务已不存在（服务可能重启过），请重试。' },
+            },
+          } as JobStatusResponse);
+        } else {
+          handlers.onProgress?.('取消请求失败，任务可能仍在运行；继续等待服务端状态。', 'cancelling');
+          if (!settled && !stopped) subscribe();
+        }
+      }
+      await result.then(() => undefined, () => undefined);
+    })();
+    return cancelPromise;
+  };
+
   return {
     result,
     detach: () => {
       if (settled || stopped) return;
       stop();
     },
-    cancel: () => {
-      if (settled || stopped) return;
-      stop();
-      deleteJob(profile, jobId);
-    },
+    cancel,
   };
 }
 
@@ -177,28 +224,24 @@ export function runContentJob<T>(
   input: Record<string, unknown>,
   onProgress?: (message: string) => void,
 ): ContentJobHandle<T> {
-  let followed: FollowedJob<T> | null = null;
   let cancelled = false;
-
-  const result = apiPost<JobCreateResponse>(jobsBase(profile), { kind, input }).then((created) => {
-    if (cancelled) {
-      deleteJob(profile, created.job_id);
-      return new Promise<T>(() => undefined);
-    }
-    followed = followJob<T>(profile, created.job_id, {
+  const ready = apiPost<JobCreateResponse>(jobsBase(profile), { kind, input }).then((created) =>
+    followJob<T>(profile, created.job_id, {
       onProgress: (message) => {
         if (message) onProgress?.(message);
       },
-    });
+    }),
+  );
+  const result = ready.then(async (followed) => {
+    if (cancelled) await followed.cancel();
     return followed.result;
   });
 
   return {
     result,
     cancel: () => {
-      if (cancelled) return;
       cancelled = true;
-      followed?.cancel();
+      return ready.then((followed) => followed.cancel()).then(() => undefined, () => undefined);
     },
   };
 }

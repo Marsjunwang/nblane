@@ -163,22 +163,8 @@ def status_by_node_id(tree_data: dict | None) -> dict[str, str]:
 
 def parse_kanban(name: str | Path) -> dict[str, list[KanbanTask]]:
     """Parse kanban.md into section -> task list."""
-    old = kanban_io.profile_dir
-    if isinstance(name, Path):
-        profile_path = name
-        profile_name = profile_path.name
-
-        def _path_profile_dir(_name: str) -> Path:
-            return profile_path
-
-        kanban_io.profile_dir = _path_profile_dir
-    else:
-        profile_name = validate_profile_name(name)
-        kanban_io.profile_dir = profile_dir
-    try:
-        return kanban_io.parse_kanban(profile_name)
-    finally:
-        kanban_io.profile_dir = old
+    profile_path = name if isinstance(name, Path) else profile_dir(name)
+    return kanban_io.parse_kanban(profile_path)
 
 
 def render_kanban(
@@ -190,51 +176,39 @@ def render_kanban(
 
 
 def save_kanban(
-    name: str,
+    name: str | Path,
     sections: dict[str, list[KanbanTask]],
     *,
     expected_snapshot: "FileSnapshot | None" = None,
 ) -> None:
     """Write kanban.md back from structured sections."""
-    old = kanban_io.profile_dir
-    kanban_io.profile_dir = profile_dir
-    try:
-        return kanban_io.save_kanban(
-            name, sections, expected_snapshot=expected_snapshot
-        )
-    finally:
-        kanban_io.profile_dir = old
+    profile_path = name if isinstance(name, Path) else profile_dir(name)
+    return kanban_io.save_kanban(
+        profile_path, sections, expected_snapshot=expected_snapshot
+    )
 
 
 def append_kanban_archive(
-    name: str,
+    name: str | Path,
     tasks: list[KanbanTask],
 ) -> None:
     """Append Done tasks to kanban-archive.md under today's heading."""
-    old = kanban_io.profile_dir
-    kanban_io.profile_dir = profile_dir
-    try:
-        return kanban_io.append_kanban_archive(name, tasks)
-    finally:
-        kanban_io.profile_dir = old
+    profile_path = name if isinstance(name, Path) else profile_dir(name)
+    return kanban_io.append_kanban_archive(profile_path, tasks)
 
 
 def archive_kanban_done_tasks(
-    name: str,
+    name: str | Path,
     sections: dict[str, list[KanbanTask]],
     done_indexes: list[int],
 ) -> dict[str, list[KanbanTask]]:
     """Archive selected Done tasks and remove them from kanban.md."""
-    old = kanban_io.profile_dir
-    kanban_io.profile_dir = profile_dir
-    try:
-        return kanban_io.archive_kanban_done_tasks(
-            name,
-            sections,
-            done_indexes,
-        )
-    finally:
-        kanban_io.profile_dir = old
+    profile_path = name if isinstance(name, Path) else profile_dir(name)
+    return kanban_io.archive_kanban_done_tasks(
+        profile_path,
+        sections,
+        done_indexes,
+    )
 
 
 __all__ = [

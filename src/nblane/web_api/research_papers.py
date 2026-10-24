@@ -17,10 +17,11 @@ Endpoints:
   start (or re-attach to) a ``paper-quick-analysis`` / ``paper-deep-read``
   job; progress streams over the shared job SSE endpoint.
 
-Job kinds run the exact Reader actions (``analyze_paper`` /
-``codex_deep_read`` via ``core.reader_actions.handle_reader_action``), which
-route through the AI gateway — no provider SDK is touched here. Before the
-call the runner checks that the configured backend is usable (LLM key for
+Job kinds compose the same Reader prepare/model/normalize primitives through
+the AI gateway — no provider SDK is touched here. Derived-artifact preparation
+and analysis persistence are separate worker commit segments; long model calls
+stay outside them and check cooperative cancellation before and after. Before
+the call the runner checks that the configured backend is usable (LLM key for
 quick analysis, Codex CLI for deep study) so a missing backend surfaces as a
 clear, retryable error instead of a silent deterministic fallback.
 
@@ -33,20 +34,23 @@ from __future__ import annotations
 import ast
 import threading
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends
 from fastapi import APIRouter
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from nblane.core import codex_adapter, profile_io
-from nblane.core.file_write import atomic_write_text
+from nblane.core import agent_journal, agent_policy, codex_adapter, profile_io
 from nblane.core import llm as llm_client
+from nblane.core import reader_actions as reader_action_core
+from nblane.core import reader_ops
 from nblane.core.reader_actions import (
     ANALYSIS_FALLBACK_KEPT_WARNING,
-    ReaderActionContext,
+    ReaderActionResult,
     handle_reader_action,
 )
 from nblane.core.research_papers import (
@@ -58,11 +62,18 @@ from nblane.core.research_papers import (
     load_paper_translations,
     paper_pdf_asset_path,
     reader_translation_structure_units,
+    save_paper_analysis,
 )
 from nblane.core.research_papers._paths import _yaml_path
-from nblane.core.research_papers._constants import PAPER_ANALYSIS_DIRNAME
+from nblane.core.research_papers._constants import (
+    PAPER_ANALYSIS_DIRNAME,
+    PAPER_PAGES_DIRNAME,
+    PAPER_SEGMENTS_DIRNAME,
+    PAPER_STRUCTURE_DIRNAME,
+    PAPER_TRANSLATIONS_DIRNAME,
+)
 from nblane.core.research_sources import ResearchSource, load_research_sources
-from nblane.core.research_workspace import load_chunks
+from nblane.core.research_workspace import load_chunks, source_slug
 from nblane.core.web_preferences import AI_ACTION_DEFAULT_BACKENDS, load_web_preferences
 from nblane.web_api import jobs
 from nblane.web_api.auth import CurrentUser
@@ -963,6 +974,13 @@ def _live_job(job_id: str) -> dict[str, Any] | None:
     return snapshot
 
 
+def find_active_job(pdir: Path, source_id: str, kind: str) -> dict[str, Any] | None:
+    """Return a live same-paper job so agent reattach needs no new reservation."""
+    with _ACTIVE_LOCK:
+        job_id = _ACTIVE_JOBS.get((_scope(pdir), source_id, kind))
+    return _live_job(job_id) if job_id else None
+
+
 def _active_jobs(pdir: Path, source_id: str) -> list[PaperJobRefModel]:
     scope = _scope(pdir)
     out: list[PaperJobRefModel] = []
@@ -1085,8 +1103,229 @@ def _validate_paper_job_input(job_input: dict[str, Any]) -> dict[str, Any]:
     return {"source_id": source_id, "user_id": _text(job_input.get("user_id"))[:200]}
 
 
-def _make_runner(kind: str) -> Callable[[str, dict[str, Any], Callable[..., None]], Any]:
-    def run(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
+def _analysis_journal_kinds(pdir: Path, source_id: str) -> tuple[str, ...]:
+    """Cover source metadata, analysis YAML, and every derived reading JSONL."""
+    path = _yaml_path(pdir, PAPER_ANALYSIS_DIRNAME, source_id)
+    relative = path.relative_to(pdir).as_posix()
+    slug = source_slug(source_id)
+    derived = tuple(
+        agent_journal.jsonl_kind(f"research/{dirname}/{slug}.jsonl")
+        for dirname in (
+            PAPER_PAGES_DIRNAME,
+            PAPER_SEGMENTS_DIRNAME,
+            PAPER_STRUCTURE_DIRNAME,
+            PAPER_TRANSLATIONS_DIRNAME,
+        )
+    )
+    return ("research_source", agent_journal.file_kind(relative), *derived)
+
+
+def _prepare_analysis_artifacts(
+    pdir: Path,
+    source_id: str,
+    report: Callable[..., None],
+    execution: jobs.JobExecutionContext,
+    kinds: tuple[str, ...],
+) -> dict[str, Any]:
+    """Run core prepare inside one commit, with cancellation before each write."""
+    report("preparing", "正在准备阅读结构…")
+    try:
+        result = execution.apply(
+            lambda: reader_action_core.ensure_paper_reading_artifacts(
+                pdir,
+                source_id,
+                prefer_grobid=True,
+                target_lang="zh",
+                progress_callback=_progress_bridge(report),
+                cancel_callback=execution.cancel_requested,
+            ),
+            kinds=kinds,
+            summary="准备论文阅读产物",
+        )
+    except reader_ops.ReaderCancelled as exc:
+        execution.checkpoint()
+        raise jobs.JobCancelledError(
+            "job_cancelled", str(exc) or jobs.CANCELLED_MESSAGE
+        ) from exc
+    execution.checkpoint()
+    return result
+
+
+def _run_quick_analysis(
+    profile: str,
+    pdir: Path,
+    source_id: str,
+    report: Callable[..., None],
+    execution: jobs.JobExecutionContext,
+    kinds: tuple[str, ...],
+) -> ReaderActionResult:
+    artifact_summary = _prepare_analysis_artifacts(pdir, source_id, report, execution, kinds)
+    segment_rows = load_paper_segments(pdir, source_id)
+    annotation_rows = load_paper_annotations(pdir, source_id)
+    chunk_rows = load_chunks(pdir, source_id)
+    source = load_research_sources(pdir).by_id().get(source_id)
+    report("scoring", "模型正在生成 TL;DR、要点与评分…")
+    analysis_context = reader_action_core._compact_paper_for_analysis(
+        pdir, source_id, chunk_rows, annotation_rows
+    )
+    execution.checkpoint()
+    ai_result = reader_action_core.generate_paper_review_card(
+        profile,
+        source_id,
+        source=reader_action_core._compact_source_for_deep_read(source, source_id),
+        paper_markdown=analysis_context["paper_markdown"],
+        chunks=analysis_context["chunks"],
+        annotations=analysis_context["annotations"],
+        paper_context=analysis_context["paper_context"],
+        require_review=False,
+    )
+    execution.checkpoint()
+    structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
+    if structured:
+        ai_result.structured = reader_action_core.expand_analysis_refs(
+            structured, analysis_context["aliases"]
+        )
+        structured = ai_result.structured
+    report("normalizing", "正在整理分析结果…")
+    analysis = reader_action_core._normalize_paper_analysis(structured, source_id)
+    kept_previous = bool(structured) and not reader_action_core._should_save_quick_analysis(
+        pdir, source_id, ai_result
+    )
+    artifact_warnings = [str(item) for item in artifact_summary.get("warnings") or []]
+    if kept_previous:
+        analysis = load_paper_analysis(pdir, source_id)
+        structured = {}
+        artifact_warnings.append(ANALYSIS_FALLBACK_KEPT_WARNING)
+    if structured:
+        report("saving", "正在保存结果…")
+        execution.apply(
+            lambda: save_paper_analysis(pdir, source_id, analysis),
+            kinds=kinds,
+            summary="保存论文快速分析",
+        )
+        execution.checkpoint()
+    message = (
+        ANALYSIS_FALLBACK_KEPT_WARNING
+        if kept_previous
+        else "Analysis saved"
+        if structured
+        else str(getattr(ai_result, "error", "") or "Analysis did not return structured output.")
+    )
+    return ReaderActionResult(
+        ok=bool(getattr(ai_result, "ok", True) and structured),
+        warnings=artifact_warnings + list(ai_result.warnings) + list(analysis.get("warnings") or []),
+        message=message,
+    )
+
+
+def _run_deep_read(
+    profile: str,
+    pdir: Path,
+    source_id: str,
+    report: Callable[..., None],
+    execution: jobs.JobExecutionContext,
+    kinds: tuple[str, ...],
+) -> ReaderActionResult:
+    artifact_summary = _prepare_analysis_artifacts(pdir, source_id, report, execution, kinds)
+    report("exporting", "正在导出全文、表格与图片…")
+    paper_md = reader_action_core.build_paper_markdown(pdir, source_id, include_images=True)
+    source = load_research_sources(pdir).by_id().get(source_id)
+    aliases = dict(paper_md.aliases)
+    annotations = []
+    active_annotations = [
+        row for row in load_paper_annotations(pdir, source_id) if str(row.status or "active") == "active"
+    ]
+    for index, row in enumerate(active_annotations[:30], start=1):
+        aliases[f"a{index}"] = str(row.id)
+        annotations.append(
+            {
+                "id": f"a{index}",
+                "kind": row.kind,
+                "page": row.page,
+                "selected_text": str(row.selected_text or "").strip()[:600],
+                "note": str(row.note or "").strip()[:600],
+            }
+        )
+    images = paper_md.image_paths(limit=reader_action_core.DEEP_READ_MAX_IMAGES)
+    payload = {
+        "source_id": source_id,
+        "scope": "paper",
+        "full_paper": True,
+        "target_lang": "zh",
+    }
+    deep_read_payload = {
+        "source": reader_action_core._compact_source_for_deep_read(source, source_id),
+        "paper_markdown": paper_md.markdown,
+        "attached_images": [path.name for path in images],
+        "annotations": annotations,
+        "projects": reader_action_core._deep_read_project_context(pdir),
+        "library_papers": reader_action_core._deep_read_library_context(pdir, source_id),
+        "question": "",
+        "reading_goal": "",
+        "paper_context": {
+            "mode": "full_text",
+            "source_segments": int(paper_md.stats.get("segments") or 0),
+            "anchored_segments": len(paper_md.aliases),
+            "images": len(images),
+        },
+        "codex_images": [str(path) for path in images],
+        "codex_workdir": str(paper_md.directory) if paper_md.directory else "",
+    }
+    reader_action_core._copy_deep_read_runtime_options(payload, deep_read_payload)
+    if not reader_action_core._payload_float(deep_read_payload, "codex_timeout_seconds"):
+        deep_read_payload["codex_timeout_seconds"] = reader_action_core.DEEP_READ_CODEX_TIMEOUT_SECONDS
+    execution.checkpoint()
+    report("reading", "Codex 正在通读全文…")
+    ai_result = reader_action_core.deep_read_paper_codex(
+        profile,
+        source_id,
+        payload=deep_read_payload,
+        require_review=True,
+        cancel_callback=execution.cancel_requested,
+    )
+    execution.checkpoint()
+    report("structuring", "正在整理发现与阅读计划…")
+    structured = ai_result.structured if isinstance(ai_result.structured, dict) else {}
+    usable = bool(ai_result.ok and structured) and str(getattr(ai_result, "backend", "") or "") != "rule_fallback"
+    if usable:
+        structured = reader_action_core.expand_analysis_refs(structured, aliases)
+        structured["schema_version"] = reader_action_core.DEEP_READ_SCHEMA_VERSION
+        structured["paper_context"] = deep_read_payload["paper_context"]
+        report("saving", "正在保存结果…")
+
+        def save() -> None:
+            analysis = load_paper_analysis(pdir, source_id)
+            analysis["codex_deep_read"] = structured
+            analysis["codex_deep_read_updated"] = datetime.now().astimezone().isoformat(
+                timespec="seconds"
+            )
+            save_paper_analysis(pdir, source_id, analysis)
+
+        execution.apply(save, kinds=kinds, summary="保存论文深度研读")
+        execution.checkpoint()
+    message = (
+        "Deep read candidate ready."
+        if usable
+        else str(
+            getattr(ai_result, "error", "")
+            or "; ".join(str(item) for item in getattr(ai_result, "warnings", []) or [])
+            or "Deep read did not return a usable report."
+        )
+    )
+    return ReaderActionResult(
+        ok=usable,
+        warnings=[str(item) for item in artifact_summary.get("warnings") or []] + list(ai_result.warnings),
+        message=message,
+    )
+
+
+def _make_runner(kind: str) -> Callable[..., Any]:
+    def run(
+        profile: str,
+        job_input: dict[str, Any],
+        report: Callable[..., None],
+        execution: jobs.JobExecutionContext,
+    ) -> Any:
         source_id = job_input["source_id"]
         pdir = profile_io.profile_dir(profile)
         if load_research_sources(pdir).by_id().get(source_id) is None:
@@ -1099,23 +1338,11 @@ def _make_runner(kind: str) -> Callable[[str, dict[str, Any], Callable[..., None
         problem = backend_problem(profile, kind)
         if problem is not None:
             raise jobs.JobFailedError(*problem)
-        # Snapshot the saved analysis: the Reader action persists even a
-        # deterministic fallback, which must not replace a real result.
-        analysis_path = _yaml_path(pdir, PAPER_ANALYSIS_DIRNAME, source_id)
-        previous_text = analysis_path.read_text(encoding="utf-8") if analysis_path.exists() else ""
-        had_previous = _has_result(load_paper_analysis(pdir, source_id), kind)
-        ctx = ReaderActionContext(
-            profile_name=profile,
-            profile_path=pdir,
-            user_id=job_input.get("user_id") or "web",
-            source_id=source_id,
-        )
-        result = handle_reader_action(
-            ctx,
-            _READER_ACTIONS[kind],
-            {"source_id": source_id, "scope": "paper", "full_paper": True, "target_lang": "zh"},
-            progress_callback=_progress_bridge(report),
-        )
+        kinds = _analysis_journal_kinds(pdir, source_id)
+        if kind == KIND_PAPER_DEEP_READ:
+            result = _run_deep_read(profile, pdir, source_id, report, execution, kinds)
+        else:
+            result = _run_quick_analysis(profile, pdir, source_id, report, execution, kinds)
         fallback_warning = next(
             (str(item) for item in result.warnings if _FALLBACK_MARKER in str(item)),
             "",
@@ -1130,12 +1357,6 @@ def _make_runner(kind: str) -> Callable[[str, dict[str, Any], Callable[..., None
             raise jobs.JobFailedError(
                 "paper_analysis_failed",
                 result.message or "AI 没有返回可用的结构化结果，请重试。",
-            )
-        if fallback_warning and had_previous and previous_text:
-            atomic_write_text(analysis_path, previous_text)
-            raise jobs.JobFailedError(
-                "paper_analysis_fallback",
-                "模型没有返回可靠结果（" + fallback_warning[:160] + "），已保留原有结果。详情见右上角「AI 异常」。",
             )
         analysis = load_paper_analysis(pdir, source_id)
         updated_key = "codex_deep_read_updated" if kind == KIND_PAPER_DEEP_READ else "updated"
@@ -1164,8 +1385,8 @@ _register(
         validate=_validate_paper_job_input,
         run=_make_runner(KIND_PAPER_QUICK_ANALYSIS),
         queued_message="已排队：快速分析。",
-        # A 16k-token card at ~30 tok/s takes ~9 minutes; stay below the
-        # 20-minute job prune like deep read.
+        # A 16k-token card at ~30 tok/s takes ~9 minutes; include preparation
+        # in a 19-minute cooperative deadline.
         timeout_seconds=1140,
         timeout_message="快速分析超时（19 分钟），请重试；可在「设置 → AI 服务」调低分析输出上限。",
     )
@@ -1176,10 +1397,8 @@ _register(
         validate=_validate_paper_job_input,
         run=_make_runner(KIND_PAPER_DEEP_READ),
         queued_message="已排队：深度研读。",
-        # The job registry prunes records after 20 minutes; stay below it so
-        # the stream always ends with a terminal frame.
         timeout_seconds=1140,
-        timeout_message="深度研读超时（19 分钟），请重试；已完成的部分不会写入。",
+        timeout_message="深度研读超时（19 分钟）；已保存的部分会保留并明确标注。",
     )
 )
 
@@ -1220,14 +1439,12 @@ def start_paper_analysis_job(
     name: str,
     source_id: str,
     body: PaperJobStartRequest,
+    request: Request,
     user: CurrentUser = Depends(require_profile_access),
 ) -> JSONResponse:
-    """Start quick analysis / deep study for one paper (202 + job handle).
+    """Start or reattach to one paper's authorized analysis worker."""
+    from nblane.web_api import agent_guard
 
-    A job of the same kind already running for this paper is returned
-    instead of starting a second run. Subscribe to
-    ``GET .../jobs/{job_id}/stream`` for progress.
-    """
     kind = _text(body.kind)
     if kind not in PAPER_JOB_KINDS:
         raise ApiError(422, "invalid_paper_job", f"kind must be one of: {', '.join(PAPER_JOB_KINDS)}")
@@ -1237,15 +1454,23 @@ def start_paper_analysis_job(
         existing = _ACTIVE_JOBS.get(key)
         snapshot = _live_job(existing) if existing else None
         if snapshot is None:
+            reservation = agent_guard.job_reservation(request, kind)
+            if reservation is None and agent_policy.is_agent(user):
+                reservation = agent_guard.reserve_job_for_request(
+                    request, pdir, kind, {"kind": kind}, actor=user.id
+                )
             try:
                 snapshot = jobs.create_job(
                     pdir.name,
                     kind,
                     {"source_id": source.id, "user_id": user.id},
                     profile_scope=pdir,
+                    agent_write=reservation,
+                    actor=user.id,
                 )
             except jobs.JobInputError as exc:
                 raise ApiError(422, exc.code, exc.message) from exc
+            agent_guard.consume_job_reservation(request, reservation)
             _ACTIVE_JOBS[key] = snapshot["job_id"]
     payload = JobCreateResponse(job_id=snapshot["job_id"], job=JobModel(**snapshot))
     return JSONResponse(status_code=202, content=payload.model_dump(mode="json"))

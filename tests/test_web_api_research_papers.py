@@ -3,9 +3,9 @@
 Covers ``GET /profiles/{name}/research/papers/{source_id}`` (metadata,
 abstract + cached translation, progress, notes, refs resolved to pages) and
 ``POST .../analysis-jobs`` with the ``paper-quick-analysis`` /
-``paper-deep-read`` kinds. The Reader action entry point and the backend
-readiness probe are always patched — tests never reach an LLM, Codex or the
-network.
+``paper-deep-read`` kinds. Preparation and model calls are patched; analysis
+persistence still runs against the temporary profile. Tests never reach an
+LLM, Codex or the network.
 """
 
 from __future__ import annotations
@@ -15,12 +15,12 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import yaml
 from fastapi.testclient import TestClient
 
-from nblane.core.reader_actions import ReaderActionResult
 from nblane.core.research_papers import (
     PaperAnnotation,
     PaperSegment,
@@ -400,20 +400,61 @@ class TestPaperOverview(_PaperApiBase):
 class TestPaperAnalysisJobs(_PaperApiBase):
     URL = "/api/v1/profiles/alice/research/papers/source:paper:demo/analysis-jobs"
 
-    def _ok_action(self, ctx, action, payload, *, progress_callback=None, cancel_callback=None):
-        self.calls.append((ctx.source_id, action, dict(payload)))
-        if progress_callback is not None:
-            progress_callback({"phase": "scoring", "label": "x", "current": 2, "total": 5})
-        return ReaderActionResult(ok=True, message="Analysis saved")
+    def _ok_review(self, profile, source_id, **kwargs):
+        self.calls.append((source_id, "generate_paper_review_card", kwargs))
+        return SimpleNamespace(
+            ok=True,
+            backend="llm",
+            structured={
+                "tldr": "Fresh analysis",
+                "key_points": [{"text": "A grounded point", "refs": []}],
+            },
+            warnings=[],
+            error="",
+        )
+
+    def _ok_deep_read(self, profile, source_id, **kwargs):
+        self.calls.append((source_id, "deep_read_paper_codex", kwargs))
+        return SimpleNamespace(
+            ok=True,
+            backend="codex",
+            structured={"takeaway": "A complete deep read"},
+            warnings=[],
+            error="",
+        )
+
+    def _deep_markdown(self, *_args, **_kwargs):
+        return SimpleNamespace(
+            markdown="# Demo Paper",
+            aliases={},
+            stats={"segments": 1},
+            directory=None,
+            image_paths=lambda **_kwargs: [],
+        )
 
     def setUp(self) -> None:
         super().setUp()
         self.calls: list[tuple[str, str, dict]] = []
 
     def test_quick_analysis_job_runs_reader_action(self) -> None:
-        _write_profile(self.root, self.asset_root)
-        with patch.object(module, "backend_problem", return_value=None), patch.object(
-            module, "handle_reader_action", side_effect=self._ok_action
+        profile = _write_profile(self.root, self.asset_root)
+        with (
+            patch.object(module, "backend_problem", return_value=None),
+            patch.object(
+                module,
+                "_prepare_analysis_artifacts",
+                return_value={"status": "ready", "warnings": []},
+            ) as prepare,
+            patch.object(
+                module.reader_action_core,
+                "generate_paper_review_card",
+                side_effect=self._ok_review,
+            ),
+            patch.object(
+                module,
+                "save_paper_analysis",
+                wraps=module.save_paper_analysis,
+            ) as save,
         ):
             response = self.client.post(self.URL, json={"kind": "paper-quick-analysis"})
             self.assertEqual(response.status_code, 202, response.text)
@@ -424,24 +465,55 @@ class TestPaperAnalysisJobs(_PaperApiBase):
         self.assertEqual(final["job"]["kind"], "paper-quick-analysis")
         self.assertEqual(final["result"]["source_id"], SOURCE_ID)
         self.assertEqual(self.calls[0][0], SOURCE_ID)
-        self.assertEqual(self.calls[0][1], "analyze_paper")
-        self.assertTrue(self.calls[0][2]["full_paper"])
+        self.assertEqual(self.calls[0][1], "generate_paper_review_card")
+        self.assertEqual(self.calls[0][2]["paper_context"]["mode"], "full_text")
+        prepare.assert_called_once()
+        save.assert_called_once()
+        self.assertEqual(load_paper_analysis(profile, SOURCE_ID)["tldr"], "Fresh analysis")
 
     def test_deep_read_job_maps_to_codex_deep_read(self) -> None:
         _write_profile(self.root, self.asset_root)
-        with patch.object(module, "backend_problem", return_value=None), patch.object(
-            module, "handle_reader_action", side_effect=self._ok_action
+        with (
+            patch.object(module, "backend_problem", return_value=None),
+            patch.object(
+                module,
+                "_prepare_analysis_artifacts",
+                return_value={"status": "ready", "warnings": []},
+            ) as prepare,
+            patch.object(
+                module.reader_action_core,
+                "build_paper_markdown",
+                side_effect=self._deep_markdown,
+            ),
+            patch.object(
+                module.reader_action_core,
+                "deep_read_paper_codex",
+                side_effect=self._ok_deep_read,
+            ),
+            patch.object(
+                module,
+                "save_paper_analysis",
+                wraps=module.save_paper_analysis,
+            ) as save,
         ):
             job_id = self.client.post(self.URL, json={"kind": "paper-deep-read"}).json()["job_id"]
             final = self._wait_final(job_id)
         self.assertEqual(final["job"]["status"], "done")
-        self.assertEqual(self.calls[0][1], "codex_deep_read")
+        self.assertEqual(self.calls[0][1], "deep_read_paper_codex")
+        self.assertEqual(self.calls[0][2]["payload"]["paper_markdown"], "# Demo Paper")
+        prepare.assert_called_once()
+        save.assert_called_once()
 
     def test_missing_backend_fails_with_clear_error(self) -> None:
         _write_profile(self.root, self.asset_root)
         problem = ("codex_unavailable", "深度研读使用 Codex CLI，但当前环境未安装 Codex。")
-        with patch.object(module, "backend_problem", return_value=problem), patch.object(
-            module, "handle_reader_action", side_effect=self._ok_action
+        with (
+            patch.object(module, "backend_problem", return_value=problem),
+            patch.object(
+                module.reader_action_core,
+                "deep_read_paper_codex",
+                side_effect=self._ok_deep_read,
+            ),
         ):
             job_id = self.client.post(self.URL, json={"kind": "paper-deep-read"}).json()["job_id"]
             final = self._wait_final(job_id)
@@ -454,31 +526,69 @@ class TestPaperAnalysisJobs(_PaperApiBase):
     def test_failed_reader_result_becomes_job_error(self) -> None:
         _write_profile(self.root, self.asset_root)
 
-        def failing(ctx, action, payload, **_kwargs):
-            return ReaderActionResult(ok=False, message="Analysis did not return structured output.")
+        def failing(profile, source_id, **kwargs):
+            return SimpleNamespace(
+                ok=False,
+                backend="llm",
+                structured={},
+                warnings=[],
+                error="Analysis did not return structured output.",
+            )
 
-        with patch.object(module, "backend_problem", return_value=None), patch.object(
-            module, "handle_reader_action", side_effect=failing
+        with (
+            patch.object(module, "backend_problem", return_value=None),
+            patch.object(
+                module,
+                "_prepare_analysis_artifacts",
+                return_value={"status": "ready", "warnings": []},
+            ),
+            patch.object(
+                module.reader_action_core,
+                "generate_paper_review_card",
+                side_effect=failing,
+            ),
+            patch.object(
+                module,
+                "save_paper_analysis",
+                wraps=module.save_paper_analysis,
+            ) as save,
         ):
             job_id = self.client.post(self.URL, json={"kind": "paper-quick-analysis"}).json()["job_id"]
             final = self._wait_final(job_id)
         self.assertEqual(final["job"]["status"], "failed")
         self.assertEqual(final["job"]["error"]["code"], "paper_analysis_failed")
+        save.assert_not_called()
 
     def test_fallback_result_does_not_replace_saved_analysis(self) -> None:
         profile = _write_profile(self.root, self.asset_root)
         _seed_reading_files(profile)
 
-        def fallback(ctx, action, payload, **_kwargs):
-            # Mimic the Reader action persisting a deterministic fallback.
-            save_paper_analysis(ctx.profile_path, ctx.source_id, {"tldr": "Introduction", "key_points": []})
-            return ReaderActionResult(
+        def fallback(profile, source_id, **kwargs):
+            return SimpleNamespace(
                 ok=True,
+                backend="rule_fallback",
+                structured={"tldr": "Introduction", "key_points": []},
                 warnings=["direct_llm failed (provider_error: timed out); used rule_fallback."],
+                error="",
             )
 
-        with patch.object(module, "backend_problem", return_value=None), patch.object(
-            module, "handle_reader_action", side_effect=fallback
+        with (
+            patch.object(module, "backend_problem", return_value=None),
+            patch.object(
+                module,
+                "_prepare_analysis_artifacts",
+                return_value={"status": "ready", "warnings": []},
+            ),
+            patch.object(
+                module.reader_action_core,
+                "generate_paper_review_card",
+                side_effect=fallback,
+            ),
+            patch.object(
+                module,
+                "save_paper_analysis",
+                wraps=module.save_paper_analysis,
+            ) as save,
         ):
             job_id = self.client.post(self.URL, json={"kind": "paper-quick-analysis"}).json()["job_id"]
             final = self._wait_final(job_id)
@@ -487,16 +597,41 @@ class TestPaperAnalysisJobs(_PaperApiBase):
         self.assertEqual(final["job"]["status"], "failed")
         self.assertEqual(final["job"]["error"]["code"], "paper_analysis_fallback")
         self.assertEqual(overview["quick_analysis"]["tldr"], "A demo transformer.")
+        save.assert_not_called()
 
     def test_fallback_is_kept_when_nothing_was_saved_before(self) -> None:
         _write_profile(self.root, self.asset_root)
 
-        def fallback(ctx, action, payload, **_kwargs):
-            save_paper_analysis(ctx.profile_path, ctx.source_id, {"tldr": "Skeleton", "warnings": ["AI fallback used deterministic candidate generation."]})
-            return ReaderActionResult(ok=True, warnings=["x used rule_fallback."])
+        def fallback(profile, source_id, **kwargs):
+            return SimpleNamespace(
+                ok=True,
+                backend="rule_fallback",
+                structured={
+                    "tldr": "Skeleton",
+                    "key_points": [],
+                    "warnings": ["AI fallback used deterministic candidate generation."],
+                },
+                warnings=["x used rule_fallback."],
+                error="",
+            )
 
-        with patch.object(module, "backend_problem", return_value=None), patch.object(
-            module, "handle_reader_action", side_effect=fallback
+        with (
+            patch.object(module, "backend_problem", return_value=None),
+            patch.object(
+                module,
+                "_prepare_analysis_artifacts",
+                return_value={"status": "ready", "warnings": []},
+            ),
+            patch.object(
+                module.reader_action_core,
+                "generate_paper_review_card",
+                side_effect=fallback,
+            ),
+            patch.object(
+                module,
+                "save_paper_analysis",
+                wraps=module.save_paper_analysis,
+            ) as save,
         ):
             job_id = self.client.post(self.URL, json={"kind": "paper-quick-analysis"}).json()["job_id"]
             final = self._wait_final(job_id)
@@ -504,26 +639,48 @@ class TestPaperAnalysisJobs(_PaperApiBase):
         self.assertEqual(final["job"]["status"], "done")
         self.assertTrue(overview["quick_analysis"]["fallback"])
         self.assertEqual(overview["quick_analysis"]["status"], "needs_review")
+        save.assert_called_once()
 
     def test_running_job_is_reused_instead_of_duplicated(self) -> None:
         _write_profile(self.root, self.asset_root)
         import threading
 
+        started = threading.Event()
         release = threading.Event()
 
-        def slow(ctx, action, payload, **_kwargs):
-            release.wait(5)
-            return ReaderActionResult(ok=True)
+        def slow(profile, source_id, **kwargs):
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError("test did not release the model call")
+            return self._ok_review(profile, source_id, **kwargs)
 
-        with patch.object(module, "backend_problem", return_value=None), patch.object(
-            module, "handle_reader_action", side_effect=slow
+        with (
+            patch.object(module, "backend_problem", return_value=None),
+            patch.object(
+                module,
+                "_prepare_analysis_artifacts",
+                return_value={"status": "ready", "warnings": []},
+            ),
+            patch.object(
+                module.reader_action_core,
+                "generate_paper_review_card",
+                side_effect=slow,
+            ),
+            patch.object(
+                module,
+                "save_paper_analysis",
+                wraps=module.save_paper_analysis,
+            ),
         ):
             first = self.client.post(self.URL, json={"kind": "paper-quick-analysis"}).json()
-            second = self.client.post(self.URL, json={"kind": "paper-quick-analysis"}).json()
-            overview = self.client.get(
-                "/api/v1/profiles/alice/research/papers/source:paper:demo"
-            ).json()
-            release.set()
+            self.assertTrue(started.wait(5))
+            try:
+                second = self.client.post(self.URL, json={"kind": "paper-quick-analysis"}).json()
+                overview = self.client.get(
+                    "/api/v1/profiles/alice/research/papers/source:paper:demo"
+                ).json()
+            finally:
+                release.set()
             self._wait_final(first["job_id"])
 
         self.assertEqual(first["job_id"], second["job_id"])
@@ -533,8 +690,13 @@ class TestPaperAnalysisJobs(_PaperApiBase):
 
     def test_missing_pdf_fails_job(self) -> None:
         _write_profile(self.root, self.asset_root, with_pdf=False)
-        with patch.object(module, "backend_problem", return_value=None), patch.object(
-            module, "handle_reader_action", side_effect=self._ok_action
+        with (
+            patch.object(module, "backend_problem", return_value=None),
+            patch.object(
+                module.reader_action_core,
+                "generate_paper_review_card",
+                side_effect=self._ok_review,
+            ),
         ):
             job_id = self.client.post(self.URL, json={"kind": "paper-quick-analysis"}).json()["job_id"]
             final = self._wait_final(job_id)

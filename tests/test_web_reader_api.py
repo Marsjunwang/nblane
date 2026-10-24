@@ -1559,7 +1559,7 @@ class TestWebReaderApi(unittest.TestCase):
             profile = self._profile(Path(tmp))
             client = self._client(profile)
 
-            def fake_handle(profile_path, body, *, progress_callback=None):
+            def fake_handle(profile_path, body, *, progress_callback=None, cancel_callback=None, commit=None):
                 if progress_callback is not None:
                     progress_callback(
                         {

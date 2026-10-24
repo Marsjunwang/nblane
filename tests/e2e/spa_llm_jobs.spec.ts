@@ -2,20 +2,20 @@ import { expect, test } from "@playwright/test";
 import type { Page, Response } from "@playwright/test";
 
 /**
- * JD 匹配 (studio-jd-match) + AI 建议引用 (project-suggest-refs) 的
+ * JD 匹配 (career-match) + AI 建议引用 (project-suggest-refs) 的
  * LLM jobs + SSE 迁移 e2e(2026-09-21,沿用已删除的 spa_gap_deep.spec.ts 手法):
  *
  * - Fast path (network stub): `POST /api/v1/profiles/{name}/jobs` 被拦截
  *   返回 202 mock job,SSE stream 端点按帧序列兑现(job → progress 阶段 →
  *   done + result)。页面全链路为真:按钮 → 建 job → EventSource 订阅 →
- *   进度卡(排队中)→ 结果渲染(suggest-refs 额外验证 confirm-not-fill
- *   「合并到表单」交互)。与 spa_home.spec.ts 模拟 sidecar 不可达同手法,
- *   除网络外全链路真实、确定性。
+ *   进行中状态 → 结果渲染(JD 为结构化匹配报告,suggest-refs 额外验证
+ *   confirm-not-fill「合并到表单」交互)。与 spa_home.spec.ts 模拟 sidecar
+ *   不可达同手法,除网络外全链路真实、确定性。
  * - Slow path (real LLM, test.slow): 隔离沙箱 web-api source 仓库 .env
  *   有活 LLM,真实 job 跑到终态。JD 匹配真实分析约 55s(给 150s 超时);
  *   suggest-refs 的 provider 结构化输出校验失败是设计内降级(黄卡,见
  *   体验官手册 §2.8),慢路径只断言「进度卡 → 终态卡」管道畅通,不断言
- *   provider 输出质量。仅当后端报 LLM 未配置时 skip。
+ *   provider 输出质量。仅当确认 LLM 未配置时 skip。
  */
 
 const SPA_BASE_URL = (process.env.NBLANE_E2E_SPA_BASE_URL || "http://127.0.0.1:18504").replace(
@@ -104,102 +104,185 @@ async function stubJobStream(
   });
 }
 
-test.describe("SPA Studio JD 匹配 (studio-jd-match job + SSE)", () => {
-  test("stubbed job: 进度卡(排队中)→ 匹配分析卡", async ({ page }) => {
-    let createBody: { kind?: string; input?: { resume_md?: string; jd_text?: string } } | null =
-      null;
+async function createCareerTarget(page: Page, target: string): Promise<string> {
+  await page.goto(spa("career"));
+  await expect(page.getByTestId("career-workspace")).toBeVisible();
+  await page.getByTestId("career-new-target").click();
+  await page.getByTestId("career-new-target-name").fill(target);
+  const created = await waitPost(page, "/career/drafts", () =>
+    page.getByTestId("career-new-target-confirm").click(),
+  );
+  expect(created.status()).toBe(201);
+  const draft = (await created.json()) as { markdown: string };
+  await expect(page.getByTestId("career-target")).toBeVisible();
+  await expect(page.getByTestId("career-target-name")).toHaveText(target);
+  return draft.markdown;
+}
+
+async function deleteCareerTarget(page: Page, target: string): Promise<void> {
+  await expect(page.getByTestId("career-save-state")).toHaveText(/已保存/, { timeout: 10_000 });
+  await page.getByRole("button", { name: "删除", exact: true }).click();
+  await page.getByTestId("career-delete-confirm").click();
+  await expect(page.getByTestId("career-workspace")).toBeVisible();
+  await expect(page.getByTestId("career-target-row").filter({ hasText: target })).toHaveCount(0);
+}
+
+test.describe("SPA Career JD 匹配 (career-match job + SSE)", () => {
+  test("stubbed job: 匹配按钮(分析中)→ 结构化匹配报告", async ({ page }) => {
+    let createBody: {
+      kind?: string;
+      input?: { resume_md?: string; jd_text?: string; notes?: string; use_evidence?: boolean };
+    } | null = null;
     await stubJobStream(
       page,
-      "studio-jd-match",
+      "career-match",
       JD_JOB_ID,
       [
         ["analyzing", "分析中:汇总档案证据与简历上下文。"],
         ["generating", "生成中:LLM 正在撰写匹配分析。"],
       ],
-      { ok: true, analysis: "## 匹配分析\n\ne2e 匹配分析结论:✅ 符合。" },
+      {
+        method: "llm",
+        score: 88,
+        summary: "e2e 匹配分析结论：符合。",
+        requirements: [
+          {
+            requirement: "机器人算法经验",
+            verdict: "match",
+            basis: "e2e 匹配依据：机械臂项目。",
+            evidence_refs: [],
+          },
+        ],
+        strengthen: ["e2e 建议：补充量化指标。"],
+        gaps: [],
+        keywords: ["ROS2"],
+        de_emphasize: [],
+        interview_questions: [],
+        evidence: [],
+        evidence_used: 0,
+      },
       (body) => {
         createBody = body as typeof createBody;
       },
     );
 
-    await page.goto(spa("studio"));
-    await expect(page.getByTestId("studio-summary")).toBeVisible();
-    await page.getByRole("tab", { name: "JD 匹配" }).click();
-    await page.getByRole("textbox", { name: "简历内容" }).fill("e2e 简历:机械臂开发经验。");
-    await page.getByRole("textbox", { name: /目标 JD/ }).fill("e2e JD:机器人算法工程师。");
-    await page.getByRole("button", { name: "分析 JD 匹配" }).click();
+    const target = `e2e-jd-stub-${Date.now()}`;
+    const resumeMarkdown = await createCareerTarget(page, target);
+    const jdText = "e2e JD：机器人算法工程师，需要 ROS2 与机械臂开发经验。";
+    await page.getByTestId("career-jd").fill(jdText);
+    const matchButton = page.getByTestId("career-match");
+    const createdPromise = page.waitForResponse(
+      (res) => JOBS_CREATE_RE.test(res.url()) && res.request().method() === "POST",
+    );
+    await matchButton.click();
+    const created = await createdPromise;
+    expect(created.status()).toBe(202);
+    expect(((await created.json()) as { job_id: string }).job_id).toBe(JD_JOB_ID);
 
-    // Job created with the jd-match kind; the queued progress card shows.
-    const progress = page.getByTestId("jd-progress");
-    await expect(progress).toBeVisible();
-    await expect(progress.getByText("排队中")).toBeVisible();
-    expect(createBody?.kind).toBe("studio-jd-match");
-    expect(createBody?.input?.resume_md).toContain("机械臂");
-    expect(createBody?.input?.jd_text).toContain("机器人算法工程师");
+    // The current workspace shows the pending job in the match button.
+    await expect(matchButton).toBeDisabled();
+    await expect(matchButton).toContainText("分析中…");
+    expect(createBody?.kind).toBe("career-match");
+    expect(createBody?.input?.resume_md).toBe(resumeMarkdown);
+    expect(createBody?.input?.resume_md?.length).toBeGreaterThan(0);
+    expect(createBody?.input?.jd_text).toBe(jdText);
+    expect(createBody?.input?.notes).toBe("");
+    expect(createBody?.input?.use_evidence).toBe(true);
 
-    // Terminal frame: the analysis card replaces the progress card.
-    const analysis = page.getByTestId("jd-analysis");
-    await expect(analysis).toBeVisible({ timeout: 10_000 });
-    await expect(analysis).toContainText("e2e 匹配分析结论");
-    await expect(progress).toHaveCount(0);
+    // The terminal SSE frame renders the structured report and ends the busy state.
+    const report = page.getByTestId("career-match-report");
+    await expect(report).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("career-match-score")).toHaveText("88");
+    await expect(report).toContainText("e2e 匹配分析结论");
+    await expect(page.getByTestId("career-requirements")).toContainText("e2e 匹配依据：机械臂项目。");
+    await expect(page.getByTestId("career-strengthen")).toContainText("补充量化指标");
+    await expect(matchButton).toBeEnabled();
+    await expect(matchButton).toHaveText("重新匹配");
+    await deleteCareerTarget(page, target);
   });
 
   test("real LLM job runs to done (slow; sandbox live LLM)", async ({ page, request }) => {
     test.slow();
     test.setTimeout(150_000);
 
-    await page.goto(spa("studio"));
-    await expect(page.getByTestId("studio-summary")).toBeVisible();
-    await page.getByRole("tab", { name: "JD 匹配" }).click();
-    await page
-      .getByRole("textbox", { name: "简历内容" })
-      .fill("熟悉 ROS2 与机械臂运动规划,主导过 piper 臂抓取 demo 与 VLA 模型复现。");
-    await page
-      .getByRole("textbox", { name: /目标 JD/ })
-      .fill("机器人算法工程师:熟悉 ROS2、运动规划与机械臂控制,有真实项目落地经验。");
+    // Do not enqueue a known-unconfigured model; all other failures remain test failures.
+    const careerResponse = await request.get(
+      `${SPA_BASE_URL}/api/v1/profiles/${encodeURIComponent(PROFILE)}/career`,
+    );
+    expect(careerResponse.status()).toBe(200);
+    const career = (await careerResponse.json()) as { ai_available: boolean };
+    test.skip(career.ai_available === false, "sandbox LLM not configured");
+
+    const target = `e2e-jd-real-${Date.now()}`;
+    const resumeMarkdown = await createCareerTarget(page, target);
+    const jdText = "机器人算法工程师：熟悉 ROS2、运动规划与机械臂控制，有真实项目落地经验。";
+    await page.getByTestId("career-jd").fill(jdText);
+    const matchButton = page.getByTestId("career-match");
     const createdPromise = page.waitForResponse(
       (res) => JOBS_CREATE_RE.test(res.url()) && res.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "分析 JD 匹配" }).click();
+    await matchButton.click();
     const created = await createdPromise;
     expect(created.status()).toBe(202);
-    const createdBody = (await created.json()) as { job_id: string };
+    const createdBody = (await created.json()) as { job_id: string; job: { kind: string } };
     expect(createdBody.job_id).toMatch(/^job-/);
+    expect(createdBody.job.kind).toBe("career-match");
+    const requestBody = created.request().postDataJSON() as {
+      kind: string;
+      input: { resume_md: string; jd_text: string; use_evidence: boolean };
+    };
+    expect(requestBody.kind).toBe("career-match");
+    expect(requestBody.input.resume_md).toBe(resumeMarkdown);
+    expect(requestBody.input.jd_text).toBe(jdText);
+    expect(requestBody.input.use_evidence).toBe(true);
 
-    // Progress card first; the real analysis takes ~55s here.
-    await expect(page.getByTestId("jd-progress")).toBeVisible();
+    // The real job is pending while the LLM compares the master resume with the JD.
+    await expect(matchButton).toBeDisabled();
+    await expect(matchButton).toContainText(/分析中…|AI 正在逐条比对 JD 要求。/);
 
-    const analysis = page.getByTestId("jd-analysis");
-    const degraded = page.getByTestId("jd-degraded");
-    const failed = page.getByTestId("jd-error");
-    await expect(analysis.or(degraded).or(failed).first()).toBeVisible({ timeout: 120_000 });
+    const report = page.getByTestId("career-match-report");
+    const failed = page.getByRole("alert").filter({ hasText: "匹配失败" });
+    await expect(report.or(failed).first()).toBeVisible({ timeout: 120_000 });
 
     if (await failed.isVisible().catch(() => false)) {
-      throw new Error(`jd-match job failed in the UI: ${await failed.innerText()}`);
-    }
-    if (await degraded.isVisible().catch(() => false)) {
-      const reason = await degraded.innerText();
-      if (/configured LLM/i.test(reason)) {
+      const reason = await failed.innerText();
+      if (/未配置 LLM|configured LLM/i.test(reason)) {
         test.skip(true, `sandbox LLM not configured: ${reason}`);
       }
-      throw new Error(`jd-match degraded unexpectedly: ${reason}`);
+      throw new Error(`career-match job failed in the UI: ${reason}`);
     }
 
-    // Happy path: real analysis markdown rendered from the job result.
-    await expect(analysis).toBeVisible();
-    await expect(analysis).not.toBeEmpty();
+    // Happy path: the real structured result is rendered, including at least one JD requirement.
+    await expect(report).toBeVisible();
+    await expect(page.getByTestId("career-match-score")).toHaveText(/^(100|[0-9]{1,2})$/);
+    await expect(page.getByTestId("career-requirements").locator("tbody tr").first()).toBeVisible();
+    await expect(matchButton).toBeEnabled();
+    await expect(matchButton).toHaveText("重新匹配");
 
-    // Server-side truth: the job really completed with an analysis payload.
+    // Server-side truth: the same job completed with a non-empty career-match payload.
     const status = await request.get(
       `${SPA_BASE_URL}/api/v1/profiles/${encodeURIComponent(PROFILE)}/jobs/${createdBody.job_id}`,
     );
     expect(status.status()).toBe(200);
     const payload = (await status.json()) as {
-      job: { status: string };
-      result: { analysis: string };
+      job: { kind: string; status: string };
+      result: {
+        method: string;
+        score: number;
+        summary: string;
+        requirements: { requirement: string; verdict: string; basis: string }[];
+      };
     };
+    expect(payload.job.kind).toBe("career-match");
     expect(payload.job.status).toBe("done");
-    expect(payload.result.analysis.length).toBeGreaterThan(0);
+    expect(payload.result.method).toBe("llm");
+    expect(Number.isFinite(payload.result.score)).toBe(true);
+    expect(payload.result.score).toBeGreaterThanOrEqual(0);
+    expect(payload.result.score).toBeLessThanOrEqual(100);
+    expect(typeof payload.result.summary).toBe("string");
+    expect(payload.result.requirements.length).toBeGreaterThan(0);
+    expect(payload.result.requirements[0].requirement.length).toBeGreaterThan(0);
+    await deleteCareerTarget(page, target);
   });
 });
 
@@ -272,7 +355,7 @@ test.describe("SPA Project Board AI 建议引用 (project-suggest-refs job + SSE
     request,
   }) => {
     test.slow();
-    test.setTimeout(120_000);
+    test.setTimeout(630_000);
 
     const ts = Date.now();
     await page.goto(spa("projects"));
@@ -303,7 +386,19 @@ test.describe("SPA Project Board AI 建议引用 (project-suggest-refs job + SSE
     const result = detail.getByTestId("suggest-result");
     const degraded = detail.getByTestId("suggest-error");
     const failed = detail.getByTestId("suggest-failed");
-    await expect(result.or(degraded).or(failed).first()).toBeVisible({ timeout: 90_000 });
+    const jobUrl = `${SPA_BASE_URL}/api/v1/profiles/${encodeURIComponent(PROFILE)}/jobs/${createdBody.job_id}`;
+    await expect
+      .poll(
+        async () => {
+          const response = await request.get(jobUrl);
+          if (response.status() === 404) return "missing";
+          const payload = (await response.json()) as { job?: { status?: string } };
+          return payload.job?.status || "unknown";
+        },
+        { timeout: 600_000, intervals: [1000, 2000, 5000, 10_000] },
+      )
+      .toMatch(/^(done|failed)$/);
+    await expect(result.or(degraded).or(failed).first()).toBeVisible({ timeout: 15_000 });
 
     if (await failed.isVisible().catch(() => false)) {
       throw new Error(`suggest-refs job failed hard: ${await failed.innerText()}`);

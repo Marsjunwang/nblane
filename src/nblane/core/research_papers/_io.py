@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
-
+from nblane.core.file_state import FileSnapshot
+from nblane.core.research_jsonl import mutate_jsonl
 from nblane.core.research_workspace import (
     ResearchChunk,
     source_slug,
@@ -34,7 +37,13 @@ def load_paper_pages(profile: str | Path, source_id: str) -> list[PaperPage]:
     ]
 
 
-def save_paper_pages(profile: str | Path, source_id: str, pages: list[PaperPage | dict]) -> Path:
+def save_paper_pages(
+    profile: str | Path,
+    source_id: str,
+    pages: list[PaperPage | dict],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> Path:
     rows = []
     for item in pages:
         page = item if isinstance(item, PaperPage) else PaperPage.from_dict(item)
@@ -44,6 +53,7 @@ def save_paper_pages(profile: str | Path, source_id: str, pages: list[PaperPage 
         _jsonl_path(profile, PAPER_PAGES_DIRNAME, source_id),
         rows,
         action=f"update paper pages for {source_id}",
+        expected_snapshot=expected_snapshot,
     )
 
 
@@ -55,7 +65,13 @@ def load_paper_segments(profile: str | Path, source_id: str) -> list[PaperSegmen
     ]
 
 
-def save_paper_segments(profile: str | Path, source_id: str, segments: list[PaperSegment | dict]) -> Path:
+def save_paper_segments(
+    profile: str | Path,
+    source_id: str,
+    segments: list[PaperSegment | dict],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> Path:
     rows = []
     for item in segments:
         segment = item if isinstance(item, PaperSegment) else PaperSegment.from_dict(item)
@@ -65,6 +81,7 @@ def save_paper_segments(profile: str | Path, source_id: str, segments: list[Pape
         _jsonl_path(profile, PAPER_SEGMENTS_DIRNAME, source_id),
         rows,
         action=f"update paper segments for {source_id}",
+        expected_snapshot=expected_snapshot,
     )
 
 
@@ -80,6 +97,8 @@ def save_paper_structure_units(
     profile: str | Path,
     source_id: str,
     units: list[PaperStructureUnit | dict],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
 ) -> Path:
     rows = []
     for item in units:
@@ -90,6 +109,7 @@ def save_paper_structure_units(
         _jsonl_path(profile, PAPER_STRUCTURE_DIRNAME, source_id),
         rows,
         action=f"update paper structure units for {source_id}",
+        expected_snapshot=expected_snapshot,
     )
 
 
@@ -105,6 +125,8 @@ def save_paper_annotations(
     profile: str | Path,
     source_id: str,
     rows: list[PaperAnnotation | dict],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
 ) -> Path:
     serialized = []
     for item in rows:
@@ -114,6 +136,37 @@ def save_paper_annotations(
     return _write_jsonl(
         _jsonl_path(profile, PAPER_ANNOTATIONS_DIRNAME, source_id),
         serialized,
+        action=f"update paper annotations for {source_id}",
+        expected_snapshot=expected_snapshot,
+    )
+
+
+_T = TypeVar("_T")
+
+
+def mutate_paper_annotations(
+    profile: str | Path,
+    source_id: str,
+    fn: Callable[[list[PaperAnnotation]], _T],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> _T:
+    path = _jsonl_path(profile, PAPER_ANNOTATIONS_DIRNAME, source_id)
+
+    def apply(rows: list[dict]) -> _T:
+        annotations = [
+            ann
+            for row in rows
+            if (ann := PaperAnnotation.from_dict(row)) is not None
+        ]
+        result = fn(annotations)
+        rows[:] = [ann.to_dict() for ann in annotations]
+        return result
+
+    return mutate_jsonl(
+        path,
+        apply,
+        expected_snapshot=expected_snapshot,
         action=f"update paper annotations for {source_id}",
     )
 
@@ -162,6 +215,8 @@ def save_paper_translations(
     profile: str | Path,
     source_id: str,
     rows: list[PaperTranslation | dict],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
 ) -> Path:
     serialized = []
     for item in rows:
@@ -171,6 +226,35 @@ def save_paper_translations(
     return _write_jsonl(
         _jsonl_path(profile, PAPER_TRANSLATIONS_DIRNAME, source_id),
         serialized,
+        action=f"update paper translations for {source_id}",
+        expected_snapshot=expected_snapshot,
+    )
+
+
+def mutate_paper_translations(
+    profile: str | Path,
+    source_id: str,
+    fn: Callable[[list[PaperTranslation], dict[str, PaperSegment]], _T],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> _T:
+    path = _jsonl_path(profile, PAPER_TRANSLATIONS_DIRNAME, source_id)
+
+    def apply(rows: list[dict]) -> _T:
+        segments = _segment_hash_map(profile, source_id)
+        translations = []
+        for raw in rows:
+            translation = PaperTranslation.from_dict(raw)
+            if translation is not None:
+                translations.append(_mark_translation_status(translation, segments))
+        result = fn(translations, segments)
+        rows[:] = [translation.to_dict() for translation in translations]
+        return result
+
+    return mutate_jsonl(
+        path,
+        apply,
+        expected_snapshot=expected_snapshot,
         action=f"update paper translations for {source_id}",
     )
 

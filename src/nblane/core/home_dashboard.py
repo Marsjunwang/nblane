@@ -1051,15 +1051,8 @@ def dashboard_goal_progress(
 
 def dashboard_health_summary(profile: ProfileRef) -> dict:
     """Return profile-health counts and the first actionable issues."""
-    if isinstance(profile, Path):
-        old_profile_dir = profile_health.profile_dir
-        try:
-            profile_health.profile_dir = lambda _name: profile
-            report = profile_health.analyze_profile_health(profile.name)
-        finally:
-            profile_health.profile_dir = old_profile_dir
-    else:
-        report = profile_health.analyze_profile_health(profile)
+    profile_path = _profile_path(profile)
+    report = profile_health.analyze_profile_health(profile_path)
     counts = report.summary_counts
     return {
         "counts": counts,

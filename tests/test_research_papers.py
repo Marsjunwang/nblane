@@ -651,12 +651,12 @@ class TestResearchPapers(unittest.TestCase):
             with patch("nblane.core.research_sources.git_backup.record_change"):
                 save_research_sources(profile, inbox)
 
-            def fake_pages(profile_arg, source_id_arg, *, backend="auto"):
+            def fake_pages(profile_arg, source_id_arg, *, backend="auto", **_kwargs):
                 pages = [PaperPage(source_id=source_id_arg, page=1, text="Page text.")]
                 save_paper_pages(profile_arg, source_id_arg, pages)
                 return pages
 
-            def fake_segments(profile_arg, source_id_arg, *, backend="auto"):
+            def fake_segments(profile_arg, source_id_arg, *, backend="auto", **_kwargs):
                 segments = [
                     PaperSegment(
                         segment_id="seg:source-paper-grounded:00001",
@@ -2914,12 +2914,12 @@ class TestResearchPapers(unittest.TestCase):
             with patch("nblane.core.research_sources.git_backup.record_change"):
                 save_research_sources(profile, inbox)
 
-            def fake_pages(profile_arg, source_id_arg, *, backend="auto"):
+            def fake_pages(profile_arg, source_id_arg, *, backend="auto", **_kwargs):
                 pages = [PaperPage(source_id=source_id_arg, page=1, text="Page text.")]
                 save_paper_pages(profile_arg, source_id_arg, pages)
                 return pages
 
-            def fake_segments(profile_arg, source_id_arg, *, backend="auto"):
+            def fake_segments(profile_arg, source_id_arg, *, backend="auto", **_kwargs):
                 segments = [
                     PaperSegment(
                         segment_id="seg:source-paper-grounded:00001",
@@ -4665,7 +4665,7 @@ class TestResearchPapers(unittest.TestCase):
                 },
             )
 
-            def fake_grobid_segments(profile_arg, source_id_arg, *, backend="auto"):
+            def fake_grobid_segments(profile_arg, source_id_arg, *, backend="auto", **_kwargs):
                 self.assertEqual(backend, "grobid")
                 segments = [
                     PaperSegment(
@@ -4803,7 +4803,7 @@ class TestResearchPapers(unittest.TestCase):
                 },
             )
 
-            def fake_grobid_segments(profile_arg, source_id_arg, *, backend="auto"):
+            def fake_grobid_segments(profile_arg, source_id_arg, *, backend="auto", **_kwargs):
                 self.assertEqual(backend, "grobid")
                 segments = [
                     PaperSegment(
@@ -4888,7 +4888,7 @@ class TestResearchPapers(unittest.TestCase):
                 },
             )
 
-            def fake_grobid_segments(profile_arg, source_id_arg, *, backend="auto"):
+            def fake_grobid_segments(profile_arg, source_id_arg, *, backend="auto", **_kwargs):
                 self.assertEqual(backend, "grobid")
                 segments = [
                     PaperSegment(

@@ -15,8 +15,9 @@ from nblane.core.file_state import FileSnapshot, assert_unchanged, snapshot_file
 from nblane.core.file_write import atomic_write_text
 from nblane.core.research_sources import (
     ResearchSource,
+    ResearchSourceInbox,
     load_research_sources,
-    save_research_sources,
+    mutate_research_sources,
 )
 from nblane.core.research_workspace import (
     RESEARCH_CHUNKS_DIRNAME,
@@ -294,28 +295,28 @@ def _apply_paper_library_delete_policy(
         fallback_parent_id=fallback_parent_id,
         deleted_ids=deleted,
     )
-    inbox = load_research_sources(_profile_root(profile))
-    changed: list[str] = []
-    for source in inbox.sources:
-        refs = list(source.library_node_refs)
-        if not any(ref in deleted for ref in refs):
-            continue
-        next_refs: list[str] = []
-        inserted_target = False
-        for ref in refs:
-            if ref in deleted:
-                if target and not inserted_target and target not in next_refs:
-                    next_refs.append(target)
-                    inserted_target = True
+    def apply(inbox: ResearchSourceInbox) -> list[str]:
+        changed: list[str] = []
+        for source in inbox.sources:
+            refs = list(source.library_node_refs)
+            if not any(ref in deleted for ref in refs):
                 continue
-            if ref not in next_refs:
-                next_refs.append(ref)
-        if next_refs != refs:
-            source.library_node_refs = next_refs
-            changed.append(source.id)
-    if changed:
-        save_research_sources(_profile_root(profile), inbox)
-    return changed
+            next_refs: list[str] = []
+            inserted_target = False
+            for ref in refs:
+                if ref in deleted:
+                    if target and not inserted_target and target not in next_refs:
+                        next_refs.append(target)
+                        inserted_target = True
+                    continue
+                if ref not in next_refs:
+                    next_refs.append(ref)
+            if next_refs != refs:
+                source.library_node_refs = next_refs
+                changed.append(source.id)
+        return changed
+
+    return mutate_research_sources(_profile_root(profile), apply)
 
 
 @_with_tree_lock
@@ -610,35 +611,36 @@ def move_papers_to_node(
     clean_node = _clean_text(node_id)
     if clean_node:
         _paper_library_require_node(tree, clean_node)
-    inbox = load_research_sources(_profile_root(profile))
-    changed: list[str] = []
     wanted = set(_clean_list(source_ids))
-    for source in inbox.sources:
-        if source.id not in wanted:
-            continue
-        existing_refs = list(source.library_node_refs)
-        if append:
-            refs = list(existing_refs)
-            if clean_node and clean_node not in refs:
-                refs.append(clean_node)
-        elif clean_node:
-            refs = [
-                clean_node,
-                *[
-                    ref
-                    for ref in existing_refs[1:]
-                    if ref and ref != clean_node
-                ],
-            ]
-        else:
-            refs = []
-        if refs == existing_refs:
-            continue
-        source.library_node_refs = refs
-        changed.append(source.id)
-    if changed:
-        save_research_sources(_profile_root(profile), inbox)
-    return changed
+
+    def apply(inbox: ResearchSourceInbox) -> list[str]:
+        changed: list[str] = []
+        for source in inbox.sources:
+            if source.id not in wanted:
+                continue
+            existing_refs = list(source.library_node_refs)
+            if append:
+                refs = list(existing_refs)
+                if clean_node and clean_node not in refs:
+                    refs.append(clean_node)
+            elif clean_node:
+                refs = [
+                    clean_node,
+                    *[
+                        ref
+                        for ref in existing_refs[1:]
+                        if ref and ref != clean_node
+                    ],
+                ]
+            else:
+                refs = []
+            if refs == existing_refs:
+                continue
+            source.library_node_refs = refs
+            changed.append(source.id)
+        return changed
+
+    return mutate_research_sources(_profile_root(profile), apply)
 
 
 def remove_papers_from_node(
@@ -649,20 +651,21 @@ def remove_papers_from_node(
     tree = load_paper_library_tree(profile)
     clean_node = _clean_text(node_id)
     _paper_library_require_node(tree, clean_node, include_trashed=True)
-    inbox = load_research_sources(_profile_root(profile))
     wanted = set(_clean_list(source_ids))
-    changed: list[str] = []
-    for source in inbox.sources:
-        if source.id not in wanted:
-            continue
-        refs = [ref for ref in source.library_node_refs if ref != clean_node]
-        if refs == source.library_node_refs:
-            continue
-        source.library_node_refs = refs
-        changed.append(source.id)
-    if changed:
-        save_research_sources(_profile_root(profile), inbox)
-    return changed
+
+    def apply(inbox: ResearchSourceInbox) -> list[str]:
+        changed: list[str] = []
+        for source in inbox.sources:
+            if source.id not in wanted:
+                continue
+            refs = [ref for ref in source.library_node_refs if ref != clean_node]
+            if refs == source.library_node_refs:
+                continue
+            source.library_node_refs = refs
+            changed.append(source.id)
+        return changed
+
+    return mutate_research_sources(_profile_root(profile), apply)
 
 
 def set_paper_primary_node(

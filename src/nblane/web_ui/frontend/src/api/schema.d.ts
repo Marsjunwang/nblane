@@ -1809,14 +1809,7 @@ export interface paths {
         put?: never;
         /**
          * Create Profile Job
-         * @description Create an async job for one profile (LLM long tasks).
-         *
-         *     Kinds are registered in ``nblane.web_api.jobs`` (e.g.
-         *     ``project-suggest-refs``, ``content-*``, ``career-*``). The job runs on a daemon
-         *     thread inside this single-worker process, tracked by the in-memory
-         *     registry (same design as the reader sidecar's paper-library search
-         *     jobs): poll ``GET .../jobs/{job_id}`` or subscribe to
-         *     ``GET .../jobs/{job_id}/stream`` (SSE) for progress and the result.
+         * @description Authorize the actual kind, then enqueue its worker-owned execution.
          */
         post: operations["create_profile_job_api_v1_profiles__name__jobs_post"];
         delete?: never;
@@ -1841,11 +1834,11 @@ export interface paths {
         post?: never;
         /**
          * Cancel Profile Job
-         * @description Cancel a queued/running job: it ends as ``failed`` / ``job_cancelled``.
+         * @description Request cancellation and return the current, possibly still-running state.
          *
-         *     Idempotent: a job that already finished is returned unchanged. The
-         *     in-flight provider call cannot be interrupted, but its result is dropped
-         *     so nothing is applied after the user cancelled.
+         *     Idempotent: a job that already finished is returned unchanged. A commit
+         *     already in progress finishes and is journaled; the worker publishes the
+         *     terminal state and any retained partial writes at the next boundary.
          */
         delete: operations["cancel_profile_job_api_v1_profiles__name__jobs__job_id__delete"];
         options?: never;
@@ -2770,10 +2763,7 @@ export interface paths {
         put?: never;
         /**
          * Import Research Connector
-         * @description Start an import job; result is a ResearchConnectorImportResultModel.
-         *
-         *     Selected fingerprints are re-discovered and imported (duplicates
-         *     skipped); an empty selection runs the whole connector.
+         * @description Discover once, then import selected candidates in a short commit segment.
          */
         post: operations["import_research_connector_api_v1_profiles__name__research_connectors__connector_id__import_post"];
         delete?: never;
@@ -2833,11 +2823,7 @@ export interface paths {
         put?: never;
         /**
          * Start Paper Analysis Job
-         * @description Start quick analysis / deep study for one paper (202 + job handle).
-         *
-         *     A job of the same kind already running for this paper is returned
-         *     instead of starting a second run. Subscribe to
-         *     ``GET .../jobs/{job_id}/stream`` for progress.
+         * @description Start or reattach to one paper's authorized analysis worker.
          */
         post: operations["start_paper_analysis_job_api_v1_profiles__name__research_papers__source_id__analysis_jobs_post"];
         delete?: never;
@@ -7654,6 +7640,16 @@ export interface components {
          */
         JobModel: {
             /**
+             * Cancel Requested
+             * @default false
+             */
+            cancel_requested: boolean;
+            /**
+             * Commit Summary
+             * @default
+             */
+            commit_summary: string;
+            /**
              * Created At
              * @default 0
              */
@@ -7692,6 +7688,11 @@ export interface components {
             started_at: number;
             /** Status */
             status: string;
+            /**
+             * Write Committed
+             * @default false
+             */
+            write_committed: boolean;
         };
         /**
          * JobStatusResponse

@@ -8,16 +8,17 @@ process can run blocking LLM work (up to ~55s) off the request thread.
 Contract:
 
 - Statuses: ``queued`` -> ``running`` -> ``done`` | ``failed``
-  (``FINAL_STATUSES``). A watchdog marks stale running jobs failed after
-  ``NBLANE_WEB_API_JOB_TIMEOUT_SECONDS`` (default 600s).
+  (``FINAL_STATUSES``). Cancellation and the per-kind watchdog request a
+  cooperative stop; the worker publishes the terminal state at a checkpoint
+  or after the current short commit segment, including retained partial writes.
 - SSE frames (``GET .../jobs/{id}/stream``): ``job`` (initial snapshot,
   replay-safe for late subscribers), ``progress`` (one per logged phase
   event), ``done`` (terminal, carries ``result``), ``error`` (terminal,
   carries the structured ``{code, message}`` error).
 - Job kinds register a validator (raw ``input`` dict -> cleaned input,
-  raising :class:`JobInputError`) and a runner
-  ``run(profile, input, report) -> result``; ``report(phase, message)``
-  appends a progress event and updates the job's phase/message.
+  raising :class:`JobInputError`), explicit agent effect/action/journal
+  policy, and a runner. Context runners also receive a
+  ``JobExecutionContext`` for checkpoints and strict worker-local commits.
 
 Registered kinds include ``project-suggest-refs`` (Project Board AI ref
 suggestion), ``evidence-crystallize`` (LLM Done-task -> evidence draft),
@@ -39,8 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nblane.core import content_ai
-from nblane.core import career_ai
+from nblane.core import agent_ops, agent_policy, career_ai, content_ai, git_backup
 from nblane.core import profile_io, project_suggest
 from nblane.core.project_board import load_project_board
 
@@ -71,6 +71,10 @@ class UnknownJobKindError(ValueError):
     """Raised when ``create_job`` gets an unregistered job kind."""
 
 
+class UnclassifiedJobKindError(ValueError):
+    """Raised when an agent targets a kind without an explicit policy."""
+
+
 class JobInputError(ValueError):
     """Raised when a kind validator rejects the raw job input."""
 
@@ -94,21 +98,72 @@ class JobFailedError(RuntimeError):
         self.run_id = run_id
 
 
+class JobCancelledError(JobFailedError):
+    """The worker reached a commit/checkpoint boundary after stop was requested."""
+
+
+@dataclass(frozen=True)
+class JobPolicy:
+    kind: str
+    effect: str
+    action: str
+    tier: str
+    journal: tuple[str, ...]
+
+
 @dataclass
 class JobKind:
-    """One registered async-job kind.
+    """One registered async-job kind, including its explicit agent policy.
 
     ``timeout_seconds`` overrides the global watchdog for kinds whose work
     is known to be short (e.g. a single LLM call the user is waiting on in
-    a wizard); 0/None falls back to ``_JOB_TIMEOUT_SECONDS``.
+    a wizard); 0/None falls back to ``_JOB_TIMEOUT_SECONDS``. Runners that
+    set ``context_runner`` receive a fourth ``JobExecutionContext`` argument.
     """
 
     name: str
     validate: Callable[[dict[str, Any]], dict[str, Any]]
-    run: Callable[[str, dict[str, Any], Callable[..., None]], Any]
+    run: Callable[..., Any]
     queued_message: str = "Queued job."
     timeout_seconds: float = 0.0
     timeout_message: str = ""
+    effect: str = ""
+    action: str = ""
+    journal: tuple[str, ...] = ()
+    context_runner: bool = False
+
+    def __post_init__(self) -> None:
+        classification = _JOB_CLASSIFICATIONS.get(self.name)
+        if classification is None:
+            return
+        effect, action, journal, context_runner = classification
+        self.effect = self.effect or effect
+        self.action = self.action or action
+        self.journal = self.journal or journal
+        self.context_runner = self.context_runner or context_runner
+
+
+_JOB_CLASSIFICATIONS: dict[str, tuple[str, str, tuple[str, ...], bool]] = {
+    "project-suggest-refs": ("draft", "ai.draft", (), False),
+    "evidence-crystallize": ("draft", "ai.draft", (), False),
+    "content-rewrite": ("draft", "ai.draft", (), False),
+    "content-meta": ("draft", "ai.draft", (), False),
+    "content-social": ("draft", "ai.draft", (), False),
+    "content-cover": ("candidate", "ai.draft", (), True),
+    "content-image": ("candidate", "ai.draft", (), True),
+    "career-match": ("draft", "ai.draft", (), False),
+    "career-tailor": ("draft", "ai.draft", (), False),
+    "career-structure": ("draft", "ai.draft", (), False),
+    "research-connector-preview": ("draft", "ai.draft", (), True),
+    "research-connector-import": (
+        "write",
+        "research.import",
+        ("research_source", "file:research/connectors.yaml"),
+        True,
+    ),
+    "paper-quick-analysis": ("write", "research.paper_analysis", ("research_source",), True),
+    "paper-deep-read": ("write", "research.paper_analysis", ("research_source",), True),
+}
 
 
 _KINDS: dict[str, JobKind] = {}
@@ -117,6 +172,26 @@ _KINDS: dict[str, JobKind] = {}
 def register_kind(spec: JobKind) -> None:
     """Register (or replace) one job kind from another router module."""
     _KINDS[spec.name] = spec
+
+
+def job_policy(kind: str) -> JobPolicy:
+    """Resolve a kind's real effect/action/tier; unknown classifications fail closed."""
+    clean_kind = _clean(kind)
+    spec = _KINDS.get(clean_kind)
+    if spec is None:
+        known = ", ".join(sorted(_KINDS)) or "(none)"
+        raise UnknownJobKindError(
+            f"Unknown job kind: {clean_kind!r}. Registered kinds: {known}."
+        )
+    if not spec.effect or not spec.action:
+        raise UnclassifiedJobKindError(clean_kind)
+    return JobPolicy(
+        kind=clean_kind,
+        effect=spec.effect,
+        action=spec.action,
+        tier=agent_policy.tier_for(spec.action),
+        journal=tuple(spec.journal),
+    )
 
 
 def _clean(value: object) -> str:
@@ -277,18 +352,199 @@ def failed_jobs(
     return rows[: max(1, min(int(limit), 200))]
 
 
+CANCELLED_MESSAGE = "已取消。"
+
+
+def _stop_message_locked(job: dict[str, Any], message: str) -> str:
+    if not job.get("write_committed") or "已保留部分写入" in message:
+        return message
+    summary = _clean(job.get("commit_summary")) or "已完成的提交段"
+    return f"{message.rstrip('。')}；已保留部分写入：{summary}。"
+
+
+def _stop_error_locked(job: dict[str, Any]) -> JobCancelledError:
+    code = _clean(job.get("_cancel_code")) or "job_cancelled"
+    message = _clean(job.get("_cancel_message")) or CANCELLED_MESSAGE
+    return JobCancelledError(code, _stop_message_locked(job, message))
+
+
+def _request_stop_locked(job: dict[str, Any], code: str, message: str) -> None:
+    if not job.get("_cancel_code"):
+        job["_cancel_code"] = code
+        job["_cancel_message"] = message
+    job["cancel_requested"] = True
+    event = job.get("_cancel_event")
+    if isinstance(event, threading.Event):
+        event.set()
+    job["phase"] = "cancelling"
+    job["message"] = (
+        "正在停止；当前提交段会完成并记录，随后结束任务。"
+        if job.get("_committing")
+        else "正在停止；任务会在下一个检查点结束。"
+    )
+
+
+class JobExecutionContext:
+    """Worker-local cancellation and strict commit boundary for one job."""
+
+    def __init__(
+        self,
+        job_id: str,
+        spec: JobKind,
+        agent_write: agent_ops.AgentWrite | None,
+    ) -> None:
+        self.job_id = job_id
+        self.spec = spec
+        self.agent_write = agent_write
+
+    def checkpoint(self) -> None:
+        """Raise before more work when cancellation/timeout won the lock race."""
+        with _LOCK:
+            job = _JOBS.get(self.job_id)
+            if not job or job.get("status") in FINAL_STATUSES:
+                raise JobCancelledError("job_cancelled", CANCELLED_MESSAGE)
+            if job.get("_cancel_code"):
+                raise _stop_error_locked(job)
+
+    def cancel_requested(self) -> bool:
+        """Cooperative cancellation callback for Codex and other long runners."""
+        with _LOCK:
+            job = _JOBS.get(self.job_id)
+            return bool(job and job.get("cancel_requested"))
+
+    def _begin_commit(self) -> None:
+        with _LOCK:
+            job = _JOBS.get(self.job_id)
+            if not job or job.get("status") in FINAL_STATUSES:
+                raise JobCancelledError("job_cancelled", CANCELLED_MESSAGE)
+            if job.get("_cancel_code"):
+                raise _stop_error_locked(job)
+            job["_committing"] = True
+
+    def _end_commit(self) -> None:
+        with _LOCK:
+            job = _JOBS.get(self.job_id)
+            if job:
+                job["_committing"] = False
+
+    def _mark_committed(self, summary: str) -> None:
+        if self.agent_write is not None:
+            self.agent_write.write_committed = True
+        with _LOCK:
+            job = _JOBS.get(self.job_id)
+            if not job:
+                return
+            job["write_committed"] = True
+            clean_summary = _clean(summary) or self.spec.action or self.spec.name
+            summaries = job.setdefault("_commit_summaries", [])
+            if clean_summary not in summaries:
+                summaries.append(clean_summary)
+            job["commit_summary"] = "；".join(summaries)
+
+    def apply(
+        self,
+        fn: Callable[[], Any],
+        *,
+        kinds: tuple[str, ...] | None = None,
+        summary: str = "",
+    ) -> Any:
+        """Run one short domain commit with worker-local before/after journaling."""
+        self._begin_commit()
+        write = self.agent_write
+        prior_committed = bool(write and write.write_committed)
+        try:
+            if write is not None:
+                agent_ops.capture_before(write, kinds)
+            try:
+                value = fn()
+            except BaseException:
+                if write is not None:
+                    try:
+                        entry = agent_ops.finish(write, refund_noop=False)
+                    except agent_ops.AgentJournalError:
+                        self._mark_committed(summary)
+                        raise
+                    if entry is not None:
+                        self._mark_committed(summary)
+                    else:
+                        write.write_committed = prior_committed
+                raise
+            if write is not None:
+                write.write_committed = True
+                try:
+                    entry = agent_ops.finish(write, refund_noop=False)
+                except agent_ops.AgentJournalError:
+                    self._mark_committed(summary)
+                    raise
+                if entry is not None:
+                    self._mark_committed(summary)
+                else:
+                    write.write_committed = prior_committed
+            elif self.spec.effect in {"write", "candidate"}:
+                self._mark_committed(summary)
+            return value
+        except agent_ops.AgentJournalError as exc:
+            raise JobFailedError("agent_journal_failed", str(exc)) from exc
+        finally:
+            self._end_commit()
+
+
+def _finish_failure(
+    job_id: str,
+    code: str,
+    message: str,
+    *,
+    run_id: str = "",
+) -> None:
+    with _LOCK:
+        job = _JOBS.get(job_id)
+        if not job or job.get("status") in FINAL_STATUSES:
+            return
+        terminal_message = _stop_message_locked(job, message)
+        job.update(
+            status="failed",
+            phase="failed",
+            message=terminal_message,
+            error={"code": code, "message": terminal_message},
+            finished_at=time.time(),
+            _finished_monotonic=time.monotonic(),
+            **({"run_id": run_id} if run_id else {}),
+        )
+        event = job.get("_finished_event")
+        if isinstance(event, threading.Event):
+            event.set()
+
+
+def _finish_done(job_id: str, kind: str, result: Any) -> None:
+    with _LOCK:
+        job = _JOBS.get(job_id)
+        if not job or job.get("status") in FINAL_STATUSES:
+            return
+        if job.get("_cancel_code"):
+            raise _stop_error_locked(job)
+        job.update(
+            status="done",
+            phase="done",
+            message=f"{kind} job finished.",
+            result=result,
+            finished_at=time.time(),
+            _finished_monotonic=time.monotonic(),
+        )
+        event = job.get("_finished_event")
+        if isinstance(event, threading.Event):
+            event.set()
+
+
 def create_job(
     profile: str,
     kind: str,
     job_input: dict[str, Any],
     *,
     profile_scope: str | Path | None = None,
+    agent_write: agent_ops.AgentWrite | None = None,
+    actor: str = "",
 ) -> dict[str, Any]:
-    """Validate, register, and start a job; return its initial snapshot.
-
-    The worker runs in a daemon thread. Raises :class:`UnknownJobKindError`
-    for unregistered kinds and :class:`JobInputError` for rejected input.
-    """
+    """Validate, register, and start a job with an optional transferred reservation."""
     clean_kind = _clean(kind)
     spec = _KINDS.get(clean_kind)
     if spec is None:
@@ -302,12 +558,10 @@ def create_job(
     _prune_jobs()
     job_id = f"job-{uuid.uuid4().hex[:16]}"
     now = time.time()
+    execution = JobExecutionContext(job_id, spec, agent_write)
     job: dict[str, Any] = {
         "job_id": job_id,
         "profile": _clean(profile),
-        # Keep the data-root identity internal. Profile names are not globally
-        # unique across test/dev roots, while the worker payload still uses
-        # the public profile name expected by existing runners.
         "_profile_scope": _scope_key(profile_scope),
         "kind": clean_kind,
         "status": "queued",
@@ -316,17 +570,28 @@ def create_job(
         "created_at": now,
         "started_at": 0.0,
         "finished_at": 0.0,
+        "cancel_requested": False,
+        "write_committed": False,
+        "commit_summary": "",
         "error": None,
         "result": None,
         "events": [],
         "_event_seq": 0,
         "_started_monotonic": 0.0,
         "_finished_monotonic": 0.0,
+        "_cancel_event": threading.Event(),
+        "_finished_event": threading.Event(),
+        "_started_event": threading.Event(),
+        "_cancel_code": "",
+        "_cancel_message": "",
+        "_committing": False,
+        "_commit_summaries": [],
+        "_execution": execution,
+        "_agent_write": agent_write,
+        "_actor": _clean(actor) or (agent_write.actor if agent_write else "web"),
     }
     with _LOCK:
         _JOBS[job_id] = job
-    # Snapshot before the worker starts so the 202 answer deterministically
-    # reports the queued state (the SSE stream re-reads live state anyway).
     bundle = read_job(job_id)
     initial = bundle["snapshot"] if bundle else {}
 
@@ -340,81 +605,62 @@ def create_job(
             started_at=time.time(),
             _started_monotonic=started,
         )
+        started_event = job.get("_started_event")
+        if isinstance(started_event, threading.Event):
+            started_event.set()
         report = _progress_reporter(job_id)
         try:
-            result = spec.run(_clean(profile), clean_input, report)
+            git_backup.start_operation(job["_actor"])
+            execution.checkpoint()
+            if spec.context_runner:
+                result = spec.run(_clean(profile), clean_input, report, execution)
+            else:
+                result = spec.run(_clean(profile), clean_input, report)
+            execution.checkpoint()
+            _finish_done(job_id, clean_kind, result)
+        except JobCancelledError as exc:
+            _finish_failure(job_id, exc.code, exc.message, run_id=exc.run_id)
         except JobFailedError as exc:
-            _update_job(
-                job_id,
-                status="failed",
-                phase="failed",
-                message=exc.message,
-                error={"code": exc.code, "message": exc.message},
-                finished_at=time.time(),
-                _finished_monotonic=time.monotonic(),
-                **({"run_id": exc.run_id} if exc.run_id else {}),
-            )
-            return
+            _finish_failure(job_id, exc.code, exc.message, run_id=exc.run_id)
         except Exception as exc:  # noqa: BLE001 - surface any runner failure
-            _update_job(
-                job_id,
-                status="failed",
-                phase="failed",
-                message=str(exc),
-                error={"code": "job_failed", "message": str(exc)},
-                finished_at=time.time(),
-                _finished_monotonic=time.monotonic(),
-            )
-            return
-        # A watchdog may have marked the job failed while the runner blocked;
-        # the late result then loses so the stream stays terminal-consistent.
-        with _LOCK:
-            current = _JOBS.get(job_id)
-            if not current or current.get("status") in FINAL_STATUSES:
-                return
-        _update_job(
-            job_id,
-            status="done",
-            phase="done",
-            message=f"{clean_kind} job finished.",
-            result=result,
-            finished_at=time.time(),
-            _finished_monotonic=time.monotonic(),
-        )
+            _finish_failure(job_id, "job_failed", str(exc))
+        finally:
+            if agent_write is not None:
+                agent_ops.abort(agent_write)
 
-    threading.Thread(
+    worker_thread = threading.Thread(
         target=worker, name=f"web-api-job-{job_id}", daemon=True
-    ).start()
-    threading.Thread(
+    )
+    watchdog_thread = threading.Thread(
         target=_watchdog_timeout,
         args=(job_id,),
         name=f"web-api-job-timeout-{job_id}",
         daemon=True,
-    ).start()
+    )
+    try:
+        watchdog_thread.start()
+        worker_thread.start()
+    except Exception:
+        with _LOCK:
+            _JOBS.pop(job_id, None)
+        for event_name in ("_started_event", "_finished_event"):
+            event = job.get(event_name)
+            if isinstance(event, threading.Event):
+                event.set()
+        if agent_write is not None:
+            agent_ops.abort(agent_write)
+        raise
     return initial
 
 
-CANCELLED_MESSAGE = "已取消。"
-
-
 def cancel_job(job_id: str) -> bool:
-    """Mark a queued/running job failed with ``job_cancelled``.
-
-    The worker thread cannot be interrupted mid-call, but its late result is
-    discarded (same rule as the watchdog), so the stream ends now and nothing
-    is applied. Returns False when the job is unknown or already final.
-    """
+    """Request a cooperative stop; the worker publishes the real terminal state."""
     clean_id = _clean(job_id)
     with _LOCK:
         job = _JOBS.get(clean_id)
         if not job or job.get("status") in FINAL_STATUSES:
             return False
-        job["status"] = "failed"
-        job["phase"] = "failed"
-        job["message"] = CANCELLED_MESSAGE
-        job["error"] = {"code": "job_cancelled", "message": CANCELLED_MESSAGE}
-        job["finished_at"] = time.time()
-        job["_finished_monotonic"] = time.monotonic()
+        _request_stop_locked(job, "job_cancelled", CANCELLED_MESSAGE)
     return True
 
 
@@ -424,7 +670,8 @@ def _prune_jobs() -> None:
         stale = [
             job_id
             for job_id, job in _JOBS.items()
-            if float(job.get("created_at") or 0) < cutoff
+            if job.get("status") in FINAL_STATUSES
+            and float(job.get("finished_at") or job.get("created_at") or 0) < cutoff
         ]
         for job_id in stale:
             _JOBS.pop(job_id, None)
@@ -439,7 +686,7 @@ def _job_timeout(job: dict[str, Any]) -> float:
 
 
 def _mark_timeout_locked(job_id: str, now: float) -> None:
-    """Mark a stale running job failed; caller must hold ``_LOCK``."""
+    """Request a timeout stop at the next boundary; caller must hold ``_LOCK``."""
     job = _JOBS.get(job_id)
     if not job or job.get("status") != "running":
         return
@@ -452,17 +699,25 @@ def _mark_timeout_locked(job_id: str, now: float) -> None:
         f"Job timed out after {int(timeout)} seconds. "
         "Retry or check the LLM provider connection."
     )
-    job["status"] = "failed"
-    job["phase"] = "failed"
-    job["message"] = message
-    job["error"] = {"code": "job_timeout", "message": message}
-    job["finished_at"] = now
-    job["_finished_monotonic"] = time.monotonic()
+    _request_stop_locked(job, "job_timeout", message)
 
 
 def _watchdog_timeout(job_id: str) -> None:
-    """Mark a hung running job failed even if nobody polls it."""
-    time.sleep(_JOB_TIMEOUT_SECONDS)
+    """Use the registered kind's actual deadline without relying on status polls."""
+    with _LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            return
+        started_event = job.get("_started_event")
+        finished_event = job.get("_finished_event")
+        timeout = _job_timeout(job)
+    if not isinstance(started_event, threading.Event) or not isinstance(
+        finished_event, threading.Event
+    ):
+        return
+    started_event.wait()
+    if finished_event.wait(timeout):
+        return
     with _LOCK:
         _mark_timeout_locked(job_id, time.time())
 
@@ -738,12 +993,81 @@ def _validate_content_cover_input(job_input: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _run_content_cover(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
+def _run_content_cover(
+    profile: str,
+    job_input: dict[str, Any],
+    report: Callable[..., None],
+    ctx: JobExecutionContext,
+) -> Any:
+    from nblane.core import public_site, visual_candidate_store, visual_generation
+
     report(phase="generating", message="正在生成封面（约 30–90 秒）。")
-    slug = job_input.pop("slug")
-    rows = _content_ai_call(
-        lambda: content_ai.generate_cover_candidates(profile, slug, **job_input)
-    )
+    slug = str(job_input["slug"])
+
+    def generate():
+        if not content_ai.cover_available():
+            raise content_ai.ContentAIError(
+                "cover_unavailable",
+                "封面生成需要配置图像服务（VISUAL_API_KEY / DASHSCOPE_API_KEY）。",
+            )
+        post = public_site.load_blog_post(profile, slug)
+        try:
+            assets = content_ai.generate_images(
+                profile,
+                "cover",
+                _clean(job_input.get("brief")),
+                style=_clean(job_input.get("style")),
+                title=post.title if job_input.get("title") is None else _clean(job_input.get("title")),
+                summary=post.summary if job_input.get("summary") is None else _clean(job_input.get("summary")),
+                tags=(
+                    [str(item) for item in (post.meta.get("tags") or [])]
+                    if job_input.get("tags") is None
+                    else list(job_input["tags"])
+                ),
+                body=post.body if job_input.get("body") is None else str(job_input.get("body") or ""),
+                reference_image=_clean(job_input.get("reference_image")),
+            )
+        except visual_generation.VisualGenerationError as exc:
+            raise content_ai.ContentAIError(
+                "cover_generation_failed",
+                str(exc),
+                run_id=str(getattr(exc, "run_id", "") or ""),
+            ) from exc
+        return post, assets
+
+    ctx.checkpoint()
+    post, assets = _content_ai_call(generate)
+    ctx.checkpoint()
+    if not assets:
+        raise JobFailedError("cover_generation_failed", "图像服务没有返回图片，请重试。")
+
+    def commit() -> list[dict[str, Any]]:
+        patch_id = f"cover-{uuid.uuid4().hex[:10]}"
+        rows: list[dict[str, Any]] = []
+        for asset in assets:
+            candidate = visual_candidate_store.write_candidate(
+                profile,
+                post.slug,
+                patch_id,
+                data=asset.data,
+                filename=visual_generation.generated_filename("cover", asset.data, asset.extension),
+                kind="image",
+                alt=post.title,
+                provider=asset.provider,
+                model=asset.model,
+                prompt=asset.prompt.positive_prompt,
+            )
+            rows.append(
+                {
+                    "candidate_path": candidate.relative_path,
+                    "filename": candidate.filename,
+                    "provider": asset.provider,
+                    "model": asset.model,
+                }
+            )
+        return rows
+
+    rows = ctx.apply(commit, summary="保存封面候选")
     return {"slug": slug, "candidates": rows}
 
 
@@ -827,10 +1151,112 @@ def _validate_content_image_input(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _run_content_image(profile: str, job_input: dict[str, Any], report: Callable[..., None]) -> Any:
-    from nblane.core import content_images
+def _run_content_image(
+    profile: str,
+    job_input: dict[str, Any],
+    report: Callable[..., None],
+    ctx: JobExecutionContext,
+) -> Any:
+    import base64
+
+    from nblane.core import content_images, public_site, visual_candidate_store, visual_generation
+
     report(phase="generating", message="正在生成图片，关闭面板不影响任务。")
-    return content_images.generate(profile, job_input)
+    post = public_site.load_blog_post(profile, job_input["slug"])
+    row: dict[str, Any] = {
+        "id": f"image-{uuid.uuid4().hex}",
+        "slug": post.slug,
+        "request": job_input.copy(),
+        "status": "running",
+        "created_at": time.time(),
+        "process_id": content_images.PROCESS_ID,
+        "candidates": [],
+        "error": "",
+        "reference": "",
+    }
+    assets = []
+    reference_data = b""
+    reference_mime = ""
+    reference_data_url = ""
+    try:
+        if not content_ai.cover_available():
+            raise ValueError("未配置图像服务。")
+        dimensions = content_images.output_size(profile, job_input)
+        row["output_size"] = dimensions["size"]
+        source = str(job_input.get("reference") or "")
+        if source:
+            reference_data = content_images.reference_bytes(profile, post.slug, source)
+            reference_mime, _ = content_images.image_info(reference_data)
+            reference_data_url = (
+                f"data:{reference_mime};base64,"
+                + base64.b64encode(reference_data).decode("ascii")
+            )
+        if job_input["mode"] == "edit" and not reference_data_url:
+            raise ValueError("请先选择要修改的图片。")
+        ctx.checkpoint()
+        assets = content_ai.generate_images(
+            profile,
+            "image_edit" if job_input["mode"] == "edit" else "cover",
+            job_input["instruction"],
+            reference_image=reference_data_url,
+            size=dimensions["size"],
+            title=job_input.get("title", ""),
+            summary=job_input.get("summary", ""),
+            tags=job_input.get("tags", []),
+            body=job_input.get("body", ""),
+        )
+        ctx.checkpoint()
+        if not assets:
+            raise ValueError("图像服务没有返回图片，请重试。")
+        for asset in assets:
+            content_images.image_info(asset.data)
+        row["status"] = "done"
+    except JobCancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - image runs report their own error row
+        row["status"] = "failed"
+        row["error"] = str(exc)
+
+    def commit() -> dict[str, Any]:
+        if reference_data:
+            snapshot = visual_candidate_store.write_candidate(
+                profile,
+                post.slug,
+                row["id"] + "-ref",
+                data=reference_data,
+                filename=f"reference.{reference_mime.split('/')[1]}",
+                kind="reference",
+            )
+            row["reference"] = snapshot.relative_path
+        for asset in assets:
+            candidate = visual_candidate_store.write_candidate(
+                profile,
+                post.slug,
+                row["id"],
+                data=asset.data,
+                filename=visual_generation.generated_filename(
+                    "edited" if job_input["mode"] == "edit" else "cover",
+                    asset.data,
+                    asset.extension,
+                ),
+                kind="image",
+                provider=asset.provider,
+                model=asset.model,
+                prompt=asset.prompt.positive_prompt,
+            )
+            row["candidates"].append(
+                {
+                    "candidate_path": candidate.relative_path,
+                    "filename": candidate.filename,
+                    "applied_path": "",
+                }
+            )
+        content_images._write(profile, row)
+        return row
+
+    result = ctx.apply(commit, summary="保存图片候选")
+    ctx.checkpoint()
+    return result
 
 
 _KINDS["content-image"] = JobKind(

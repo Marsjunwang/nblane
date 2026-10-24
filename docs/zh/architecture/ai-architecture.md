@@ -58,20 +58,23 @@ SPA / CLI / Reader 短任务
 
 ## 个人助手接入
 
-助手只走 HTTP：`scripts/openclaw/skills/bin/nblane_api.py` 用 `agent: true` 的服务账号调用 `/api/v1`，受 profile ACL 约束。调用规则只有一份：`scripts/openclaw/skills/nblane/SKILL.md`（技能）+ 服务端策略。
+助手只走 HTTP：`scripts/openclaw/skills/bin/nblane_api.py` 用 `agent: true` 的服务账号调用 `/api/v1`，受 profile ACL 约束。经授权访问 Reader 时，8502 也按同一账号、同一策略表和同一撤销日志执行。调用规则由 `scripts/openclaw/skills/nblane/SKILL.md`（技能）和服务端策略共同约束。
 
 服务端策略：
 
 | 组件 | 作用 |
 |------|------|
 | `core/agent_policy.py` | 动作分级表 T0–T3、批量阈值 3、确认码（10 分钟、一次性、请求指纹） |
-| `web_api/agent_guard.py` | 路由 → 动作映射，应用级依赖统一拦截 |
-| `core/agent_ops.py` | begin / finish / abort 共享流程（HTTP 与 MCP 共用） |
-| `core/agent_journal.py` | 实体级 before / after 撤销日志 `agent-journal.yaml` |
+| `web_api/agent_guard.py` | `/api/v1` 路由与实际 JobKind → 动作映射，统一拦截 |
+| `web_reader_api/agent_guard.py` | Reader 路由、Paper event、Reader action → 动作映射；未知动作 fail closed |
+| `core/agent_ops.py` | 预授权、提交前快照、strict journal、reservation 收尾（HTTP 与 MCP 共用） |
+| `core/reader_ops.py` | Reader 同步 / worker 提交段与协作取消边界 |
+| `core/agent_journal.py` | 实体、JSONL 行、文本和 PDF 的 before / after 撤销日志 |
 
-- T1 日常操作（打卡、加任务、勾子任务、习惯计划等）直写、记日志、可撤销。
+- T1 日常操作（打卡、加任务、勾子任务、习惯计划、Reader 进度与标注等）直写、记日志、可撤销。
 - T2 重要操作（删除、超过 3 条的批量、改目标 / 北极星 / 技能点、证据编辑与评审、结晶 apply 等）先 428，助手在聊天里请用户确认后带 `X-Nblane-Confirm` 重发。
 - T3 页面专属（发布、权限、系统设置）对 Agent 返回 403 `agent_forbidden`。
+- 主 API 与 Reader 后台任务在 worker 的真实提交段记账；取消 / 超时在提交边界生效，已提交部分保留且可撤销，未提交结果不得晚到落盘。
 - 定时任务归 OpenClaw 管（`openclaw automations`），nblane 不同步；`nblane openclaw automations sync` 只是可选的手动工具。
 
 用户侧说明（接入、确认、撤销、助手页）见 [个人助手](../guides/assistant.md)，运维见 [OpenClaw 运维](../guides/openclaw-ops.md)。

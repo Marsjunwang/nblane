@@ -13,7 +13,7 @@ from typing import Any
 
 import yaml
 
-from nblane.core import llm as llm_client
+from nblane.core import agent_ops, agent_policy, llm as llm_client, reader_ops
 from nblane.core.auth import mint_reader_token
 from nblane.core.profile_io import profile_dir
 from nblane.core.research_papers import (
@@ -50,7 +50,7 @@ from nblane.core.research_papers import (
 from nblane.core.research_sources import (
     SOURCE_STATUSES,
     load_research_sources,
-    save_research_sources,
+    mutate_research_sources,
     update_research_source,
 )
 from nblane.core.research_workspace import load_chunks
@@ -957,6 +957,8 @@ def handle_paper_library_event(
     *,
     selected_paper_ids: list[str] | None = None,
     progress_callback: Any | None = None,
+    cancel_callback: Any | None = None,
+    commit: reader_ops.Commit | None = None,
     ui_lang: str | None = None,
 ) -> PaperLibraryEventResult:
     """Apply one Paper Library UI event and return a structured result.
@@ -971,6 +973,12 @@ def handle_paper_library_event(
     payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
     state = event.get("state") if isinstance(event.get("state"), dict) else {}
     labels = paper_library_labels(ui_lang or event.get("ui_lang") or state.get("ui_lang"))
+    if action not in agent_policy.PAPER_LIBRARY_EVENT_ACTIONS:
+        return PaperLibraryEventResult(
+            ok=False,
+            message=_fmt(labels, "srv_unknown_event", action=action),
+        )
+    write = reader_ops.commit_or_direct(commit)
 
     def event_paper_ids() -> list[str]:
         return _clean_list(payload.get("paper_ids")) or list(selected_paper_ids or [])
@@ -1015,51 +1023,60 @@ def handle_paper_library_event(
         return PaperLibraryEventResult(message="", data={"delete_preview": preview})
 
     if action == "paper_library_create_collection":
-        node = create_paper_library_node(
+        reader_ops.checkpoint(cancel_callback)
+        node = write(lambda: create_paper_library_node(
             profile,
             _clean_text(payload.get("title")),
             parent_id=_clean_text(payload.get("parent_id")),
-        )
+        ))
         changed["nodes"] = [node.id]
     elif action == "paper_library_rename_collection":
-        node = rename_paper_library_node(
+        reader_ops.checkpoint(cancel_callback)
+        node = write(lambda: rename_paper_library_node(
             profile,
             _clean_text(payload.get("node_id")),
             _clean_text(payload.get("title")),
-        )
+        ))
         changed["nodes"] = [node.id]
     elif action == "paper_library_move_collection":
-        node = position_paper_library_node(
+        reader_ops.checkpoint(cancel_callback)
+        node = write(lambda: position_paper_library_node(
             profile,
             _clean_text(payload.get("node_id")),
             parent_id=_clean_text(payload.get("parent_id")),
             before_node_id=_clean_text(payload.get("before_node_id")),
             after_node_id=_clean_text(payload.get("after_node_id")),
-        )
+        ))
         changed["nodes"] = [node.id]
     elif action == "paper_library_reorder_collection":
-        node = reorder_paper_library_node(
+        reader_ops.checkpoint(cancel_callback)
+        node = write(lambda: reorder_paper_library_node(
             profile,
             _clean_text(payload.get("node_id")),
             _clean_text(payload.get("direction")) or "down",
-        )
+        ))
         changed["nodes"] = [node.id]
     elif action == "paper_library_trash_collection":
-        node = trash_paper_library_node(
+        reader_ops.checkpoint(cancel_callback)
+        node = write(lambda: trash_paper_library_node(
             profile,
             _clean_text(payload.get("node_id")),
             paper_policy=_clean_text(payload.get("paper_policy")) or "move_to_parent",
-        )
+        ))
         changed["nodes"] = [node.id]
     elif action == "paper_library_purge_collection":
-        node = purge_paper_library_node(
+        reader_ops.checkpoint(cancel_callback)
+        node = write(lambda: purge_paper_library_node(
             profile,
             _clean_text(payload.get("node_id")),
             paper_policy=_clean_text(payload.get("paper_policy")) or "move_to_unsorted",
-        )
+        ))
         changed["nodes"] = [node.id]
     elif action == "paper_library_restore_collection":
-        node = restore_paper_library_node(profile, _clean_text(payload.get("node_id")))
+        reader_ops.checkpoint(cancel_callback)
+        node = write(lambda: restore_paper_library_node(
+            profile, _clean_text(payload.get("node_id"))
+        ))
         changed["nodes"] = [node.id]
     elif action in {
         "paper_library_add_selected_papers_to_collection",
@@ -1067,29 +1084,37 @@ def handle_paper_library_event(
         "paper_library_drop_papers_to_collection",
     }:
         source_ids = event_paper_ids()
-        changed["sources"] = move_papers_to_node(
+        reader_ops.checkpoint(cancel_callback)
+        changed["sources"] = write(lambda: move_papers_to_node(
             profile,
             source_ids,
             _clean_text(payload.get("node_id")),
             append=action == "paper_library_add_selected_papers_to_collection" or bool(payload.get("append")),
-        )
+        ))
     elif action == "paper_library_remove_papers_from_collection":
-        changed["sources"] = remove_papers_from_node(
+        reader_ops.checkpoint(cancel_callback)
+        changed["sources"] = write(lambda: remove_papers_from_node(
             profile,
             event_paper_ids(),
             _clean_text(payload.get("node_id")),
-        )
+        ))
     elif action == "paper_library_update_papers_status":
         next_status = _clean_text(payload.get("status"))
         if next_status not in SOURCE_STATUSES:
             raise ValueError(f"Unknown source status: {next_status}")
-        inbox = load_research_sources(_profile_root(profile))
-        changed_sources: list[str] = []
-        for source_id in event_paper_ids():
-            update_research_source(inbox, source_id, status=next_status)
-            changed_sources.append(source_id)
-        if changed_sources:
-            save_research_sources(_profile_root(profile), inbox)
+        selected_ids = event_paper_ids()
+
+        def apply_status(inbox) -> list[str]:
+            changed_sources: list[str] = []
+            for source_id in selected_ids:
+                update_research_source(inbox, source_id, status=next_status)
+                changed_sources.append(source_id)
+            return changed_sources
+
+        reader_ops.checkpoint(cancel_callback)
+        changed_sources = write(lambda: mutate_research_sources(
+            _profile_root(profile), apply_status
+        ))
         changed["sources"] = changed_sources
         message_key = {
             "reading": "srv_marked_reading",
@@ -1109,9 +1134,12 @@ def handle_paper_library_event(
             raise ValueError("source_id is required")
         if not title:
             raise ValueError("Paper title cannot be blank.")
-        inbox = load_research_sources(_profile_root(profile))
-        update_research_source(inbox, source_id, title=title)
-        save_research_sources(_profile_root(profile), inbox)
+
+        def apply_rename(inbox) -> None:
+            update_research_source(inbox, source_id, title=title)
+
+        reader_ops.checkpoint(cancel_callback)
+        write(lambda: mutate_research_sources(_profile_root(profile), apply_rename))
         changed["sources"] = [source_id]
         next_state["detail_id"] = source_id
         message = labels["srv_renamed_paper"]
@@ -1127,10 +1155,13 @@ def handle_paper_library_event(
                     "message": labels["srv_downloading_pdf"],
                 }
             )
+            reader_ops.checkpoint(cancel_callback)
             summary = ensure_paper_pdf_downloaded(
                 profile,
                 source_id,
                 error_prefix="PDF download failed",
+                cancel_callback=cancel_callback,
+                commit=commit,
             )
             download_summaries.append(summary)
             changed_sources.append(source_id)
@@ -1162,11 +1193,14 @@ def handle_paper_library_event(
                     "message": labels["srv_extracting"],
                 }
             )
+            reader_ops.checkpoint(cancel_callback)
             summary = ensure_paper_reading_artifacts(
                 _profile_root(profile),
                 source_id,
                 force_grobid=bool(payload.get("force_grobid")),
                 progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+                commit=commit,
             )
             extraction_summaries.append(summary)
             changed_sources.append(source_id)
@@ -1212,12 +1246,15 @@ def handle_paper_library_event(
                     "message": labels["srv_preparing_translation"],
                 }
             )
+            reader_ops.checkpoint(cancel_callback)
             extraction_summary = ensure_paper_reading_artifacts(
                 _profile_root(profile),
                 source_id,
                 target_lang=target_lang,
                 force_grobid=bool(payload.get("force_grobid")),
                 progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+                commit=commit,
             )
             extraction_summaries.append(extraction_summary)
             try:
@@ -1233,6 +1270,7 @@ def handle_paper_library_event(
                         "message": labels["srv_starting_translation"],
                     }
                 )
+                reader_ops.checkpoint(cancel_callback)
                 translation_summary = translate_full_paper(
                     _profile_root(profile),
                     source_id,
@@ -1242,7 +1280,11 @@ def handle_paper_library_event(
                     include_references=include_references,
                     require_review=False,
                     progress_callback=progress_callback,
+                    cancel_callback=cancel_callback,
+                    commit=commit,
                 )
+            except (reader_ops.ReaderCancelled, agent_ops.AgentJournalError):
+                raise
             except Exception as exc:
                 translation_summary = {
                     "source_id": source_id,
@@ -1286,7 +1328,8 @@ def handle_paper_library_event(
         changed_chunks: list[str] = []
         changed_sources = []
         for source_id in event_paper_ids():
-            chunks = auto_chunk_paper(_profile_root(profile), source_id)
+            reader_ops.checkpoint(cancel_callback)
+            chunks = write(lambda: auto_chunk_paper(_profile_root(profile), source_id))
             changed_sources.append(source_id)
             changed_chunks.extend(chunk.id for chunk in chunks)
         changed["sources"] = changed_sources
@@ -1296,12 +1339,13 @@ def handle_paper_library_event(
         confirm = _clean_text(payload.get("confirm"))
         if len(source_ids) == 1 and confirm != source_ids[0]:
             raise ValueError("Type the source id to confirm paper deletion.")
-        result = delete_paper_record(
+        reader_ops.checkpoint(cancel_callback)
+        result = write(lambda: delete_paper_record(
             _profile_root(profile),
             source_ids,
             delete_pdf_asset=bool(payload.get("delete_pdf_asset")),
             delete_reader_artifacts=bool(payload.get("delete_reader_artifacts")),
-        )
+        ))
         changed["sources"] = [str(item) for item in result.get("deleted_sources", [])]
         changed["pdf_assets"] = [str(item) for item in result.get("deleted_pdf_assets", [])]
         changed["artifacts"] = [str(item) for item in result.get("deleted_artifacts", [])]
@@ -1311,23 +1355,26 @@ def handle_paper_library_event(
     elif action == "paper_library_delete_paper_asset":
         changed_assets: list[str] = []
         for source_id in event_paper_ids():
-            result = delete_paper_pdf_asset(_profile_root(profile), source_id)
+            reader_ops.checkpoint(cancel_callback)
+            result = write(lambda: delete_paper_pdf_asset(_profile_root(profile), source_id))
             changed_assets.extend(str(item) for item in result.get("deleted_pdf_assets", []))
         changed["pdf_assets"] = changed_assets
         message = _fmt(labels, "srv_deleted_assets", count=len(changed_assets))
     elif action == "paper_library_delete_paper_artifacts":
         changed_artifacts: list[str] = []
         for source_id in event_paper_ids():
-            result = delete_paper_reader_artifacts(_profile_root(profile), source_id)
+            reader_ops.checkpoint(cancel_callback)
+            result = write(lambda: delete_paper_reader_artifacts(_profile_root(profile), source_id))
             changed_artifacts.extend(str(item) for item in result.get("deleted_artifacts", []))
         changed["artifacts"] = changed_artifacts
         message = _fmt(labels, "srv_deleted_artifacts", count=len(changed_artifacts))
     elif action == "paper_library_purge_discarded_papers":
-        result = purge_discarded_papers(
+        reader_ops.checkpoint(cancel_callback)
+        result = write(lambda: purge_discarded_papers(
             _profile_root(profile),
             delete_pdf_asset=bool(payload.get("delete_pdf_asset")),
             delete_reader_artifacts=bool(payload.get("delete_reader_artifacts")),
-        )
+        ))
         changed["sources"] = [str(item) for item in result.get("deleted_sources", [])]
         changed["pdf_assets"] = [str(item) for item in result.get("deleted_pdf_assets", [])]
         changed["artifacts"] = [str(item) for item in result.get("deleted_artifacts", [])]

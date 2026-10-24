@@ -68,7 +68,7 @@ class TestReaderTasks(unittest.TestCase):
         self.assertEqual(snap["source_id"], "source:paper:grounded")
         self.assertIn("lost", snap["error"])
 
-    def test_cancel_marks_running_task_cancelled(self) -> None:
+    def test_cancel_waits_for_worker_before_terminal_cancelled(self) -> None:
         started = threading.Event()
         release = threading.Event()
 
@@ -82,10 +82,14 @@ class TestReaderTasks(unittest.TestCase):
             with patch("nblane.core.reader_tasks.handle_reader_action", side_effect=run_action):
                 reader_tasks.start(ctx, "ask_paper", {"question": "Why?"}, task_id="reader-task-test-cancel")
                 self.assertTrue(started.wait(timeout=1))
-                cancelled = reader_tasks.cancel("reader-task-test-cancel", ctx=ctx)
+                cancelling = reader_tasks.cancel("reader-task-test-cancel", ctx=ctx)
                 release.set()
+                final = list(reader_tasks.iter_snapshots("reader-task-test-cancel", ctx=ctx, poll_seconds=0.01))[-1]
 
-        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(cancelling["status"], "cancelling")
+        self.assertTrue(cancelling["cancel_requested"])
+        self.assertEqual(cancelling["finished_at"], 0.0)
+        self.assertEqual(final["status"], "cancelled")
 
     def test_translate_full_progress_callback_updates_snapshot(self) -> None:
         progress_seen = threading.Event()

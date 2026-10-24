@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
 
@@ -594,6 +595,21 @@ def archive_research_source(
     return update_research_source(inbox, source_id, status="archived")
 
 
+def _research_sources_text(inbox: ResearchSourceInbox, path: Path) -> str:
+    profile_name = inbox.profile or path.parent.parent.name
+    header = (
+        f"# Research sources for {profile_name}\n"
+        "# Sources are not evidence until reviewed into evidence candidates.\n\n"
+    )
+    body = yaml.dump(
+        inbox.to_dict(),
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+    return header + body
+
+
 def save_research_sources(
     name_or_dir: str | Path,
     data: ResearchSourceInbox | dict,
@@ -616,26 +632,56 @@ def save_research_sources(
     )
     inbox.profile = inbox.profile or path.parent.parent.name
     inbox.updated = date.today().isoformat()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _preserve_newer_reader_state(path, inbox)
-    header = (
-        f"# Research sources for {inbox.profile or path.parent.parent.name}\n"
-        "# Sources are not evidence until reviewed into evidence candidates.\n\n"
-    )
-    body = yaml.dump(
-        inbox.to_dict(),
-        allow_unicode=True,
-        default_flow_style=False,
-        sort_keys=False,
-    )
     with locked_profile_write(path.parent, path.name):
         if expected_snapshot is not None:
             assert_unchanged(path, expected_snapshot, label=path.name)
-        atomic_write_text(path, header + body)
+        _preserve_newer_reader_state(path, inbox)
+        atomic_write_text(path, _research_sources_text(inbox, path))
     git_backup.record_change(
         [path],
         action=f"update {path.parent.parent.name}/research/sources.yaml",
     )
+
+
+_T = TypeVar("_T")
+
+
+def mutate_research_sources(
+    name_or_dir: str | Path,
+    fn: Callable[[ResearchSourceInbox], _T],
+    *,
+    expected_snapshot: FileSnapshot | None = None,
+) -> _T:
+    """Apply a pure in-memory callback to the latest sources under one lock.
+
+    Callback exceptions and no-op mutations do not write or create a backup.
+    The callback must not invoke another writer for this same sources file.
+    """
+    path = _profile_file_path(name_or_dir)
+    changed = False
+    with locked_profile_write(path.parent, path.name):
+        if expected_snapshot is not None:
+            assert_unchanged(path, expected_snapshot, label=path.name)
+        raw = _load_yaml_dict(path)
+        inbox = (
+            ResearchSourceInbox.from_dict(raw)
+            if raw is not None
+            else ResearchSourceInbox()
+        )
+        inbox.profile = inbox.profile or path.parent.parent.name
+        before = copy.deepcopy(inbox.to_dict())
+        result = fn(inbox)
+        inbox.profile = inbox.profile or path.parent.parent.name
+        changed = inbox.to_dict() != before
+        if changed:
+            inbox.updated = date.today().isoformat()
+            atomic_write_text(path, _research_sources_text(inbox, path))
+    if changed:
+        git_backup.record_change(
+            [path],
+            action=f"update {path.parent.parent.name}/research/sources.yaml",
+        )
+    return result
 
 
 def _source_metadata(source: ResearchSource) -> dict[str, Any]:
@@ -994,11 +1040,15 @@ def apply_research_evidence_candidate(
     pool["evidence_entries"] = evidence_entries
     save_evidence_pool(clean_profile, pool)
 
-    if new_row["id"] not in source.evidence_refs:
-        source.evidence_refs.append(new_row["id"])
-    if source.status in {"inbox", "reading", "summarized"}:
-        source.status = "candidate_ready"
-    save_research_sources(clean_profile, inbox)
+    def link_evidence(latest: ResearchSourceInbox) -> ResearchSource:
+        latest_source = _find_source(latest, source_id)
+        if new_row["id"] not in latest_source.evidence_refs:
+            latest_source.evidence_refs.append(new_row["id"])
+        if latest_source.status in {"inbox", "reading", "summarized"}:
+            latest_source.status = "candidate_ready"
+        return latest_source
+
+    source = mutate_research_sources(clean_profile, link_evidence)
 
     pdir = profile_dir(clean_profile)
     changed_paths = [
@@ -1056,6 +1106,7 @@ __all__ = [
     "generate_reading_draft",
     "load_research_sources",
     "load_research_sources_raw",
+    "mutate_research_sources",
     "research_evidence_patch",
     "save_research_sources",
     "update_research_source",
