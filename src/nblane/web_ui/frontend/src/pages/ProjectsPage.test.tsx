@@ -154,7 +154,10 @@ const MUTATION_RESULT = {
   merge_notices: [],
 };
 
-type FetchHandler = (url: string, init?: RequestInit) => Response | Promise<Response>;
+type FetchHandler = (
+  url: string,
+  init?: RequestInit,
+) => Response | undefined | Promise<Response | undefined>;
 
 function stubFetch(handler?: FetchHandler) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -499,6 +502,26 @@ describe('ProjectsPage board view', () => {
     // land in context (MUTATION_RESULT.card.id = kb_1 in this fixture).
     await waitFor(() => expect(lastSearch).toContain('task=kb_1'));
     expect(await screen.findByTestId('task-detail-card')).toHaveTextContent('读 VLA 综述');
+  });
+
+  it('quick-add keeps the draft and shows an inline error when creation fails', async () => {
+    stubFetch((url, init) =>
+      url.includes('/project-board/cases/p1/tasks') && init?.method === 'POST'
+        ? jsonResponse(500, { detail: 'forced offline' })
+        : undefined,
+    );
+    renderPage();
+    await screen.findByText('读 VLA 综述');
+
+    fireEvent.click(screen.getByTestId('quick-add-p1'));
+    const input = screen.getByTestId('quick-add-input-p1');
+    fireEvent.change(input, { target: { value: '失败时保留这段草稿' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(input).toHaveAttribute('aria-invalid', 'true'));
+    expect(input).toHaveValue('失败时保留这段草稿');
+    expect(screen.getByTestId('quick-add-editor-p1')).toBeInTheDocument();
+    expect(screen.queryByTestId('task-detail-card')).not.toBeInTheDocument();
   });
 
   it('unassigned quick-add posts a kanban card and auto-opens the detail card', async () => {

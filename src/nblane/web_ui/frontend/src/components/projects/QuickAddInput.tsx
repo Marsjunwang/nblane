@@ -1,25 +1,51 @@
-// 「＋ 快速添加」— the persistent inline-create row pinned to the top of
-// every lane's Queue column (裁决4:创建 ≤1 次点击,零滚动). Click unfolds the
-// input; Enter submits; Escape/blur folds back. The full-field form stays in
-// the project edit drawer.
+// 「＋ 快速添加」— title, open state and the optional continuous mode live in
+// the lane controller, so a folded lane becoming non-empty cannot lose them.
 
-import { TextInput } from '@mantine/core';
+import { Checkbox, Group, Stack, TextInput } from '@mantine/core';
+import { useLocalStorage } from '@mantine/hooks';
 import { IconPlus } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { boardPalette } from './palette';
 
+export interface QuickAddController {
+  open: boolean;
+  title: string;
+  continuous: boolean;
+  setOpen: (value: boolean) => void;
+  setTitle: (value: string) => void;
+  setContinuous: (value: boolean) => void;
+}
+
+export interface QuickAddCallbacks {
+  onSuccess: () => void;
+  onError: (message: string) => void;
+}
+
+export interface QuickAddOptions {
+  pending: boolean;
+  controller: QuickAddController;
+  onSubmit: (title: string, callbacks: QuickAddCallbacks) => void;
+}
+
+export function useQuickAddController(): QuickAddController {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState('');
+  const [continuous, setContinuous] = useLocalStorage({
+    key: 'nblane.projects.quickAdd.continuous',
+    defaultValue: false,
+  });
+  return { open, title, continuous, setOpen, setTitle, setContinuous };
+}
+
 export function QuickAddInput({
   laneId,
   pending,
+  controller,
   onSubmit,
-}: {
-  laneId: string;
-  pending: boolean;
-  onSubmit: (title: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState('');
+}: QuickAddOptions & { laneId: string }) {
+  const { open, title, continuous, setOpen, setTitle, setContinuous } = controller;
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -28,15 +54,33 @@ export function QuickAddInput({
     }
   }, [open]);
 
+  useEffect(() => {
+    if (!open || pending) {
+      return;
+    }
+    const active = document.activeElement;
+    if (active === document.body || active === inputRef.current) {
+      inputRef.current?.focus();
+    }
+  }, [open, pending]);
+
   const submit = () => {
     const value = title.trim();
     if (!value || pending) {
       return;
     }
-    onSubmit(value);
-    setTitle('');
-    // Keep the input open for rapid consecutive adds.
-    inputRef.current?.focus();
+    setError(null);
+    onSubmit(value, {
+      onSuccess: () => {
+        setTitle('');
+        setError(null);
+        inputRef.current?.focus();
+      },
+      onError: (message) => {
+        setError(message);
+        inputRef.current?.focus();
+      },
+    });
   };
 
   if (!open) {
@@ -67,29 +111,52 @@ export function QuickAddInput({
     );
   }
   return (
-    <TextInput
-      ref={inputRef}
-      size="sm"
-      className="projects-form projects-quick-add-input"
-      placeholder="任务标题,回车创建"
-      value={title}
-      disabled={pending}
-      data-testid={`quick-add-input-${laneId}`}
-      onChange={(event) => setTitle(event.currentTarget.value)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          submit();
-        } else if (event.key === 'Escape') {
-          setTitle('');
-          setOpen(false);
-        }
-      }}
-      onBlur={() => {
-        if (!title.trim()) {
-          setOpen(false);
-        }
-      }}
-    />
+    <Stack gap={4} data-quick-add-root={laneId} data-testid={`quick-add-editor-${laneId}`}>
+      <Group gap="xs" wrap="nowrap">
+        <TextInput
+          ref={inputRef}
+          size="sm"
+          className="projects-form projects-quick-add-input"
+          placeholder="任务标题,回车创建"
+          value={title}
+          disabled={pending}
+          error={error ?? undefined}
+          data-testid={`quick-add-input-${laneId}`}
+          style={{ flex: 1, minWidth: 0 }}
+          onChange={(event) => {
+            setTitle(event.currentTarget.value);
+            setError(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              submit();
+            } else if (event.key === 'Escape') {
+              setTitle('');
+              setError(null);
+              setOpen(false);
+            }
+          }}
+          onBlur={(event) => {
+            const root = event.currentTarget.closest('[data-quick-add-root]');
+            const inside = event.relatedTarget instanceof Node && root?.contains(event.relatedTarget);
+            if (!title.trim() && !continuous && !inside) {
+              setOpen(false);
+            }
+          }}
+        />
+        <Checkbox
+          size="sm"
+          label="连续"
+          aria-label="连续添加"
+          checked={continuous}
+          disabled={pending}
+          className="projects-quick-add-continuous"
+          data-testid={`quick-add-continuous-${laneId}`}
+          onChange={(event) => setContinuous(event.currentTarget.checked)}
+          styles={{ root: { minHeight: 36 }, label: { color: boardPalette.dim, fontSize: 13 } }}
+        />
+      </Group>
+    </Stack>
   );
 }

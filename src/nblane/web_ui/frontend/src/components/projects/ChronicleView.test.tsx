@@ -206,27 +206,43 @@ describe('ChronicleView 触屏控制', () => {
   it('按钮按一行向过去/现在翻页，并能回到今天', async () => {
     renderNarrowView();
     const readout = screen.getByTestId('chronicle-span-readout');
-    expect(readout).toHaveTextContent('→ 2026-10-18');
+    expect(readout).toHaveTextContent('每行 30 天');
+    expect(readout).toHaveTextContent('→ 2026-10-03');
 
     fireEvent.click(screen.getByTestId('chronicle-older'));
-    await waitFor(() => expect(readout).toHaveTextContent('→ 2026-07-20'));
+    await waitFor(() => expect(readout).toHaveTextContent('→ 2026-09-03'));
     fireEvent.click(screen.getByTestId('chronicle-newer'));
-    await waitFor(() => expect(readout).toHaveTextContent('→ 2026-10-18'));
+    await waitFor(() => expect(readout).toHaveTextContent('→ 2026-10-03'));
 
     fireEvent.click(screen.getByTestId('chronicle-older'));
-    await waitFor(() => expect(readout).toHaveTextContent('→ 2026-07-20'));
+    await waitFor(() => expect(readout).toHaveTextContent('→ 2026-09-03'));
     fireEvent.click(screen.getByTestId('chronicle-today-button'));
-    await waitFor(() => expect(readout).toHaveTextContent('→ 2026-10-18'));
+    await waitFor(() => expect(readout).toHaveTextContent('→ 2026-10-03'));
   });
 
-  it('不依赖 Ctrl+滚轮也能改变每行天数', async () => {
+  it('不依赖 Ctrl+滚轮也能改变每行天数，重置恢复手机默认 30 天', async () => {
     renderNarrowView();
+    expect(screen.getByRole('textbox', { name: '每行天数' })).toHaveValue('30 天/行');
     fireEvent.click(screen.getByRole('textbox', { name: '每行天数' }));
-    fireEvent.click(await screen.findByRole('option', { name: '30 天/行' }));
+    fireEvent.click(await screen.findByRole('option', { name: '7 天/行' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('chronicle-span-readout')).toHaveTextContent('每行 7 天'),
+    );
+    expect(screen.getByRole('textbox', { name: '每行天数' })).toHaveValue('7 天/行');
+
+    fireEvent.click(screen.getByTestId('chronicle-reset-view'));
     await waitFor(() =>
       expect(screen.getByTestId('chronicle-span-readout')).toHaveTextContent('每行 30 天'),
     );
     expect(screen.getByRole('textbox', { name: '每行天数' })).toHaveValue('30 天/行');
+  });
+
+  it('图例通过点击打开，使用直白的状态与操作说明', async () => {
+    renderNarrowView();
+    fireEvent.click(screen.getByRole('button', { name: '大事记图例与操作说明' }));
+    expect(await screen.findByText('月白刻点 = 已完成')).toBeInTheDocument();
+    expect(screen.getByText('虚线框 = 待办 / 排期')).toBeInTheDocument();
+    expect(screen.getByText('点按事件查看完整标题和项目；「较新 / 较早」按一行翻页。')).toBeInTheDocument();
   });
 
   it('手机详情在画布下方显示，关闭按钮同时收起卡片和选中态', async () => {

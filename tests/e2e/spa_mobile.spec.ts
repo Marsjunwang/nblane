@@ -498,8 +498,8 @@ test.describe("SPA mobile 375px — 项目触屏", () => {
       await page.getByTestId("chronicle-newer").tap();
       await expect(readout).toHaveText(initialChronicle ?? "");
       await page.getByRole("textbox", { name: "每行天数" }).tap();
-      await page.getByRole("option", { name: "30 天/行" }).tap();
-      await expect(readout).toContainText("每行 30 天");
+      await page.getByRole("option", { name: "7 天/行" }).tap();
+      await expect(readout).toContainText("每行 7 天");
       await page.getByTestId(`chronicle-event-${taskId}`).tap();
       const inspector = page.getByTestId("chronicle-inspector");
       await expect(inspector).toBeVisible();
@@ -511,6 +511,114 @@ test.describe("SPA mobile 375px — 项目触屏", () => {
       await request.delete(api(`/kanban/cards/${encodeURIComponent(taskId)}`), {
         data: { record_chronicle: false },
       });
+    }
+  });
+});
+
+test.describe("SPA mobile 375px — 项目可用性回归", () => {
+  test("任务详情输入不被工具栏遮挡，大事记默认 30 天且图例可点开", async ({ page, request }) => {
+    const title = `e2e-mob-usability-${Date.now()}`;
+    const taskId = await seedKanbanCard(request, title);
+    try {
+      await page.goto(spa(`projects?task=${taskId}`));
+      const dateInput = page.getByLabel("排期开始");
+      await dateInput.tap();
+      await dateInput.fill("2026-11-01");
+      await expect(dateInput).toHaveValue("2026-11-01");
+      const coveredByToolbar = await dateInput.evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        return Boolean(hit?.closest("[data-testid='projects-toolbar']"));
+      });
+      expect(coveredByToolbar).toBe(false);
+      await page.getByRole("button", { name: "关闭详情" }).tap();
+
+      await page.goto(spa("projects?view=story"));
+      await expect(page.getByRole("textbox", { name: "每行天数" })).toHaveValue("30 天/行");
+      await page.getByTestId("chronicle-legend-button").tap();
+      await expect(page.getByTestId("chronicle-legend-content")).toBeVisible();
+      await expect(page.getByText("月白刻点 = 已完成", { exact: true })).toBeVisible();
+      await expect(page.getByText("虚线框 = 待办 / 排期", { exact: true })).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+    } finally {
+      await request.delete(api(`/kanban/cards/${encodeURIComponent(taskId)}`), {
+        data: { record_chronicle: false },
+      });
+    }
+  });
+
+  test("空泳道连续添加两条后仍保留输入框和焦点", async ({ page, request }) => {
+    const run = Date.now();
+    const caseTitle = `e2e-mob-continuous-${run}`;
+    const create = await request.post(api("/project-board/cases"), { data: { title: caseTitle } });
+    expect(create.status()).toBe(201);
+    const caseId: string = (await create.json()).case.id;
+    const taskIds: string[] = [];
+    try {
+      await page.goto(spa("projects"));
+      const lane = page.getByTestId(`project-lane-${caseId}`);
+      await lane.getByTestId(`quick-add-${caseId}`).tap();
+      const continuous = lane.getByRole("checkbox", { name: "连续添加" });
+      await continuous.tap();
+      await expect(continuous).toBeChecked();
+      const input = lane.getByTestId(`quick-add-input-${caseId}`);
+      const add = async (title: string) => {
+        await input.fill(title);
+        const responsePromise = page.waitForResponse(
+          (res) => res.url().includes(`/project-board/cases/${encodeURIComponent(caseId)}/tasks`) && res.request().method() === "POST",
+        );
+        await input.press("Enter");
+        const response = await responsePromise;
+        expect(response.status()).toBeLessThan(300);
+        taskIds.push((await response.json()).card.id);
+      };
+
+      await add(`连续任务一-${run}`);
+      await expect(input).toHaveValue("");
+      await expect(input).toBeFocused();
+      await add(`连续任务二-${run}`);
+      await expect(input).toHaveValue("");
+      await expect(input).toBeFocused();
+      await expect(page.getByTestId("task-detail-card")).toHaveCount(0);
+      await expect(lane.getByText(`连续任务一-${run}`, { exact: true })).toBeVisible();
+      await expect(lane.getByText(`连续任务二-${run}`, { exact: true })).toBeVisible();
+    } finally {
+      for (const taskId of taskIds) {
+        await request.delete(api(`/kanban/cards/${encodeURIComponent(taskId)}`), {
+          data: { record_chronicle: false },
+        });
+      }
+      await request.delete(api(`/project-board/cases/${caseId}`), {
+        data: { confirm_title: caseTitle, record_chronicle: false },
+      });
+    }
+  });
+
+  test("快添请求失败时保留草稿并在输入区显示错误", async ({ page }) => {
+    const lane = page.locator("[data-testid^=project-lane-]").first();
+    await page.goto(spa("projects"));
+    const laneId = (await lane.getAttribute("data-testid"))!.replace("project-lane-", "");
+    const title = `失败时保留-${Date.now()}`;
+    await lane.locator(`[data-testid="quick-add-${laneId}"]`).tap();
+    const input = lane.getByTestId(`quick-add-input-${laneId}`);
+    await input.fill(title);
+    await page.route("**/api/v1/profiles/dev/project-board/cases/*/tasks", (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "forced offline test" }),
+      }),
+    );
+    try {
+      await input.press("Enter");
+      await expect(page.getByText("forced offline test", { exact: true })).toBeVisible();
+      await expect(input).toHaveValue(title);
+      await expect(input).toBeFocused();
+      await expect(lane.getByTestId(`quick-add-editor-${laneId}`)).toBeVisible();
+      await expect(page.getByTestId("task-detail-card")).toHaveCount(0);
+      await expectNoHorizontalOverflow(page);
+    } finally {
+      await page.unroute("**/api/v1/profiles/dev/project-board/cases/*/tasks");
     }
   });
 });

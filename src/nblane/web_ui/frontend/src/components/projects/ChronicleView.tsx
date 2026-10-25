@@ -17,7 +17,7 @@
 
 import { ActionIcon, Box, Button, Group, MultiSelect, Popover, Select, Stack, Text, Tooltip } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconChevronDown, IconChevronUp, IconRestore, IconX } from '@tabler/icons-react';
+import { IconChevronDown, IconChevronUp, IconInfoCircle, IconRestore, IconX } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
@@ -800,7 +800,11 @@ export function ChronicleView({
   const today = board.today || '';
   const [searchParams, setSearchParams] = useSearchParams();
   const [initialUrl] = useState(() => decodeChronicleParams(searchParams));
-  const [span, setSpan] = useState(initialUrl.span ?? CHRONICLE_DEFAULT_SPAN);
+  const defaultSpan = narrow ? 30 : CHRONICLE_DEFAULT_SPAN;
+  const [span, setSpan] = useState(
+    initialUrl.span ??
+      (window.matchMedia('(max-width: 48em)').matches ? 30 : CHRONICLE_DEFAULT_SPAN),
+  );
   const [anchor, setAnchor] = useState(() => initialUrl.top ?? defaultChronicleAnchor(today, span));
   const [filterSelection, setFilterSelection] = useState<Set<string> | null>(
     initialUrl.projects ?? null,
@@ -1084,11 +1088,10 @@ export function ChronicleView({
     saveProjectFilter(window.localStorage, next ?? new Set(allProjectIds), CHRONICLE_FILTER_KEY);
   };
 
-  // 重置视图: default 90 天/行 anchored on today, 全项目, breaks folded,
-  // and the stored filter pref dropped so a refresh stays on the default.
+  // 重置视图: desktop 90d / phone 30d per row, all projects, folded breaks.
   const resetView = () => {
-    setSpan(CHRONICLE_DEFAULT_SPAN);
-    setAnchor(defaultChronicleAnchor(today, CHRONICLE_DEFAULT_SPAN));
+    setSpan(defaultSpan);
+    setAnchor(defaultChronicleAnchor(today, defaultSpan));
     setFilterSelection(null);
     setExpandedBreaks(new Set());
     try {
@@ -1256,11 +1259,46 @@ export function ChronicleView({
             </ActionIcon>
           </Tooltip>
         </Group>
-        <Text size="xs" style={{ color: DIM_DEEP }}>
-          {narrow
-            ? '刻点=完成 · 金条=进行 · 虚框=排期 · 虚点=虚位'
-            : '刻点=完成(顶部图形=项目 ●◆■▲★✦◈✚) · 金条=进行 · 虚框=排期 · 虚点=虚位 · ///=断轴 · ▲=今天'}
-        </Text>
+        <Popover
+          width={270}
+          position="bottom-start"
+          withArrow
+          withinPortal
+          shadow="md"
+          styles={{
+            dropdown: {
+              background: inscription.background,
+              border: `1px solid ${inscription.borderColor}`,
+            },
+          }}
+        >
+          <Popover.Target>
+            <Button
+              variant="subtle"
+              size={narrow ? 'sm' : 'compact-sm'}
+              leftSection={<IconInfoCircle size={14} />}
+              aria-label="大事记图例与操作说明"
+              data-testid="chronicle-legend-button"
+              style={{ color: boardPalette.dim, paddingInline: narrow ? 0 : undefined }}
+            >
+              图例
+            </Button>
+          </Popover.Target>
+          <Popover.Dropdown>
+            <Stack gap={4} data-testid="chronicle-legend-content">
+              <Text size="sm">月白刻点 = 已完成</Text>
+              <Text size="sm">金色短条 = 进行中</Text>
+              <Text size="sm">虚线框 = 待办 / 排期</Text>
+              <Text size="sm">金色虚点 = 以后再说</Text>
+              <Text size="xs" style={{ color: inscription.dimColor }}>
+                /// = 无事件间隔 · ▲ = 今天
+              </Text>
+              <Text size="xs" style={{ color: inscription.dimColor }}>
+                点按事件查看完整标题和项目；「较新 / 较早」按一行翻页。
+              </Text>
+            </Stack>
+          </Popover.Dropdown>
+        </Popover>
       </Stack>
 
       {allProjectIds.length > 0 && selectedProjects.size === 0 && (

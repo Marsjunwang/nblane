@@ -294,7 +294,7 @@ export function ProjectsPage() {
           // below the fixed AppShell header.
           position: narrow ? 'static' : 'sticky',
           top: 56,
-          zIndex: selected ? 210 : 10,
+          zIndex: narrow ? 10 : selected ? 210 : 10,
           background: boardPalette.ground,
           border: `1px solid ${boardPalette.border}`,
           borderRadius: 12,

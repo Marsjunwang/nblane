@@ -51,6 +51,7 @@
   }
 
   .projects-page .projects-quick-add,
+  .projects-page .projects-quick-add-continuous,
   .projects-page .projects-done-toggle {
     min-height: 44px;
   }

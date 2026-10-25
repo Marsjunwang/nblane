@@ -68,7 +68,8 @@ import {
   planTodayTasks,
 } from './habitPlans';
 import { LaneColumn, laneColumnDroppableId } from './LaneColumn';
-import { QuickAddInput } from './QuickAddInput';
+import { QuickAddInput, useQuickAddController } from './QuickAddInput';
+import type { QuickAddOptions } from './QuickAddInput';
 import { SortableTaskCard, TaskCardBody } from './TaskCard';
 import { KIND_LABELS, PROJECT_STATUS_LABELS } from './lanes';
 import { boardPalette } from './palette';
@@ -196,6 +197,17 @@ export function handleLaneMutationError(error: unknown, fallbackTitle: string, o
   });
 }
 
+function handleQuickAddError(
+  error: unknown,
+  onRefresh: () => void,
+  onInlineError: (message: string) => void,
+) {
+  onInlineError(error instanceof Error ? error.message : String(error));
+  if (error instanceof ApiError && (error.status === 412 || error.code === 'kanban_card_ambiguous')) {
+    handleLaneMutationError(error, '添加失败', onRefresh);
+  }
+}
+
 /**
  * Queue/Doing columns with per-lane DnD. Shared by ProjectLane and the
  * unassigned lane. `laneId` scopes droppable ids; mutations address cards
@@ -229,7 +241,7 @@ export function TaskLaneDnd({
   onSelectTask: (taskId: string) => void;
   onRefresh: () => void;
   /** Inline「＋ 快速添加」for the Queue column top (裁决4). */
-  quickAdd?: { pending: boolean; onSubmit: (title: string) => void };
+  quickAdd?: QuickAddOptions;
 }) {
   const moveCard = useMoveKanbanCard(profile);
   const doneCard = useDoneKanbanCard(profile);
@@ -475,6 +487,7 @@ export function TaskLaneDnd({
                   <QuickAddInput
                     laneId={laneId}
                     pending={quickAdd.pending}
+                    controller={quickAdd.controller}
                     onSubmit={quickAdd.onSubmit}
                   />
                 ) : undefined
@@ -812,9 +825,11 @@ export function ProjectLane({
       project.habit_id ? activePlansForHabit(plansQuery.data ?? [], project.habit_id) : [],
     [plansQuery.data, project.habit_id],
   );
-  const quickAdd = {
+  const quickAddController = useQuickAddController();
+  const quickAdd: QuickAddOptions = {
     pending: addTask.isPending,
-    onSubmit: (title: string) =>
+    controller: quickAddController,
+    onSubmit: (title, callbacks) =>
       addTask.mutate(
         {
           caseId: project.id,
@@ -823,16 +838,16 @@ export function ProjectLane({
         },
         {
           onSuccess: (result) => {
-            notifications.show({ color: 'green', title: '已添加', message: `「${title}」已进入 Queue。` });
-            // ≤1-click rule kept: the card exists with just a title, but the
-            // detail card opens right away so edits land in context (Esc /
-            // click-away costs nothing when the title was enough).
+            if (!quickAddController.continuous) {
+              notifications.show({ color: 'green', title: '已添加', message: `「${title}」已进入 Queue。` });
+            }
+            callbacks.onSuccess();
             const createdId = result?.card?.id;
-            if (createdId) {
+            if (!quickAddController.continuous && createdId) {
               onSelectTask(createdId);
             }
           },
-          onError: (error) => handleLaneMutationError(error, '添加失败', onRefresh),
+          onError: (error) => handleQuickAddError(error, onRefresh, callbacks.onError),
         },
       ),
   };
@@ -941,6 +956,7 @@ export function ProjectLane({
           <QuickAddInput
             laneId={project.id}
             pending={quickAdd.pending}
+            controller={quickAdd.controller}
             onSubmit={quickAdd.onSubmit}
           />
         </Box>
@@ -998,21 +1014,25 @@ export function UnassignedLane({
   onRefresh: () => void;
 }) {
   const addCard = useAddKanbanCard(profile);
-  const quickAdd = {
+  const quickAddController = useQuickAddController();
+  const quickAdd: QuickAddOptions = {
     pending: addCard.isPending,
-    onSubmit: (title: string) =>
+    controller: quickAddController,
+    onSubmit: (title, callbacks) =>
       addCard.mutate(
         { body: { title, section: 'Queue', context: '' }, etag: kanbanEtag },
         {
           onSuccess: (result) => {
-            notifications.show({ color: 'green', title: '已添加', message: `「${title}」已进入 Queue。` });
-            // Same auto-open as the project lanes: land in the detail card.
+            if (!quickAddController.continuous) {
+              notifications.show({ color: 'green', title: '已添加', message: `「${title}」已进入 Queue。` });
+            }
+            callbacks.onSuccess();
             const createdId = result?.data?.card?.id;
-            if (createdId) {
+            if (!quickAddController.continuous && createdId) {
               onSelectTask(createdId);
             }
           },
-          onError: (error) => handleLaneMutationError(error, '添加失败', onRefresh),
+          onError: (error) => handleQuickAddError(error, onRefresh, callbacks.onError),
         },
       ),
   };
