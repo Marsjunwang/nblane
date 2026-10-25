@@ -9,5 +9,6 @@ signing.env
 google-services.json
 app/google-services.json
 app-release*
+app/src/main/res/xml/shortcuts.xml
 .idea/
 .cxx/
