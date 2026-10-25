@@ -38,7 +38,8 @@ _NOT_BUILT_NOTE = "SPA not built; run npm run build in src/nblane/web_ui/fronten
 
 
 def _file_response(path: Path, *, immutable: bool) -> FileResponse:
-    response = FileResponse(path)
+    media_type = "application/manifest+json" if path.suffix == ".webmanifest" else None
+    response = FileResponse(path, media_type=media_type)
     response.headers["Cache-Control"] = _IMMUTABLE_CACHE if immutable else _NO_CACHE
     return response
 
@@ -84,5 +85,8 @@ def mount_spa(app: FastAPI, static_dir: Path | None = None) -> None:
         if asset is not None:
             immutable = asset.is_relative_to(static_root / "assets")
             return _file_response(asset, immutable=immutable)
+        if full_path == ".well-known/assetlinks.json":
+            # TWA asset links are optional until Android packaging supplies them.
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
         # Client-side route (e.g. /p/alice/kanban): hand over to the SPA.
         return _file_response(index_html, immutable=False)

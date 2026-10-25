@@ -14,14 +14,25 @@ from nblane.web_api.spa import DEFAULT_STATIC_DIR
 
 INDEX_HTML = "<!doctype html><html><body><div id=\"root\"></div></body></html>"
 APP_JS = "console.log('app');\n"
+MANIFEST = '{"name":"大佬之路","start_url":"/","scope":"/"}'
+PNG_BYTES = b"\x89PNG\r\n\x1a\n"
+SERVICE_WORKER = "self.addEventListener('fetch', () => {});\n"
+OFFLINE_HTML = "<!doctype html><html><body>当前处于离线状态</body></html>"
+ICON_NAMES = ("icon-192.png", "icon-512.png", "icon-maskable-512.png")
 
 
 @pytest.fixture()
 def static_dir(tmp_path: Path) -> Path:
-    """A minimal fake Vite build output: index.html + assets/app.js."""
+    """A minimal fake Vite build output with the PWA static shell."""
     (tmp_path / "assets").mkdir()
+    (tmp_path / "icons").mkdir()
     (tmp_path / "index.html").write_text(INDEX_HTML, encoding="utf-8")
     (tmp_path / "assets" / "app.js").write_text(APP_JS, encoding="utf-8")
+    (tmp_path / "manifest.webmanifest").write_text(MANIFEST, encoding="utf-8")
+    (tmp_path / "offline.html").write_text(OFFLINE_HTML, encoding="utf-8")
+    (tmp_path / "sw.js").write_text(SERVICE_WORKER, encoding="utf-8")
+    for icon_name in ICON_NAMES:
+        (tmp_path / "icons" / icon_name).write_bytes(PNG_BYTES)
     return tmp_path
 
 
@@ -52,6 +63,65 @@ def test_hashed_asset_served_with_immutable_cache(client: TestClient) -> None:
         response.headers["Cache-Control"]
         == "public, max-age=31536000, immutable"
     )
+
+
+def test_manifest_served_with_json_mime_and_no_cache(client: TestClient) -> None:
+    response = client.get("/manifest.webmanifest")
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("application/manifest+json")
+    assert response.headers["Cache-Control"] == "no-cache"
+    assert response.text == MANIFEST
+
+
+@pytest.mark.parametrize("icon_name", ICON_NAMES)
+def test_pwa_icons_served_with_png_mime_and_no_cache(
+    client: TestClient, icon_name: str
+) -> None:
+    response = client.get(f"/icons/{icon_name}")
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("image/png")
+    assert response.headers["Cache-Control"] == "no-cache"
+    assert response.content == PNG_BYTES
+
+
+@pytest.mark.parametrize(
+    ("path", "media_type", "body"),
+    [
+        ("/sw.js", "text/javascript", SERVICE_WORKER),
+        ("/offline.html", "text/html", OFFLINE_HTML),
+    ],
+)
+def test_pwa_shell_files_served_with_no_cache(
+    client: TestClient, path: str, media_type: str, body: str
+) -> None:
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith(media_type)
+    assert response.headers["Cache-Control"] == "no-cache"
+    assert response.text == body
+
+
+def test_missing_assetlinks_returns_json_404_not_spa_html(client: TestClient) -> None:
+    response = client.get("/.well-known/assetlinks.json")
+    assert response.status_code == 404
+    assert response.headers["Content-Type"].startswith("application/json")
+    assert response.json() == {"detail": "Not Found"}
+    assert response.text != INDEX_HTML
+
+
+def test_existing_assetlinks_uses_normal_static_file_response(
+    client: TestClient, static_dir: Path
+) -> None:
+    well_known = static_dir / ".well-known"
+    well_known.mkdir()
+    assetlinks = '[{"relation":["delegate_permission/common.handle_all_urls"]}]'
+    (well_known / "assetlinks.json").write_text(assetlinks, encoding="utf-8")
+
+    response = client.get("/.well-known/assetlinks.json")
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("application/json")
+    assert response.headers["Cache-Control"] == "no-cache"
+    assert response.text == assetlinks
 
 
 def test_api_health_still_json(client: TestClient) -> None:
@@ -105,8 +175,16 @@ def test_spa_static_payload_declared_as_package_data() -> None:
         "tool"
     ]["setuptools"]["package-data"]
     entries = package_data.get("nblane.web_ui", [])
-    assert "static/index.html" in entries
-    assert "static/assets/*" in entries
+    expected_entries = {
+        "static/index.html",
+        "static/manifest.webmanifest",
+        "static/offline.html",
+        "static/sw.js",
+        "static/icons/*.png",
+        "static/.well-known/*",
+        "static/assets/*",
+    }
+    assert expected_entries <= set(entries)
 
 
 def test_default_static_dir_is_importable_package_data() -> None:
@@ -115,4 +193,13 @@ def test_default_static_dir_is_importable_package_data() -> None:
     from importlib import resources
 
     web_ui_files = resources.files("nblane.web_ui")
-    assert (web_ui_files / "static" / "index.html").is_file()
+    relative_paths = (
+        "static/index.html",
+        "static/manifest.webmanifest",
+        "static/offline.html",
+        "static/sw.js",
+        "static/.well-known/assetlinks.json",
+        *(f"static/icons/{icon_name}" for icon_name in ICON_NAMES),
+    )
+    for relative_path in relative_paths:
+        assert (web_ui_files / relative_path).is_file(), relative_path

@@ -100,11 +100,14 @@ Design principles that shape all changes:
 - `schemas/` — domain skill-tree definitions; `schemas/.learned/` is
   local-only, gitignored.
 - `scripts/` — `dev-web.sh` (tmux dev launcher), `dump-openapi.sh`,
-  `package-ubuntu.sh` (locked offline release builder),
+  `package-ubuntu.sh` and `package-android.sh` (release builders),
   `openclaw/` (assistant skill `skills/nblane/SKILL.md`, HTTP client
   `skills/bin/nblane_api.py`, installer).
 - `packaging/ubuntu/` — package installer, upgrade and code-only rollback;
   see `docs/zh/guides/ubuntu-package.md`.
+- `packaging/android/twa/` — Bubblewrap TWA project and `twa-manifest.json`;
+  signing material and local Android SDK stay out of Git. See
+  `docs/zh/guides/android-twa.md`.
 - `tests/` — pytest suite + `tests/e2e/` (Playwright, TypeScript).
 - `docs/zh/` — canonical docs. Keep them in sync when you change documented
   behavior.
@@ -121,6 +124,9 @@ nblane doctor [--online]      # environment check with fix hints
 
 # Ubuntu offline package (clean tree; requires uv and network to fetch wheels)
 scripts/package-ubuntu.sh     # dist/ubuntu/nblane-<version>-ubuntu.tar.gz + SHA256
+
+# Android PWA/TWA (JDK 17, Android SDK and signing config required)
+scripts/package-android.sh    # dist/android/nblane-<version>-twa.apk/.aab + SHA256
 
 # CLI smoke
 nblane init yourname

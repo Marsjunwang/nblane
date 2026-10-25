@@ -85,6 +85,14 @@ config.yaml
 !/auth/users.example.yaml
 """,
     )
+    for relative, content in {
+        "src/nblane/web_ui/static/manifest.webmanifest": '{"start_url":"/"}\n',
+        "src/nblane/web_ui/static/offline.html": "<h1>offline</h1>\n",
+        "src/nblane/web_ui/static/sw.js": "const cache = 'static';\n",
+        "src/nblane/web_ui/static/icons/icon-512.png": "png\n",
+        "src/nblane/web_ui/static/.well-known/assetlinks.json": "[]\n",
+    }.items():
+        _write(root, relative, content)
     _git(root, "init", "--quiet")
     _git(root, "config", "user.name", "Package Test")
     _git(root, "config", "user.email", "package-test@example.invalid")
@@ -270,6 +278,11 @@ def test_dirty_development_package_structure_and_checksum(tmp_path: Path) -> Non
                 "profiles/template/SKILL.md",
                 "auth/users.example.yaml",
                 ".env.example",
+                "src/nblane/web_ui/static/manifest.webmanifest",
+                "src/nblane/web_ui/static/offline.html",
+                "src/nblane/web_ui/static/sw.js",
+                "src/nblane/web_ui/static/icons/icon-512.png",
+                "src/nblane/web_ui/static/.well-known/assetlinks.json",
                 "WORKING.txt",
             } <= source_names
             assert set(local_files).isdisjoint(source_names)

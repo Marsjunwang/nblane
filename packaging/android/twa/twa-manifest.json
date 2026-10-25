@@ -1,0 +1,41 @@
+{
+  "packageId": "cloud.nblane.app",
+  "host": "www.nblane.cloud",
+  "name": "大佬之路",
+  "launcherName": "大佬之路",
+  "display": "standalone",
+  "themeColor": "#dcae55",
+  "themeColorDark": "#0f1930",
+  "navigationColor": "#0f1930",
+  "navigationColorDark": "#0f1930",
+  "navigationDividerColor": "#16263d",
+  "navigationDividerColorDark": "#16263d",
+  "backgroundColor": "#0f1930",
+  "enableNotifications": false,
+  "startUrl": "/",
+  "iconUrl": "https://www.nblane.cloud/icons/icon-512.png",
+  "maskableIconUrl": "https://www.nblane.cloud/icons/icon-maskable-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./nblane-upload.p12",
+    "alias": "nblane"
+  },
+  "appVersion": "0.1.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://www.nblane.cloud/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://www.nblane.cloud/",
+  "minSdkVersion": 24,
+  "orientation": "default",
+  "additionalTrustedOrigins": [],
+  "displayOverride": []
+}

@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-25
+last_verified: 2026-10-26
 source_of_truth: true
 ---
 
@@ -85,6 +85,7 @@ sudo systemctl restart nblane-reader nblane-web-api
 
 - Vite 用内容哈希命名产物。提交时把删掉的旧哈希文件、新文件和 `index.html` 一起提交，漏一个就会 404 或加载旧版。
 - 改了 SPA 重启 `nblane-web-api`；改了论文库组件重启 `nblane-reader`。
+- PWA manifest、图标、service worker 与 `/.well-known/assetlinks.json` 也由 8504 静态根提供，保持 `no-cache`；不放入 immutable 的 `/assets/`，不另开端口。见 [安卓 PWA 与 TWA](android-twa.md)。
 - 验证时先硬刷新，或用 DevTools Network 对比实际加载的哈希文件名。
 
 ## systemd

@@ -1,13 +1,38 @@
 /// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
 
 // Dev-server proxy target for the FastAPI backend
 // (uvicorn nblane.web_api:app --port 8511). Override with VITE_API_PROXY_TARGET.
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:8511';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src/pwa',
+      filename: 'sw.ts',
+      registerType: 'prompt',
+      injectRegister: false,
+      manifest: false,
+      scope: '/',
+      injectManifest: {
+        rollupFormat: 'iife',
+        injectionPoint: '__PRECACHE_MANIFEST__',
+        globPatterns: [
+          'index.html',
+          'offline.html',
+          'manifest.webmanifest',
+          'icons/*.png',
+          'assets/index-*.js',
+          'assets/index-*.css',
+        ],
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+      },
+    }),
+  ],
   resolve: {
     // Keep one BlockNote/React/Yjs copy for the blog block modules under
     // src/blogBlocks: a second copy makes BlockNote reject the schema at

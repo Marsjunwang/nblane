@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-10-20
+last_verified: 2026-10-26
 source_of_truth: true
 ---
 
@@ -73,6 +73,7 @@ nblane 的 Web 界面是一个单页应用（SPA），由 `nblane.web_api` 在�
 - 顶栏按钮只显示图标，不换行。
 - 设置页的左侧目录变成顶部两个下拉框：分区和档案。
 - 车间终端有手机快捷键栏，见 [车间](workshop.md)。
+- 可将 PWA 添加到主屏幕，或安装共用全部网页的安卓 TWA，见 [安卓 PWA 与 TWA](android-twa.md)。
 
 ## 小窗
 

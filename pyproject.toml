@@ -65,6 +65,11 @@ include = ["nblane*", "schemas*"]
 ]
 "nblane.web_ui" = [
     "static/index.html",
+    "static/manifest.webmanifest",
+    "static/offline.html",
+    "static/sw.js",
+    "static/icons/*.png",
+    "static/.well-known/*",
     "static/assets/*",
 ]
 "schemas" = [

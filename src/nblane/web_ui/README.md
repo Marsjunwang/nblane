@@ -33,11 +33,15 @@ npm run preview    # 本地预览构建产物
 
 **打包决策(已定)**:`../static`(即 `src/nblane/web_ui/static/`)的构建产物
 **提交进 git**,并在 `pyproject.toml` `[tool.setuptools.package-data]` 中声明
-(`nblane.web_ui` = `static/index.html` + `static/assets/*`)——与各
+(index、哈希 assets、PWA manifest、图标、SW 与 `.well-known`)——与各
 `*_component` 前端同一惯例。`nblane.web_api.spa.mount_spa` 以 `__file__`
 相对路径定位该目录,因此 `pip install -e .` 与 wheel 安装后均无需 Node 即可
 服务 SPA。改前端代码后必须重新 `npm run build` 并连同 `static/` 一起提交;
 CI 的 `frontend-artifacts` job 会重建并比对,产物过期即红。
+
+PWA 使用 `frontend/public/` 的静态源文件与受控生成的 service worker；
+API、登录、Reader、车间和 OpenClaw 不走业务离线缓存。安卓安装与签名见
+`docs/zh/guides/android-twa.md`。
 
 ## 当前进度
 

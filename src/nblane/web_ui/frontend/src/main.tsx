@@ -11,6 +11,7 @@ import '@mantine/notifications/styles.css';
 import { installUnauthorizedHandler } from './api/client';
 import { installCrossWindowSync } from './api/crossWindowSync';
 import { App } from './App';
+import { PwaUpdatePrompt } from './pwa/PwaUpdatePrompt';
 import { theme } from './theme';
 
 const queryClient = new QueryClient({
@@ -31,6 +32,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <MantineProvider theme={theme} forceColorScheme="dark">
         <Notifications />
         <App />
+        {import.meta.env.PROD && <PwaUpdatePrompt />}
       </MantineProvider>
     </QueryClientProvider>
   </React.StrictMode>,

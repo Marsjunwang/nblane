@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "cloud.nblane.app",
+      "sha256_cert_fingerprints": [
+        "A7:C7:56:D7:FF:3E:78:F8:29:1E:C1:A7:54:45:74:E5:0B:A4:2D:29:86:7E:05:7C:59:40:3B:23:16:33:6C:0E"
+      ]
+    }
+  }
+]
