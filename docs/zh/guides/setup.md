@@ -1,13 +1,13 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-12
+last_verified: 2026-10-25
 source_of_truth: true
 ---
 
 # 本机安装与 AI 配置
 
-本文讲在一台机器上把 nblane 跑起来。上服务器见 [腾讯云部署](deployment-tencent-cloud.md)，换机器见 [整机迁移](migration.md)。
+本文讲源码安装与配置。服务器一键安装、离线依赖、升级和回滚见 [Ubuntu 离线安装包](ubuntu-package.md)，手动服务器部署见 [腾讯云部署](deployment-tencent-cloud.md)，换机器见 [整机迁移](migration.md)。
 
 ## 环境要求
 

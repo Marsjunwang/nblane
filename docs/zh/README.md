@@ -1,7 +1,7 @@
 ---
 status: active
 owner: docs
-last_verified: 2026-10-07
+last_verified: 2026-10-25
 source_of_truth: true
 ---
 
@@ -67,7 +67,8 @@ source_of_truth: true
 | [assistant.md](guides/assistant.md) | 个人助手：接入、写入策略、确认与撤销 |
 | [workshop.md](guides/workshop.md) | 车间网页终端 |
 | [openclaw-ops.md](guides/openclaw-ops.md) | OpenClaw 安装、接入、定时任务、备份 |
-| [setup.md](guides/setup.md) | 安装、依赖、LLM 配置 |
+| [setup.md](guides/setup.md) | 源码安装、依赖、LLM 配置 |
+| [ubuntu-package.md](guides/ubuntu-package.md) | Ubuntu 离线包：一键生成、安装、升级、代码回滚 |
 | [deployment-tencent-cloud.md](guides/deployment-tencent-cloud.md) | 生产部署：systemd + Caddy |
 | [migration.md](guides/migration.md) | 整机迁移 runbook |
 | [mihomo-deployment.md](guides/mihomo-deployment.md) | Mihomo 代理部署与运维 |

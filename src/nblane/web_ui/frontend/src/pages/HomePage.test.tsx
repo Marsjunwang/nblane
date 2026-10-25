@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
 import { jsonResponse, renderWithProviders } from '../test/render';
@@ -138,6 +138,10 @@ function renderPage(fetchImpl?: typeof fetch) {
     '/p/alice/home',
   );
 }
+
+beforeAll(async () => {
+  await import('../starmap/StarmapView');
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

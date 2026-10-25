@@ -100,8 +100,11 @@ Design principles that shape all changes:
 - `schemas/` — domain skill-tree definitions; `schemas/.learned/` is
   local-only, gitignored.
 - `scripts/` — `dev-web.sh` (tmux dev launcher), `dump-openapi.sh`,
+  `package-ubuntu.sh` (locked offline release builder),
   `openclaw/` (assistant skill `skills/nblane/SKILL.md`, HTTP client
   `skills/bin/nblane_api.py`, installer).
+- `packaging/ubuntu/` — package installer, upgrade and code-only rollback;
+  see `docs/zh/guides/ubuntu-package.md`.
 - `tests/` — pytest suite + `tests/e2e/` (Playwright, TypeScript).
 - `docs/zh/` — canonical docs. Keep them in sync when you change documented
   behavior.
@@ -115,6 +118,9 @@ scripts/install.sh            # venv + pip install -e . + `nblane setup` wizard
 python3 -m venv .venv && .venv/bin/pip install -e .
 cp .env.example .env          # fill LLM_API_KEY only if using AI features
 nblane doctor [--online]      # environment check with fix hints
+
+# Ubuntu offline package (clean tree; requires uv and network to fetch wheels)
+scripts/package-ubuntu.sh     # dist/ubuntu/nblane-<version>-ubuntu.tar.gz + SHA256
 
 # CLI smoke
 nblane init yourname

@@ -1,13 +1,13 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-07
+last_verified: 2026-10-25
 source_of_truth: true
 ---
 
 # 腾讯云部署
 
-公网入口是域名 + HTTPS（Caddy），应用内账号登录，数据仍是纯文件 + 私有 Git 仓库。本机开发见 [本机安装](setup.md)，换机器见 [整机迁移](migration.md)。
+公网入口是域名 + HTTPS（Caddy），应用内账号登录，数据仍是纯文件 + 私有 Git 仓库。需要一键生成离线包、自动安装或代码回滚时见 [Ubuntu 离线安装包](ubuntu-package.md)；本文是手动部署与运行配置参考。本机开发见 [本机安装](setup.md)，换机器见 [整机迁移](migration.md)。
 
 ## 端口与服务
 
