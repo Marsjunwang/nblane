@@ -924,6 +924,140 @@ class TestCrystallizeJobKind(unittest.TestCase):
             self.assertEqual(run.call_args.kwargs["timeout_seconds"], 90.0)
 
 
+    def test_runner_generates_each_selected_task_independently(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _write_profile(root)
+            from nblane.core.kanban_io import render_kanban
+            from nblane.core.models import KanbanTask
+
+            tasks = [
+                KanbanTask(title="task-a", id="taskA", done=True, outcome="result-a"),
+                KanbanTask(title="task-b", id="taskB", done=True, outcome="result-b"),
+            ]
+            (profile / "kanban.md").write_text(
+                render_kanban("alice", {"Done": tasks}), encoding="utf-8"
+            )
+            calls = []
+
+            def fake_crystallize(_profile, selected, **kwargs):
+                task = selected[0]
+                calls.append((task.id, kwargs))
+                return AIActionResult(
+                    ok=True,
+                    action="evidence.crystallize",
+                    backend="direct_llm",
+                    run_id=f"run-{task.id}",
+                    structured={
+                        "evidence_entries": [
+                            {"title": task.title, "source_task_id": task.id}
+                        ],
+                        "node_updates": [],
+                    },
+                )
+
+            with patch("nblane.core.profile_io.PROFILES_DIR", root), patch(
+                "nblane.core.io.PROFILES_DIR", root
+            ), patch(
+                "nblane.core.ai.gateway.crystallize_done_tasks",
+                side_effect=fake_crystallize,
+            ) as run:
+                messages = []
+                result = jobs_module._run_evidence_crystallize(
+                    "alice",
+                    {"task_ids": ["taskA", "taskB"], "titles": []},
+                    lambda **kw: messages.append(kw["message"]),
+                )
+            self.assertEqual([call[0] for call in calls], ["taskA", "taskB"])
+            self.assertEqual(run.call_count, 2)
+            for _task_id, kwargs in calls:
+                self.assertEqual(kwargs["timeout_seconds"], 90.0)
+                self.assertEqual(kwargs["max_retries"], 0)
+            rows = result["patch"]["evidence_entries"]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["kanban_refs"], ["kanban:taskA"])
+            self.assertEqual(rows[1]["kanban_refs"], ["kanban:taskB"])
+            self.assertIn("task-a", rows[0]["original_content"])
+            self.assertIn("result-a", rows[0]["original_content"])
+            self.assertIn("task-b", rows[1]["original_content"])
+            self.assertIn("result-b", rows[1]["original_content"])
+            self.assertEqual(rows[0]["origin_ref"], "kanban:taskA")
+            self.assertEqual(rows[1]["origin_ref"], "kanban:taskB")
+            self.assertTrue(any("第 1/2" in message for message in messages))
+            self.assertTrue(any("第 2/2" in message for message in messages))
+
+    def test_runner_stops_before_another_task_has_wrong_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _write_profile(root)
+            from nblane.core.kanban_io import render_kanban
+            from nblane.core.models import KanbanTask
+
+            tasks = [
+                KanbanTask(title="task-a", id="taskA", done=True),
+                KanbanTask(title="task-b", id="taskB", done=True),
+            ]
+            (profile / "kanban.md").write_text(
+                render_kanban("alice", {"Done": tasks}), encoding="utf-8"
+            )
+            with patch("nblane.core.profile_io.PROFILES_DIR", root), patch(
+                "nblane.core.io.PROFILES_DIR", root
+            ), patch(
+                "nblane.core.ai.gateway.crystallize_done_tasks",
+                return_value=AIActionResult(
+                    ok=True,
+                    action="evidence.crystallize",
+                    backend="direct_llm",
+                    run_id="run-wrong-source",
+                    structured={
+                        "evidence_entries": [
+                            {"title": "wrong source", "source_task_id": "taskB"}
+                        ],
+                        "node_updates": [],
+                    },
+                ),
+            ) as run:
+                with self.assertRaises(jobs_module.JobFailedError) as caught:
+                    jobs_module._run_evidence_crystallize(
+                        "alice", {"task_ids": ["taskA", "taskB"], "titles": []}, lambda **kw: None
+                    )
+            self.assertEqual(caught.exception.code, "crystallize_draft_failed")
+            self.assertIn("task-a", caught.exception.message)
+            self.assertEqual(run.call_count, 1)
+
+    def test_gateway_forwards_zero_retries_to_llm(self) -> None:
+        from nblane.core.ai.gateway import crystallize_done_tasks
+        from nblane.core.models import KanbanTask
+
+        with patch("nblane.core.ai.gateway.run_ai_action") as run:
+            crystallize_done_tasks(
+                "alice",
+                [KanbanTask(title="task-a", id="taskA", done=True)],
+                timeout_seconds=90,
+                max_retries=0,
+            )
+        self.assertEqual(run.call_args.args[1]["llm_max_retries"], 0)
+
+    def test_job_records_task_count_for_timeout(self) -> None:
+        with patch.object(
+            jobs_module._KINDS[jobs_module.KIND_EVIDENCE_CRYSTALLIZE],
+            "run",
+            return_value={"ok": True},
+        ):
+            snapshot = jobs_module.create_job(
+                "alice",
+                jobs_module.KIND_EVIDENCE_CRYSTALLIZE,
+                {"task_ids": ["taskA", "taskB"], "titles": []},
+            )
+        job = jobs_module._JOBS[snapshot["job_id"]]
+        self.assertEqual(job["_task_count"], 2)
+        self.assertEqual(jobs_module._job_timeout(job), 180.0)
+        job["status"] = "running"
+        job["started_at"] = time.time() - 181
+        jobs_module._mark_timeout_locked(snapshot["job_id"], time.time())
+        self.assertIn("180 秒", job["_cancel_message"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

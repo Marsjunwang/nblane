@@ -31,7 +31,7 @@ from nblane.core.evidence_migrate import (
 )
 from nblane.core.file_write import atomic_write_text
 from nblane.core.io import profile_dir
-from nblane.core.kanban_archive import kanban_ref
+from nblane.core.kanban_archive import kanban_ref, kanban_ref_id
 from nblane.core.kanban_io import (
     KANBAN_DONE,
     materialize_kanban_task_ids,
@@ -202,19 +202,28 @@ def attach_task_snapshots(
             continue
         refs = task_source_refs(row)
         source_task_id = _clean(row.pop("source_task_id", ""))
+        source_task_ids = [
+            _clean(t) for t in row.pop("source_task_ids", []) if _clean(t)
+        ]
+        source_ref = kanban_ref(kanban_ref_id(source_task_id)) if source_task_id else ""
+        origin_ref_id = kanban_ref_id(_clean(row.get("origin_ref")))
+        origin_ref = kanban_ref(origin_ref_id) if origin_ref_id else ""
         if source_task_id:
-            refs.add(kanban_ref(source_task_id))
-        refs.update(kanban_ref(_clean(t)) for t in row.pop("source_task_ids", []) if _clean(t))
-        if not refs and len(by_ref) == 1:
-            refs = set(by_ref)
+            refs.add(source_ref)
+        if origin_ref:
+            refs.add(origin_ref)
+        refs.update(kanban_ref(kanban_ref_id(t)) for t in source_task_ids)
+        explicit_source_refs = {source_ref, origin_ref}
+        explicit_source_refs.update(kanban_ref(kanban_ref_id(t)) for t in source_task_ids)
+        explicit_source_refs.discard("")
+        if explicit_source_refs and not explicit_source_refs <= by_ref.keys():
+            raise ValueError("Evidence source tasks are outside the selection.")
         selected_refs = refs & by_ref.keys()
         if strict and (not selected_refs or not refs <= by_ref.keys()):
             raise ValueError("Evidence source tasks are missing or outside the selection.")
         if not strict:
-            # AI drafts must keep their task attribution. Historically this
-            # path attached every row to every selected task, collapsing a
-            # multi-task selection into one shared evidence row.
-            if not selected_refs and len(by_ref) == 1:
+            # Explicit source aliases are constrained; related task refs remain intact.
+            if not explicit_source_refs and len(by_ref) == 1:
                 selected_refs = set(by_ref)
             elif len(selected_refs) != 1:
                 raise ValueError(

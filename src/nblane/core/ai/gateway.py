@@ -640,18 +640,22 @@ def crystallize_done_tasks(
     *,
     goal_context: str = "",
     timeout_seconds: float = 90.0,
+    max_retries: int | None = None,
     context_refs: list[str] | None = None,
 ) -> AIActionResult:
     """Generate a reviewable evidence patch from selected Done tasks."""
 
+    payload: dict[str, Any] = {
+        "done_tasks": done_tasks,
+        "goal_context": goal_context,
+        "timeout_seconds": timeout_seconds,
+    }
+    if max_retries is not None:
+        payload["llm_max_retries"] = max(0, int(max_retries))
     body, preferred_backend = _with_action_ai_preferences(
         profile,
         "evidence.crystallize",
-        {
-            "done_tasks": done_tasks,
-            "goal_context": goal_context,
-            "timeout_seconds": timeout_seconds,
-        },
+        payload,
     )
     return run_ai_action(
         "evidence.crystallize",

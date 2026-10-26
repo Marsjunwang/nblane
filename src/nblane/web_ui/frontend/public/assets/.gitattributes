@@ -1,0 +1,3 @@
+# Minified bundles can contain meaningful trailing spaces in string literals.
+*.js whitespace=-blank-at-eol
+*.css whitespace=-blank-at-eol

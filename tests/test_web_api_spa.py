@@ -199,6 +199,7 @@ def test_default_static_dir_is_importable_package_data() -> None:
         "static/offline.html",
         "static/sw.js",
         "static/.well-known/assetlinks.json",
+        "static/assets/.gitattributes",
         *(f"static/icons/{icon_name}" for icon_name in ICON_NAMES),
     )
     for relative_path in relative_paths:

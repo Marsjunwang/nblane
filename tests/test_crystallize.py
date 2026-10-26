@@ -228,6 +228,26 @@ class TestDoneCrystallization(unittest.TestCase):
         self.assertEqual(second["kanban_refs"], ["kanban:other", "kanban:taskA"])
         self.assertNotIn("original_content_hash", second)
 
+    def test_attach_task_snapshots_normalizes_source_aliases(self) -> None:
+        from nblane.core import crystallize
+        from nblane.core.models import KanbanTask
+
+        task = KanbanTask(title="task-a", id="taskA", done=True)
+        snap = crystallize.task_snapshot(task)
+        patch = {
+            "evidence_entries": [
+                {
+                    "title": "task-a",
+                    "source_task_id": "kanban:taskA",
+                    "origin_ref": "taskA",
+                }
+            ]
+        }
+        out = crystallize.attach_task_snapshots(patch, [snap])
+        row = out["evidence_entries"][0]
+        self.assertEqual(row["kanban_refs"], ["kanban:taskA"])
+        self.assertEqual(row["origin_ref"], "kanban:taskA")
+
     def test_ai_rows_keep_one_task_per_evidence(self) -> None:
         from nblane.core import crystallize
         from nblane.core.models import KanbanTask
@@ -442,6 +462,41 @@ class TestDoneCrystallization(unittest.TestCase):
                 self.assertEqual(raw.get("evidence_entries"), [])
                 task = crystallize.parse_kanban("dev")["Done"][0]
                 self.assertFalse(task.crystallized)
+
+            self._run_with_profiles(tmp, go)
+
+
+    def test_apply_two_tasks_creates_two_evidence_rows(self) -> None:
+        from nblane.core.models import KanbanTask
+
+        with tempfile.TemporaryDirectory() as tmp_s:
+            tmp = Path(tmp_s)
+            profile = self._make_profile(tmp)
+            tasks = [
+                KanbanTask(id="taskA", title="implement health checks", done=True, outcome="checks pass"),
+                KanbanTask(id="taskB", title="fix mobile input overlap", done=True, outcome="input stays visible"),
+            ]
+            from nblane.core.kanban_io import render_kanban
+
+            (profile / "kanban.md").write_text(
+                render_kanban("dev", {"Done": tasks}), encoding="utf-8"
+            )
+
+            def go():
+                from nblane.core import crystallize
+
+                result = crystallize.apply_crystallization(
+                    "dev",
+                    crystallize.rule_crystallize_patch(tasks),
+                    task_ids=["taskA", "taskB"],
+                )
+                self.assertTrue(result["ok"], result)
+                self.assertEqual(result["crystallized_count"], 2)
+                self.assertEqual(len(result["new_evidence_ids"]), 2)
+                self.assertEqual(
+                    [item["task_id"] for item in result["items"]],
+                    ["taskA", "taskB"],
+                )
 
             self._run_with_profiles(tmp, go)
 

@@ -564,6 +564,11 @@ def create_job(
         "profile": _clean(profile),
         "_profile_scope": _scope_key(profile_scope),
         "kind": clean_kind,
+        "_task_count": (
+            max(1, len(clean_input.get("task_ids") or clean_input.get("titles") or []))
+            if clean_kind == KIND_EVIDENCE_CRYSTALLIZE
+            else 1
+        ),
         "status": "queued",
         "phase": "queued",
         "message": spec.queued_message,
@@ -678,8 +683,15 @@ def _prune_jobs() -> None:
 
 
 def _job_timeout(job: dict[str, Any]) -> float:
-    """Effective timeout for a job: kind override, else the global default."""
-    spec = _KINDS.get(str(job.get("kind") or ""))
+    """Effective timeout for a job, including per-task crystallize work."""
+    kind = str(job.get("kind") or "")
+    spec = _KINDS.get(kind)
+    if kind == KIND_EVIDENCE_CRYSTALLIZE and spec is not None:
+        task_count = max(1, int(job.get("_task_count") or 1))
+        return max(
+            float(spec.timeout_seconds),
+            _CRYSTALLIZE_LLM_TIMEOUT_SECONDS * task_count,
+        )
     if spec and spec.timeout_seconds and spec.timeout_seconds > 0:
         return float(spec.timeout_seconds)
     return float(_JOB_TIMEOUT_SECONDS)
@@ -694,11 +706,14 @@ def _mark_timeout_locked(job_id: str, now: float) -> None:
     timeout = _job_timeout(job)
     if not started or now - started <= timeout:
         return
-    spec = _KINDS.get(str(job.get("kind") or ""))
+    kind = str(job.get("kind") or "")
+    spec = _KINDS.get(kind)
     message = (spec.timeout_message if spec and spec.timeout_message else "") or (
         f"Job timed out after {int(timeout)} seconds. "
         "Retry or check the LLM provider connection."
     )
+    if kind == KIND_EVIDENCE_CRYSTALLIZE:
+        message = message.format(timeout=int(timeout))
     _request_stop_locked(job, "job_timeout", message)
 
 
@@ -839,12 +854,29 @@ def _crystallize_friendly_error(err: str) -> str:
     return f"AI 草稿失败:{text or '未知原因'};可改用规则草稿。"
 
 
+def _merge_crystallize_patches(patches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Merge independent per-task drafts without losing their provenance."""
+    merged: dict[str, Any] = {}
+    for patch in patches:
+        for key, value in patch.items():
+            if key in {"evidence_entries", "node_updates", "skipped_tasks"}:
+                if value is None:
+                    merged.setdefault(key, [])
+                    continue
+                if not isinstance(value, list):
+                    raise ValueError(f"{key} must be a list in the AI draft.")
+                merged.setdefault(key, []).extend(value)
+            else:
+                merged.setdefault(key, value)
+    return merged
+
+
 def _run_evidence_crystallize(
     profile: str,
     job_input: dict[str, Any],
     report: Callable[..., None],
 ) -> dict[str, Any]:
-    """LLM crystallize draft; result mirrors ``CrystallizeDraftResponse``."""
+    """Generate and merge one AI draft per selected Done task."""
     from nblane.core import crystallize as crystallize_core
     from nblane.core.ai.gateway import crystallize_done_tasks
     from nblane.core.kanban_io import materialize_kanban_task_ids
@@ -860,28 +892,49 @@ def _run_evidence_crystallize(
             "empty_selection",
             "所选 Done 任务都找不到了(可能已归档);请刷新后重选。",
         )
-    report(phase="drafting", message="AI 正在生成证据草稿(最长约 90 秒)。")
-    ai_result = crystallize_done_tasks(
-        profile,
-        tasks,
-        timeout_seconds=_CRYSTALLIZE_LLM_TIMEOUT_SECONDS,
-    )
-    if not ai_result.ok or not isinstance(ai_result.structured, dict):
+    patches = []
+    backends = []
+    for index, task in enumerate(tasks, start=1):
+        title = str(getattr(task, "title", "") or getattr(task, "id", "") or f"第 {index} 个任务")
+        report(
+            phase="drafting",
+            message=f"AI 正在生成第 {index}/{len(tasks)} 个任务：{title}（单任务最多 90 秒）",
+        )
+        ai_result = crystallize_done_tasks(
+            profile,
+            [task],
+            timeout_seconds=_CRYSTALLIZE_LLM_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+        if not ai_result.ok or not isinstance(ai_result.structured, dict):
+            raise JobFailedError(
+                "crystallize_draft_failed",
+                f"任务 {title}：{_crystallize_friendly_error(ai_result.error or '')}",
+            )
+        try:
+            patch = crystallize_core.attach_task_snapshots(
+                ai_result.structured,
+                [crystallize_core.task_snapshot(task)],
+            )
+        except ValueError as exc:
+            raise JobFailedError(
+                "crystallize_draft_failed",
+                f"任务 {title}：{exc}；已停止，避免证据误关联。",
+            ) from exc
+        patches.append(patch)
+        backends.append(ai_result.backend)
+    try:
+        patch = _merge_crystallize_patches(patches)
+    except ValueError as exc:
         raise JobFailedError(
             "crystallize_draft_failed",
-            _crystallize_friendly_error(ai_result.error or ""),
-        )
-    patch = ai_result.structured
+            f"AI 草稿格式不符合结晶协议：{exc}；可改用规则草稿。",
+        ) from exc
     snapshots = [crystallize_core.task_snapshot(task) for task in tasks]
-    patch = crystallize_core.attach_task_snapshots(patch, snapshots)
     return {
         "ok": True,
         "profile": profile,
-        "backend": (
-            "codex"
-            if ai_result.backend == "local_codex_readonly"
-            else "llm"
-        ),
+        "backend": "codex" if all(backend == "local_codex_readonly" for backend in backends) else "llm",
         "patch": patch,
         "tasks": [
             {
@@ -904,7 +957,7 @@ _KINDS[KIND_EVIDENCE_CRYSTALLIZE] = JobKind(
     queued_message="Queued evidence crystallize draft.",
     timeout_seconds=_CRYSTALLIZE_JOB_TIMEOUT_SECONDS,
     timeout_message=(
-        "AI 草稿超时(120 秒未完成);请重试,或改用规则草稿(立等可取)。"
+        "AI 草稿超时({timeout} 秒未完成);请重试,或改用规则草稿(立等可取)。"
     ),
 )
 
