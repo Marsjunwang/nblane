@@ -883,6 +883,67 @@ def render_paper_page_preview(
     return result
 
 
+class _CachedPdfTable:
+    """Plain snapshot of one PyMuPDF ``find_tables()`` table.
+
+    Mirrors only the attributes the Reader uses (``bbox``, ``row_count``,
+    ``col_count``, ``cells``, ``extract()``) so the result can be reused
+    after the page object is gone.
+    """
+
+    __slots__ = ("bbox", "row_count", "col_count", "cells", "_texts")
+
+    def __init__(self, table: Any) -> None:
+        self.bbox = tuple(getattr(table, "bbox", ()) or ())
+        self.row_count = int(getattr(table, "row_count", 0) or 0)
+        self.col_count = int(getattr(table, "col_count", 0) or 0)
+        self.cells = [tuple(c) if c else () for c in (getattr(table, "cells", []) or [])]
+        try:
+            self._texts = [list(row) for row in (table.extract() or [])]
+        except Exception:
+            self._texts = []
+
+    def extract(self) -> list[list[Any]]:
+        return [list(row) for row in self._texts]
+
+
+# Table detection is the slowest step of a Reader payload build (~250 ms a
+# page) and both the figure crops and the layout units ask for the same
+# pages on every request. Key on the PDF's identity + page so any rewrite of
+# the file invalidates its entries.
+_PDF_TABLES_CACHE_MAX = 512
+_pdf_tables_cache: dict[tuple[str, int, int, int, int], list[_CachedPdfTable]] = {}
+_pdf_tables_cache_lock = threading.Lock()
+
+
+def _pdf_page_tables(pdf_path: Path, pdf_page: Any, page_number: int) -> list[_CachedPdfTable]:
+    """``pdf_page.find_tables()`` results, cached per PDF version and page."""
+    try:
+        st = pdf_path.stat()
+        key: tuple[str, int, int, int, int] | None = (
+            str(pdf_path), st.st_mtime_ns, st.st_size, st.st_ino, int(page_number)
+        )
+    except OSError:
+        key = None
+    if key is not None:
+        with _pdf_tables_cache_lock:
+            hit = _pdf_tables_cache.get(key)
+        if hit is not None:
+            return hit
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            raw = list(getattr(pdf_page.find_tables(), "tables", []) or [])
+        tables = [_CachedPdfTable(t) for t in raw]
+    except Exception:
+        tables = []
+    if key is not None:
+        with _pdf_tables_cache_lock:
+            if len(_pdf_tables_cache) >= _PDF_TABLES_CACHE_MAX:
+                _pdf_tables_cache.pop(next(iter(_pdf_tables_cache)))
+            _pdf_tables_cache[key] = tables
+    return tables
+
+
 def extract_paper_figures(
     profile: str | Path,
     source_id: str,
@@ -928,11 +989,7 @@ def extract_paper_figures(
                 for image_index, raw_rect in enumerate(layer.get("image_rects") or [], start=1):
                     if isinstance(raw_rect, dict):
                         candidates.append(("figure", image_index, raw_rect))
-                try:
-                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                        tables = list(getattr(pdf_page.find_tables(), "tables", []) or [])
-                except Exception:
-                    tables = []
+                tables = _pdf_page_tables(pdf_path, pdf_page, page_number)
                 for table_index, table in enumerate(tables, start=1):
                     table_rect = _rect_payload(
                         getattr(table, "bbox", ()),
@@ -4468,11 +4525,7 @@ def build_paper_layout_units(
                 page_height = float(page_rect.height)
                 candidates: list[dict[str, object]] = []
                 accepted_table_rects: list[dict[str, object]] = []
-                try:
-                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                        tables = list(getattr(pdf_page.find_tables(), "tables", []) or [])
-                except Exception:
-                    tables = []
+                tables = _pdf_page_tables(pdf_path, pdf_page, index)
                 for table_index, table in enumerate(tables, start=1):
                     try:
                         row_count = int(getattr(table, "row_count", 0) or 0)

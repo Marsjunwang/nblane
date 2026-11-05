@@ -1733,6 +1733,60 @@ class TestResearchPapers(unittest.TestCase):
             self.assertLessEqual(rect["x_pct"] + rect["w_pct"], 1)
             self.assertLessEqual(rect["y_pct"] + rect["h_pct"], 1)
 
+    def test_table_detection_is_cached_per_pdf_version(self) -> None:
+        if not pymupdf_available():
+            self.skipTest("PyMuPDF is not available")
+        import fitz  # type: ignore[import-not-found]
+
+        import nblane.core.research_papers as rp
+
+        def make_pdf(label: str) -> bytes:
+            doc = fitz.open()
+            page = doc.new_page(width=300, height=300)
+            for i in range(4):
+                page.draw_line((20, 40 + 30 * i), (280, 40 + 30 * i))
+            for x in (20, 150, 280):
+                page.draw_line((x, 40), (x, 130))
+            page.insert_text((30, 60), label, fontsize=9)
+            page.insert_text((160, 60), "B1", fontsize=9)
+            data = doc.tobytes()
+            doc.close()
+            return data
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"NBLANE_RESEARCH_ASSET_ROOT": str(Path(tmp) / "assets")},
+            clear=False,
+        ):
+            profile = self._profile(Path(tmp))
+            source_id = "source:paper:grounded"
+            with patch("nblane.core.research_papers.git_backup.record_change"):
+                import_paper_pdf(profile, source_id, make_pdf("A1"), "tables.pdf")
+            rp._pdf_tables_cache.clear()
+            real = fitz.Page.find_tables
+            calls: list[int] = []
+
+            def counting(page, *args, **kwargs):
+                calls.append(page.number)
+                return real(page, *args, **kwargs)
+
+            with patch.object(fitz.Page, "find_tables", counting):
+                first = build_paper_layout_units(profile, source_id, pages={1})
+                extract_paper_figures(profile, source_id, pages={1})
+                second = build_paper_layout_units(profile, source_id, pages={1})
+                self.assertEqual(len(calls), 1, "same page/version detects tables once")
+                self.assertEqual(first, second)
+
+                pdf_path = rp.paper_pdf_asset_path(profile, source_id)
+                pdf_path.write_bytes(make_pdf("Z9"))
+                st = pdf_path.stat()
+                os.utime(pdf_path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+                rewritten = build_paper_layout_units(profile, source_id, pages={1})
+                self.assertEqual(len(calls), 2, "rewriting the PDF invalidates the cache")
+            texts = {str(u.get("source_text")) for u in rewritten}
+            self.assertIn("Z9", texts)
+            self.assertNotIn("A1", texts)
+
     def test_pymupdf_fallback_projects_positioned_segments(self) -> None:
         """GROBID outages must not collapse a readable PDF into page-sized units."""
 
