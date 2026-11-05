@@ -43,3 +43,7 @@ src/nblane/home_dashboard_component/frontend/playground/assets/fonts/LXGWWenKai-
 # Real login accounts written by `nblane setup` / auth_store (password hashes)
 /auth/*
 !/auth/users.example.yaml
+
+# Local agent tool state and old work plans (per-machine, not project data)
+/.codex
+/.claude/
