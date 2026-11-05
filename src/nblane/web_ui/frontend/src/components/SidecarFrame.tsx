@@ -181,6 +181,9 @@ export function SidecarFrame({
       ) : (
         <Center style={{ height }} data-testid="sidecar-loading">
           <Loader size="sm" />
+          <Text size="sm" c="dimmed" ml="xs">
+            正在连接…
+          </Text>
         </Center>
       )}
     </>
