@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-08
+last_verified: 2026-10-26
 source_of_truth: true
 ---
 
@@ -44,6 +44,12 @@ nblane 是单人加自己的 Agent 的成长系统。唯一界面是 React SPA�
 - LLM 走 OpenAI-compatible API，经 `core/ai/` 路由；本地翻译用 llama.cpp。
 - `nblane-mcp` 只给本机 Cursor / Claude Code，无登录无权限控制。
 - 公开站构建不读取 private 文件。
+
+## 手机 App
+
+截至 2026-10-26，PWA 已在正式域名上线，签名 TWA `0.1.0` 内测 APK/AAB 已产出；两者共用现有 SPA，不另做移动业务页面或服务器监控页。构建、签名和静态配置已验证，但真实安卓设备尚未验收，下一里程碑是安装并检查域名信任、登录保持、全部网页、车间输入与重连、论文阅读和后台恢复。
+
+后续待交付：业务数据离线、推送与后台提醒、设备授权与桌面小组件、受限远程维护、发布自动化与应用商店、Kotlin 原生重写。完成状态、构建入口和真机清单见 [安卓 PWA 与 TWA](../guides/android-twa.md)。
 
 ## 缺口与优先级
 
