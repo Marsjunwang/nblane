@@ -189,6 +189,54 @@ class TestKanbanParseRender(unittest.TestCase):
         manual = parse_kanban_text(md, "p")[KANBAN_QUEUE][0]
         self.assertEqual(manual.planned_start, "2026-11-01")
         self.assertIsNone(manual.planned_end)
+
+    def test_legacy_title_date_suffix_lifts_into_date_fields(self) -> None:
+        """``Title — finished/started DATE`` keeps the date out of the title."""
+        md = """# p · Kanban
+
+## Doing
+
+- [ ] 调研 MoveIt2 笛卡尔路径规划 — started 2026-06-09
+  - id: d-1
+
+## Done
+
+- [x] 开源 ros2_nav_bench 基准工具 — finished 2026-05-28
+  - id: f-1
+- [x] 优化感知节点推理延迟 — finished 2026-05-30
+  - id: f-2
+  - completed_on: 2026-06-01
+- [x] {Task title} — finished {date}
+- [x] 讨论 A — B 两种方案
+"""
+        back = parse_kanban_text(md, "p")
+        doing = back[KANBAN_DOING][0]
+        self.assertEqual(doing.title, "调研 MoveIt2 笛卡尔路径规划")
+        self.assertEqual(doing.started_on, "2026-06-09")
+        done = {t.id or t.title: t for t in back[KANBAN_DONE]}
+        self.assertEqual(done["f-1"].title, "开源 ros2_nav_bench 基准工具")
+        self.assertEqual(done["f-1"].completed_on, "2026-05-28")
+        # An explicit meta bullet wins over the title suffix.
+        self.assertEqual(done["f-2"].completed_on, "2026-06-01")
+        titles = [t.title for t in back[KANBAN_DONE]]
+        # Non-date suffixes and plain em-dashes stay untouched.
+        self.assertIn("{Task title} — finished {date}", titles)
+        self.assertIn("讨论 A — B 两种方案", titles)
+        # Render writes the clean title plus a date bullet (idempotent).
+        text = render_kanban("p", back)
+        self.assertNotIn("— finished 2026", text)
+        self.assertIn("  - completed_on: 2026-05-28", text)
+        again = parse_kanban_text(text, "p")
+        self.assertEqual(
+            [t.title for t in again[KANBAN_DONE]],
+            [t.title for t in back[KANBAN_DONE]],
+        )
+
+    def test_planned_dates_absent_render_nothing(self) -> None:
+        manual = parse_kanban_text(
+            "## Queue\n\n- [ ] Manual\n  - planned_start: 2026-11-01\n", "p"
+        )[KANBAN_QUEUE][0]
+        self.assertIsNone(manual.planned_end)
         # Tasks without planned dates render no planned bullets.
         plain = render_kanban(
             "u1", {KANBAN_QUEUE: [KanbanTask(title="Plain", id="p-1")]}

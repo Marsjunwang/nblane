@@ -53,6 +53,26 @@ _KANBAN_TODO_VALUE_RE = re.compile(r"^\[([ xX])\]\s*(.*)$")
 # Archive group header written by _render_kanban_archive_append:
 # ``## Archived · <date>``; the captured text is the group's archive date.
 _KANBAN_ARCHIVE_GROUP_RE = re.compile(r"^##\s+Archived\s*·\s*(\S.*)$")
+# Legacy title suffix taught by the old template: ``Title — finished
+# 2026-05-28`` / ``Title — started 2026-06-09``. Parse lifts the date into
+# completed_on / started_on so it never leaks into evidence titles.
+_KANBAN_TITLE_DATE_SUFFIX_RE = re.compile(
+    r"^(?P<title>.*?\S)\s*[—–-]{1,2}\s*(?P<kind>finished|started)\s+"
+    r"(?P<date>\d{4}-\d{2}-\d{2})\s*$",
+    re.IGNORECASE,
+)
+
+
+def split_kanban_title_date(title: str) -> tuple[str, str, str]:
+    """Split a legacy ``— finished/started YYYY-MM-DD`` title suffix.
+
+    Returns ``(title, kind, date)``; *kind* is ``"finished"``, ``"started"``
+    or ``""`` when the title carries no such suffix (title unchanged).
+    """
+    m = _KANBAN_TITLE_DATE_SUFFIX_RE.match(title or "")
+    if not m:
+        return title, "", ""
+    return m.group("title").strip(), m.group("kind").lower(), m.group("date")
 
 
 def _normalize_kanban_meta_key(raw_key: str) -> str | None:
@@ -665,10 +685,17 @@ def _parse_kanban_sections(
                     current_task = None
                     continue
                 done = top_cb.group(1).lower() == "x"
+                t_title, date_kind, date_val = split_kanban_title_date(t_title)
                 current_task = KanbanTask(
                     title=t_title,
                     done=done,
                 )
+                # Explicit started_on / completed_on meta bullets follow the
+                # title line and override these.
+                if date_kind == "finished":
+                    current_task.completed_on = date_val
+                elif date_kind == "started":
+                    current_task.started_on = date_val
                 continue
             top_plain = re.match(r"^-\s+(.+)$", slim)
             if top_plain:

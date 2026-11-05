@@ -27,6 +27,15 @@ class TestFindDuplicateCandidates(unittest.TestCase):
         self.assertIn(("a", "b"), _pair_ids(cands))
         self.assertEqual(len(cands), 1)
 
+    def test_legacy_date_suffix_still_matches(self) -> None:
+        rows = [
+            {"id": "a", "title": "开源 ros2_nav_bench 基准工具"},
+            {"id": "b", "title": "开源 ros2_nav_bench 基准工具 — finished 2026-05-28"},
+        ]
+        cands = find_duplicate_candidates(rows)
+        self.assertEqual(_pair_ids(cands), {("a", "b")})
+        self.assertEqual(cands[0]["reason"], "same_title")
+
     def test_same_kanban_task(self) -> None:
         rows = [
             {"id": "a", "title": "x", "kanban_refs": ["kanban:t1"]},

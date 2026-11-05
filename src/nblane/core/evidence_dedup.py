@@ -31,7 +31,12 @@ def _clean(value: Any) -> str:
 
 
 def _norm_title(text: str) -> str:
-    return " ".join(_clean(text).lower().split())
+    # Rows crystallized from legacy kanban titles carry a ``— finished DATE``
+    # suffix; strip it so they still match the hand-written row.
+    from nblane.core.kanban_io import split_kanban_title_date
+
+    title, _kind, _date = split_kanban_title_date(_clean(text))
+    return " ".join(title.lower().split())
 
 
 def _kanban_task_id(row: dict) -> str:
