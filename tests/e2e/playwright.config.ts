@@ -15,6 +15,10 @@ const systemChromium =
 // NBLANE_E2E_READER_BASE).
 export default defineConfig({
   testDir: ".",
+  // Snapshot the sandbox profiles before the run and restore them after,
+  // so e2e writes do not accumulate in .dev-data (see profile_snapshot.ts).
+  globalSetup: "./global_setup.ts",
+  globalTeardown: "./global_teardown.ts",
   timeout: 45_000,
   expect: {
     timeout: 8_000,

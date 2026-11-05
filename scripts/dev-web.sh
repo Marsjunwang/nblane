@@ -219,6 +219,12 @@ sync_tmux_proxy_environment() {
   # A long-lived tmux server keeps the environment from when it was first
   # created. Synchronize proxy variables explicitly so a later dev restart
   # does not silently fall back to a slow direct download path.
+  # With no server running (fresh boot) there is nothing stale to fix: the
+  # first `tmux new-session` starts a server that inherits this shell's
+  # environment, and `set-environment -g` would fail with "no server".
+  if ! tmux list-sessions >/dev/null 2>&1; then
+    return 0
+  fi
   local name value
   for name in \
     http_proxy https_proxy all_proxy \

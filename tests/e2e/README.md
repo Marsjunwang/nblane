@@ -36,6 +36,19 @@ NBLANE_E2E_BASE_URL=http://127.0.0.1:8504 NBLANE_E2E_SPA_BASE_URL=http://127.0.0
 npx playwright test -c tests/e2e/playwright.config.ts spa_smoke --headed
 ```
 
+## Sandbox data is restored after each run
+
+Specs write real entities (`e2e-chain-*` evidence, 验收 posts, throwaway
+projects) into the sandbox profiles. `global_setup.ts` copies the `dev` and
+`王军` profile dirs (data and research assets) into
+`.dev-data/.e2e-snapshot/<timestamp>/` before the run; `global_teardown.ts`
+moves the run's residue next to that copy and puts the snapshot back. Nothing
+is deleted at restore time; the newest 5 snapshots are kept.
+
+This only applies when the data root is `.dev-data` (the isolated stack). Set
+`NBLANE_E2E_KEEP_DATA=1` to leave the residue in place for debugging, or
+`NBLANE_E2E_RESTORE_PROFILES=dev,other` to change the profile list.
+
 ## SPA backend auth (login journey)
 
 The isolated stack enables app-level auth on the **SPA backend** (web-api,
