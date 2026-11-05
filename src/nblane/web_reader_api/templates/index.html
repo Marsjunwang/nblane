@@ -3206,10 +3206,10 @@
       if (Number.isFinite(raw)) return Math.max(0, Math.min(8, raw));
       const cores = Number(navigator.hardwareConcurrency || 0);
       const memory = Number(navigator.deviceMemory || 0);
-      if ((cores && cores <= 2) || (memory && memory <= 4)) return 2;
-      if ((cores && cores >= 12) || (memory && memory >= 16)) return 6;
-      if ((cores && cores >= 8) || (memory && memory >= 8)) return 5;
-      return 4;
+      if ((cores && cores <= 2) || (memory && memory <= 4)) return 0;
+      if ((cores && cores >= 12) || (memory && memory >= 16)) return 2;
+      if ((cores && cores >= 8) || (memory && memory >= 8)) return 1;
+      return 1;
     }
     function renderCacheMaxPages() {
       const raw = Number(settings().render_cache_max_pages);
@@ -3435,7 +3435,7 @@
       if (missing.length) schedulePayloadRefresh();
     }
     function requestPagePreviews(pages) {
-      if (selectionIsActive()) return;
+      if (pdfDocumentLoading || (pdfDoc && !pageDomReady(currentPage)) || selectionIsActive()) return;
       const clean = Array.from(new Set(asArr(pages).map((page) => Number(page || 0)).filter((page) => page > 0))).slice(0, pagePreviewBatchLimit());
       const missing = clean.filter((page) => !requestedPreviews.has(page) && !previewForPage(page));
       if (!missing.length) return;
@@ -7030,7 +7030,7 @@
         currentPage = targetPage;
         ensureSkeletonForPage(targetPage, Boolean(options.preserveScroll));
       }
-      const extra = overscanPages();
+      const extra = pdfDoc && pageDomReady(targetPage) ? overscanPages() : 0;
       const start = Math.max(Number(skeletonWindow.start || 1), targetPage - extra);
       const end = Math.min(Number(skeletonWindow.end || targetPage), totalPages || knownPageCount(targetPage), targetPage + extra);
       for (let page = start; page <= end; page += 1) {
@@ -7196,6 +7196,13 @@
           };
           if ("requestIdleCallback" in window) window.requestIdleCallback(encode, { timeout: 2500 });
           else window.setTimeout(encode, 400);
+          if (pageNumber === currentPage) {
+            window.setTimeout(() => {
+              if (!pdfDoc || currentPage !== pageNumber) return;
+              renderAround(pageNumber);
+              requestVisiblePageThumbPreviews();
+            }, 0);
+          }
         }
       } catch (error) {
         if (applyPagePreview(pageNumber, viewportSize)) {
@@ -7533,7 +7540,10 @@
         requestedPreviews.add(pageNumber);
         fetchPagePreview(pageNumber);
       }
-      if (!pdfDocumentLoading) markPageRenderSource(pageNumber, "preview", pdfLoadError || label("pdf_error"));
+      if (!pdfDocumentLoading) {
+        markPageRenderSource(pageNumber, "preview", pdfLoadError || label("pdf_error"));
+        ensureBackendTextLayer(pageNumber, size);
+      }
       if (state) {
         state.status = pageDomReady(pageNumber, "preview") ? "preview" : "preview_requested";
         state.previewScale = size.scale;
@@ -7542,7 +7552,6 @@
       }
       const pageInput = document.getElementById("pageInput");
       if (pageInput) pageInput.value = String(currentPage);
-      ensureBackendTextLayer(pageNumber, size);
       renderHighlights(pageNumber);
     }
     function applyAllKnownHighlights() {
@@ -8869,6 +8878,10 @@
           // Default 64KB range chunks turn a 25MB paper into hundreds of
           // round trips; 1MB chunks keep range loading but cut the count.
           source.rangeChunkSize = 1024 * 1024;
+          // Keep bandwidth for the pages being read instead of prefetching
+          // the rest of a large PDF in the background.
+          source.disableAutoFetch = true;
+          source.disableStream = true;
         }
         pdfLoadError = "";
         loadingTask = window.pdfjsLib.getDocument(source);

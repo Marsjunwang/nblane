@@ -406,6 +406,53 @@ test("pdf reader creates a bounded page window on first render", async ({ page }
   await expect(page.locator("canvas")).toHaveCount(3);
 });
 
+test("pdf reader prioritizes the current page and on-demand document bytes", async ({ page }) => {
+  const payload = readerPayload(false);
+  payload.settings.reader_mode = "pdf";
+  payload.settings.translation_layout = "flow";
+  payload.settings.debug_overlay_enabled = false;
+  (payload.settings as any).overscan_pages = undefined;
+  payload.settings.page_count = 36;
+  payload.source.metadata.page_count = 36;
+  payload.context_window = { pages: [1, 2], total_pages: 36 };
+  (payload as any).pdf_url = "/reader/api/source%3Areader%3Ageometry/pdf";
+
+  const previewHits: number[] = [];
+  const textLayerHits: number[] = [];
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 12 });
+    (window as any).pdfjsLib = {
+      GlobalWorkerOptions: {},
+      getDocument(source) {
+        (window as any).__documentSource = source;
+        return { promise: new Promise(() => {}), destroy() { return Promise.resolve(); } };
+      },
+    };
+  });
+  await page.route("**/reader/api/**/payload**", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(payload) });
+  });
+  await page.route("**/reader/api/**/page-preview/**", async (route) => {
+    previewHits.push(Number(route.request().url().match(/page-preview\/(\d+)/)?.[1]));
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ page: 1, width: 200, height: 100, data_url: previewDataUrl }),
+    });
+  });
+  await page.route("**/reader/api/**/page-text-layer/**", async (route) => {
+    textLayerHits.push(Number(route.request().url().match(/page-text-layer\/(\d+)/)?.[1]));
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ spans: [] }) });
+  });
+  await page.setContent(readerHtml(), { waitUntil: "domcontentloaded" });
+
+  await expect.poll(() => page.evaluate(() => Boolean((window as any).__documentSource))).toBe(true);
+  const source = await page.evaluate(() => (window as any).__documentSource);
+  expect(source).toMatchObject({ rangeChunkSize: 1024 * 1024, disableAutoFetch: true, disableStream: true });
+  expect(await page.evaluate(() => (window as any).overscanPages())).toBe(2);
+  expect(previewHits).toEqual([]);
+  expect(textLayerHits).toEqual([]);
+});
+
 test("translation progress bar reflects actionState and fades out", async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 760 });
   await renderReader(page, readerPayload(false));
