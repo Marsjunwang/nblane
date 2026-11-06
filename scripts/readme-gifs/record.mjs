@@ -21,94 +21,54 @@ async function newCtx(name) {
 }
 const wait = (p, ms) => p.waitForTimeout(ms);
 async function glide(page, x, y, steps = 25) { await page.mouse.move(x, y, { steps }); }
-// Scroll in small wheel steps so the recording shows motion, not a jump.
-async function scroll(page, dy, ms = 900) {
-  const steps = Math.max(1, Math.round(ms / 16));
-  for (let i = 0; i < steps; i++) { await page.mouse.wheel(0, dy / steps); await page.waitForTimeout(16); }
-}
 async function tryClick(page, locator, label) {
   try { await locator.first().click({ timeout: 4000 }); return true; }
   catch { console.warn(`skip click: ${label}`); return false; }
 }
 
-// Loading gaps [start, end] in seconds since the page opened; to-webp.sh cuts
-// them so the clip jumps straight from a click to the rendered page.
-let marks = [];
-let T0 = 0;
-async function until(ready) {
-  const start = Date.now();
-  await ready();
-  const end = Date.now();
-  if (end - start > 250) marks.push([(start - T0) / 1000 + 0.15, (end - T0) / 1000]);
-}
-const visible = (locator) => () => locator.first().waitFor({ state: "visible", timeout: 30000 });
-async function nav(page, label, readyText) {
-  await page.getByRole("link", { name: label, exact: true }).first().click();
-  await until(visible(page.getByText(readyText)));
+async function nav(page, label) {
+  await page.getByRole("link", { name: label, exact: true }).first().click(); await wait(page, 2500);
 }
 
 const SCENES = {
-  // 1. Home star map. Software WebGL on a GPU-less host renders ~9 fps while
-  // a video is recording, so freeze time and screenshot frame by frame:
-  // every frame is fully rendered and the motion is evenly spaced.
-  home: {
-    frames: { fps: 15, seconds: 10 },
-    async run(page, shoot) {
-      await page.clock.install();
-      await page.goto(`${base}/p/demo/home`);
-      for (let i = 0; i < 100 && !(await page.locator("canvas").count()); i++) {
-        await page.clock.runFor(100); await wait(page, 100);
-      }
-      await page.clock.runFor(300); await wait(page, 300);
-      const path = [[640, 400], [420, 320], [760, 420], [940, 300]];
-      await shoot(async (i, n) => {
-        const t = (i / (n - 1)) * (path.length - 1);
-        const k = Math.min(path.length - 2, Math.floor(t)); const f = t - k;
-        await page.mouse.move(path[k][0] + (path[k + 1][0] - path[k][0]) * f, path[k][1] + (path[k + 1][1] - path[k][1]) * f);
-        if (i >= Math.round(n * 0.55) && i < Math.round(n * 0.55) + 15) await page.mouse.wheel(0, -20);
-      });
-    },
+  // 1. Home star map: let the 3D scene breathe, sweep the cursor across it.
+  async home(page) {
+    await page.goto(`${base}/p/demo/home`); await wait(page, 4500);
+    await glide(page, 420, 320, 40); await wait(page, 900);
+    await glide(page, 760, 420, 40); await wait(page, 900);
+    await page.mouse.wheel(0, -300); await wait(page, 1500);
+    await glide(page, 940, 300, 40); await wait(page, 1500);
   },
   // 2. Projects -> evidence review -> skill tree.
-  loop: { async run(page) {
-    await page.goto(`${base}/p/demo/projects`);
-    await until(visible(page.getByText("真机导航栈")));
-    await wait(page, 1000);
-    await page.mouse.move(700, 500); await scroll(page, 300); await wait(page, 1200);
-    await nav(page, "证据", "MVP 上线"); await wait(page, 800);
-    await tryClick(page, page.getByText("MVP 上线"), "evidence row");
-    await until(visible(page.getByTestId("evidence-detail"))); await wait(page, 2200);
-    await tryClick(page, page.getByRole("button", { name: /已入座/ }), "seated tab");
-    await until(visible(page.getByText("感知节点推理延迟优化"))); await wait(page, 1800);
-    await nav(page, "技能树", "ROS2 Basics"); await wait(page, 800);
-    await tryClick(page, page.getByText("ROS2 Basics"), "skill"); await wait(page, 2800);
-  } },
-  // 3. Research desk -> paper overview -> reader in side-by-side mode.
-  research: { async run(page) {
-    await page.goto(`${base}/p/demo/research`);
-    await until(visible(page.getByText("阅读队列"))); await wait(page, 1500);
-    await tryClick(page, page.getByRole("link", { name: /Embodied Chain-of-Thought/ }), "paper");
-    await until(visible(page.getByText("对照阅读"))); await wait(page, 2200);
-    await tryClick(page, page.getByRole("link", { name: "对照阅读" }), "compare");
-    const frame = page.frameLocator('iframe[src*="/reader/view/"]');
-    await until(async () => {
-      await page.locator("[data-testid=sidecar-loading]").first().waitFor({ state: "detached", timeout: 30000 }).catch(() => {});
-      await frame.locator("canvas").first().waitFor({ state: "visible", timeout: 30000 }).catch(() => console.warn("reader canvas not seen"));
-    });
-    await wait(page, 2500);
-    await page.mouse.move(800, 600); await scroll(page, 400); await wait(page, 1800);
-    await page.mouse.move(640, 450); await scroll(page, 500); await wait(page, 2200);
-  } },
+  async loop(page) {
+    await page.goto(`${base}/p/demo/projects`); await wait(page, 3000);
+    await page.mouse.wheel(0, 300); await wait(page, 1500);
+    await nav(page, "证据");
+    await tryClick(page, page.getByText("MVP 上线"), "evidence row"); await wait(page, 2200);
+    await tryClick(page, page.getByRole("button", { name: "已入座 8" }), "seated tab"); await wait(page, 1800);
+    await nav(page, "技能树");
+    await tryClick(page, page.getByText("ROS2 Basics"), "skill"); await wait(page, 2500);
+  },
+  // 3. Research desk -> reader.
+  async research(page) {
+    await page.goto(`${base}/p/demo/research`); await wait(page, 3000);
+    await tryClick(page, page.getByRole("link", { name: /Embodied Chain-of-Thought/ }), "paper"); await wait(page, 3000);
+    await page.goto(`${base}/p/demo/research/papers/${encodeURIComponent("source:research:20261003-001")}/read`); await wait(page, 3500);
+    const frame = page.frameLocator("iframe[src*=\"/reader/view/\"]");
+    await frame.getByText("对照", { exact: true }).first().waitFor({ timeout: 20000 }).catch(() => console.warn("reader not ready"));
+    await wait(page, 2000);
+    await tryClick(page, frame.getByText("对照", { exact: true }), "bilingual"); await wait(page, 4000);
+    await page.mouse.move(800, 600); await page.mouse.wheel(0, 400); await wait(page, 2500);
+    await page.mouse.move(640, 450); await page.mouse.wheel(0, 500); await wait(page, 2500);
+  },
   // 4. Content editor -> public site preview.
-  content: { async run(page) {
-    await page.goto(`${base}/p/demo/content`);
-    await until(visible(page.getByText("Sim2Real 域随机化实践笔记"))); await wait(page, 1200);
-    await tryClick(page, page.getByRole("link", { name: "Sim2Real 域随机化实践笔记" }), "post");
-    await until(visible(page.getByText("为什么要做域随机化"))); await wait(page, 1800);
-    await page.mouse.move(640, 450); await scroll(page, 400); await wait(page, 1500);
-    await nav(page, "公开站点", "网站与自我介绍"); await wait(page, 2000);
-    await page.mouse.move(1000, 450); await scroll(page, 500); await wait(page, 2200);
-  } },
+  async content(page) {
+    await page.goto(`${base}/p/demo/content`); await wait(page, 2500);
+    await tryClick(page, page.getByRole("link", { name: "Sim2Real 域随机化实践笔记" }), "post"); await wait(page, 3500);
+    await page.mouse.move(640, 450); await page.mouse.wheel(0, 400); await wait(page, 2000);
+    await nav(page, "公开站点"); await wait(page, 1500);
+    await page.mouse.move(1000, 450); await page.mouse.wheel(0, 500); await wait(page, 2500);
+  },
 };
 
 const scenes = picked.length ? picked : Object.keys(SCENES);
@@ -123,36 +83,14 @@ if (scenes.includes("research")) {
   await wp.waitForTimeout(12000); await warm.close();
 }
 for (const name of scenes) {
-  const scene = SCENES[name];
-  const t0 = Date.now();
-  if (scene.frames) {
-    const dir = `${outDir}/frames-${name}`;
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.mkdirSync(dir, { recursive: true });
-    const ctx = await browser.newContext({ viewport: { width: W, height: H } });
-    await ctx.request.post(base + "/api/v1/auth/login", { data: { username: user, password } });
-    const page = await ctx.newPage();
-    const { fps, seconds } = scene.frames;
-    const n = Math.round(fps * seconds);
-    await scene.run(page, async (onFrame) => {
-      for (let i = 0; i < n; i++) {
-        await onFrame(i, n);
-        await page.clock.runFor(1000 / fps);
-        await page.screenshot({ path: `${dir}/f${String(i).padStart(4, "0")}.png` });
-      }
-    });
-    await ctx.close();
-    console.log(name, `${n} frames @${fps}fps`, ((Date.now() - t0) / 1000).toFixed(1) + "s");
-    continue;
-  }
   const ctx = await newCtx(name);
   const page = await ctx.newPage();
-  marks = []; T0 = Date.now();
-  await scene.run(page);
-  fs.writeFileSync(`${outDir}/${name}.cuts.json`, JSON.stringify(marks.map(([a, b]) => [+a.toFixed(2), +b.toFixed(2)])));
+  const t0 = Date.now();
+  await SCENES[name](page);
   const video = page.video();
   await ctx.close();
-  fs.renameSync(await video.path(), `${outDir}/${name}.webm`);
-  console.log(name, "done", ((Date.now() - t0) / 1000).toFixed(1) + "s", "cuts", JSON.stringify(marks.map(([a, b]) => `${a.toFixed(1)}-${b.toFixed(1)}`)));
+  const src = await video.path();
+  fs.renameSync(src, `${outDir}/${name}.webm`);
+  console.log(name, "done", ((Date.now() - t0) / 1000).toFixed(1) + "s");
 }
 await browser.close();
