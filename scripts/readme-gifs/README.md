@@ -33,17 +33,14 @@ scripts/readme-gifs/to-webp.sh                              # 输出到 docs/ass
 
 ## 裁剪和体积
 
-`to-webp.sh` 里的时间窗口用来剪掉页面加载时的空白帧。场景节奏变了就重新量：
+录制脚本会在 `<场景>.cuts.json` 里记录加载空白的时间段（点击到内容出现之间的
+等待）。`to-webp.sh` 用 ffmpeg `select` 滤镜把这些段落剪掉，让输出直接从点击
+跳到渲染完的画面。场景节奏变了就重新录制——录制脚本等的是内容可见，不是固定
+延迟。
 
-```bash
-ffmpeg -i dist/readme-gifs/loop.webm \
-  -vf "fps=2,signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG:file=-" -f null -
-```
-
-亮度接近 37 的帧是空白的深色背景。
-
-默认 800 px 宽、质量 55，四段合计约 4 MB。可用 `DEMO_WIDTH`、`DEMO_QUALITY`
-调整。不用 GIF 是因为 GIF 只有 256 色，帧率提上去后体积会到 16 MB。
+默认 800 px 宽、质量 55，四段合计约 3 MB（home 670 KB、loop 530 KB、research
+1.5 MB、content 400 KB）。可用 `DEMO_WIDTH`、`DEMO_QUALITY` 调整。不用 GIF 是
+因为 GIF 只有 256 色，同样帧率下体积是 WebP 的两倍多。
 
 环境变量：`NBLANE_DEMO_BASE_URL`、`NBLANE_DEMO_USER`、`NBLANE_DEMO_PASSWORD`、
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`。
