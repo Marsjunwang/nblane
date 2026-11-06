@@ -9,7 +9,7 @@ nblane is a local-first growth workspace for AI-native researchers and developer
 
 Each person keeps a `SKILL.md`: a growth record that doubles as an agent system prompt. Everything is plain YAML / Markdown under `profiles/<name>/`, backed up with Git. No database.
 
-![Home star map: goals are stars, skills are constellations](docs/assets/readme/starmap.gif)
+![Home star map: goals are stars, skills are constellations](docs/assets/readme/starmap.webp)
 
 ## How it works
 
@@ -17,15 +17,15 @@ The core loop: **do the work → crystallize evidence → confirm it → light u
 
 1. **Projects → evidence → skill tree.** Finished tasks become evidence; AI pre-fills strength and confidence, you confirm. Confirmed evidence advances skills on the tree.
 
-   ![Projects → evidence review → skill tree](docs/assets/readme/project-evidence-skill.gif)
+   ![Projects → evidence review → skill tree](docs/assets/readme/project-evidence-skill.webp)
 
 2. **Read papers.** Library, reading queue, PDF reader with side-by-side translation, AI deep reading and an in-paper glossary.
 
-   ![Research desk → paper overview → reader](docs/assets/readme/research.gif)
+   ![Research desk → paper overview → reader](docs/assets/readme/research.webp)
 
 3. **Write and publish.** BlockNote editor with AI cleanup and translation; the public site page previews exactly what goes live and publishes only after you confirm.
 
-   ![Content workspace → public site preview](docs/assets/readme/content.gif)
+   ![Content workspace → public site preview](docs/assets/readme/content.webp)
 
 4. **Hand it to your agent.** `nblane context` prints `SKILL.md` as a system prompt. The assistant reads and writes over HTTP; writes are undoable and important ones need confirmation in chat.
 
