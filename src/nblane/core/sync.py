@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from nblane.core import git_backup
+from nblane.core.file_lock import locked_profile_write
 from nblane.core.file_write import atomic_write_text
 from nblane.core.io import (
     KANBAN_DOING,
@@ -213,17 +214,17 @@ def get_drifted_blocks(profile_dir: Path) -> list[str]:
 def write_generated_blocks(profile_dir: Path) -> None:
     """Rewrite generated blocks in SKILL.md."""
     skill_md = profile_dir / "SKILL.md"
-    if not skill_md.exists():
-        raise ValueError("SKILL.md not found.")
-
-    content = skill_md.read_text(encoding="utf-8")
-    generated = build_generated_blocks(profile_dir)
-    updated = content
-    for block_name in BLOCKS:
-        updated = _replace_block_body(
-            updated, block_name, generated[block_name]
-        )
-    atomic_write_text(skill_md, updated)
+    with locked_profile_write(profile_dir, "SKILL.md"):
+        if not skill_md.exists():
+            raise ValueError("SKILL.md not found.")
+        content = skill_md.read_text(encoding="utf-8")
+        generated = build_generated_blocks(profile_dir)
+        updated = content
+        for block_name in BLOCKS:
+            updated = _replace_block_body(
+                updated, block_name, generated[block_name]
+            )
+        atomic_write_text(skill_md, updated)
     git_backup.record_change(
         [skill_md],
         action=f"sync {profile_dir.name}/SKILL.md",

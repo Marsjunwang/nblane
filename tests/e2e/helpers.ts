@@ -1,19 +1,10 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
 /**
  * Shared URL helpers for the nblane browser e2e suite.
  *
- * Port convention (mirrors scripts/dev-web.sh):
- *   - default dev instance:  SPA http://127.0.0.1:8504, Reader API sidecar :8502
- *   - isolated dev instance: SPA http://127.0.0.1:18504, Reader API sidecar :18502
- *     (`scripts/dev-web.sh --isolated`, data under .dev-data/, assets under
- *     .dev-assets/)
- *
- * playwright.config.ts sets `use.baseURL` once (env NBLANE_E2E_BASE_URL,
- * default http://127.0.0.1:18504, the isolated SPA). The helpers below cover
- * the cases that need an absolute URL string (skip messages, cross-origin
- * sidecar calls, deep-link parameters).
+ * run.mjs supplies fresh loopback ports and a temporary data root. Global
+ * setup checks both server identities before any spec can mutate files.
+ * The fallback URL only permits Playwright to collect specs outside a run;
+ * the ownership check rejects execution without the generated environment.
  */
 
 export const DEFAULT_SPA_BASE_URL = "http://127.0.0.1:18504";
@@ -58,19 +49,20 @@ export function readerPageURL(path: string = "/"): string {
   return new URL(path, `${readerBaseURL()}/`).toString();
 }
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-
-/**
- * Data root (NBLANE_ROOT) of the instance under test. The isolated dev
- * instance serves .dev-data; the default instance serves the repo root.
- * Specs that write fixture profiles must write into the same tree the
- * server reads. Override with NBLANE_E2E_DATA_ROOT for a custom --root.
- */
+/** Data root owned by run.mjs; never fall back to personal/dev profiles. */
 export function e2eDataRoot(): string {
   const override = (process.env.NBLANE_E2E_DATA_ROOT || "").trim();
-  if (override) {
+  if (override && process.env.NBLANE_E2E_RUN_ID) {
     return override;
   }
-  const port = new URL(`${spaBaseURL()}/`).port;
-  return port === "18504" ? path.join(repoRoot, ".dev-data") : repoRoot;
+  throw new Error("Use npm run test:e2e to create owned temporary fixtures.");
+}
+
+/** Confine configurable fixture names to one directory below profiles/. */
+export function fixtureProfileName(fallback: string): string {
+  const name = process.env.NBLANE_PAPER_LIBRARY_E2E_PROFILE || fallback;
+  if (!name.trim() || name === "." || name === ".." || /[\\/\0]/.test(name)) {
+    throw new Error("Invalid E2E fixture profile name.");
+  }
+  return name;
 }

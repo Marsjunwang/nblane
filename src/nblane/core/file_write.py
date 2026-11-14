@@ -6,7 +6,10 @@ import os
 import tempfile
 from pathlib import Path
 from contextlib import contextmanager
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+
+from nblane.core.file_lock import locked_profile_files
+from nblane.core.file_state import FileSnapshot, assert_unchanged
 
 
 def _fsync_directory(path: Path) -> None:
@@ -69,7 +72,8 @@ def rollback_profile_files(directory: Path, filenames: tuple[str, ...]) -> Itera
 
     This handles ordinary exceptions, not process death. Callers must use
     stable source identities so interrupted operations can be safely retried.
-    Individual domain writers retain responsibility for their own file locks.
+    Callers must hold the relevant domain locks across the whole operation;
+    use ``profile_file_transaction`` for ordinary profile-file transactions.
     Readers may observe intermediate files while the operation is in flight.
     """
     before = {
@@ -95,3 +99,31 @@ def rollback_profile_files(directory: Path, filenames: tuple[str, ...]) -> Itera
         if failures:
             raise OSError(f"{original}; rollback failed: {'; '.join(failures)}") from original
         raise
+
+
+@contextmanager
+def profile_file_transaction(
+    directory: Path,
+    filenames: tuple[str, ...],
+    *,
+    expected_snapshots: Mapping[str, FileSnapshot | None] | None = None,
+) -> Iterator[None]:
+    """Preflight and commit multiple files under their domain write locks.
+
+    Every expected version is checked before the first write. Ordinary
+    failures restore the transaction's starting state while all locks remain
+    held, so a rollback cannot erase another cooperating writer's commit.
+    This is exception recovery, not crash-atomic storage; unlocked readers
+    can still observe intermediate files.
+    """
+    from nblane.core import git_backup
+
+    checks = dict(expected_snapshots or {})
+    names = tuple(dict.fromkeys((*filenames, *checks)))
+    with locked_profile_files(directory, names):
+        for name, expected in checks.items():
+            if expected is not None:
+                assert_unchanged(directory / name, expected, label=name)
+        with git_backup.defer_changes(f"update {directory.name} files"):
+            with rollback_profile_files(directory, filenames):
+                yield

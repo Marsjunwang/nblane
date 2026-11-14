@@ -1,20 +1,18 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
-import { e2eDataRoot, readerBaseURL, spaPageURL } from "./helpers";
+import { e2eDataRoot, fixtureProfileName, readerBaseURL, spaPageURL } from "./helpers";
 
-const profileName = process.env.NBLANE_PAPER_LIBRARY_E2E_PROFILE || "paper-library-e2e";
+const profileName = fixtureProfileName("paper-library-e2e");
 // The standalone Paper Library workspace is served by the Reader API sidecar.
 const e2eBaseUrl = readerBaseURL();
 // Deep-link target exercised by the Overview tests: the SPA Research page.
 const overviewReturnURL = spaPageURL("/research");
 
-// Fixtures must land in the data root of the instance under test
-// (.dev-data for the isolated dev instance, repo root otherwise).
+// Fixtures stay in the temporary roots supplied by run.mjs.
 const profileDir = path.join(e2eDataRoot(), "profiles", profileName);
 const researchDir = path.join(profileDir, "research");
-const repoRoot = path.basename(e2eDataRoot()) === ".dev-data" ? path.dirname(e2eDataRoot()) : e2eDataRoot();
-const assetRoot = process.env.NBLANE_E2E_RESEARCH_ASSET_ROOT || path.join(repoRoot, ".dev-assets", "research");
+const assetRoot = path.join(e2eDataRoot(), "assets");
 const assetProfileDir = path.join(assetRoot, "profiles", profileName);
 const fixturePdf = Buffer.from(`%PDF-1.4
 1 0 obj
@@ -163,6 +161,7 @@ function cleanupFixtureProfile() {
 function paperLibraryUrl(params: Record<string, string> = {}): string {
   const url = new URL("/paper-library", e2eBaseUrl);
   url.searchParams.set("profile", profileName);
+  url.searchParams.set("ui_lang", "en");
   for (const [key, value] of Object.entries(params)) {
     if (value) {
       url.searchParams.set(key, value);
@@ -172,18 +171,11 @@ function paperLibraryUrl(params: Record<string, string> = {}): string {
 }
 
 async function openPaperLibrary(page, params: Record<string, string> = {}) {
-  let response;
-  try {
-    response = await page.goto(paperLibraryUrl(params), {
-      waitUntil: "domcontentloaded",
-      timeout: 20_000,
-    });
-  } catch {
-    test.skip(true, "Run the Reader API sidecar (scripts/dev-web.sh --isolated) or set NBLANE_E2E_READER_BASE.");
-  }
-  if (!response || response.status() >= 400) {
-    test.skip(true, "Paper Library workspace is not available at the configured sidecar URL.");
-  }
+  const response = await page.goto(paperLibraryUrl(params), {
+    waitUntil: "domcontentloaded",
+    timeout: 20_000,
+  });
+  expect(response?.ok(), "The owned Reader fixture must serve the library").toBeTruthy();
   await expect(page.locator(".paper-tree-shell.is-standalone")).toBeVisible();
   await expect(page.locator(".paper-workbench")).toBeVisible();
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
@@ -387,7 +379,7 @@ test("Paper Library shows retry translation job progress", async ({ page }) => {
   await expect(page.locator(".paper-detail-title")).toContainText("Extremely Long English Paper Title");
   const apiPayload = await page.evaluate(async ({ profileName, sourceId }) => {
     const response = await fetch(
-      `/api/research/${encodeURIComponent(profileName)}/paper-library?view=all&detail_id=${encodeURIComponent(sourceId)}&focus=translations`,
+      `/api/research/${encodeURIComponent(profileName)}/paper-library?ui_lang=en&view=all&detail_id=${encodeURIComponent(sourceId)}&focus=translations`,
       { credentials: "same-origin" },
     );
     const data = await response.json();
@@ -497,7 +489,7 @@ test("Paper Library shows run extraction fallback-ready progress", async ({ page
 
   const apiPayload = await page.evaluate(async ({ profileName, sourceId }) => {
     const response = await fetch(
-      `/api/research/${encodeURIComponent(profileName)}/paper-library?view=all&detail_id=${encodeURIComponent(sourceId)}&focus=artifacts`,
+      `/api/research/${encodeURIComponent(profileName)}/paper-library?ui_lang=en&view=all&detail_id=${encodeURIComponent(sourceId)}&focus=artifacts`,
       { credentials: "same-origin" },
     );
     const data = await response.json();
@@ -590,7 +582,7 @@ test("Paper Library force GROBID upgrade sends explicit override", async ({ page
 
   const apiPayload = await page.evaluate(async ({ profileName, sourceId }) => {
     const response = await fetch(
-      `/api/research/${encodeURIComponent(profileName)}/paper-library?view=all&detail_id=${encodeURIComponent(sourceId)}&focus=artifacts`,
+      `/api/research/${encodeURIComponent(profileName)}/paper-library?ui_lang=en&view=all&detail_id=${encodeURIComponent(sourceId)}&focus=artifacts`,
       { credentials: "same-origin" },
     );
     const data = await response.json();

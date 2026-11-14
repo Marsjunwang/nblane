@@ -21,7 +21,7 @@ import yaml
 
 from nblane.core import file_state, git_backup, resume_doc
 from nblane.core.file_lock import locked_profile_write
-from nblane.core.file_write import atomic_write_text
+from nblane.core.file_write import atomic_write_text, profile_file_transaction
 from nblane.core.public_site import (
     GENERATED_RESUME_DIRNAME,
     MEDIA_DIRNAME,
@@ -184,7 +184,9 @@ def clean_draft_id(target: str) -> str:
 
 
 def draft_etag(path: Path) -> str:
-    return file_state.snapshot_file(path).sha256 or "missing"
+    """Version both the draft body and its editable metadata."""
+    versions = [file_state.snapshot_file(item).sha256 or "missing" for item in (path, _meta_path(path))]
+    return hashlib.sha256("|".join(versions).encode("utf-8")).hexdigest()
 
 
 def _meta_path(path: Path) -> Path:
@@ -222,7 +224,11 @@ def list_drafts(name: str) -> list[dict[str, Any]]:
     root = _drafts_root(name)
     if not root.is_dir():
         return []
-    rows = [_draft_row(path) for path in root.glob("*.md") if path.is_file()]
+    rows = []
+    for path in root.glob("*.md"):
+        with locked_profile_write(root, path.name):
+            if path.is_file():
+                rows.append(_draft_row(path))
     return sorted(rows, key=lambda row: row["updated_at"], reverse=True)
 
 
@@ -238,7 +244,10 @@ def get_draft(name: str, draft_id: str) -> dict[str, Any]:
     path = draft_path(name, draft_id)
     if path is None:
         raise CareerError("career_draft_not_found", "定制简历不存在。")
-    return _draft_row(path)
+    with locked_profile_write(path.parent, path.name):
+        if not path.is_file():
+            raise CareerError("career_draft_not_found", "定制简历不存在。")
+        return _draft_row(path)
 
 
 def save_draft(
@@ -262,12 +271,11 @@ def save_draft(
     root = _drafts_root(name)
     path = root / f"{clean_target}.md"
     root.mkdir(parents=True, exist_ok=True)
-    with locked_profile_write(root, path.name):
+    with profile_file_transaction(root, (path.name, _meta_path(path).name)):
+        if expected_etag and (not path.exists() or draft_etag(path) != expected_etag):
+            raise ResumeConflict("定制简历已在别处修改，请刷新后再保存。")
         if path.exists():
-            if expected_etag:
-                if draft_etag(path) != expected_etag:
-                    raise ResumeConflict("定制简历已在别处修改，请刷新后再保存。")
-            elif not overwrite:
+            if not expected_etag and not overwrite:
                 raise CareerError("career_draft_exists", f"已存在同名定制简历：{clean_target}")
         atomic_write_text(path, str(markdown).rstrip() + "\n")
         changed = [path]
@@ -277,27 +285,49 @@ def save_draft(
             current.update({k: v for k, v in meta.items() if k in META_FIELDS and v is not None})
             atomic_write_text(meta_path, yaml.safe_dump(current, allow_unicode=True, sort_keys=False))
             changed.append(meta_path)
-    git_backup.record_change(changed, action=f"save {name} tailored resume draft")
-    return _draft_row(path)
+        git_backup.record_change(changed, action=f"save {name} tailored resume draft")
+        return _draft_row(path)
 
 
 META_FIELDS = ("jd_text", "notes", "analysis")
 
 
-def update_draft_meta(name: str, draft_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-    """Merge JD / notes / analysis into ``<id>.meta.yaml`` (the draft text is untouched)."""
+def update_draft(
+    name: str, draft_id: str, *, markdown: str | None = None,
+    meta: dict[str, Any] | None = None, expected_etag: str = "",
+) -> dict[str, Any]:
+    """Check one version and commit body and metadata as one operation."""
     path = draft_path(name, draft_id)
     if path is None:
         raise CareerError("career_draft_not_found", "定制简历不存在。")
     meta_path = _meta_path(path)
-    with locked_profile_write(path.parent, meta_path.name):
-        meta = _load_meta(path)
-        for key in META_FIELDS:
-            if key in patch and patch[key] is not None:
-                meta[key] = patch[key]
-        atomic_write_text(meta_path, yaml.safe_dump(meta, allow_unicode=True, sort_keys=False))
-    git_backup.record_change([meta_path], action=f"update {name} tailored resume notes")
-    return _draft_row(path)
+    with profile_file_transaction(path.parent, (path.name, meta_path.name)):
+        if not path.is_file():
+            raise CareerError("career_draft_not_found", "定制简历不存在。")
+        if expected_etag and draft_etag(path) != expected_etag:
+            raise ResumeConflict("定制简历已在别处修改，请刷新后再保存。")
+        changed = []
+        if markdown is not None:
+            if not markdown.strip():
+                raise CareerError("invalid_career_draft", "定制简历内容为空。")
+            text = markdown.rstrip() + "\n"
+            if text != path.read_text(encoding="utf-8"):
+                atomic_write_text(path, text)
+                changed.append(path)
+        current = _load_meta(path)
+        updated = {**current, **{key: value for key, value in (meta or {}).items()
+                                if key in META_FIELDS and value is not None}}
+        if updated != current:
+            atomic_write_text(meta_path, yaml.safe_dump(updated, allow_unicode=True, sort_keys=False))
+            changed.append(meta_path)
+        if changed:
+            git_backup.record_change(changed, action=f"update {name} tailored resume draft")
+        return _draft_row(path)
+
+
+def update_draft_meta(name: str, draft_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    """Merge metadata under the same draft lock used for body saves."""
+    return update_draft(name, draft_id, meta=patch)
 
 
 def delete_draft(name: str, draft_id: str) -> None:

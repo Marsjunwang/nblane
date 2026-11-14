@@ -231,7 +231,11 @@ export interface paths {
          */
         get: operations["list_profiles_api_v1_profiles_get"];
         put?: never;
-        post?: never;
+        /**
+         * Create Profile
+         * @description Create a fully initialized private profile; admins automatically have access.
+         */
+        post: operations["create_profile_api_v1_profiles_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9245,6 +9249,40 @@ export interface components {
              */
             used_at: string;
         };
+        /** ProfileCreateRequest */
+        ProfileCreateRequest: {
+            /**
+             * Goal Title
+             * @default
+             */
+            goal_title: string;
+            /** Name */
+            name: string;
+            /**
+             * North Star
+             * @default
+             */
+            north_star: string;
+            /**
+             * Project Title
+             * @default
+             */
+            project_title: string;
+            /** Schema */
+            schema: string;
+            /**
+             * Task Title
+             * @default
+             */
+            task_title: string;
+        };
+        /** ProfileCreateResponse */
+        ProfileCreateResponse: {
+            /** Has First Plan */
+            has_first_plan: boolean;
+            /** Name */
+            name: string;
+        };
         /**
          * ProfileDetailSummary
          * @description Structured profile summary (JSON counterpart of profile-summary.md).
@@ -13263,6 +13301,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfileSummary"][];
+                };
+            };
+        };
+    };
+    create_profile_api_v1_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileCreateResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

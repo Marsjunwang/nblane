@@ -17,13 +17,12 @@ import { SPA_BASE_URL } from "./spa_auth_shared";
  * 5. 删除项目 — danger-zone confirm dialog with consequence preview.
  * 6. 首页日课印 — bottom-left seal, click-to-checkin, hover dots.
  *
- * Runs against the isolated stack (127.0.0.1:18504, admin/test1234) with the
- * REAL 王军 profile. Writes are confined to: one throwaway project (deleted
- * again via the UI flow), one backfill + one today check-in on real habits.
- * Screenshots land in /tmp/hci-shots/.
+ * Uses the synthetic profile created by run.mjs; project, habit and
+ * history fixtures never come from a personal profile. Screenshots and
+ * mutations stay inside the temporary directory for this run.
  */
 
-const PROFILE = process.env.NBLANE_E2E_PROFILE || "王军";
+const PROFILE = process.env.NBLANE_E2E_PROFILE || "dev";
 const SHOTS = process.env.NBLANE_HCI_SHOTS || "/tmp/hci-shots";
 
 function spa(path: string): string {
@@ -84,10 +83,9 @@ test.describe("SPA /projects HCI package (phase2-projects-hci)", () => {
     await expect(page.getByTestId("lane-group-habits")).toHaveCount(0);
 
     // Habit-plan rows carry the 第N/30天 progress arc.
-    const planRow = page.getByTestId("habit-band-row-康复训练");
-    if ((await planRow.count()) > 0) {
-      await expect(planRow.getByTestId("habit-plan-arc")).toContainText(/第\d+\/30天/);
-    }
+    const planRow = page.getByTestId("habit-band-row-e2e-training");
+    await expect(planRow).toBeVisible();
+    await expect(planRow.getByTestId("habit-plan-arc")).toContainText(/第\d+\/30天/);
     await shot(page, "01-habit-band");
   });
 
@@ -95,12 +93,12 @@ test.describe("SPA /projects HCI package (phase2-projects-hci)", () => {
     page,
   }) => {
     await openProjects(page);
-    // 康复训练 (fresh habit-plan) has empty cells in the trailing 90 days.
-    const row = page.getByTestId("habit-band-row-康复训练");
-    test.skip((await row.count()) === 0, "profile has no 康复训练 habit");
+    // e2e-training (fresh habit-plan) has empty cells in the trailing 90 days.
+    const row = page.getByTestId("habit-band-row-e2e-training");
+    await expect(row).toBeVisible();
 
-    await row.getByTestId("habit-expand-康复训练").click();
-    const heatmap = page.getByTestId("habit-heatmap-康复训练");
+    await row.getByTestId("habit-expand-e2e-training").click();
+    const heatmap = page.getByTestId("habit-heatmap-e2e-training");
     await expect(heatmap).toBeVisible();
     await shot(page, "02-habit-heatmap");
 
@@ -112,7 +110,7 @@ test.describe("SPA /projects HCI package (phase2-projects-hci)", () => {
     const pastCells: { date: string; locator: ReturnType<Page["locator"]> }[] = [];
     for (const cell of cells) {
       const testid = (await cell.getAttribute("data-testid")) ?? "";
-      const date = testid.replace("heatmap-cell-康复训练-", "");
+      const date = testid.replace("heatmap-cell-e2e-training-", "");
       if (date < todayIso) pastCells.push({ date, locator: cell });
     }
     expect(pastCells.length, "heatmap should expose empty past cells").toBeGreaterThan(0);
@@ -128,7 +126,7 @@ test.describe("SPA /projects HCI package (phase2-projects-hci)", () => {
       (response.request().postDataJSON() as { habit?: string; date?: string }).date,
     ).toBe(target.date);
     // After the invalidation refetch the cell is filled.
-    await expect(heatmap.getByTestId(`heatmap-cell-康复训练-${target.date}`)).toHaveAttribute(
+    await expect(heatmap.getByTestId(`heatmap-cell-e2e-training-${target.date}`)).toHaveAttribute(
       "data-filled",
       "true",
       { timeout: 10_000 },
@@ -215,7 +213,7 @@ test.describe("SPA /projects HCI package (phase2-projects-hci)", () => {
     request,
   }) => {
     // Self-seeded archived lane: the flow drives ONLY this case, so the run
-    // never toggles the real archived projects either way.
+    // never toggles the other archived projects either way.
     const run = Date.now();
     const title = `hci-归档验收-${run}`;
     const create = await request.post(api("/project-board/cases"), { data: { title } });
@@ -296,7 +294,7 @@ test.describe("SPA /projects HCI package (phase2-projects-hci)", () => {
     expect(start >= `${sixMonthsAgo.getFullYear()}-${String(sixMonthsAgo.getMonth() + 1).padStart(2, "0")}-${String(sixMonthsAgo.getDate()).padStart(2, "0")}`).toBe(true);
     await shot(page, "09-timeline-recent");
 
-    // 「全部」 extends the domain left (王军 has history back to 2022, clamped ≥2015).
+    // 「全部」 extends the domain left (the synthetic fixture has history back to 2022, clamped ≥2015).
     await page.getByTestId("timeline-zoom-toggle").getByText("全部").click();
     const toolbarText = await page.getByTestId("timeline-toolbar").innerText();
     const allStart = toolbarText.match(/(\d{4}-\d{2}-\d{2})\s*→/)?.[1] ?? "";

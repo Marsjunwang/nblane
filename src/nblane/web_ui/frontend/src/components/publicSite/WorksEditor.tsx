@@ -31,11 +31,11 @@ import {
   IconVideo,
 } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { profileMediaUrl, uploadPublicSiteWorkMedia, useSavePublicSiteWorks } from '../../api/hooks';
 import type { PublicSiteWork, PublicSiteWorkLink } from '../../api/types';
-import { MutationErrorAlert } from '../ConflictAlert';
+import { isConflictError, MutationErrorAlert } from '../ConflictAlert';
 import {
   WORK_TYPE_OPTIONS,
   cleanWorks,
@@ -302,32 +302,58 @@ function WorkCard({
  * Works list editor (`outputs.yaml`). Edits stay local until 保存作品; the
  * save carries `works_etag` so a concurrent edit elsewhere is not clobbered.
  */
-export function WorksEditor({ profile, works, etag }: { profile: string; works: PublicSiteWork[]; etag: string }) {
+type WorksEditorProps = { profile: string; works: PublicSiteWork[]; etag: string };
+
+export function WorksEditor(props: WorksEditorProps) {
+  return <WorksEditorInner key={props.profile} {...props} />;
+}
+
+function WorksEditorInner({ profile, works, etag }: WorksEditorProps) {
   const save = useSavePublicSiteWorks(profile);
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<PublicSiteWork[]>(works);
   const [dirty, setDirty] = useState(false);
   const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const baseEtagRef = useRef(etag);
+  const revisionRef = useRef(0);
 
   // Follow server data while there are no local edits (e.g. after save/refresh).
   useEffect(() => {
-    if (!dirty) setDraft(works);
-  }, [works, dirty]);
+    if (!dirty && !save.isPending) {
+      setDraft(works);
+      baseEtagRef.current = etag;
+    }
+  }, [works, etag, dirty, save.isPending]);
 
   const update = (next: PublicSiteWork[]) => {
+    if (!dirty) baseEtagRef.current = etag;
+    revisionRef.current += 1;
     setDraft(next);
     setDirty(true);
   };
   const issues = worksIssues(draft);
 
-  const submit = () =>
+  const submit = () => {
+    const revision = revisionRef.current;
     save.mutate(
-      { works: cleanWorks(draft), etag },
+      { works: cleanWorks(draft), etag: baseEtagRef.current },
       {
-        onSuccess: () => setDirty(false),
+        onSuccess: (saved) => {
+          baseEtagRef.current = saved.works_etag;
+          if (revisionRef.current === revision) {
+            setDraft(saved.works ?? []);
+            setDirty(false);
+          }
+        },
+        onError: (error) => {
+          if (isConflictError(error)) void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'public-site'] });
+        },
       },
     );
+  };
   const reset = () => {
+    revisionRef.current += 1;
+    baseEtagRef.current = etag;
     setDraft(works);
     setDirty(false);
     save.reset();
@@ -365,14 +391,11 @@ export function WorksEditor({ profile, works, etag }: { profile: string; works: 
           <Text size="xs">{issues.join('；')}</Text>
         </Alert>
       )}
-      <MutationErrorAlert
-        error={save.error}
-        title="作品保存失败"
-        onRefetch={() => {
-          reset();
-          void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'public-site'] });
-        }}
-      />
+      {isConflictError(save.error) ? (
+        <Alert color="yellow" title="作品已在别处修改" data-testid="works-conflict">
+          本地修改已保留，尚未覆盖服务器上的作品。请先复制需要保留的内容；点击「放弃修改」会载入最新版本。
+        </Alert>
+      ) : <MutationErrorAlert error={save.error} title="作品保存失败" />}
       <Group justify="space-between">
         <Button
           size="xs"
@@ -389,7 +412,7 @@ export function WorksEditor({ profile, works, etag }: { profile: string; works: 
         </Button>
         <Group gap="xs">
           {dirty && (
-            <Button size="xs" variant="subtle" color="gray" onClick={reset}>
+            <Button size="xs" variant="subtle" color="gray" onClick={reset} disabled={save.isPending}>
               放弃修改
             </Button>
           )}

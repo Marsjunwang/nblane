@@ -11,10 +11,10 @@ Caveats:
 - Advisory and per-host: only writers that also go through this
   module (UI, CLI, MCP server on the same host) are serialized.
   NFS semantics depend on the mount.
-- Not reentrant for the same lock file: nesting
-  ``locked_profile_write`` for the same path in one process
-  self-deadlocks (each ``open`` creates a new open file
-  description). Different lock files nest safely.
+- Reentrant in the owning thread, allowing a transaction to call existing
+  domain writers. Other threads and processes still acquire their own flock.
+- Multi-file operations acquire all their locks in sorted path order before
+  reading or writing. Do not acquire an earlier lock from inside a later one.
 - The kernel releases the lock when the process dies, so a crashed
   writer never leaves a stale lock behind. The empty ``.lock``
   sidecar files are safe to ignore in VCS.
@@ -23,9 +23,22 @@ Caveats:
 from __future__ import annotations
 
 import fcntl
+import os
+import threading
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
+
+
+_HELD = threading.local()
+
+
+def _held_locks() -> set[Path]:
+    """Return only locks owned by this thread in this process."""
+    if getattr(_HELD, "pid", None) != os.getpid():
+        _HELD.pid = os.getpid()
+        _HELD.paths = set()
+    return _HELD.paths
 
 
 @contextmanager
@@ -42,12 +55,29 @@ def locked_profile_write(
     directory = Path(profile_dir)
     directory.mkdir(parents=True, exist_ok=True)
     lock_path = directory / f"{filename}.lock"
+    identity = lock_path.resolve()
+    held = _held_locks()
+    if identity in held:
+        yield lock_path
+        return
     with open(lock_path, "a", encoding="utf-8") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        held.add(identity)
         try:
             yield lock_path
         finally:
+            held.remove(identity)
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-__all__ = ["locked_profile_write"]
+@contextmanager
+def locked_profile_files(directory: Path, filenames: tuple[str, ...]) -> Iterator[None]:
+    """Hold each domain file's sidecar lock in a consistent order."""
+    paths = sorted({(directory / name).resolve() for name in filenames})
+    with ExitStack() as stack:
+        for path in paths:
+            stack.enter_context(locked_profile_write(path.parent, path.name))
+        yield
+
+
+__all__ = ["locked_profile_write", "locked_profile_files"]

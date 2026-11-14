@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-25
+last_verified: 2026-11-15
 source_of_truth: true
 ---
 
@@ -21,7 +21,7 @@ source_of_truth: true
 ```bash
 git clone <repo-url>
 cd nblane
-scripts/install.sh        # 建 .venv、pip install -e .，然后进入 nblane setup
+scripts/install.sh        # 建 .venv、按 uv.lock 安装，然后进入 nblane setup
 ```
 
 `nblane setup` 是交互式向导，依次做四件事，每步都可以回车跳过：
@@ -50,7 +50,7 @@ python3 -m venv .venv
 cp .env.example .env      # 只在使用 AI 功能时填 LLM_API_KEY
 ```
 
-依赖以 `pyproject.toml` 为准（`uv.lock` 锁定版本，`requirements.txt` 给 pip 用户镜像一份）。走 SOCKS 代理访问外部服务时需要 `httpx[socks]`，已包含在依赖里。
+依赖以 `pyproject.toml` 为准（`uv.lock` 锁定版本，`requirements.txt` 给 pip 用户镜像一份）。安装脚本在没有 uv 时先安装 uv，再执行 `uv sync --locked --no-dev --inexact`，保留已手动安装的可选模型运行时；CI 和 Ubuntu 发布包使用同一份锁文件。开发测试可用 `uv sync --locked --group dev` 安装 pytest。手动 `pip install -e .` 会重新解析允许范围内的依赖版本。走 SOCKS 代理访问外部服务时需要 `httpx[socks]`，已包含在依赖里。
 
 ## 环境自检
 
@@ -93,6 +93,10 @@ scripts/dev-web.sh stop
 
 浏览器打开 `http://127.0.0.1:8504`。远程开发时两个端口都要转发，否则论文库和阅读器 iframe 空白。
 
+档案列表中的「创建档案」供本人管理员使用（未启用登录时，本地用户也是管理员）。先填写档案名、选择领域，再按需填写北极星、阶段目标、首个项目和第一件任务；留空项目名时沿用目标名。创建后直接进入项目页，未填写计划则进入首页。新档案和首个计划默认私有，全部校验完成后才出现在列表中；创建失败会保留表单内容供重试。成员账号需要管理员创建或分配档案，Agent 不能调用此创建入口。
+
+已有档案的领域迁移尚未提供网页流程；不要只替换 schema 名称而忽略已有技能和证据关联。
+
 常用参数：
 
 - `--isolated`：端口改为 18502 / 18504，数据放 `.dev-data/`、资产放 `.dev-assets/`，首次自动 `nblane init dev`。助手、备份、GROBID 也换成独立的 dev 实例，不碰真实数据和生产服务。
@@ -116,6 +120,8 @@ npm run build              # 输出到 src/nblane/web_ui/static/，产物一起�
 
 改了后端接口后，先跑 `scripts/dump-openapi.sh` 更新 `openapi.json`，再 `npm run gen:api` 生成 `src/api/schema.d.ts`。
 
+仓库根目录的 `npm run check:spa-budget` 检查构建后的入口 JavaScript，gzip 上限为 260 KiB；仅统计 `index.html` 实际引用的入口，不把按需加载的页面算入。CI 在重建后执行同一检查。
+
 前端热更新开发用 `npm run dev`（Vite，5173），它把 API 代理到后端，目标用 `VITE_API_PROXY_TARGET` 指定。
 
 ## 浏览器 e2e（可选）
@@ -123,10 +129,14 @@ npm run build              # 输出到 src/nblane/web_ui/static/，产物一起�
 ```bash
 npm install
 npm run test:e2e:install     # 国内网络用 npm run test:e2e:install:cn
-npm run test:e2e             # 需要已运行的服务，地址 NBLANE_E2E_BASE_URL
+npm run test:e2e             # 自动生成测试数据并启动临时 SPA + Reader 服务
+npm run test:e2e -- spa_smoke # 只跑指定用例
+npm run test:e2e:harness     # 检查测试服务归属，不需要浏览器
 ```
 
 `test:e2e:install:cn` 面向 Linux x64，从 npmmirror 下载浏览器；内网缓存可设 `NBLANE_CHROME_FOR_TESTING_MIRROR` 和 `NBLANE_PLAYWRIGHT_BINARY_MIRROR`。
+
+每轮使用独立临时目录、随机本机端口和合成档案，不读取个人档案或开发栈数据。执行写入前核对两个服务的本轮身份标记；测试结束后关闭服务、删除临时目录。失败日志和浏览器 trace 留在 `test-results/`，`NBLANE_E2E_KEEP_DATA=1` 可保留合成数据排查。测试使用已构建的前端产物，改了源码后先重新构建。CI 已接入登录、页面导航和任务修改烟测；详细约定见 `tests/e2e/README.md`。
 
 ## AI 配置
 

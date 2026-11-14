@@ -7806,6 +7806,70 @@
     "title": "PlanTemplateUsageModel",
     "type": "object"
    },
+   "ProfileCreateRequest": {
+    "properties": {
+     "goal_title": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Goal Title",
+      "type": "string"
+     },
+     "name": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+     },
+     "north_star": {
+      "default": "",
+      "maxLength": 2000,
+      "title": "North Star",
+      "type": "string"
+     },
+     "project_title": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Project Title",
+      "type": "string"
+     },
+     "schema": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Schema",
+      "type": "string"
+     },
+     "task_title": {
+      "default": "",
+      "maxLength": 300,
+      "title": "Task Title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "schema"
+    ],
+    "title": "ProfileCreateRequest",
+    "type": "object"
+   },
+   "ProfileCreateResponse": {
+    "properties": {
+     "has_first_plan": {
+      "title": "Has First Plan",
+      "type": "boolean"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "has_first_plan"
+    ],
+    "title": "ProfileCreateResponse",
+    "type": "object"
+   },
    "ProfileDetailSummary": {
     "description": "Structured profile summary (JSON counterpart of profile-summary.md).",
     "properties": {
@@ -14090,6 +14154,76 @@
      }
     },
     "summary": "List Profiles"
+   },
+   "post": {
+    "description": "Create a fully initialized private profile; admins automatically have access.",
+    "operationId": "create_profile_api_v1_profiles_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ProfileCreateRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProfileCreateResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unauthorized"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Forbidden"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Conflict"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      },
+      "description": "Unprocessable Entity"
+     }
+    },
+    "summary": "Create Profile",
+    "tags": [
+     "profiles"
+    ]
    }
   },
   "/api/v1/profiles/{name}/agent-tasks": {

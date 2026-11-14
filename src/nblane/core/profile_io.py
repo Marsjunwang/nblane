@@ -185,7 +185,7 @@ def update_skill_tree(
     document dict and mutates it in place; its return value is passed
     through. When *fn* leaves the document unchanged, no write or backup
     happens. *fn* must not call ``save_skill_tree``/``update_skill_tree``
-    for the same profile (the lock is not reentrant for the same file).
+    for the same profile (a nested save would be overwritten by this callback).
     """
     path = profile_dir(name) / SKILL_TREE_FILENAME
     with locked_profile_write(path.parent, SKILL_TREE_FILENAME):
@@ -438,16 +438,20 @@ def init_profile(name: str, schema: str | None = None) -> Path:
                 f"Unknown schema '{schema}'. Available: {available}"
             )
     dest = safe_profile_dir(profile_name)
-    if dest.exists():
-        raise FileExistsError(
-            f"Profile '{profile_name}' already exists."
-        )
+    # Coordinate with staged web initialization before copytree creates its
+    # empty destination. Otherwise a web rename can replace that directory
+    # while the CLI is still copying template files into the same path.
+    with locked_profile_write(dest.parent, ".profile-create"):
+        if dest.exists():
+            raise FileExistsError(
+                f"Profile '{profile_name}' already exists."
+            )
 
-    shutil.copytree(TEMPLATE_DIR, dest)
-    fill_template_placeholders(dest, profile_name)
-    if schema is not None and schema_obj is not None:
-        apply_profile_schema(dest, schema, schema_obj.domain)
-    seed_skill_tree_nodes(dest, profile_name)
+        shutil.copytree(TEMPLATE_DIR, dest)
+        fill_template_placeholders(dest, profile_name)
+        if schema is not None and schema_obj is not None:
+            apply_profile_schema(dest, schema, schema_obj.domain)
+        seed_skill_tree_nodes(dest, profile_name)
 
     git_backup.record_change(
         list(dest.rglob("*")),

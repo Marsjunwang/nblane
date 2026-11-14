@@ -35,8 +35,14 @@ if [[ ! -x .venv/bin/python ]]; then
 fi
 
 echo "== 安装 nblane 和依赖"
-.venv/bin/python -m pip install --quiet --upgrade pip
-.venv/bin/python -m pip install --quiet -e .
+if command -v uv >/dev/null 2>&1; then
+  uv_bin="$(command -v uv)"
+else
+  .venv/bin/python -m pip install --quiet 'uv>=0.8,<1'
+  uv_bin="$repo_root/.venv/bin/uv"
+fi
+# Preserve explicitly installed optional model runtimes when re-running setup.
+"$uv_bin" sync --locked --no-dev --inexact --python "$python_bin"
 
 echo "== 设置向导"
 exec .venv/bin/nblane setup "$@"

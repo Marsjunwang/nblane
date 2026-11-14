@@ -43,7 +43,7 @@ from typing import Any, Callable
 import yaml
 
 from nblane.core import activity_log, file_state, git_backup, research_journal
-from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_lock import locked_profile_files, locked_profile_write
 from nblane.core.file_write import atomic_write_text
 from nblane.core.kanban_io import kanban_path, parse_kanban
 from nblane.core.kanban_merge import copy_kanban_sections, save_kanban_with_merge
@@ -420,14 +420,23 @@ def _restore_activity(pdir: Path, targets: list[tuple[str, str, State | None]]) 
     activity_log.save(pdir, log, expected_snapshot=snap)
 
 
-def _restore_list(pdir: Path, kind: str, targets: list[tuple[str, State | None]]) -> None:
+def _restore_list(
+    pdir: Path, kind: str, targets: list[tuple[str, State | None, State | None]],
+    *, check_current: bool = True,
+) -> None:
     doc = _LIST_DOCS[kind]
-    raw = doc.load(pdir)
-    ids = {entity_id for entity_id, _state in targets}
-    rows = [row for row in _rows(raw, doc.key) if str(row.get("id", "") or "").strip() not in ids]
-    _insert_by_index(rows, [state for _id, state in targets if state is not None], dict)
-    raw[doc.key] = rows
-    doc.save(pdir, raw)
+    with locked_profile_files(pdir, (doc.filename,)):
+        if check_current:
+            current = _kind_states(pdir, kind)
+            for entity_id, _before, after in targets:
+                if not same_state(kind, current.get(entity_id), after):
+                    raise research_journal.RestoreConflictError(kind)
+        raw = doc.load(pdir)
+        ids = {entity_id for entity_id, _before, _after in targets}
+        rows = [row for row in _rows(raw, doc.key) if str(row.get("id", "") or "").strip() not in ids]
+        _insert_by_index(rows, [before for _id, before, _after in targets if before is not None], dict)
+        raw[doc.key] = rows
+        doc.save(pdir, raw)
 
 
 def _restore_sources(
@@ -515,15 +524,19 @@ def _apply_restore(pdir: Path, changes: list[dict[str, Any]]) -> None:
     for kind in _LIST_DOCS:
         if kind not in by_kind:
             continue
+        targets = [
+            (change["id"], change.get("before"), change.get("after"))
+            for change in ordered
+            if change["entity"] == kind
+        ]
         if kind == "research_source":
-            targets = [
-                (change["id"], change.get("before"), change.get("after"))
-                for change in ordered
-                if change["entity"] == kind
-            ]
             _restore_sources(pdir, targets)
         else:
-            _restore_list(pdir, kind, by_kind[kind])
+            # The locked preflight checked every case before any restore.
+            # Kanban restoration can legitimately change its derived task
+            # refs; those are our own writes, not a concurrent edit.
+            check_current = not (kind == "project_case" and "kanban_card" in by_kind)
+            _restore_list(pdir, kind, targets, check_current=check_current)
     if "north_star" in by_kind:
         for _id, state in by_kind["north_star"]:
             _restore_north_star(pdir, state)
@@ -719,26 +732,33 @@ def undo(pdir: Path, entry_id: str, *, actor: str) -> dict[str, Any]:
         files = tuple(
             dict.fromkeys(name for change in changes for name in kind_files(pdir, change["entity"]))
         )
-        asset_changes = [change for change in changes if change["entity"].startswith(ASSET_KIND_PREFIX)]
-        try:
-            with (
-                git_backup.defer_changes(f"undo agent {entry.get('action')}"),
-                _rollback_undo_files(pdir, files),
-                research_journal.rollback_assets(pdir, asset_changes),
-            ):
-                _apply_restore(pdir, changes)
-        except research_journal.RestoreConflictError as exc:
-            raise UndoError(
-                "journal_undo_conflict",
-                "之后又有人改过这条内容，自动撤销会覆盖新的修改，请到页面上手动处理。",
-            ) from exc
-        except research_journal.SnapshotIntegrityError as exc:
-            raise UndoError(
-                "journal_snapshot_invalid",
-                "撤销所需的 PDF 快照缺失或损坏，未继续覆盖当前文件。",
-            ) from exc
-        entry["undone_at"] = _now().isoformat()
-        entry["undone_by"] = actor
-        _write(pdir, entries, f"agent journal undo {entry.get('action')}")
-        research_journal.prune_asset_snapshots(pdir, removed, entries)
+        with locked_profile_files(pdir, files):
+            # The journal lock alone cannot exclude normal domain writers.
+            if _first_conflict(pdir, changes):
+                raise UndoError(
+                    "journal_undo_conflict",
+                    "之后又有人改过这条内容，自动撤销会覆盖新的修改，请到页面上手动处理。",
+                )
+            asset_changes = [change for change in changes if change["entity"].startswith(ASSET_KIND_PREFIX)]
+            try:
+                with (
+                    git_backup.defer_changes(f"undo agent {entry.get('action')}"),
+                    _rollback_undo_files(pdir, (*files, JOURNAL_FILENAME)),
+                    research_journal.rollback_assets(pdir, asset_changes),
+                ):
+                    _apply_restore(pdir, changes)
+                    entry["undone_at"] = _now().isoformat()
+                    entry["undone_by"] = actor
+                    _write(pdir, entries, f"agent journal undo {entry.get('action')}")
+            except research_journal.RestoreConflictError as exc:
+                raise UndoError(
+                    "journal_undo_conflict",
+                    "之后又有人改过这条内容，自动撤销会覆盖新的修改，请到页面上手动处理。",
+                ) from exc
+            except research_journal.SnapshotIntegrityError as exc:
+                raise UndoError(
+                    "journal_snapshot_invalid",
+                    "撤销所需的 PDF 快照缺失或损坏，未继续覆盖当前文件。",
+                ) from exc
+            research_journal.prune_asset_snapshots(pdir, removed, entries)
     return entry

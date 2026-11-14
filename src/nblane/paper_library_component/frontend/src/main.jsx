@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Streamlit } from "streamlit-component-lib";
 
 import "./style.css";
 import {
@@ -104,7 +103,7 @@ function postToParent(message) {
 function openPaperReader(item, profile) {
   const sourceId = cleanText(item?.source_id || item?.id);
   const readerUrl = cleanText(item?.reader_url);
-  if (runtimeMode() !== "streamlit" && isFramed()) {
+  if (isFramed()) {
     postToParent({ type: "nblane.library.open_reader", source_id: sourceId, profile: cleanText(profile) });
     return;
   }
@@ -248,11 +247,6 @@ function currentUrlQuery() {
     return "";
   }
   return cleanText(new URLSearchParams(window.location.search).get("query"));
-}
-
-function runtimeMode() {
-  const bootstrap = window.__NBLANE_PAPER_LIBRARY_BOOTSTRAP__;
-  return cleanText(bootstrap?.runtime) || "streamlit";
 }
 
 function bootstrapProfile() {
@@ -2824,8 +2818,6 @@ function WorkspaceTaskProgress({ job, onDismiss }) {
 }
 
 function App() {
-  const runtime = useMemo(() => runtimeMode(), []);
-  const standalone = runtime !== "streamlit";
   const profile = useMemo(() => bootstrapProfile(), []);
   const [args, setArgs] = useState({});
   const [query, setQuery] = useState("");
@@ -2844,7 +2836,7 @@ function App() {
   const payload = useMemo(() => normalizePayload(args.payload), [args.payload]);
   // Refresh the module label table before children render (t() reads it).
   setActiveLabels(payload.labels);
-  const embed = useMemo(() => standalone && isEmbedMode(), [standalone]);
+  const embed = useMemo(() => isEmbedMode(), []);
   const activePayload = useMemo(
     () => ({ ...payload, selectedPaperIds: [...selectedPaperIds] }),
     [payload, selectedPaperIds],
@@ -2978,41 +2970,20 @@ function App() {
   }, [embed]);
 
   useEffect(() => {
-    if (standalone) {
-      // Tell an embedding host (the SPA) that the library is mounted.
-      postToParent({ type: "nblane.library.ready", profile });
-    }
-  }, [standalone, profile]);
+    // Tell an embedding host (the SPA) that the library is mounted.
+    postToParent({ type: "nblane.library.ready", profile });
+  }, [profile]);
 
   useEffect(() => {
-    if (standalone) {
-      const bootstrapPayload = window.__NBLANE_PAPER_LIBRARY_BOOTSTRAP__?.payload;
-      if (bootstrapPayload) {
-        setArgs({ payload: bootstrapPayload });
-        setPaperQuery(cleanText(bootstrapPayload.query || ""));
-        setSortMode(cleanText(bootstrapPayload.sort_mode || "recent") || "recent");
-      } else {
-        loadStandalonePayload();
-      }
-      return undefined;
+    const bootstrapPayload = window.__NBLANE_PAPER_LIBRARY_BOOTSTRAP__?.payload;
+    if (bootstrapPayload) {
+      setArgs({ payload: bootstrapPayload });
+      setPaperQuery(cleanText(bootstrapPayload.query || ""));
+      setSortMode(cleanText(bootstrapPayload.sort_mode || "recent") || "recent");
+    } else {
+      loadStandalonePayload();
     }
-    Streamlit.setComponentReady();
-    const onRender = (event) => {
-      setArgs(event.detail.args || {});
-    };
-    Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
-    Streamlit.setFrameHeight();
-    return () => {
-      Streamlit.events.removeEventListener(Streamlit.RENDER_EVENT, onRender);
-    };
   }, []);
-
-  useEffect(() => {
-    if (!standalone) {
-      setPaperQuery(cleanText(payload.query || ""));
-      setSortMode(cleanText(payload.sortMode || "recent") || "recent");
-    }
-  }, [payload.query, payload.sortMode, standalone]);
 
   useEffect(() => {
     setSelectedPaperIds(new Set(payload.selectedPaperIds));
@@ -3027,12 +2998,6 @@ function App() {
     }
     setExpanded(ids);
   }, [payload.sections]);
-
-  useEffect(() => {
-    if (!standalone) {
-      window.setTimeout(() => Streamlit.setFrameHeight(), 0);
-    }
-  }, [filteredSections, menu, dialog, deleteDialog, expanded, workspaceJob, standalone]);
 
   const eventState = () => ({
     ui_lang: uiLang(),
@@ -3135,11 +3100,6 @@ function App() {
   };
 
   const emit = async (event) => {
-    if (!standalone) {
-      Streamlit.setComponentValue(event);
-      window.setTimeout(() => Streamlit.setFrameHeight(), 0);
-      return { ok: true };
-    }
     if (!profile) {
       setNotice(t("msg_missing_profile_url", "Missing profile in URL."));
       return { ok: false };
@@ -3199,7 +3159,7 @@ function App() {
           : current
       ));
       setNotice(error.message || String(error));
-      if (standalone && error?.recoverPayload) {
+      if (error?.recoverPayload) {
         await loadStandalonePayload({}, { setBusy: false, clearNotice: false, preserveNoticeOnError: true });
       }
       return { ok: false, error };
@@ -3209,10 +3169,6 @@ function App() {
   };
   const uploadPdf = async (sourceId, file) => {
     const cleanSourceId = cleanText(sourceId);
-    if (!standalone) {
-      setNotice(t("msg_streamlit_upload", "Open the 8502 Paper Library Workspace to upload PDFs."));
-      return { ok: false };
-    }
     if (!profile || !cleanSourceId) {
       setNotice(t("msg_missing_paper", "Missing profile or paper id."));
       return { ok: false };
@@ -3245,16 +3201,8 @@ function App() {
     }
   };
   const requestDeletePreview = async ({ sourceId, title }) => {
-    const base = { source_id: sourceId, title, pending: standalone };
+    const base = { source_id: sourceId, title, pending: true };
     setDeleteDialog(base);
-    if (!standalone) {
-      setDeleteDialog({
-        ...base,
-        pending: false,
-        error: t("msg_streamlit_delete", "Open the 8502 Paper Library Workspace to preview and delete papers."),
-      });
-      return;
-    }
     setLoading(true);
     try {
       const data = await jsonRequest(paperLibraryApiUrl(profile, "/events"), {
@@ -3297,10 +3245,6 @@ function App() {
   };
   const exportPapers = async (paperIds, format) => {
     const ids = asArray(paperIds).map(cleanText).filter(Boolean);
-    if (!standalone) {
-      setNotice(t("msg_streamlit_export", "Open the 8502 Paper Library Workspace to export papers."));
-      return { ok: false };
-    }
     if (!profile) {
       setNotice(t("msg_missing_profile_url", "Missing profile in URL."));
       return { ok: false };
@@ -3440,25 +3384,21 @@ function App() {
     </>
   );
   return (
-    <div className={`paper-tree-shell ${hasPapers ? "has-papers" : ""} ${standalone ? "is-standalone" : ""} ${embed ? "is-embed" : ""}`}>
-      {standalone ? (
-        <>
-          <DiscoveryPanel
-            payload={payload}
-            profile={profile}
-            workspaceBusy={workspaceBusy}
-            onImported={(data) => applyStandalonePayload(data.payload, data.message || "")}
-          />
-          <WorkspaceHeader
-            payload={payload}
-            paperQuery={paperQuery}
-            setPaperQuery={setPaperQuery}
-            sortMode={sortMode}
-            setSortMode={setSortMode}
-            onApply={(overrides = {}) => loadStandalonePayload({ query: paperQuery, ...overrides })}
-          />
-        </>
-      ) : null}
+    <div className={`paper-tree-shell is-standalone ${hasPapers ? "has-papers" : ""} ${embed ? "is-embed" : ""}`}>
+      <DiscoveryPanel
+        payload={payload}
+        profile={profile}
+        workspaceBusy={workspaceBusy}
+        onImported={(data) => applyStandalonePayload(data.payload, data.message || "")}
+      />
+      <WorkspaceHeader
+        payload={payload}
+        paperQuery={paperQuery}
+        setPaperQuery={setPaperQuery}
+        sortMode={sortMode}
+        setSortMode={setSortMode}
+        onApply={(overrides = {}) => loadStandalonePayload({ query: paperQuery, ...overrides })}
+      />
       {notice && !noticeDuplicatesJob ? <div className="paper-workspace-notice" role="status" aria-live="polite">{notice}</div> : null}
       <WorkspaceTaskProgress job={workspaceJob} onDismiss={dismissWorkspaceJob} />
       {loading && !workspaceJob ? <div className="paper-workspace-loading" role="status">{t("loading", "Loading...")}</div> : null}
@@ -3471,7 +3411,7 @@ function App() {
             setSelectedPaperIds={setSelectedPaperIds}
             setDragPayload={setDragPayload}
             emit={emit}
-            onExport={standalone ? exportPapers : undefined}
+            onExport={exportPapers}
             workspaceBusy={workspaceBusy}
             onPaperMenu={(event, paper, paperIds) => setMenu({
               item: { ...paper, type: "paper" },
@@ -3485,7 +3425,7 @@ function App() {
             emit={emit}
             onDeletePaper={requestDeletePreview}
             onUploadPdf={uploadPdf}
-            onExport={standalone ? exportPapers : undefined}
+            onExport={exportPapers}
             workspaceBusy={workspaceBusy}
           />
         </div>

@@ -1,7 +1,7 @@
 ---
 status: active
 owner: 王军
-last_verified: 2026-10-08
+last_verified: 2026-11-15
 source_of_truth: src/nblane/web_ui/、src/nblane/web_api/、src/nblane/web_reader_api/、tests/e2e/
 ---
 
@@ -26,14 +26,15 @@ Streamlit 已退役（ad87958，2026-10-06）。React SPA 是唯一 Web 界面�
 | 产物新鲜度 | CI `frontend-artifacts` job 重建 SPA 与组件前端并比对，过期即红 |
 | API 契约 | `scripts/dump-openapi.sh` 生成 `openapi.json` 快照；`npm run gen:api` 生成 `src/api/schema.d.ts`（不手改）；页面只从 `src/api/types.ts` 引类型；`tests/test_web_api_openapi_snapshot.py` 守护漂移 |
 | 本地开发 | `npm run dev`（5173，`/api` 代理到 8511，可用 `VITE_API_PROXY_TARGET` 改） |
-| 测试 | 单元：vitest + testing-library（`npm run test`）；端点：`httpx.ASGITransport` 直打 app；E2E：Playwright，SPA 用例默认指向 isolated 18504 |
+| 测试 | 单元：vitest + testing-library（`npm run test`）；端点：ASGITransport / TestClient；E2E：`npm run test:e2e` 每轮创建临时数据、自启 SPA / Reader 并核验实例身份，不使用个人档案或已有服务 |
+| 加载恢复 | 页面按路由懒加载；`PageBoundary` 提供重试和显式应用刷新，错误不会移除外层导航 |
 | Agent 写入 | 新写端点在 `web_api/agent_guard.py` 登记动作分级 |
 
 ## 页面现状
 
 | 区域 | 路由 | 现状 |
 |------|------|------|
-| 档案列表 / 登录 | `/`、`/login` | 已完成 |
+| 档案列表 / 登录 | `/`、`/login` | 本人管理员可选择领域，创建私有档案及首个目标、项目、任务；接口 `/api/v1/profiles`，Agent 不可调用 |
 | 首页 | `/p/:name/home` | 全屏星图、星表（含目标管理）、占卜、习惯印、铭文卡 |
 | 项目 | `/p/:name/projects` | 看板 + 项目板合并；`view=kanban\|timeline\|story`，`group=goal\|activity`；习惯阶段计划、Someday |
 | 技能树 | `/p/:name/skill-tree` | 已完成 |
@@ -52,9 +53,9 @@ Streamlit 已退役（ad87958，2026-10-06）。React SPA 是唯一 Web 界面�
 
 Team、Gap Analysis、Agent Activity 审批页、Inbox 页、Studio 页已删（页面、路由、hooks 与对应端点）。旧 Streamlit URL 中 `Agent_Activity` 重定向到首页，`Output_Studio` 重定向到内容工作台。
 
-## 收尾待办
+## 保留边界
 
-- 删除 Streamlit 遗留代码与依赖（清单见 [模块地图](module-map.md#待删遗留)）。删前要先迁走 Reader API 对 `web_i18n.py`、`research_paper_reader_component.events`、`paper_library_component` 产物的引用，并替换 CI import smoke 里的 `kanban_ui`。
-- 删除上述孤儿页面的路由、页面、测试和仅供它们使用的 API。
-- E2E 中只测 Streamlit 的用例（默认 base URL 仍为 18503）随之删除或改指 SPA。
+- Streamlit 入口和页面已删除；论文库 React 组件、Reader 渲染辅助仍由现有服务使用，不能按旧文件名批量删除。组件已移除 Streamlit 分支，直接使用 Reader API。
+- 旧 URL 重定向保留，供书签和历史链接使用。
+- E2E 运行方式与隔离约束见 `tests/e2e/README.md`。
 - 缺口与优先级以 [当前状态](../project/status.md) 为准。

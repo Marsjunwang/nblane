@@ -249,12 +249,14 @@ def automations_file_path(name_or_dir: str | Path) -> Path:
 
 
 def _default_env() -> Mapping[str, str]:
-    """Return the process environment with the repo ``.env`` layered in."""
+    """Layer the configured env file into unset process environment values."""
 
     try:
         from dotenv import load_dotenv
 
-        load_dotenv(REPO_ROOT / ".env", override=False)
+        override = os.getenv("NBLANE_ENV_FILE", "").strip()
+        env_file = Path(override) if override else REPO_ROOT / ".env"
+        load_dotenv(env_file, override=False)
     except ImportError:
         pass
     return os.environ

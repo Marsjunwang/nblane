@@ -57,6 +57,7 @@ function stubFetch() {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   jobs.list = [];
   stubFetch();
 });

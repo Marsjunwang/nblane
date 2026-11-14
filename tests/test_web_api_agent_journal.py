@@ -419,7 +419,12 @@ class TestAgentAsyncJobs(JournalTestBase):
                 },
             ),
         )
-        env = patch.dict(os.environ, {"NBLANE_RESEARCH_ASSET_ROOT": str(asset_root)})
+        # Exercise actual local extraction without depending on a GROBID service.
+        env = patch.dict(os.environ, {
+            "NBLANE_RESEARCH_ASSET_ROOT": str(asset_root),
+            "NBLANE_RESEARCH_PDF_BACKEND": "pymupdf",
+            "NBLANE_GROBID_URL": "off",
+        })
         self.addCleanup(env.stop)
         env.start()
 

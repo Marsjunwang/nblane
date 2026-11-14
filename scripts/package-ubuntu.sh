@@ -253,7 +253,7 @@ if [[ "$offline" == "1" ]]; then
     printf 'Error: uv is required to export locked dependencies. Install uv, or set NBLANE_PACKAGE_OFFLINE=0 for a development-only package.\n' >&2
     exit 1
   fi
-  uv export --frozen --no-hashes --no-dev --no-emit-project \
+  uv export --locked --no-hashes --no-dev --no-emit-project \
     -o "$locked_requirements"
   printf '\nsetuptools>=68.0\nwheel\n' >> "$locked_requirements"
   mkdir -p "$package_dir/wheelhouse"

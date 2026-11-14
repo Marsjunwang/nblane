@@ -177,8 +177,8 @@ blank), `LLM_REPLY_LANG` (model reply language),
 # SPA unit tests
 cd src/nblane/web_ui/frontend && npm run test
 
-# Browser e2e (requires a running dev stack; SPA specs default to
-# http://127.0.0.1:18504 via NBLANE_E2E_SPA_BASE_URL)
+# Browser e2e (creates temporary data and starts owned SPA/Reader servers;
+# do not point it at an existing dev or production stack)
 npm install
 npm run test:e2e:install               # or npm run test:e2e:install:cn (China mirror)
 npm run test:e2e                       # all specs
@@ -193,10 +193,11 @@ npm run test:e2e:spa                   # SPA smoke only
   `profiles/`.
 - `tests/test_web_api_openapi_snapshot.py` fails when `openapi.json` drifts
   from the live app.
-- CI (`.github/workflows/ci.yml`) runs `pip install -e .`, `pytest -q`,
-  `python -m nblane.cli validate`, `status`, an import smoke, and the
-  `frontend-artifacts` job (rebuilds the SPA and component frontends and
-  fails if committed build output is stale). Keep them green.
+- CI (`.github/workflows/ci.yml`) uses `uv sync --locked --group dev`, runs
+  pytest, CLI validate/status and an import smoke. `frontend-artifacts`
+  runs frontend unit tests, generated API-type checks, builds, the SPA entry
+  gzip budget, and checks committed output freshness. `browser-smoke` runs
+  isolated login, navigation and task mutation tests. Keep them green.
 
 ## Design workflow
 

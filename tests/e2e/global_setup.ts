@@ -1,5 +1,5 @@
-import { snapshotProfiles } from "./profile_snapshot";
+import { assertOwnedStack } from "./runtime.mjs";
 
-export default function globalSetup(): void {
-  snapshotProfiles();
+export default async function globalSetup(): Promise<void> {
+  await assertOwnedStack();
 }

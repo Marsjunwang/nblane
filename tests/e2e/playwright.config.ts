@@ -7,25 +7,20 @@ const systemChromium =
   process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ||
   (fs.existsSync("/snap/bin/chromium") ? "/snap/bin/chromium" : "");
 
-// Port convention (details in tests/e2e/README.md):
-//   default dev  (`scripts/dev-web.sh`):            SPA 8504 + sidecar 8502
-//   isolated dev (`scripts/dev-web.sh --isolated`): SPA 18504 + sidecar 18502
-// use.baseURL points at the SPA; specs that talk to the Reader API sidecar
-// directly use readerBaseURL() from helpers.ts (override via
-// NBLANE_E2E_READER_BASE).
+// run.mjs starts fresh SPA and Reader services on allocated loopback ports.
+// Direct Playwright execution is rejected by globalSetup's ownership check.
 export default defineConfig({
   testDir: ".",
-  // Snapshot the sandbox profiles before the run and restore them after,
-  // so e2e writes do not accumulate in .dev-data (see profile_snapshot.ts).
+  // Verify both services belong to this run before setup or spec writes.
   globalSetup: "./global_setup.ts",
-  globalTeardown: "./global_teardown.ts",
+  workers: 1,
+  outputDir: `../../test-results/e2e-${process.env.NBLANE_E2E_RUN_ID || "unowned"}`,
   timeout: 45_000,
   expect: {
     timeout: 8_000,
   },
   use: {
-    // Default matches the isolated dev instance so a bare `npm run test:e2e`
-    // never collides with a developer's live dev server on 8504.
+    // The launcher supplies the actual temporary SPA origin.
     baseURL: process.env.NBLANE_E2E_BASE_URL || DEFAULT_SPA_BASE_URL,
     launchOptions: {
       ...(systemChromium ? { executablePath: systemChromium } : {}),
@@ -36,8 +31,7 @@ export default defineConfig({
   },
   projects: [
     {
-      // Logs into the SPA backend (18504) once and bakes the admin session
-      // cookie into tests/e2e/.auth/; a no-op empty bake when auth is off.
+      // Bake a session for the generated admin into this run's temp root.
       name: "spa-auth-setup",
       testMatch: /spa_auth\.setup\.ts/,
     },
@@ -46,9 +40,7 @@ export default defineConfig({
       testIgnore: [/content-image-editor\.spec\.ts/, /spa_auth\.setup\.ts/, /spa_auth\.spec\.ts/],
       dependencies: ["spa-auth-setup"],
       use: {
-        // The SPA backend may run with NBLANE_AUTH_FILE (isolated stack does
-        // since 2026-09-21): pre-existing specs get the baked admin session.
-        // Harmless on the auth-less sidecar origin — it ignores the cookie.
+        // Both fixture services share auth configuration and session secrets.
         storageState: SPA_ADMIN_STORAGE_STATE,
       },
     },

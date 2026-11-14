@@ -27,7 +27,7 @@ nblane-<版本>-ubuntu.tar.gz.sha256  完整性校验
 BUILDINFO                          版本、源码 commit、构建时间
 ```
 
-包内有源码快照、两个已构建前端、安装器、锁定依赖清单和 Python wheelhouse。默认使用 `uv export --frozen` 按 `uv.lock` 导出依赖，再用 pip 下载。前端不需要在目标机器重新构建。
+包内有源码快照、两个已构建前端、安装器、锁定依赖清单和 Python wheelhouse。默认使用 `uv export --locked` 按 `uv.lock` 导出依赖，并检查锁文件与项目依赖一致，再用 pip 下载。前端不需要在目标机器重新构建。
 
 - 建包需要 Git、Python ≥ 3.11、uv、pip，以及下载依赖的网络。
 - 默认要求 Git 工作树干净，从 `HEAD` 建包，避免把未提交修改误当发布版本。

@@ -1,8 +1,9 @@
 import { Alert, Center, Loader, Stack } from '@mantine/core';
-import { lazy, Suspense, useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 
 import { useStarmapEditingData } from '../starmap/useStarmapData';
+import { retryableLazy } from '../components/PageBoundary';
 
 // three.js + troika + postprocessing are ~600kB minified — the starmap scene
 // loads as its own chunk so other pages never pay for it.
@@ -16,7 +17,7 @@ function loadStarmapChunk() {
   });
   return starmapChunk;
 }
-const StarmapView = lazy(() =>
+const StarmapView = retryableLazy(() =>
   loadStarmapChunk().then((m) => ({ default: m.StarmapView })),
 );
 

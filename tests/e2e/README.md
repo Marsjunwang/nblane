@@ -1,111 +1,73 @@
 # Browser e2e tests (Playwright)
 
-TypeScript specs driven by `@playwright/test` against a running nblane dev
-instance. **Not run in CI** (they need live servers); run them locally.
-
-## Port convention
-
-| instance  | command                          | SPA (web-api) | Reader API sidecar | data root   |
-| --------- | -------------------------------- | ------------- | ------------------ | ----------- |
-| isolated  | `scripts/dev-web.sh --isolated`  | 18504         | 18502              | `.dev-data` |
-| default   | `scripts/dev-web.sh`             | 8504          | 8502               | repo root   |
-
-`use.baseURL` in `playwright.config.ts` comes from `NBLANE_E2E_BASE_URL`,
-**default `http://127.0.0.1:18504`** (the isolated SPA, so a bare run never
-collides with a live dev server on 8504). Specs that talk to the Reader API
-sidecar directly (`/paper-library`, `/reader`) use `readerBaseURL()` from
-`helpers.ts`, which maps the SPA port to its sidecar port.
+`npm run test:e2e` creates synthetic profiles and starts its own SPA and Reader
+services on temporary loopback ports. It never uses the running development
+stack, `.dev-data`, personal profiles, or the repository `.env`.
 
 ## Run
 
 ```bash
-scripts/dev-web.sh start --isolated     # serve 18502/18504 with .dev-data
-npm install                             # once, installs @playwright/test
-npm run test:e2e:install                # once, installs the chromium build
-npm run test:e2e                        # full suite against the isolated stack
-scripts/dev-web.sh stop --isolated
+uv sync --locked --group dev
+npm ci
+npm run test:e2e:install       # or test:e2e:install:cn for the China mirror
+npm run test:e2e              # full suite
+npm run test:e2e:spa          # SPA smoke
+npm run test:e2e -- spa_mutations --headed
+npm run test:e2e:harness      # ownership checks, no browser/server needed
 ```
 
-Useful variations:
+The repository's committed SPA and Paper Library bundles are served. Rebuild
+the affected frontend before testing source changes.
+
+## Isolated data and server ownership
+
+`run.mjs` creates a unique `nblane-browser-e2e-*` directory in the system temp
+directory. `seed.py` uses normal domain writers to generate profiles `dev` and
+`other`, goals, tasks, project history, and habits. Both services load the same
+generated auth store; the admin sees all profiles and the member sees only
+`dev`. No AI key is needed.
+
+Before Playwright setup or specs can write, `global_setup.ts` verifies a unique
+run marker on disk and the identity endpoint of both services. These endpoints
+exist only in `fixture_server.py`, not the production application. Direct
+execution against an ordinary server is rejected. URL/data-root environment
+overrides are replaced by the launcher.
+
+After each run, the launcher stops its child processes and removes the temporary
+directory. On failure, server logs and browser traces remain in unique
+directories under `test-results/`. To inspect generated data after shutdown:
 
 ```bash
-# target the default dev instance instead
-NBLANE_E2E_BASE_URL=http://127.0.0.1:8504 NBLANE_E2E_SPA_BASE_URL=http://127.0.0.1:8504 npm run test:e2e
-
-# one spec / headed debugging
-npx playwright test -c tests/e2e/playwright.config.ts spa_smoke --headed
+NBLANE_E2E_KEEP_DATA=1 npm run test:e2e -- spa_mutations
 ```
 
-## Sandbox data is restored after each run
+Useful environment overrides:
 
-Specs write real entities (`e2e-chain-*` evidence, 验收 posts, throwaway
-projects) into the sandbox profiles. `global_setup.ts` copies the `dev` and
-`王军` profile dirs (data and research assets) into
-`.dev-data/.e2e-snapshot/<timestamp>/` before the run; `global_teardown.ts`
-moves the run's residue next to that copy and puts the snapshot back. Nothing
-is deleted at restore time; the newest 5 snapshots are kept.
+- `NBLANE_E2E_PYTHON`: Python executable; defaults to `.venv/bin/python`, then
+  `python3`.
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE`: system Chromium executable instead of the
+  downloaded build; `/snap/bin/chromium` is detected automatically.
+- `NBLANE_PAPER_LIBRARY_E2E_PROFILE`: alternate synthetic paper fixture name;
+  must be a single directory name.
 
-This only applies when the data root is `.dev-data` (the isolated stack). Set
-`NBLANE_E2E_KEEP_DATA=1` to leave the residue in place for debugging, or
-`NBLANE_E2E_RESTORE_PROFILES=dev,other` to change the profile list.
+## Authentication projects
 
-## SPA backend auth (login journey)
+- `spa-auth-setup` logs in as the generated admin and saves its session inside
+  this run's temporary directory.
+- `chromium` loads that session for UI and Reader tests.
+- `spa-auth` tests unauthenticated redirects, login/logout, member access, and
+  rate limiting with fresh browser contexts.
 
-The isolated stack enables app-level auth on the **SPA backend** (web-api,
-18504) whenever `.dev-data/auth/users.yaml` exists — `scripts/dev-web.sh
---isolated` auto-detects it (override with `--auth-file PATH` or
-`NBLANE_DEV_AUTH_FILE`). The Reader sidecar stays auth-less.
-Sandbox accounts (test passwords only): `admin`/`test1234` (all profiles),
-`member`/`test1234` (dev profile only).
+CI runs the ownership harness checks and isolated login/navigation/task-mutation
+smoke tests. The `frontend-artifacts` job runs frontend unit tests, verifies
+generated API types, rebuilds committed bundles, and checks the SPA entry's
+260 KiB gzip budget (`npm run check:spa-budget`). Python CI and Ubuntu
+packaging both use `uv.lock`.
 
-Playwright is split into three projects:
+## Retry policy
 
-- `spa-auth-setup` (`spa_auth.setup.ts`) — logs into the SPA backend once as
-  admin and bakes `tests/e2e/.auth/spa-admin.json` (gitignored). On auth-less
-  stacks it bakes an empty state, so behavior there is unchanged.
-- `chromium` — every pre-existing spec; loads the baked file as
-  `storageState`, so SPA specs (spa_smoke/spa_home/spa_mutations/
-  spa_kanban_dnd/spa_pages/spa_llm_jobs) keep passing with auth on, and
-  sidecar specs are unaffected (they ignore the extra cookie).
-- `spa-auth` (`spa_auth.spec.ts`) — the login journey itself (deep-link
-  bounce, generic wrong-password error, redirect-back after login, logout,
-  member profile scoping, rate limiting) on fresh session-less contexts;
-  skips wholesale when the backend has auth off.
-
-SPA-targeting env vars: `NBLANE_E2E_SPA_BASE_URL` (default
-`http://127.0.0.1:18504`), `NBLANE_E2E_ADMIN_USER` /
-`NBLANE_E2E_ADMIN_PASSWORD`, `NBLANE_E2E_MEMBER_USER` /
-`NBLANE_E2E_MEMBER_PASSWORD`, `NBLANE_E2E_PROFILE` (default `dev`).
-
-## Environment variables
-
-- `NBLANE_E2E_BASE_URL` — SPA base URL (sets `use.baseURL`).
-- `NBLANE_E2E_READER_BASE` — override the sidecar base URL when it does not
-  follow the port mapping (e.g. behind a reverse proxy).
-- `NBLANE_E2E_DATA_ROOT` — data root of the instance under test, for specs
-  that write fixture profiles (`paper_library_workspace`). Defaults to
-  `.dev-data` when baseURL port is 18504, else the repo root.
-- `NBLANE_PAPER_LIBRARY_E2E_PROFILE` — profile name used by the
-  paper-library workspace spec.
-- `PLAYWRIGHT_CHROMIUM_EXECUTABLE` — use a system chromium instead of the
-  downloaded build (auto-detects `/snap/bin/chromium`).
-
-`paper_library.spec.ts` is hermetic: it spawns its own isolated sidecar on a
-free port with a temp fixture profile, unless `NBLANE_E2E_READER_BASE` is set.
-
-## 已知负载型抖动与 retry 约定
-
-On this 2-vCPU/3.75GB sandbox the tail of a full-suite run accumulates
-software-GL canvases, so a handful of timing-sensitive
-specs (WebGL mounts, the SPA login redirect-back chain) can sporadically outrun their locator/navigation budgets.
-Each passes standalone and on retry, and the failure point does not repeat
-across runs — resource-contention jitter, not a product race. The convention:
-
-- real root causes get fixed in product code, never papered over with
-  retries;
-- the remaining jitter cases carry a **describe-scoped**
-  `test.describe.configure({ retries: 1 })` with a comment stating the cause
-  (low-spec resource contention), the standalone-stable evidence, and a "do
-  not widen" note — currently case c of `spa_auth`;
-- **no global `retries` in `playwright.config.ts`** — a retry must always be
-  a deliberate, per-spec exception.
+Fix product races rather than hiding them with retries. There is no global
+retry setting. A describe-scoped retry requires evidence of resource-contention
+jitter, a comment explaining the cause, and a narrow scope. The login
+redirect-back case currently retains one retry for low-spec software-rendering
+hosts.

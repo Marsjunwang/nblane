@@ -1022,7 +1022,7 @@ def update_kanban(
     in place; its return value is passed through. When *fn* leaves the
     board unchanged, no write or backup happens. *fn* must not call
     ``save_kanban``/``update_kanban``/``save_kanban_with_merge`` for the
-    same profile (the lock is not reentrant for the same file).
+    same profile (a nested save would be overwritten by this callback).
     """
     profile_name = (
         name_or_dir.name if isinstance(name_or_dir, Path) else name_or_dir

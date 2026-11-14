@@ -1,10 +1,15 @@
-import { Alert, Card, Center, Loader, SimpleGrid, Text, Title } from '@mantine/core';
+import { Alert, Button, Card, Center, Group, Loader, SimpleGrid, Stack, Text, Title } from '@mantine/core';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { useProfiles } from '../api/hooks';
+import { useMe, useProfiles } from '../api/hooks';
+import { ProfileCreateDialog } from '../components/ProfileCreateDialog';
 
 export function ProfilesPage() {
   const profiles = useProfiles();
+  const me = useMe();
+  const [creating, setCreating] = useState(false);
+  const canCreate = me.data?.role === 'admin' && !me.data.agent;
 
   if (profiles.isPending) {
     return (
@@ -23,11 +28,16 @@ export function ProfilesPage() {
 
   return (
     <>
-      <Title order={2} mb="md">
-        档案列表
-      </Title>
+      <Group justify="space-between" mb="md">
+        <Title order={2}>档案列表</Title>
+        {canCreate && profiles.data.length > 0 && <Button onClick={() => setCreating(true)}>创建档案</Button>}
+      </Group>
       {profiles.data.length === 0 ? (
-        <Text c="dimmed">还没有档案,先用 `nblane init &lt;name&gt;` 创建一个。</Text>
+        <Stack align="flex-start" gap="sm">
+          <Text>从自己的第一个目标开始。</Text>
+          <Text c="dimmed">{canCreate ? '选择领域，写下方向和第一件任务，建立你的成长档案。' : '当前账号还没有可访问的档案，请联系管理员创建或分配。'}</Text>
+          {canCreate && <Button onClick={() => setCreating(true)}>创建档案</Button>}
+        </Stack>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
           {profiles.data.map((p) => (
@@ -56,6 +66,7 @@ export function ProfilesPage() {
           ))}
         </SimpleGrid>
       )}
+      {creating && <ProfileCreateDialog onClose={() => setCreating(false)} />}
     </>
   );
 }

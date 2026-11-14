@@ -3,8 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
-    "test:e2e:spa": "playwright test -c tests/e2e/playwright.config.ts spa_smoke",
+    "check:spa-budget": "node scripts/check-spa-budget.mjs",
+    "test:e2e": "node tests/e2e/run.mjs",
+    "test:e2e:spa": "node tests/e2e/run.mjs spa_smoke",
+    "test:e2e:harness": "node --test tests/e2e/runtime.test.mjs",
     "test:e2e:install": "playwright install chromium",
     "test:e2e:install:cn": "bash scripts/install-playwright-chromium-cn.sh"
   },

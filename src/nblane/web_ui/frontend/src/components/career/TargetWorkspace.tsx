@@ -172,24 +172,26 @@ function TargetInner({ profile, draft, data }: { profile: string; draft: CareerD
 
   const draftUrl = `${apiBase()}/profiles/${encodeURIComponent(profile)}/career/drafts/${encodeURIComponent(draft.id)}`;
   const autosave = useAutosave<TargetState>({
+    storageKey: `${profile}/draft/${draft.id}`,
     initial: { markdown: draft.markdown, jd_text: draft.jd_text, notes: draft.notes, analysis: draft.analysis ?? null },
     etag: draft.etag,
     save: async (value, etag, isAutosave) => {
+      if (!value.markdown.trim()) throw new Error('定制简历正文不能为空。请补充正文后再保存或导出。');
       const saved = await updateCareerDraft(
         profile,
         draft.id,
-        { ...value, markdown: value.markdown.trim() ? value.markdown : undefined },
+        value,
         etag,
         isAutosave,
       );
       void queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'career'], refetchType: 'none' });
       return saved.etag;
     },
-    keepalive: (value) => ({
+    keepalive: (value) => value.markdown.trim() ? ({
       url: draftUrl,
       method: 'PUT',
-      body: JSON.stringify({ ...value, markdown: value.markdown.trim() ? value.markdown : undefined }),
-    }),
+      body: JSON.stringify(value),
+    }) : null,
   });
   const state = autosave.value;
   const set = (patch: Partial<TargetState>) => autosave.edit((previous) => ({ ...previous, ...patch }));
@@ -224,12 +226,13 @@ function TargetInner({ profile, draft, data }: { profile: string; draft: CareerD
   };
 
   const back = async () => {
-    await autosave.flush();
+    if (!(await autosave.flush())) return;
     navigate(careerHomePath(profile));
   };
 
   const remove = async () => {
     await deleteCareerDraft(profile, draft.id);
+    autosave.discard();
     await queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'career'] });
     navigate(careerHomePath(profile));
   };
@@ -373,11 +376,16 @@ function TargetInner({ profile, draft, data }: { profile: string; draft: CareerD
       {autosave.state === 'conflict' && (
         <Alert color="orange" m="md" title="定制简历已在别处修改">
           <Group justify="space-between">
-            <Text size="sm">已暂停自动保存。刷新会载入最新版本。</Text>
-            <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} onClick={() => window.location.reload()}>
-              刷新
+            <Text size="sm">已暂停自动保存，本地修改仍保留在编辑器和本机草稿中。可以先复制需要的内容，再放弃修改并载入最新版本。</Text>
+            <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} onClick={() => { autosave.discard(); window.location.reload(); }}>
+              放弃修改并刷新
             </Button>
           </Group>
+        </Alert>
+      )}
+      {autosave.recovered && autosave.state !== 'conflict' && (
+        <Alert color="yellow" m="md" title="已恢复本地草稿">
+          上次未保存的修改已恢复到编辑器，保存成功后会清理这份备份。
         </Alert>
       )}
       {autosave.state === 'error' && (
@@ -487,5 +495,5 @@ export function TargetWorkspace({ profile, draftId }: { profile: string; draftId
       </Alert>
     );
   }
-  return <TargetInner key={draft.id} profile={profile} draft={draft} data={career.data} />;
+  return <TargetInner key={`${profile}/${draft.id}`} profile={profile} draft={draft} data={career.data} />;
 }

@@ -28,6 +28,7 @@ import { AIExceptionDrawer } from './AIExceptionDrawer';
 import { MiniWindowButton } from './MiniWindowButton';
 import { isWorkPath, lastWorkHome, rememberWorkPath } from './BackToWork';
 import { chrome } from '../theme';
+import { RouteContent } from './PageBoundary';
 
 const NAV_ITEMS = [
   { label: '首页', path: 'home', icon: IconHome },
@@ -306,7 +307,7 @@ export function AppLayout() {
               : { maxWidth: CONTENT_MAX_WIDTH, marginInline: 'auto', width: '100%' }
           }
         >
-          <Outlet />
+          <RouteContent><Outlet /></RouteContent>
         </div>
       </AppShell.Main>
       {currentProfile && (

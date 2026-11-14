@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-22
+last_verified: 2026-11-15
 source_of_truth: true
 ---
 
@@ -86,8 +86,10 @@ flowchart TB
 | `src/api/` | fetch 封装、TanStack Query hooks、生成的 `schema.d.ts` 与 `types.ts` |
 | `src/theme.ts` | 设计 token，深色锁定 |
 
-## 待删遗留
+## Reader 保留模块与历史入口
 
 | 模块 | 说明 |
 |------|------|
-| `app.py`、`pages/`、`.streamlit/`、`web_shared.py`、`web_cache.py`、`web_auth.py`、`web_page_shell.py`、`web_output_studio.py`、`web_public_build.py`、`web_linkify.py`、`web_i18n.py`、`kanban_ui/`、`research_ui/`、`evidence_editor_host.py`、`kanban_ai_jobs.py`、`core/ai_stream_tasks.py`、`*_component/` | Streamlit 遗留，待删，勿改。删除前注意：Reader API 仍引用 `web_i18n.py`、`research_paper_reader_component.events` 与 `paper_library_component` 前端产物；CI import smoke 仍引用 `kanban_ui` |
+| `paper_library_component/` | Reader API 使用的 React 论文库与静态构建；已去除 Streamlit 分支 |
+| `i18n/`、`web_reader_api/` | Reader 的双语文案和渲染逻辑；按现有引用维护 |
+| `app.py`、`pages/`、`kanban_ui/` | 历史 Streamlit 入口与页面已删除；SPA 保留旧 URL 重定向 |

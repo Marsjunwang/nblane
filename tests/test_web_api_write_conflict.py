@@ -5,7 +5,7 @@ re-checks the request-start fingerprint *inside* the write lock and raises
 ``file_state.FileConflictError`` on mismatch, which the route maps to the
 same 412 (``etag_mismatch``) with a fresh ETag header. These tests
 simulate a concurrent writer landing exactly in that window by wrapping
-the target module's ``locked_profile_write``: the wrapper acquires the
+the writer's lock (or the transaction's complete lock set): it acquires the
 real lock, performs an external (lock-bypassing) write, then lets the
 saver proceed — deterministically exercising the in-lock re-check.
 
@@ -25,6 +25,7 @@ from unittest.mock import patch
 import yaml
 from fastapi.testclient import TestClient
 
+from nblane.core import file_write as file_write_core
 from nblane.core import profile_io
 from nblane.core import project_board as project_board_core
 from nblane.core import public_site as public_site_core
@@ -173,11 +174,14 @@ class TestWebApiWriteConflict(unittest.TestCase):
                 atomic_write_text(path, yaml.safe_dump(raw, allow_unicode=True))
 
             with _wrap_lock(
-                project_board_core.locked_profile_write,
+                file_write_core.locked_profile_files,
                 external_board_write,
             ) as wrapped:
+                # The multi-file transaction now acquires the board lock
+                # before calling its domain saver. Inject at that preflight
+                # boundary, not inside the already protected transaction.
                 with patch.object(
-                    project_board_core, "locked_profile_write", wrapped
+                    file_write_core, "locked_profile_files", wrapped
                 ):
                     conflicted = client.post(
                         "/api/v1/profiles/alice/project-board/cases/"

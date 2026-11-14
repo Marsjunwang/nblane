@@ -35,7 +35,7 @@ export function ExportMenu({
   /** What to export: a saved draft id, explicit Markdown, or the master resume. */
   source: { draft_id?: string; markdown?: string };
   /** Flush pending edits first so the export matches the screen. */
-  beforeExport?: () => Promise<unknown>;
+  beforeExport?: () => Promise<boolean>;
   label?: string;
 }) {
   const [busy, setBusy] = useState<string>('');
@@ -44,7 +44,10 @@ export function ExportMenu({
     setBusy(format);
     setError('');
     try {
-      await beforeExport?.();
+      if (beforeExport && !(await beforeExport())) {
+        setError('修改尚未保存，导出已暂停。请先处理保存错误或冲突。');
+        return;
+      }
       await downloadCareerExport(profile, { format, ...source });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

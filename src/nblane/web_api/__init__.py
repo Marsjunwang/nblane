@@ -28,6 +28,7 @@ from nblane.web_api.auth import GitActorMiddleware, LoginRateLimiter
 from nblane.web_api.auth import router as auth_router
 from nblane.web_api.grobid import router as grobid_router
 from nblane.web_api.local_models import router as local_models_router
+from nblane.web_api.profiles import router as profiles_router
 from nblane.web_api.routes_v1 import (
     ApiError,
     api_error_handler,
@@ -91,6 +92,7 @@ def create_app(
     app.include_router(grobid_router)
     app.include_router(agents_setup_router)
     app.include_router(accounts_router)
+    app.include_router(profiles_router)
     # /terminal/* (authenticated ttyd proxy) must also win over the SPA fallback.
     app.include_router(workshop_terminal_router)
     # Mounted last so API routes win over the SPA catch-all fallback.

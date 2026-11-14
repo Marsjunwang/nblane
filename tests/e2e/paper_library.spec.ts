@@ -1,22 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
-import net from "node:net";
-import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { readerBaseURL } from "./helpers";
+import { e2eDataRoot, fixtureProfileName, readerBaseURL } from "./helpers";
 
-const e2eDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(e2eDir, "../..");
-const profileName = process.env.NBLANE_PAPER_LIBRARY_E2E_PROFILE || "e2e-paper-library";
-let tempRoot = "";
-let server: ChildProcessWithoutNullStreams | null = null;
-// When NBLANE_E2E_READER_BASE points at an already-running sidecar we test
-// that instance; otherwise the spec spawns its own isolated one on a free
-// port (see beforeAll), so it never depends on the shared dev ports.
-let baseUrl = (process.env.NBLANE_E2E_READER_BASE || "").trim() ? readerBaseURL() : "";
-let serverOutput = "";
+const profileName = fixtureProfileName("e2e-paper-library");
+const baseUrl = readerBaseURL();
 
 function writeFixtureProfile(root: string) {
   const profileRoot = path.join(root, "profiles", profileName);
@@ -41,7 +29,7 @@ function writeFixtureProfile(root: string) {
             published: "2026",
             tags: ["e2e", "workspace"],
             summary: "A deterministic paper used by the Paper Library browser test.",
-            notes: "Should move into a collection without a Streamlit rerun.",
+            notes: "Should move into a collection without reloading the page.",
           },
           {
             id: "source:paper:e2e-beta",
@@ -63,71 +51,6 @@ function writeFixtureProfile(root: string) {
   );
 }
 
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const socket = net.createServer();
-    socket.once("error", reject);
-    socket.listen(0, "127.0.0.1", () => {
-      const address = socket.address();
-      socket.close(() => {
-        if (address && typeof address === "object") {
-          resolve(address.port);
-        } else {
-          reject(new Error("Could not allocate an e2e server port."));
-        }
-      });
-    });
-  });
-}
-
-async function waitForHttp(url: string, timeoutMs = 20_000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError = "";
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) {
-        return;
-      }
-      lastError = `${response.status} ${response.statusText}`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Timed out waiting for ${url}: ${lastError}\n${serverOutput}`);
-}
-
-async function startIsolatedReader() {
-  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nblane-paper-library-e2e-"));
-  writeFixtureProfile(tempRoot);
-  const port = await freePort();
-  baseUrl = `http://127.0.0.1:${port}`;
-  const venvPython = path.join(repoRoot, ".venv", "bin", "python");
-  const python = process.env.NBLANE_E2E_PYTHON || (fs.existsSync(venvPython) ? venvPython : "python3");
-  server = spawn(
-    python,
-    ["-m", "uvicorn", "nblane.web_reader_api:app", "--host", "127.0.0.1", "--port", String(port)],
-    {
-      cwd: repoRoot,
-      env: {
-        ...process.env,
-        NBLANE_ROOT: tempRoot,
-        NBLANE_READER_TOKEN_SECRET: "paper-library-e2e-secret",
-        NBLANE_RESEARCH_ASSET_ROOT: path.join(tempRoot, "assets"),
-        PYTHONPATH: path.join(repoRoot, "src"),
-      },
-    },
-  );
-  server.stdout.on("data", (chunk) => {
-    serverOutput += chunk.toString();
-  });
-  server.stderr.on("data", (chunk) => {
-    serverOutput += chunk.toString();
-  });
-  await waitForHttp(`${baseUrl}/paper-library?profile=${encodeURIComponent(profileName)}`);
-}
-
 async function stableScreenshot(page, name: string, testInfo) {
   await page.locator(".paper-workspace-loading").waitFor({ state: "detached", timeout: 8000 }).catch(() => {});
   const body = await page.screenshot({ fullPage: true });
@@ -135,24 +58,13 @@ async function stableScreenshot(page, name: string, testInfo) {
   expect(body.byteLength).toBeGreaterThan(30_000);
 }
 
-test.beforeAll(async () => {
-  if (!baseUrl) {
-    await startIsolatedReader();
-  }
-});
-
-test.afterAll(async () => {
-  if (server) {
-    server.kill("SIGTERM");
-  }
-  if (tempRoot) {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
+test.beforeAll(() => {
+  writeFixtureProfile(e2eDataRoot());
 });
 
 test("Standalone Paper Library covers collection, delete preview, and screenshots", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(`${baseUrl}/paper-library?profile=${encodeURIComponent(profileName)}`, {
+  await page.goto(`${baseUrl}/paper-library?profile=${encodeURIComponent(profileName)}&ui_lang=en`, {
     waitUntil: "domcontentloaded",
     timeout: 20_000,
   });
@@ -225,7 +137,7 @@ test("Standalone Paper Library covers collection, delete preview, and screenshot
   expect(apiPayload.payload.metrics.papers).toBe(1);
 
   await page.setViewportSize({ width: 390, height: 820 });
-  await page.goto(`${baseUrl}/paper-library?profile=${encodeURIComponent(profileName)}`, {
+  await page.goto(`${baseUrl}/paper-library?profile=${encodeURIComponent(profileName)}&ui_lang=en`, {
     waitUntil: "domcontentloaded",
     timeout: 20_000,
   });

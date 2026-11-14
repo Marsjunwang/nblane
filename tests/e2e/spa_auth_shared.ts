@@ -12,15 +12,14 @@ export const SPA_BASE_URL = (process.env.NBLANE_E2E_SPA_BASE_URL || "http://127.
   "",
 );
 
-// Sandbox credentials from .dev-data/auth/users.yaml (test passwords only,
-// overridable for other stacks). Defaults match scripts/dev-web.sh --isolated.
+// Synthetic credentials are supplied by run.mjs for each temporary stack.
 export const SPA_ADMIN_USER = process.env.NBLANE_E2E_ADMIN_USER || "admin";
-export const SPA_ADMIN_PASSWORD = process.env.NBLANE_E2E_ADMIN_PASSWORD || "test1234";
+export const SPA_ADMIN_PASSWORD = process.env.NBLANE_E2E_ADMIN_PASSWORD || "e2e-test-password";
 export const SPA_MEMBER_USER = process.env.NBLANE_E2E_MEMBER_USER || "member";
-export const SPA_MEMBER_PASSWORD = process.env.NBLANE_E2E_MEMBER_PASSWORD || "test1234";
+export const SPA_MEMBER_PASSWORD = process.env.NBLANE_E2E_MEMBER_PASSWORD || "e2e-test-password";
 export const SPA_E2E_PROFILE = process.env.NBLANE_E2E_PROFILE || "dev";
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
 
 /** Baked admin session (cookies) for the main chromium project. Gitignored. */
-export const SPA_ADMIN_STORAGE_STATE = path.join(configDir, ".auth", "spa-admin.json");
+export const SPA_ADMIN_STORAGE_STATE = process.env.NBLANE_E2E_AUTH_STATE || path.join(configDir, ".auth", "spa-admin.json");

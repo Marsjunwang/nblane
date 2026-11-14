@@ -36,6 +36,7 @@ P = "/api/v1/profiles/{name}"
 # (method, route template) -> action. Settings/auth/system routes are T3 by
 # prefix (see ``action_for``).
 ROUTE_ACTIONS: dict[tuple[str, str], str] = {
+    ("POST", "/api/v1/profiles"): "settings.system",
     # kanban
     ("POST", f"{P}/kanban/cards"): "kanban.card.add",
     ("POST", f"{P}/kanban/cards/{{card_ref}}/move"): "kanban.card.move",

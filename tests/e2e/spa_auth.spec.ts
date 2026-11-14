@@ -159,13 +159,13 @@ test.describe("SPA login journey (auth-enabled web_api on " + SPA_BASE_URL + ")"
     await expect(
       page.getByRole("link", { name: new RegExp(SPA_E2E_PROFILE) }).first(),
     ).toBeVisible();
-    // 王军 exists in this sandbox (admin sees it) but must not leak to member.
-    await expect(page.getByRole("link", { name: /王军/ })).toHaveCount(0);
+    // The synthetic other profile exists in this sandbox (admin sees it) but must not leak to member.
+    await expect(page.getByRole("link", { name: /other/ })).toHaveCount(0);
 
     // Direct API access to a non-granted profile: scope check precedes the
     // 404 lookup, so even existence is not probeable.
     const denied = await page.request.get(
-      spaURL(`/api/v1/profiles/${encodeURIComponent("王军")}/kanban`),
+      spaURL(`/api/v1/profiles/${encodeURIComponent("other")}/kanban`),
     );
     expect(denied.status()).toBe(403);
   });

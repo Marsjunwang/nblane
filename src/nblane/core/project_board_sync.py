@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable
 
 from nblane.core.file_state import FileSnapshot
+from nblane.core.file_write import profile_file_transaction
 from nblane.core.io import (
     KANBAN_SECTIONS,
     KanbanTask,
@@ -138,13 +139,28 @@ def sync_project_case_workspace(
     already belong to another project are not stolen; they are dropped from this
     project's task refs and reported as warnings.
 
-    *expected_snapshots* optionally carries request-start fingerprints keyed
-    ``board`` / ``kanban`` / ``pool`` / ``sources``; each is re-checked
-    inside that file's write lock and a mismatch raises
-    ``file_state.FileConflictError`` so the web layer can answer 412
-    instead of silently overwriting a concurrent edit.
+    All source versions are checked under their file locks before any write;
+    ordinary failures roll back the whole sync before releasing those locks.
     """
     snaps = dict(expected_snapshots or {})
+    files = {
+        "board": "project-board.yaml",
+        "kanban": "kanban.md",
+        "pool": "evidence-pool.yaml",
+        "sources": "research/sources.yaml",
+    }
+    with profile_file_transaction(
+        profile_dir(profile),
+        tuple(files.values()),
+        expected_snapshots={files[key]: value for key, value in snaps.items() if key in files},
+    ):
+        return _sync_project_case_workspace_locked(profile, board, project_id)
+
+
+def _sync_project_case_workspace_locked(
+    profile: str, board: ProjectBoard, project_id: str,
+) -> ProjectSyncResult:
+    """Apply project links after the transaction's complete preflight."""
 
     result = ProjectSyncResult()
     case = _case_by_id(board, project_id)
@@ -234,17 +250,13 @@ def sync_project_case_workspace(
             source.id in desired_sources,
         )
 
-    save_project_board(
-        profile, board, expected_snapshot=snaps.get("board")
-    )
+    save_project_board(profile, board)
     result.changed_paths.append(pdir / "project-board.yaml")
     if kanban_changed:
-        save_kanban(profile, sections, expected_snapshot=snaps.get("kanban"))
+        save_kanban(profile, sections)
         result.changed_paths.append(pdir / "kanban.md")
     if not _same_pool_refs(pool_before, pool_raw):
-        save_evidence_pool(
-            profile, pool_raw, expected_snapshot=snaps.get("pool")
-        )
+        save_evidence_pool(profile, pool_raw)
         result.changed_paths.append(pdir / "evidence-pool.yaml")
     if sources_before != sources.to_dict():
         def apply_source_refs(latest) -> bool:
@@ -260,7 +272,6 @@ def sync_project_case_workspace(
         sources_changed = mutate_research_sources(
             profile,
             apply_source_refs,
-            expected_snapshot=snaps.get("sources"),
         )
         if sources_changed:
             result.changed_paths.append(pdir / "research" / "sources.yaml")

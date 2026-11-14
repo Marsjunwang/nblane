@@ -3,11 +3,12 @@
 // Same contract as the blog editor: edits schedule a save after idle,
 // autosaves skip the server's Git backup commit, an explicit flush (⌘S,
 // leaving the page) commits, a 412 freezes saving until the user reloads,
-// and a keepalive request covers tab close / in-app navigation.
+// and a local backup survives failed exit requests and in-app navigation.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { isConflictError } from '../ConflictAlert';
+import { careerDraftKey, clearCareerDraft, readCareerDraft, writeCareerDraft } from './localDraft';
 
 export type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
 
@@ -16,6 +17,8 @@ const DEFAULT_DELAY_MS = 1500;
 const KEEPALIVE_MAX_BYTES = 60_000;
 
 export interface AutosaveOptions<T> {
+  /** Stable profile + document identity; editors remount when this changes. */
+  storageKey: string;
   initial: T;
   etag: string;
   save: (value: T, etag: string, autosave: boolean) => Promise<string>;
@@ -24,18 +27,24 @@ export interface AutosaveOptions<T> {
   delayMs?: number;
 }
 
-export function useAutosave<T>({ initial, etag, save, keepalive, delayMs = DEFAULT_DELAY_MS }: AutosaveOptions<T>) {
-  const [value, setValue] = useState<T>(initial);
-  const [state, setState] = useState<SaveState>('saved');
+export function useAutosave<T>({ storageKey, initial, etag, save, keepalive, delayMs = DEFAULT_DELAY_MS }: AutosaveOptions<T>) {
+  const [restored] = useState(() => readCareerDraft(storageKey, initial));
+  const [localKey] = useState(() => careerDraftKey(storageKey));
+  const [value, setValue] = useState<T>(restored?.value ?? initial);
+  const [state, setState] = useState<SaveState>(restored ? (restored.etag === etag ? 'dirty' : 'conflict') : 'saved');
   const [error, setError] = useState('');
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
-  const valueRef = useRef<T>(initial);
-  const etagRef = useRef(etag);
-  const revisionRef = useRef(0);
+  const valueRef = useRef<T>(restored?.value ?? initial);
+  const etagRef = useRef(restored?.etag ?? etag);
+  const revisionRef = useRef(restored ? 1 : 0);
   const savedRevisionRef = useRef(0);
   const uncommittedRef = useRef(false);
-  const conflictRef = useRef(false);
+  const conflictRef = useRef(Boolean(restored && restored.etag !== etag));
+  const failedRef = useRef(false);
+  const discardedRef = useRef(false);
+  const mountedRef = useRef(true);
+  const localRawRef = useRef<string | null>(null);
   const inFlightRef = useRef<Promise<boolean> | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
   const saveRef = useRef(save);
@@ -45,14 +54,31 @@ export function useAutosave<T>({ initial, etag, save, keepalive, delayMs = DEFAU
 
   const isDirty = () => revisionRef.current !== savedRevisionRef.current;
 
+  const backup = useCallback(() => {
+    if (!isDirty() || discardedRef.current) return true;
+    const raw = writeCareerDraft(localKey, valueRef.current, etagRef.current);
+    if (raw) {
+      localRawRef.current = raw;
+      // Transfer this recovered snapshot only after the new backup exists.
+      // Repeated failed visits must not leave older recoveries behind.
+      if (restored) clearCareerDraft(restored.key, restored.raw);
+    }
+    return raw !== null;
+  }, [localKey, restored]);
+
+  const clearBackup = useCallback(() => {
+    clearCareerDraft(localKey, localRawRef.current);
+    if (restored) clearCareerDraft(restored.key, restored.raw);
+  }, [localKey, restored]);
+
   const run = useCallback(
     async (autosave: boolean): Promise<boolean> => {
       window.clearTimeout(timerRef.current);
-      if (conflictRef.current) return false;
-      if (inFlightRef.current) {
+      if (conflictRef.current || discardedRef.current) return false;
+      while (inFlightRef.current) {
         if (autosave) return inFlightRef.current;
-        await inFlightRef.current;
-        if (conflictRef.current) return false;
+        if (!(await inFlightRef.current)) return false;
+        if (conflictRef.current || discardedRef.current) return false;
       }
       if (!isDirty() && !(uncommittedRef.current && !autosave)) return true;
       const atRevision = revisionRef.current;
@@ -63,17 +89,22 @@ export function useAutosave<T>({ initial, etag, save, keepalive, delayMs = DEFAU
           etagRef.current = nextEtag;
           savedRevisionRef.current = atRevision;
           uncommittedRef.current = autosave;
+          failedRef.current = false;
           setSavedAt(new Date());
           setError('');
           if (isDirty()) {
+            backup();
             setState('dirty');
-            timerRef.current = window.setTimeout(() => void run(true), delayMs);
+            if (mountedRef.current) timerRef.current = window.setTimeout(() => void run(true), delayMs);
           } else {
+            clearBackup();
             setState('saved');
           }
           return true;
         })
         .catch((err: unknown) => {
+          failedRef.current = true;
+          backup();
           if (isConflictError(err)) {
             conflictRef.current = true;
             setState('conflict');
@@ -89,7 +120,7 @@ export function useAutosave<T>({ initial, etag, save, keepalive, delayMs = DEFAU
       inFlightRef.current = promise;
       return promise;
     },
-    [delayMs],
+    [backup, clearBackup, delayMs],
   );
 
   const edit = useCallback(
@@ -98,21 +129,29 @@ export function useAutosave<T>({ initial, etag, save, keepalive, delayMs = DEFAU
       valueRef.current = next;
       setValue(next);
       revisionRef.current += 1;
+      backup();
       if (conflictRef.current) return;
       setState('dirty');
       window.clearTimeout(timerRef.current);
       timerRef.current = window.setTimeout(() => void run(true), delayMs);
     },
-    [delayMs, run],
+    [backup, delayMs, run],
   );
 
-  const flush = useCallback(() => run(false), [run]);
+  const flush = useCallback(async (): Promise<boolean> => {
+    do {
+      if (!(await run(false))) return false;
+    } while (isDirty() || uncommittedRef.current);
+    return true;
+  }, [run]);
 
   const flushOnExit = useCallback(() => {
     window.clearTimeout(timerRef.current);
-    if (conflictRef.current || (!isDirty() && !uncommittedRef.current)) return;
+    backup();
+    // A second request would use the ETag from before the in-flight save.
+    if (discardedRef.current || conflictRef.current || inFlightRef.current || (!isDirty() && !uncommittedRef.current)) return;
     const request = keepaliveRef.current?.(valueRef.current, etagRef.current);
-    if (!request || request.body.length > KEEPALIVE_MAX_BYTES) return;
+    if (!request || new TextEncoder().encode(request.body).byteLength > KEEPALIVE_MAX_BYTES) return;
     void fetch(request.url, {
       method: request.method,
       keepalive: true,
@@ -120,25 +159,45 @@ export function useAutosave<T>({ initial, etag, save, keepalive, delayMs = DEFAU
       headers: { 'Content-Type': 'application/json', ...(etagRef.current ? { 'If-Match': etagRef.current } : {}) },
       body: request.body,
     }).catch(() => undefined);
-    savedRevisionRef.current = revisionRef.current;
-    uncommittedRef.current = false;
-  }, []);
+    // Keep the backup until a normal save acknowledges it, or a later mount
+    // finds the same content on the server. Dispatch alone is not success.
+  }, [backup]);
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (conflictRef.current) {
+      if (discardedRef.current) return;
+      const backedUp = backup();
+      if (isDirty() && (conflictRef.current || failedRef.current || !backedUp)) {
         event.preventDefault();
+        event.returnValue = '';
         return;
       }
       flushOnExit();
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [flushOnExit]);
+  }, [backup, flushOnExit]);
 
-  useEffect(() => () => flushOnExit(), [flushOnExit]);
+  useEffect(() => {
+    mountedRef.current = true;
+    if (restored && !conflictRef.current) timerRef.current = window.setTimeout(() => void run(true), delayMs);
+    return () => {
+      mountedRef.current = false;
+      window.clearTimeout(timerRef.current);
+      backup();
+      queueMicrotask(() => {
+        if (!mountedRef.current) flushOnExit();
+      });
+    };
+  }, [backup, delayMs, flushOnExit, restored, run]);
 
-  return { value, edit, state, error, savedAt, flush, etag: () => etagRef.current };
+  const discard = useCallback(() => {
+    discardedRef.current = true;
+    window.clearTimeout(timerRef.current);
+    clearBackup();
+  }, [clearBackup]);
+
+  return { value, edit, state, error, savedAt, flush, discard, recovered: Boolean(restored), etag: () => etagRef.current };
 }
 
 export function saveStateLabel(state: SaveState, savedAt: Date | null): string {

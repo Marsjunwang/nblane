@@ -560,6 +560,7 @@ function ResumeEditorInner({ profile, data }: { profile: string; data: CareerWor
   const [mobileView, setMobileView] = useState<'form' | 'preview'>('form');
   const [importOpen, setImportOpen] = useState(false);
   const autosave = useAutosave<ResumeDoc>({
+    storageKey: `${profile}/resume`,
     initial: data.resume,
     etag: data.resume_etag,
     save: async (resume, etag, isAutosave) => {
@@ -577,7 +578,7 @@ function ResumeEditorInner({ profile, data }: { profile: string; data: CareerWor
   useHotkeys([['mod+S', () => void autosave.flush()]], []);
 
   const back = async () => {
-    await autosave.flush();
+    if (!(await autosave.flush())) return;
     navigate(careerHomePath(profile));
   };
 
@@ -628,12 +629,17 @@ function ResumeEditorInner({ profile, data }: { profile: string; data: CareerWor
   return (
     <Box data-testid="resume-editor" style={{ minHeight: 'calc(100vh - 56px)' }}>
       {topBar}
+      {autosave.recovered && autosave.state !== 'conflict' && (
+        <Alert color="yellow" m="md" title="已恢复本地草稿">
+          上次未保存的修改已恢复到编辑器，保存成功后会清理这份备份。
+        </Alert>
+      )}
       {autosave.state === 'conflict' && (
         <Alert color="orange" m="md" title="简历已在别处修改">
           <Group justify="space-between">
-            <Text size="sm">为避免覆盖，已暂停自动保存。刷新会载入最新版本，本页未保存的修改会丢失。</Text>
-            <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} onClick={() => window.location.reload()}>
-              刷新
+            <Text size="sm">已暂停自动保存，本地修改仍保留在编辑器和本机草稿中。可以先复制需要的内容，再放弃修改并载入最新版本。</Text>
+            <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} onClick={() => { autosave.discard(); window.location.reload(); }}>
+              放弃修改并刷新
             </Button>
           </Group>
         </Alert>
@@ -701,5 +707,5 @@ export function ResumeEditor({ profile }: { profile: string }) {
       </Alert>
     );
   }
-  return <ResumeEditorInner profile={profile} data={career.data} />;
+  return <ResumeEditorInner key={profile} profile={profile} data={career.data} />;
 }

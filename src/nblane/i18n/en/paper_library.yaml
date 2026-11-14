@@ -213,7 +213,6 @@ format_bibtex: BibTeX
 format_ris: RIS
 format_csl_json: CSL-JSON
 format_markdown: Markdown
-msg_streamlit_export: Open the 8502 Paper Library Workspace to export papers.
 msg_export_none: Select at least one paper to export.
 exporting: Exporting...
 msg_exported: Exported {count} paper{s} as {format}.
@@ -316,8 +315,6 @@ msg_lost_progress: Lost connection to the Paper Library action after saved progr
 msg_lost: Lost connection to the Paper Library action for {seconds}s.
 msg_reconnecting: Reconnecting to job status... {seconds}s grace remaining
 msg_missing_paper: Missing profile or paper id.
-msg_streamlit_upload: Open the 8502 Paper Library Workspace to upload PDFs.
-msg_streamlit_delete: Open the 8502 Paper Library Workspace to preview and delete papers.
 msg_request_timeout: Request timed out after {seconds}s.
 msg_request_failed: "Request failed: {status}"
 progress_updated: "{count} updated"

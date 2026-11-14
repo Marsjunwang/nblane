@@ -48,7 +48,8 @@ from nblane.core import social_cards, content_images
 from nblane.web_api.schemas import (ContentImageReferenceRequest, ContentImageReferenceResponse, ContentImageRunModel, ContentImageRunsResponse, ContentImageActionRequest)
 from nblane.core import career_ai, career_workspace, content_ai, content_workspace, git_backup, public_site, resume_doc, visual_candidate_store
 from nblane.core import public_console
-from nblane.core.file_lock import locked_profile_write
+from nblane.core.file_lock import locked_profile_files, locked_profile_write
+from nblane.core.file_write import profile_file_transaction
 from nblane.core.ai.exceptions import (
     DISMISSABLE_PREFIXES,
     collect_profile_exceptions,
@@ -1023,7 +1024,8 @@ def patch_profile_skill_node(
     ids unknown to both answer 404.
     """
     pdir = _resolve_profile(name)
-    etag = _skill_tree_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / profile_io.SKILL_TREE_FILENAME)
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _evidence_review_error(
             412,
@@ -1083,9 +1085,7 @@ def patch_profile_skill_node(
             profile_io.update_skill_tree(
                 pdir.name,
                 _apply,
-                expected_snapshot=file_state.snapshot_file(
-                    pdir / profile_io.SKILL_TREE_FILENAME
-                ),
+                expected_snapshot=expected_snapshot,
             )
         except file_state.FileConflictError:
             return _evidence_review_error(
@@ -1405,6 +1405,17 @@ def append_profile_growth_log(name: str, body: GrowthLogRequest) -> GrowthLogRes
     return GrowthLogResponse(ok=True, event=event)
 
 
+def _snapshot_etag(snapshot: file_state.FileSnapshot) -> str:
+    """Use the same version for the HTTP precondition and locked write."""
+    return f'W/"{snapshot.sha256 or "empty"}"'
+
+
+def _kanban_edit_snapshot(pdir: Path) -> tuple[file_state.FileSnapshot, dict[str, list[KanbanTask]]]:
+    """Read the merge base and its version together before checking If-Match."""
+    with locked_profile_write(pdir, "kanban.md"):
+        return file_state.snapshot_file(kanban_path(pdir)), parse_kanban(pdir)
+
+
 def _kanban_etag(pdir: Path) -> str:
     """Weak ETag for the profile's kanban.md (sha256 fingerprint).
 
@@ -1625,6 +1636,23 @@ def _save_kanban_mutation(
     )
 
 
+def _save_linked_kanban_mutation(
+    pdir: Path,
+    sections: dict[str, list[KanbanTask]],
+    base: dict[str, list[KanbanTask]],
+    snapshot: file_state.FileSnapshot,
+    board_snapshot: file_state.FileSnapshot,
+):
+    """Commit a card edit and its derived project references together."""
+    with profile_file_transaction(
+        pdir, ("kanban.md", "project-board.yaml"),
+        expected_snapshots={"project-board.yaml": board_snapshot},
+    ):
+        result = _save_kanban_mutation(pdir, sections, base, snapshot)
+        sync_project_board_from_kanban(pdir.name, result.sections)
+        return result
+
+
 @router.post(
     "/profiles/{name}/kanban/cards",
     response_model=KanbanMutationResponse,
@@ -1656,7 +1684,8 @@ def add_profile_kanban_card(
     target = resolve_kanban_section(body.section)
     if target is None:
         raise _unknown_kanban_section(body.section)
-    etag = _kanban_etag(pdir)
+    snapshot, sections = _kanban_edit_snapshot(pdir)
+    etag = _snapshot_etag(snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -1664,13 +1693,11 @@ def add_profile_kanban_card(
             "kanban.md changed since it was loaded; reload before adding.",
             etag,
         )
-    snapshot = file_state.snapshot_file(kanban_path(pdir))
     board_snapshot = (
         file_state.snapshot_file(pdir / "project-board.yaml")
         if body.project_id.strip()
         else None
     )
-    sections = parse_kanban(pdir)
     base = copy_kanban_sections(sections)
     tags = ", ".join(tag.strip() for tag in body.tags if tag.strip())
     planned_start = _validate_planned_date(body.planned_start, "planned_start")
@@ -1692,27 +1719,22 @@ def add_profile_kanban_card(
     sections.setdefault(target, []).append(task)
     ensured = ensure_kanban_task_ids(sections, pdir.name)
     created_id = ensured[target][-1].id
-    result = _save_kanban_mutation(pdir, ensured, base, snapshot)
-    section, stored = _find_card_by_id(result.sections, created_id)
     trace_paths = [kanban_path(pdir)]
-    if stored.project_id:
-        # Lane assignment lives on the card; re-sync project-board refs like
-        # the patch endpoint does.
-        try:
-            sync_project_board_from_kanban(
-                pdir.name,
-                parse_kanban(pdir),
-                expected_snapshot=board_snapshot,
+    try:
+        if board_snapshot is not None:
+            result = _save_linked_kanban_mutation(
+                pdir, ensured, base, snapshot, board_snapshot,
             )
             trace_paths.append(pdir / "project-board.yaml")
-        except file_state.FileConflictError:
-            return _kanban_error(
-                412,
-                "etag_mismatch",
-                "project-board.yaml changed while syncing lane assignment; "
-                "reload before retrying.",
-                _kanban_etag(pdir),
-            )
+        else:
+            result = _save_kanban_mutation(pdir, ensured, base, snapshot)
+    except file_state.FileConflictError:
+        return _kanban_error(
+            412, "etag_mismatch",
+            "project-board.yaml changed while syncing lane assignment; reload before retrying.",
+            _kanban_etag(pdir),
+        )
+    section, stored = _find_card_by_id(result.sections, created_id)
     _record_agent_writeback(
         user,
         pdir.name,
@@ -1756,7 +1778,8 @@ def _mutate_kanban_card_section(
     to the current section without ``to_index`` is an idempotent no-op.
     """
     pdir = _resolve_profile(name)
-    etag = _kanban_etag(pdir)
+    snapshot, sections = _kanban_edit_snapshot(pdir)
+    etag = _snapshot_etag(snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -1764,8 +1787,6 @@ def _mutate_kanban_card_section(
             "kanban.md changed since it was loaded; reload before mutating.",
             etag,
         )
-    snapshot = file_state.snapshot_file(kanban_path(pdir))
-    sections = parse_kanban(pdir)
     base = copy_kanban_sections(sections)
     ref = card_ref.strip()
     hit, match_kind, match_error = _resolve_kanban_card(sections, ref)
@@ -1895,7 +1916,8 @@ def schedule_profile_kanban_card(
     save is 3-way merged.
     """
     pdir = _resolve_profile(name)
-    etag = _kanban_etag(pdir)
+    snapshot, sections = _kanban_edit_snapshot(pdir)
+    etag = _snapshot_etag(snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -1916,8 +1938,6 @@ def schedule_profile_kanban_card(
             "At least one of planned_start / planned_end is required "
             "(use an empty string to clear).",
         )
-    snapshot = file_state.snapshot_file(kanban_path(pdir))
-    sections = parse_kanban(pdir)
     base = copy_kanban_sections(sections)
     ref = card_ref.strip()
     hit, match_kind, match_error = _resolve_kanban_card(sections, ref)
@@ -1985,7 +2005,8 @@ def patch_profile_kanban_card(
     (412 on mismatch); a concurrent kanban write is 3-way merged.
     """
     pdir = _resolve_profile(name)
-    etag = _kanban_etag(pdir)
+    snapshot, sections = _kanban_edit_snapshot(pdir)
+    etag = _snapshot_etag(snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -2023,8 +2044,6 @@ def patch_profile_kanban_card(
             "At least one editable field is required.",
         )
     board_snapshot = file_state.snapshot_file(pdir / "project-board.yaml")
-    snapshot = file_state.snapshot_file(kanban_path(pdir))
-    sections = parse_kanban(pdir)
     base = copy_kanban_sections(sections)
     ref = card_ref.strip()
     hit, match_kind, match_error = _resolve_kanban_card(sections, ref)
@@ -2034,23 +2053,20 @@ def patch_profile_kanban_card(
         raise ApiError(404, "kanban_card_not_found", match_error)
     from_section, _index, task = hit
     sections[from_section][_index] = replace(task, **updates)
-    result = _save_kanban_mutation(pdir, sections, base, snapshot)
+    try:
+        if "project_id" in updates:
+            result = _save_linked_kanban_mutation(
+                pdir, sections, base, snapshot, board_snapshot,
+            )
+        else:
+            result = _save_kanban_mutation(pdir, sections, base, snapshot)
+    except file_state.FileConflictError:
+        return _kanban_error(
+            412, "etag_mismatch",
+            "project-board.yaml changed while syncing lane assignment; reload before retrying.",
+            _kanban_etag(pdir),
+        )
     section, stored = _find_card_by_id(result.sections, task.id)
-    if "project_id" in updates:
-        try:
-            sync_project_board_from_kanban(
-                pdir.name,
-                parse_kanban(pdir),
-                expected_snapshot=board_snapshot,
-            )
-        except file_state.FileConflictError:
-            return _kanban_error(
-                412,
-                "etag_mismatch",
-                "project-board.yaml changed while syncing lane assignment; "
-                "reload before retrying.",
-                _kanban_etag(pdir),
-            )
     trace_paths = [kanban_path(pdir)]
     if "project_id" in updates:
         trace_paths.append(pdir / "project-board.yaml")
@@ -2100,7 +2116,8 @@ def delete_profile_kanban_card(
     and save is 3-way merged like the other card mutations.
     """
     pdir = _resolve_profile(name)
-    etag = _kanban_etag(pdir)
+    snapshot, sections = _kanban_edit_snapshot(pdir)
+    etag = _snapshot_etag(snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -2108,8 +2125,6 @@ def delete_profile_kanban_card(
             "kanban.md changed since it was loaded; reload before deleting.",
             etag,
         )
-    snapshot = file_state.snapshot_file(kanban_path(pdir))
-    sections = parse_kanban(pdir)
     base = copy_kanban_sections(sections)
     ref = card_ref.strip()
     hit, match_kind, match_error = _resolve_kanban_card(sections, ref)
@@ -2319,7 +2334,8 @@ def patch_profile_north_star(
     of the full text appends ``north_star.rewritten``.
     """
     pdir = _resolve_profile(name)
-    etag = _skill_md_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / "SKILL.md")
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -2354,7 +2370,7 @@ def patch_profile_north_star(
             full=body.full,
             brief=body.brief,
             visibility=visibility,
-            expected_snapshot=file_state.snapshot_file(pdir / "SKILL.md"),
+            expected_snapshot=expected_snapshot,
         )
     except FileNotFoundError:
         raise ApiError(
@@ -2479,7 +2495,8 @@ def create_profile_goal(
     Honors ``If-Match`` against the goals.yaml ETag (412 on mismatch).
     """
     pdir = _resolve_profile(name)
-    etag = _goals_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / "goals.yaml")
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -2509,7 +2526,7 @@ def create_profile_goal(
         save_goal_book(
             pdir,
             book,
-            expected_snapshot=file_state.snapshot_file(pdir / "goals.yaml"),
+            expected_snapshot=expected_snapshot,
         )
     except file_state.FileConflictError:
         return _kanban_error(
@@ -2575,7 +2592,8 @@ def patch_profile_goal(
     ``If-Match`` against the goals.yaml ETag (412 on mismatch).
     """
     pdir = _resolve_profile(name)
-    etag = _goals_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / "goals.yaml")
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -2632,9 +2650,7 @@ def patch_profile_goal(
             save_goal_book(
                 pdir,
                 book,
-                expected_snapshot=file_state.snapshot_file(
-                    pdir / "goals.yaml"
-                ),
+                expected_snapshot=expected_snapshot,
             )
         except file_state.FileConflictError:
             return _kanban_error(
@@ -3070,7 +3086,8 @@ def _mutate_evidence_pool(
     when the If-Match precondition fails (412, fresh ETag in the header).
     """
     pdir = _resolve_profile(name)
-    etag = _evidence_pool_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / profile_io.EVIDENCE_POOL_FILENAME)
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _evidence_review_error(
             412,
@@ -3097,9 +3114,7 @@ def _mutate_evidence_pool(
         profile_io.update_evidence_pool(
             pdir.name,
             _apply,
-            expected_snapshot=file_state.snapshot_file(
-                pdir / profile_io.EVIDENCE_POOL_FILENAME
-            ),
+            expected_snapshot=expected_snapshot,
         )
     except file_state.FileConflictError:
         # A concurrent write landed between the If-Match check and the
@@ -3489,7 +3504,8 @@ def set_profile_evidence_skill_links(
         raise ApiError(
             404, "evidence_not_found", f"Unknown evidence entry: {eid}"
         )
-    etag = _skill_tree_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / profile_io.SKILL_TREE_FILENAME)
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _evidence_review_error(
             412,
@@ -3532,9 +3548,7 @@ def set_profile_evidence_skill_links(
         profile_io.update_skill_tree(
             pdir.name,
             _apply,
-            expected_snapshot=file_state.snapshot_file(
-                pdir / profile_io.SKILL_TREE_FILENAME
-            ),
+            expected_snapshot=expected_snapshot,
         )
     except file_state.FileConflictError:
         return _evidence_review_error(
@@ -4127,10 +4141,20 @@ def _project_board_etag(pdir: Path) -> str:
     goals/experience/outputs. Weak (``W/``) because the hash identifies the
     source file versions, not the JSON response bytes.
     """
-    fingerprints = []
-    for relative in PROJECT_BOARD_ETAG_FILES:
-        snapshot = file_state.snapshot_file(pdir / relative)
-        fingerprints.append(f"{relative}:{snapshot.sha256 or 'empty'}")
+    return _source_files_etag(_source_file_snapshots(pdir, PROJECT_BOARD_ETAG_FILES))
+
+
+def _source_file_snapshots(
+    pdir: Path, filenames: tuple[str, ...],
+) -> dict[str, file_state.FileSnapshot]:
+    """Capture a coherent version of all sources participating in a mutation."""
+    with locked_profile_files(pdir, filenames):
+        return {name: file_state.snapshot_file(pdir / name) for name in filenames}
+
+
+def _source_files_etag(snapshots: dict[str, file_state.FileSnapshot]) -> str:
+    """Hash the captured source versions without observing a newer baseline."""
+    fingerprints = [f"{relative}:{snapshot.sha256 or 'empty'}" for relative, snapshot in snapshots.items()]
     digest = hashlib.sha256("|".join(fingerprints).encode("utf-8")).hexdigest()
     return f'W/"{digest}"'
 
@@ -4375,7 +4399,10 @@ def _check_board_mutation(
     mismatch there raises ``FileConflictError`` → 412 (TOCTOU closure).
     """
     pdir = _resolve_profile(name)
-    etag = _project_board_etag(pdir)
+    with locked_profile_files(pdir, PROJECT_BOARD_ETAG_FILES):
+        versions = _source_file_snapshots(pdir, PROJECT_BOARD_ETAG_FILES)
+        board = load_project_board(pdir)
+    etag = _source_files_etag(versions)
     if not _if_match_satisfied(if_match, etag):
         return _project_board_error(
             412,
@@ -4385,14 +4412,12 @@ def _check_board_mutation(
             etag,
         )
     snapshots = {
-        "board": file_state.snapshot_file(pdir / "project-board.yaml"),
-        "kanban": file_state.snapshot_file(kanban_path(pdir)),
-        "pool": file_state.snapshot_file(
-            pdir / profile_io.EVIDENCE_POOL_FILENAME
-        ),
-        "sources": file_state.snapshot_file(pdir / "research" / "sources.yaml"),
+        "board": versions["project-board.yaml"],
+        "kanban": versions["kanban.md"],
+        "pool": versions[profile_io.EVIDENCE_POOL_FILENAME],
+        "sources": versions["research/sources.yaml"],
     }
-    return pdir, load_project_board(pdir), snapshots
+    return pdir, board, snapshots
 
 
 def _require_board_choice(
@@ -4725,12 +4750,15 @@ def delete_profile_project_case(
         ]
 
     try:
-        tasks_unassigned = update_kanban(
-            pdir, _unassign, expected_snapshot=snapshots["kanban"]
-        )
-        update_project_board(
-            pdir, _remove, expected_snapshot=snapshots["board"]
-        )
+        with profile_file_transaction(
+            pdir, ("kanban.md", "project-board.yaml"),
+            expected_snapshots={
+                "kanban.md": snapshots["kanban"],
+                "project-board.yaml": snapshots["board"],
+            },
+        ):
+            tasks_unassigned = update_kanban(pdir, _unassign)
+            update_project_board(pdir, _remove)
     except file_state.FileConflictError:
         return _project_board_error(
             412,
@@ -4958,8 +4986,7 @@ def add_profile_project_task(
             "unknown_milestone",
             f"Unknown milestone {milestone_id!r} in project {case.id}.",
         )
-    snapshot = file_state.snapshot_file(kanban_path(pdir))
-    sections = parse_kanban(pdir)
+    snapshot, sections = _kanban_edit_snapshot(pdir)
     base = copy_kanban_sections(sections)
     anchor = body.date.strip() or date.today().isoformat()
     task = KanbanTask(
@@ -4975,13 +5002,9 @@ def add_profile_project_task(
     sections.setdefault(target, []).append(task)
     ensured = ensure_kanban_task_ids(sections, pdir.name)
     created_id = ensured[target][-1].id
-    result = _save_kanban_mutation(pdir, ensured, base, snapshot)
-    section, stored = _find_card_by_id(result.sections, created_id)
     try:
-        sync_project_board_from_kanban(
-            pdir.name,
-            parse_kanban(pdir),
-            expected_snapshot=snapshots["board"],
+        result = _save_linked_kanban_mutation(
+            pdir, ensured, base, snapshot, snapshots["board"],
         )
     except file_state.FileConflictError:
         return _project_board_error(
@@ -4991,6 +5014,7 @@ def add_profile_project_task(
             "reload before retrying.",
             _project_board_etag(pdir),
         )
+    section, stored = _find_card_by_id(result.sections, created_id)
     response.headers["ETag"] = _project_board_etag(pdir)
     return KanbanMutationResponse(
         ok=True,
@@ -5028,8 +5052,7 @@ def move_profile_project_task(
     target = resolve_kanban_section(body.target_section)
     if target is None:
         raise _unknown_kanban_section(body.target_section)
-    snapshot = file_state.snapshot_file(kanban_path(pdir))
-    sections = parse_kanban(pdir)
+    snapshot, sections = _kanban_edit_snapshot(pdir)
     base = copy_kanban_sections(sections)
     task: KanbanTask | None = None
     for _section, tasks in sections.items():
@@ -5048,13 +5071,9 @@ def move_profile_project_task(
         [{"id": task.id, "to_section": target}],
         auto_dates=True,
     )
-    result = _save_kanban_mutation(pdir, moved, base, snapshot)
-    section, stored = _find_card_by_id(result.sections, task.id)
     try:
-        sync_project_board_from_kanban(
-            pdir.name,
-            parse_kanban(pdir),
-            expected_snapshot=snapshots["board"],
+        result = _save_linked_kanban_mutation(
+            pdir, moved, base, snapshot, snapshots["board"],
         )
     except file_state.FileConflictError:
         return _project_board_error(
@@ -5064,6 +5083,7 @@ def move_profile_project_task(
             "reload before retrying.",
             _project_board_etag(pdir),
         )
+    section, stored = _find_card_by_id(result.sections, task.id)
     response.headers["ETag"] = _project_board_etag(pdir)
     return KanbanMutationResponse(
         ok=True,
@@ -5476,7 +5496,8 @@ def add_profile_checkin(
     ETag in the header).
     """
     pdir = _resolve_profile(name)
-    etag = _activity_log_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / activity_log.ACTIVITY_LOG_FILENAME)
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -5520,9 +5541,7 @@ def add_profile_checkin(
             plan_id=plan_id,
             week_number=week_number,
             day_number=day_number,
-            expected_snapshot=file_state.snapshot_file(
-                pdir / activity_log.ACTIVITY_LOG_FILENAME
-            ),
+            expected_snapshot=expected_snapshot,
         )
     except ValueError as exc:
         raise ApiError(422, "invalid_checkin", str(exc)) from exc
@@ -5577,7 +5596,8 @@ def delete_profile_checkin(
     ETag in the header).
     """
     pdir = _resolve_profile(name)
-    etag = _activity_log_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / activity_log.ACTIVITY_LOG_FILENAME)
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -5590,9 +5610,7 @@ def delete_profile_checkin(
         deleted = activity_log.delete_checkin(
             pdir,
             checkin_id,
-            expected_snapshot=file_state.snapshot_file(
-                pdir / activity_log.ACTIVITY_LOG_FILENAME
-            ),
+            expected_snapshot=expected_snapshot,
         )
     except file_state.FileConflictError:
         # A concurrent write landed between the If-Match check and the
@@ -5673,7 +5691,8 @@ def archive_profile_habit(
     the activity-log.yaml ETag (412 on mismatch, fresh ETag in the header).
     """
     pdir = _resolve_profile(name)
-    etag = _activity_log_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / activity_log.ACTIVITY_LOG_FILENAME)
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -5690,9 +5709,7 @@ def archive_profile_habit(
                 pdir,
                 habit.id,
                 body.archived,
-                expected_snapshot=file_state.snapshot_file(
-                    pdir / activity_log.ACTIVITY_LOG_FILENAME
-                ),
+                expected_snapshot=expected_snapshot,
             )
         except file_state.FileConflictError:
             # TOCTOU closure: a concurrent write landed between the If-Match
@@ -5755,7 +5772,8 @@ def delete_profile_habit(
     activity-log.yaml ETag (412 on mismatch, fresh ETag in the header).
     """
     pdir = _resolve_profile(name)
-    etag = _activity_log_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / activity_log.ACTIVITY_LOG_FILENAME)
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -5777,9 +5795,7 @@ def delete_profile_habit(
         outcome = activity_log.delete_habit(
             pdir,
             habit.id,
-            expected_snapshot=file_state.snapshot_file(
-                pdir / activity_log.ACTIVITY_LOG_FILENAME
-            ),
+            expected_snapshot=expected_snapshot,
         )
     except file_state.FileConflictError:
         return _kanban_error(
@@ -6210,7 +6226,8 @@ def create_profile_habit_plan(
     activity-log.yaml ETag (412 on mismatch, fresh ETag in the header).
     """
     pdir = _resolve_profile(name)
-    etag = _activity_log_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / activity_log.ACTIVITY_LOG_FILENAME)
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -6274,9 +6291,7 @@ def create_profile_habit_plan(
         stored = activity_log.add_habit_plan(
             pdir,
             plan,
-            expected_snapshot=file_state.snapshot_file(
-                pdir / activity_log.ACTIVITY_LOG_FILENAME
-            ),
+            expected_snapshot=expected_snapshot,
         )
     except file_state.FileConflictError:
         # TOCTOU closure: a concurrent write landed between the If-Match
@@ -6338,7 +6353,8 @@ def patch_profile_habit_plan(
     the header).
     """
     pdir = _resolve_profile(name)
-    etag = _activity_log_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / activity_log.ACTIVITY_LOG_FILENAME)
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -6398,9 +6414,7 @@ def patch_profile_habit_plan(
             status=new_status,
             title=new_title,
             weekly_tasks=new_weekly,
-            expected_snapshot=file_state.snapshot_file(
-                pdir / activity_log.ACTIVITY_LOG_FILENAME
-            ),
+            expected_snapshot=expected_snapshot,
         )
     except file_state.FileConflictError:
         # TOCTOU closure: a concurrent write landed between the If-Match
@@ -6517,7 +6531,8 @@ def delete_profile_habit_plan(
     instead of failing.
     """
     pdir = _resolve_profile(name)
-    etag = _activity_log_etag(pdir)
+    expected_snapshot = file_state.snapshot_file(pdir / activity_log.ACTIVITY_LOG_FILENAME)
+    etag = _snapshot_etag(expected_snapshot)
     if not _if_match_satisfied(if_match, etag):
         return _kanban_error(
             412,
@@ -6540,9 +6555,7 @@ def delete_profile_habit_plan(
         deleted = activity_log.delete_habit_plan(
             pdir,
             plan.id,
-            expected_snapshot=file_state.snapshot_file(
-                pdir / activity_log.ACTIVITY_LOG_FILENAME
-            ),
+            expected_snapshot=expected_snapshot,
         )
     except file_state.FileConflictError:
         # TOCTOU closure: a concurrent write landed between the If-Match
@@ -6603,6 +6616,13 @@ def delete_profile_habit_plan(
 # --- Habit-plan templates (Phase 2): click-to-instantiate plans -------------
 
 
+PLAN_TEMPLATE_ETAG_FILES = (
+    plan_templates.PLAN_TEMPLATES_FILENAME,
+    "project-board.yaml",
+    activity_log.ACTIVITY_LOG_FILENAME,
+)
+
+
 def _plan_templates_etag(pdir: Path) -> str:
     """Weak ETag over the plan-template mutation's source files.
 
@@ -6611,16 +6631,7 @@ def _plan_templates_etag(pdir: Path) -> str:
     because the hash identifies the source file versions, not the JSON
     response bytes.
     """
-    fingerprints = []
-    for relative in (
-        plan_templates.PLAN_TEMPLATES_FILENAME,
-        "project-board.yaml",
-        activity_log.ACTIVITY_LOG_FILENAME,
-    ):
-        snapshot = file_state.snapshot_file(pdir / relative)
-        fingerprints.append(f"{relative}:{snapshot.sha256 or 'empty'}")
-    digest = hashlib.sha256("|".join(fingerprints).encode("utf-8")).hexdigest()
-    return f'W/"{digest}"'
+    return _source_files_etag(_source_file_snapshots(pdir, PLAN_TEMPLATE_ETAG_FILES))
 
 
 def _plan_templates_error(
@@ -6776,7 +6787,8 @@ def instantiate_profile_plan_template(
     request-start snapshot inside its write lock.
     """
     pdir = _resolve_profile(name)
-    etag = _plan_templates_etag(pdir)
+    versions = _source_file_snapshots(pdir, PLAN_TEMPLATE_ETAG_FILES)
+    etag = _source_files_etag(versions)
     if not _if_match_satisfied(if_match, etag):
         return _plan_templates_error(
             412,
@@ -6800,59 +6812,58 @@ def instantiate_profile_plan_template(
     else:
         start = date.today()
     snapshots = {
-        "board": file_state.snapshot_file(pdir / "project-board.yaml"),
-        "activity_log": file_state.snapshot_file(
-            pdir / activity_log.ACTIVITY_LOG_FILENAME
-        ),
-        "history": file_state.snapshot_file(
-            pdir / plan_templates.PLAN_TEMPLATES_FILENAME
-        ),
+        "board": versions["project-board.yaml"],
+        "activity_log": versions[activity_log.ACTIVITY_LOG_FILENAME],
+        "history": versions[plan_templates.PLAN_TEMPLATES_FILENAME],
     }
     try:
-        # Habit first: explicit override wins, else the template's title;
-        # an existing habit (id or title) is reused, otherwise created.
-        log = activity_log.load(pdir)
-        habit_ref = body.habit_id.strip() or template.habit_title
-        resolved = activity_log.resolve_habit_id(log, habit_ref)
-        created_habit = resolved is None
-        habit = activity_log.add_habit(
-            pdir,
-            habit_ref,
-            kind=template.habit_kind,
-            cadence=template.cadence,
-            target=template.target,
-            expected_snapshot=snapshots["activity_log"],
-        )
-        case_fields = plan_templates.plan_case_fields(
-            template, title=body.title, start=start
-        )
-
-        def _add_case(board: ProjectBoard) -> ProjectCase:
-            return add_project_case(
-                board,
-                case_fields["title"],
-                kind=case_fields["kind"],
-                time_range=case_fields["time_range"],
-                summary=case_fields["summary"],
-                goal_refs=body.goal_refs,
-                milestones=case_fields["milestones"],
-                habit_id=habit.id,
+        with profile_file_transaction(
+            pdir, PLAN_TEMPLATE_ETAG_FILES, expected_snapshots=versions,
+        ):
+            # Habit first: explicit override wins, else the template's title;
+            # an existing habit (id or title) is reused, otherwise created.
+            log = activity_log.load(pdir)
+            habit_ref = body.habit_id.strip() or template.habit_title
+            resolved = activity_log.resolve_habit_id(log, habit_ref)
+            created_habit = resolved is None
+            habit = activity_log.add_habit(
+                pdir,
+                habit_ref,
+                kind=template.habit_kind,
+                cadence=template.cadence,
+                target=template.target,
+                expected_snapshot=snapshots["activity_log"],
+            )
+            case_fields = plan_templates.plan_case_fields(
+                template, title=body.title, start=start
             )
 
-        case = update_project_board(
-            pdir, _add_case, expected_snapshot=snapshots["board"]
-        )
-        template_id = template.id or f"inline:{case.id}"
-        plan_templates.record_plan_usage(
-            pdir,
-            {
-                "template_id": template_id,
-                "title": case.title,
-                "project_id": case.id,
-                "habit_id": habit.id,
-            },
-            expected_snapshot=snapshots["history"],
-        )
+            def _add_case(board: ProjectBoard) -> ProjectCase:
+                return add_project_case(
+                    board,
+                    case_fields["title"],
+                    kind=case_fields["kind"],
+                    time_range=case_fields["time_range"],
+                    summary=case_fields["summary"],
+                    goal_refs=body.goal_refs,
+                    milestones=case_fields["milestones"],
+                    habit_id=habit.id,
+                )
+
+            case = update_project_board(
+                pdir, _add_case, expected_snapshot=snapshots["board"]
+            )
+            template_id = template.id or f"inline:{case.id}"
+            plan_templates.record_plan_usage(
+                pdir,
+                {
+                    "template_id": template_id,
+                    "title": case.title,
+                    "project_id": case.id,
+                    "habit_id": habit.id,
+                },
+                expected_snapshot=snapshots["history"],
+            )
     except ValueError as exc:
         raise ApiError(422, "invalid_plan_instantiate", str(exc)) from exc
     except file_state.FileConflictError:
@@ -6956,6 +6967,28 @@ def _studio_post_etag(post) -> str:
     if post.sidecar_path is not None:
         paths.append(post.sidecar_path)
     return _studio_etag_for_files(paths)
+
+
+def _studio_post_edit_snapshot(pdir: Path, slug: str):
+    """Read the post, ETag, and write preconditions under the blog writer lock."""
+    with locked_profile_write(pdir, "blog"):
+        post = _load_studio_post(pdir, slug)
+        paths = [post.path]
+        if post.sidecar_path is not None:
+            paths.append(post.sidecar_path)
+        snapshots = {path: file_state.snapshot_file(path) for path in paths}
+        fingerprints = [
+            f"{path.name}:{snapshot.mtime_ns:x}-{snapshot.size:x}"
+            if snapshot.exists else f"{path.name}:empty"
+            for path, snapshot in snapshots.items()
+        ]
+        digest = hashlib.sha256("|".join(fingerprints).encode("utf-8")).hexdigest()
+        # Absence is a write precondition too: do not overwrite a sidecar
+        # that another editor creates after this Markdown-only snapshot.
+        sidecar = public_site.blog_sidecar_path_for_slug(pdir.name, post.slug)
+        if sidecar not in snapshots:
+            snapshots[sidecar] = file_state.snapshot_file(sidecar)
+        return post, f'W/"{digest}"', snapshots
 
 
 def _studio_error(
@@ -7180,8 +7213,7 @@ def _save_blog_post(
     client already holds the body it sent.
     """
     pdir = _resolve_profile(name)
-    post = _load_studio_post(pdir, slug)
-    etag = _studio_post_etag(post)
+    post, etag, snapshots = _studio_post_edit_snapshot(pdir, slug)
     if not _if_match_satisfied(if_match, etag):
         if _save_matches_post(post, body):
             # A replay of a save that already landed (the client lost the
@@ -7224,12 +7256,8 @@ def _save_blog_post(
             meta,
             text_body,
             blocks_json=body.blocks_json,
-            expected_snapshot=file_state.snapshot_file(post.path),
-            expected_sidecar_snapshot=(
-                file_state.snapshot_file(post.sidecar_path)
-                if post.sidecar_path is not None
-                else None
-            ),
+            expected_snapshot=snapshots[post.path],
+            expected_sidecar_snapshot=snapshots[public_site.blog_sidecar_path_for_slug(pdir.name, post.slug)],
         )
     except file_state.FileConflictError:
         # A concurrent edit landed between the If-Match check and the
@@ -7303,8 +7331,7 @@ def _publish_blog_post(
     Honors ``If-Match`` (412 on mismatch, fresh ETag in the header).
     """
     pdir = _resolve_profile(name)
-    post = _load_studio_post(pdir, slug)
-    etag = _studio_post_etag(post)
+    post, etag, snapshots = _studio_post_edit_snapshot(pdir, slug)
     if not _if_match_satisfied(if_match, etag):
         return _studio_error(
             412,
@@ -7322,12 +7349,8 @@ def _publish_blog_post(
             meta,
             text_body,
             blocks_json=body.blocks_json if body is not None else post.blocks_json,
-            expected_snapshot=file_state.snapshot_file(post.path),
-            expected_sidecar_snapshot=(
-                file_state.snapshot_file(post.sidecar_path)
-                if post.sidecar_path is not None
-                else None
-            ),
+            expected_snapshot=snapshots[post.path],
+            expected_sidecar_snapshot=snapshots[public_site.blog_sidecar_path_for_slug(pdir.name, post.slug)],
         )
     except file_state.FileConflictError:
         # A concurrent edit landed between the If-Match check and the
@@ -8086,11 +8109,10 @@ def update_profile_career_draft(
 
     def write() -> dict[str, Any]:
         meta = {"jd_text": body.jd_text, "notes": body.notes, "analysis": body.analysis}
-        if any(value is not None for value in meta.values()):
-            career_workspace.update_draft_meta(pdir.name, draft_id, meta)
-        if body.markdown is not None and body.markdown.rstrip() + "\n" != current["markdown"]:
-            return career_workspace.save_draft(pdir.name, draft_id, body.markdown, expected_etag=current["etag"])
-        return career_workspace.get_draft(pdir.name, draft_id)
+        return career_workspace.update_draft(
+            pdir.name, draft_id, markdown=body.markdown, meta=meta,
+            expected_etag=current["etag"],
+        )
 
     try:
         if autosave:

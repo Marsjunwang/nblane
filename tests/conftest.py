@@ -16,6 +16,10 @@ os.environ.setdefault("NBLANE_DISABLE_NETWORK_LOOKUPS", "1")
 # model, GROBID backend override) live in this user's home. Point tests at
 # an empty scratch dir so those choices never leak into test results.
 _STATE_DIR = Path(tempfile.mkdtemp(prefix="nblane-test-state-"))
+# Never import developer credentials through the repository's real .env.
+_ENV_FILE = _STATE_DIR / "test.env"
+_ENV_FILE.write_text("", encoding="utf-8")
+os.environ["NBLANE_ENV_FILE"] = str(_ENV_FILE)
 os.environ["NBLANE_LOCAL_MODELS_DIR"] = str(_STATE_DIR / "local-models")
 os.environ["NBLANE_GROBID_SERVICE_DIR"] = str(_STATE_DIR / "grobid")
 # The Quadlet path and unit name are real systemd --user state: without these

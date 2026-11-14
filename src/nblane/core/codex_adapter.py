@@ -39,7 +39,8 @@ from nblane.core.paths import REPO_ROOT
 from nblane.core.profile_io import profile_dir
 from nblane.core.yaml_io import _load_yaml_dict
 
-_ENV_FILE = REPO_ROOT / ".env"
+_env_file_override = os.getenv("NBLANE_ENV_FILE", "").strip()
+_ENV_FILE = Path(_env_file_override) if _env_file_override else REPO_ROOT / ".env"
 
 try:
     from dotenv import load_dotenv

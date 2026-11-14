@@ -290,7 +290,7 @@ def apply_crystallization(
     """
     from nblane.core import profile_io
     from nblane.core.evidence_review import confidence_for_origin, internal_project_goal_index
-    from nblane.core.file_write import rollback_profile_files
+    from nblane.core.file_write import profile_file_transaction
     from nblane.core.goals import load_goal_book
     from nblane.core.ingest_apply import run_ingest_patch
     from nblane.core.ingest_merge import task_source_refs
@@ -300,7 +300,7 @@ def apply_crystallization(
     pdir = profile_io.profile_dir(profile_name)
     warnings: list[str] = []
     try:
-        with git_backup.defer_changes(f"crystallize {profile_name}"), rollback_profile_files(pdir, (
+        with git_backup.defer_changes(f"crystallize {profile_name}"), profile_file_transaction(pdir, (
             "evidence-pool.yaml", "skill-tree.yaml", "SKILL.md", "kanban.md",
         )):
             tasks, missing = resolve_done_tasks(profile_name, task_ids, titles)

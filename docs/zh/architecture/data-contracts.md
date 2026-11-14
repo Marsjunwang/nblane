@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-10-11
+last_verified: 2026-11-15
 source_of_truth: true
 ---
 
@@ -84,6 +84,20 @@ append-only;每条 `{date, kind, ref, note}`。`core/chronicle.py` 的
 消费者:首页简报行、拓片年度叙事、openclaw 复盘素材。
 
 ## 更新顺序
+
+### 档案创建
+
+- 网页初始化由 `core/profile_setup.py` 完成：在 `profiles/` 外、同一文件系统的临时目录中复制模板、建立首个计划、校验和同步，最后整体重命名到目标目录；此前不出现在档案列表中。
+- 网页与 CLI 的创建入口共用 `profiles/.profile-create.lock`，覆盖目标存在检查及整个创建过程；已有档案不替换。不能只在重命名前再次检查存在性，否则 CLI 刚建立的空目录仍可能在并发窗口内被覆盖。
+- 新档案及初始目标、项目默认私有；网页入口仅供本人管理员，Agent 账号不可调用。
+
+### 并发写入与跨文件失败恢复
+
+- `If-Match` 检查和领域写入必须使用同一次读取的版本，不能在检查后重新取快照作为保存基线。看板的三方合并还必须同时捕获原始内容和版本；文章正文、BlockNote sidecar 与 ETag 在同一个 blog 锁内读取。
+- 项目关联同步、任务归属调整、项目删除、导入与任务结晶、计划模板实例化通过 `profile_file_transaction` 按路径固定顺序取得相关文件的 sidecar 锁。在任何写入前复核全部预期版本，普通异常在持锁期间恢复原文件，避免 412 后留下部分关联或回滚覆盖其他写入。任务侧调整仍保留看板三方合并，但合并结果和项目引用一起提交。
+- 文件锁允许同一线程重入，以便事务调用既有领域写入器；其他线程和进程仍互斥。新跨文件流程须先一次取得全部所需锁，不能持有排序靠后的锁再申请靠前的锁。
+- 求职定制简历的 ETag 同时覆盖 Markdown 正文与 `.meta.yaml`（JD、备注、分析）。两者在同一事务中检查、写入和失败回滚；只修改备注也会更新版本，不能先写备注再检查正文冲突。
+- 这是普通异常下的恢复边界；进程被强制终止仍需通过稳定来源标识安全重试，未加读锁的读取也可能看到提交中的中间文件。
 
 ### Evidence / Skill Tree / SKILL.md
 
@@ -308,9 +322,9 @@ entries:
 
 - 只记 Agent 账号的写入；人类账号不记。请求没有实际改变（412、422、no-op）时不写条目。handler 异常前已经发生的写入仍要记账；快照 / journal 故障必须显式失败，不能假称安全完成。
 - 保留 30 天、最多 500 条（`RETENTION_DAYS` / `MAX_ENTRIES`），写入时修剪；不再被保留条目引用的 PDF 快照同步清理。
-- 撤销把每个实体的 `before` 经所属领域写入器写回，并整体回滚相关文件与 PDF；只有当前状态仍等于 `after` 时才允许，否则拒绝（`journal_undo_conflict`），不覆盖后来的修改。research source 和 JSONL 会在各自文件锁内再次复核，撤销新增 PDF 时不会删除仍被其他 source 引用的共享资产。
+- 撤销把每个实体的 `before` 经所属领域写入器写回，并整体回滚相关文件与 PDF；只有当前状态仍等于 `after` 时才允许，否则拒绝（`journal_undo_conflict`），不覆盖后来的修改。取得相关领域文件锁后再次检查冲突，通用列表、research source 和 JSONL 还在各自恢复入口复核；撤销新增 PDF 时不会删除仍被其他 source 引用的共享资产。
 - 后台 Job / Reader task 的取消和超时是协作停止，不等于立即无写入：取消先到则后续提交不发生；提交先到则当前段完成并记账。最终状态公开 `cancel_requested` / `write_committed`（Reader task 同义字段）和保留写入说明。
-- 每条只能撤销一次；撤销后记录 `undone_at` / `undone_by`。`recent` 给每条附 `status`：`undoable`、`conflict`、`undone`。
+- 每条只能撤销一次；撤销后记录 `undone_at` / `undone_by`，记录写入失败会连同业务恢复一起回滚。`recent` 给每条附 `status`：`undoable`、`conflict`、`undone`。
 - chronicle.yaml、计划模板使用历史等追加型叙事副作用，以及 AI 运行审计、可重建页面预览缓存，不作为业务撤销对象。
 - 日志与撤销都经 Git 备份；同步请求的 git actor 由 `GitActorMiddleware` 提供，后台 worker 显式接收 actor，与日志 `actor` 互证。外部 PDF 快照本身不进 Git。
 
@@ -396,8 +410,8 @@ project-board.yaml
   - 请求体 `confirm_title` 必须与 case 标题逐字一致,否则 422
     `project_delete_confirm_mismatch`;`record_chronicle` 默认 false,
     为 true 时追加 `project.deleted`(note = 项目标题)。
-  - 写入顺序 kanban.md → project-board.yaml(→ chronicle.yaml),两文件都在各自
-    写锁内复核请求起始快照,冲突 412;走 `kanban_io.update_kanban` /
+  - 写入顺序 kanban.md → project-board.yaml(→ chronicle.yaml),前两文件在统一
+    事务中先取得全部写锁并复核请求起始快照,冲突 412 且不会留下半写;走 `kanban_io.update_kanban` /
     `project_board.update_project_board`,不裸改文件。
   - 存活 kanban 任务的 `project_id` 清空回「未归属」;指向被删 case 里程碑的
     `milestone_id` 一并清空;`kanban-archive.md` 历史不动。

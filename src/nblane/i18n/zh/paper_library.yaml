@@ -205,7 +205,6 @@ format_bibtex: BibTeX
 format_ris: RIS
 format_csl_json: CSL-JSON
 format_markdown: Markdown
-msg_streamlit_export: 请在 8502 论文库工作台中导出论文。
 msg_export_none: 请至少选择一篇论文再导出。
 exporting: 正在导出…
 msg_exported: 已导出 {count} 篇（{format}）。
@@ -306,8 +305,6 @@ msg_lost_progress: 与论文库任务的连接在保存部分进度后中断（{
 msg_lost: 与论文库任务失去连接已 {seconds} 秒。
 msg_reconnecting: 正在重新连接任务状态…剩余 {seconds} 秒
 msg_missing_paper: 缺少 profile 或论文 ID。
-msg_streamlit_upload: 请在 8502 论文库工作台中上传 PDF。
-msg_streamlit_delete: 请在 8502 论文库工作台中预览并删除论文。
 msg_request_timeout: 请求超时（{seconds} 秒）。
 msg_request_failed: 请求失败：{status}
 progress_updated: 已更新 {count}
