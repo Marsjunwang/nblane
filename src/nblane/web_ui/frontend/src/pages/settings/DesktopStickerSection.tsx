@@ -90,10 +90,10 @@ export function DesktopStickerSection() {
           </Paper>
           <Paper p="md" radius="md" bg={chrome.panelBg}>
             <Group gap="xs" mb={6}><IconAdjustmentsHorizontal size={17} color={chrome.gold} /><Text fw={600} size="sm">随手调节透明度</Text></Group>
-            <Text size="sm" c="dimmed">只调整靛蓝背景的透明度，文字保持清晰；Mac 支持背景模糊。</Text>
+            <Text size="sm" c="dimmed">背景不透明度可调至 10%，文字保持清晰；Mac 可选择清晰透视或背景模糊。</Text>
           </Paper>
         </SimpleGrid>
-        <Text size="sm" c="dimmed">贴纸使用合并顶栏，高度随任务内容变化。置顶与背景透明度在「更多」菜单里调整，并保存在这台 Mac 上。</Text>
+        <Text size="sm" c="dimmed">刷新、透明度、设置和置顶都在首行，高度随任务内容变化。窗口偏好保存在这台 Mac 上，隐藏和退出等操作在「更多」菜单里。</Text>
         {latest.isPending && <Group role="status" gap="xs"><Loader size="sm" /><Text size="sm">正在获取 Mac 安装包…</Text></Group>}
         {latest.isError && (
           <Alert color="gray" title="暂时无法获取下载信息">

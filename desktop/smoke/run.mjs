@@ -88,6 +88,7 @@ try {
   }
   await toolbar.locator('#server-url').fill(origin);
   await toolbar.locator('#profile').fill('smoke-profile');
+  await toolbar.locator('#refresh-interval').selectOption('30');
   await toolbar.locator('#save-settings').click();
   await expect.poll(async () => (await getState(toolbar)).loading).toBe(false);
   assert.equal((await getState(toolbar)).error, null);
@@ -111,7 +112,7 @@ try {
   assert.ok(controls, 'The compact trusted controls must exist');
   await expect(controls.getByRole('button', { name: '始终置顶', exact: true })).toBeVisible();
   await expect(controls.getByRole('button', { name: '更多操作', exact: true })).toBeVisible();
-  assert.equal(await controls.locator('.toolbar button:visible').count(), 2, 'Only pin and more stay in the compact toolbar');
+  assert.equal(await controls.locator('.toolbar button:visible').count(), 5, 'Refresh, opacity, settings, pin and more share the compact toolbar');
   const remotePage = application.windows().find((page) => page.url().startsWith(origin));
   assert.ok(remotePage);
   const height = () => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds().height);
@@ -174,7 +175,7 @@ try {
   await expect.poll(async () => (await getState(toolbar)).settings.opacity).toBe(0.65);
   assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getOpacity()), 1, 'Text must never use native whole-window transparency');
   const surface = await getState(toolbar);
-  assert.equal(surface.effectiveOpacity, surface.nativeBlur && !surface.reducedTransparency ? 0.65 : 1);
+  assert.equal(surface.effectiveOpacity, surface.nativeTransparency && !surface.reducedTransparency ? 0.65 : 1);
   await expect.poll(() => toolbar.locator('h1').first().evaluate((heading) => {
     for (let element = heading; element; element = element.parentElement) {
       if (getComputedStyle(element).opacity !== '1') return false;
@@ -211,11 +212,13 @@ try {
   const saved = JSON.parse(await readFile(path.join(data, 'sticker-settings.json'), 'utf8'));
   assert.equal(saved.settings.opacity, 0.65);
   assert.equal(saved.settings.profile, 'smoke-profile');
+  assert.equal(saved.settings.refreshIntervalSeconds, 30);
   assert.equal(saved.settings.alwaysOnTop, false);
 
   toolbar = await launch();
   await expect.poll(async () => (await getState(toolbar)).screen).toBe('content');
   assert.equal((await getState(toolbar)).settings.opacity, 0.65);
+  assert.equal((await getState(toolbar)).settings.refreshIntervalSeconds, 30);
   assert.equal((await getState(toolbar)).settings.alwaysOnTop, false);
   await expect(toolbar.locator('#pin-button')).toHaveAttribute('aria-pressed', 'false');
   assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getOpacity()), 1);

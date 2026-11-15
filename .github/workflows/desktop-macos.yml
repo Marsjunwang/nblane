@@ -60,6 +60,7 @@ jobs:
       - name: Verify and launch the archived app
         env:
           STICKER_ARCH: ${{ matrix.arch }}
+          NBLANE_STICKER_SCREENSHOT_DIR: ${{ runner.temp }}/sticker-visual-check
         shell: bash
         run: |
           set -euo pipefail
@@ -73,6 +74,7 @@ jobs:
           /usr/bin/codesign --verify --deep --strict --verbose=4 "$app"
           npm run test:smoke --prefix desktop -- "--app=$app"
           node desktop/smoke/mini-ui.mjs "--app=$app"
+          node desktop/smoke/material.mjs "--app=$app"
       - uses: actions/upload-artifact@v4
         with:
           name: nblane-sticker-mac-${{ matrix.arch }}
@@ -81,3 +83,10 @@ jobs:
             dist/desktop/*.sha256
           if-no-files-found: error
           retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sticker-visual-check-${{ matrix.arch }}
+          path: ${{ runner.temp }}/sticker-visual-check/*.png
+          if-no-files-found: ignore
+          retention-days: 7

@@ -10,7 +10,12 @@
     toolbar: document.querySelector('.toolbar'),
     message: byId('toolbar-message'),
     pin: byId('pin-button'),
+    refresh: byId('refresh-button'),
     more: byId('more-button'),
+    opacityButton: byId('opacity-button'),
+    opacityPopover: byId('opacity-popover'),
+    toolbarRange: byId('toolbar-opacity-range'),
+    toolbarValue: byId('toolbar-opacity-value'),
     controlError: byId('control-error'),
     alwaysOnTop: byId('always-on-top'),
     settings: byId('settings-screen'),
@@ -18,9 +23,11 @@
     fields: byId('settings-fields'),
     serverUrl: byId('server-url'),
     profile: byId('profile'),
+    refreshInterval: byId('refresh-interval'),
     launchAtLogin: byId('launch-at-login'),
     settingsRange: byId('settings-opacity-range'),
     settingsValue: byId('settings-opacity-value'),
+    backgroundBlur: byId('background-blur'),
     formError: byId('settings-error'),
     save: byId('save-settings'),
     cancel: byId('cancel-settings'),
@@ -39,6 +46,7 @@
   let desiredOpacity = null;
   let opacityWorker = null;
   let opacityError = null;
+  let blurPending = false;
   let localError = '';
 
   const errorMessage = (error) => error instanceof Error ? error.message : String(error);
@@ -66,9 +74,9 @@
   }
 
   function applySurface() {
-    const effective = previewOpacity !== null && state?.nativeBlur && !state?.reducedTransparency
+    const effective = previewOpacity !== null && state?.nativeTransparency && !state?.reducedTransparency
       ? previewOpacity : state?.effectiveOpacity ?? 1;
-    const opacity = Number.isFinite(effective) ? Math.min(1, Math.max(0.4, effective)) : 1;
+    const opacity = Number.isFinite(effective) ? Math.min(1, Math.max(0.1, effective)) : 1;
     // Keep the view and every glyph fully opaque. Only the host's background
     // color receives alpha; the compact controls view contributes no second tint.
     document.documentElement.style.setProperty('--sticker-surface-alpha', String(opacity));
@@ -76,14 +84,18 @@
 
   function displayOpacity(opacity) {
     const percent = Math.round(opacity * 100);
-    elements.settingsRange.value = String(percent);
-    elements.settingsRange.setAttribute('aria-valuetext', `${percent}% 背景不透明`);
+    for (const input of [elements.settingsRange, elements.toolbarRange]) {
+      input.value = String(percent);
+      input.setAttribute('aria-valuetext', `${percent}% 背景不透明`);
+    }
     elements.settingsValue.textContent = `${percent}%`;
+    elements.toolbarValue.textContent = `${percent}%`;
   }
 
   function fillForm(settings) {
     elements.serverUrl.value = settings.serverUrl;
     elements.profile.value = settings.profile;
+    elements.refreshInterval.value = String(settings.refreshIntervalSeconds ?? 60);
     elements.launchAtLogin.checked = settings.launchAtLogin;
     formDirty = false;
     settingsInitialized = true;
@@ -92,13 +104,23 @@
   function applyState(next) {
     if (!next || typeof next !== 'object' || !next.settings) return;
     const enteringSettings = next.screen === 'settings' && state?.screen !== 'settings';
+    const enteringOpacity = Boolean(next.opacityEditor) && !state?.opacityEditor;
     state = next;
     applySurface();
     const showingSettings = state.screen === 'settings';
     elements.pin.setAttribute('aria-pressed', String(state.settings.alwaysOnTop));
     elements.pin.title = state.settings.alwaysOnTop ? '已置顶 · 点击取消' : '始终置顶 · 点击开启';
+    const integrated = Boolean(state.integratedContent && !showingSettings && !state.loading && !state.error);
+    // The native controls view owns the popup in every screen, including
+    // settings and login. A second host copy would race it for keyboard focus.
+    const showOpacity = Boolean(state.opacityEditor && controlsOnly);
+    elements.opacityPopover.hidden = !showOpacity;
+    elements.opacityButton.setAttribute('aria-expanded', String(Boolean(state.opacityEditor)));
+    if (!opacityWorker && desiredOpacity === null) displayOpacity(state.settings.opacity);
+    elements.refresh.disabled = showingSettings || !state.configured;
+    if (enteringOpacity && showOpacity) elements.toolbarRange.focus({ preventScroll: true });
     if (controlsOnly) return;
-    elements.toolbar.hidden = Boolean(state.integratedContent && !showingSettings && !state.loading && !state.error);
+    elements.toolbar.hidden = integrated;
     if (!localError) elements.message.textContent = state.settings.profile || 'nblane';
     if (showingSettings && (enteringSettings || !settingsInitialized || !formDirty)) {
       fillForm(state.settings);
@@ -106,13 +128,14 @@
     elements.settings.hidden = !showingSettings;
     elements.contentStatus.hidden = showingSettings || (!state.loading && !state.error);
     elements.alwaysOnTop.checked = state.settings.alwaysOnTop;
-    if (!opacityWorker && desiredOpacity === null) displayOpacity(state.settings.opacity);
     elements.launchAtLogin.disabled = !state.canLaunchAtLogin;
+    elements.backgroundBlur.checked = Boolean(state.settings.backgroundBlur);
+    elements.backgroundBlur.disabled = !state.nativeTransparency || blurPending;
     const transparencyHint = byId('transparency-unavailable');
-    transparencyHint.hidden = state.nativeBlur && !state.reducedTransparency;
+    transparencyHint.hidden = state.nativeTransparency && !state.reducedTransparency;
     transparencyHint.textContent = state.reducedTransparency
       ? '系统已开启减少透明度或增强对比度，背景暂时保持不透明。'
-      : '当前系统使用清晰的不透明背景；Mac 上可显示模糊背景。';
+      : '当前系统使用不透明背景；Mac 上可调整背景透明度。';
     byId('login-unavailable').hidden = state.canLaunchAtLogin;
     elements.cancel.hidden = !state.configured;
     byId('settings-open-browser').hidden = !state.configured;
@@ -146,7 +169,7 @@
       } catch (error) {
         showError(error);
       } finally {
-        button.disabled = false;
+        button.disabled = id === 'refresh-button' && (!state?.configured || state.screen === 'settings');
       }
     });
   }
@@ -154,7 +177,7 @@
   // Only one opacity write is in flight. A new slider value replaces the next
   // queued value, so a slow round trip can never restore an older position.
   function queueOpacity(opacity) {
-    const normalized = Math.min(1, Math.max(0.4, opacity));
+    const normalized = Math.min(1, Math.max(0.1, opacity));
     desiredOpacity = normalized;
     previewOpacity = normalized;
     applySurface();
@@ -195,6 +218,22 @@
   }
 
   elements.settingsRange.addEventListener('input', onOpacityInput);
+  elements.toolbarRange.addEventListener('input', onOpacityInput);
+  elements.backgroundBlur.addEventListener('change', async () => {
+    const enabled = elements.backgroundBlur.checked;
+    blurPending = true;
+    elements.backgroundBlur.disabled = true;
+    clearError();
+    try {
+      await invoke('set-background-blur', enabled);
+    } catch (error) {
+      if (state) elements.backgroundBlur.checked = Boolean(state.settings.backgroundBlur);
+      showError(error);
+    } finally {
+      blurPending = false;
+      elements.backgroundBlur.disabled = !state?.nativeTransparency;
+    }
+  });
   elements.alwaysOnTop.addEventListener('change', async () => {
     const enabled = elements.alwaysOnTop.checked;
     elements.alwaysOnTop.disabled = true;
@@ -211,6 +250,9 @@
     }
   });
 
+  bindAction('refresh-button', 'retry');
+  bindAction('opacity-button', 'toggle-opacity-editor');
+  bindAction('settings-button', 'show-settings');
   bindAction('pin-button', 'toggle-pin');
   bindAction('more-button', 'show-menu');
   bindAction('status-settings-button', 'show-settings');
@@ -218,7 +260,7 @@
   bindAction('retry-button', 'retry');
   bindAction('settings-open-browser', 'open-browser');
 
-  for (const input of [elements.serverUrl, elements.profile, elements.launchAtLogin]) {
+  for (const input of [elements.serverUrl, elements.profile, elements.refreshInterval, elements.launchAtLogin]) {
     input.addEventListener('input', () => {
       formDirty = true;
       if (localError) clearError();
@@ -235,6 +277,7 @@
     const draft = {
       serverUrl: elements.serverUrl.value.trim(),
       profile: elements.profile.value.trim(),
+      refreshIntervalSeconds: Number(elements.refreshInterval.value),
       launchAtLogin: elements.launchAtLogin.checked,
     };
     try {
@@ -251,6 +294,16 @@
   });
 
   document.addEventListener('keydown', async (event) => {
+    if (event.key === 'Escape' && state?.opacityEditor) {
+      event.preventDefault();
+      try {
+        await invoke('close-opacity-editor');
+        elements.opacityButton.focus({ preventScroll: true });
+      } catch (error) {
+        showError(error);
+      }
+      return;
+    }
     const openSettings = (event.metaKey || event.ctrlKey) && event.key === ',';
     const closeSettings = event.key === 'Escape' && state?.configured && state.screen === 'settings';
     if (!openSettings && !closeSettings) return;
@@ -260,6 +313,14 @@
     } catch (error) {
       showError(error);
     }
+  });
+
+  document.addEventListener('pointerdown', (event) => {
+    if (!state?.opacityEditor) return;
+    if (event.target instanceof Element && event.target.closest('#opacity-popover, #opacity-button')) return;
+    // Transparent gutters in the native view also intercept OS input; close
+    // here instead of waiting for focus to reach the underlying task view.
+    void invoke('close-opacity-editor').catch(showError);
   });
 
   const unsubscribe = api.onState(applyState);

@@ -6,11 +6,13 @@ const DEFAULT_SETTINGS = Object.freeze({
   serverUrl: 'https://www.nblane.cloud',
   profile: '',
   opacity: 0.86,
+  backgroundBlur: false,
+  refreshIntervalSeconds: 60,
   alwaysOnTop: true,
   launchAtLogin: false,
 });
 const TOOLBAR_HEIGHT = 44;
-const CONTROLS_WIDTH = 88;
+const CONTROLS_WIDTH = 180;
 const MAX_CONTENT_HEIGHT = 560;
 const MIN_WINDOW = Object.freeze({ width: 280, height: 156 });
 
@@ -44,10 +46,17 @@ function normalizeProfile(value, allowEmpty = false) {
 }
 
 function normalizeOpacity(value) {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0.4 || value > 1) {
-    throw new Error('不透明度必须在 40% 到 100% 之间。');
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0.1 || value > 1) {
+    throw new Error('不透明度必须在 10% 到 100% 之间。');
   }
   return Math.round(value * 100) / 100;
+}
+
+function normalizeRefreshInterval(value) {
+  if (![15, 30, 60, 120, 300].includes(value)) {
+    throw new Error('自动刷新间隔必须为 15、30、60、120 或 300 秒。');
+  }
+  return value;
 }
 
 function normalizeSettings(value) {
@@ -55,7 +64,9 @@ function normalizeSettings(value) {
   const settings = { ...DEFAULT_SETTINGS };
   try { settings.serverUrl = normalizeServerUrl(input.serverUrl); } catch { /* Use safe defaults for invalid stored values. */ }
   try { settings.profile = normalizeProfile(input.profile, true); } catch { /* Require setup again for an invalid profile. */ }
-  try { settings.opacity = normalizeOpacity(input.opacity); } catch { /* Recover at full visibility. */ }
+  try { settings.opacity = normalizeOpacity(input.opacity); } catch { /* Recover the default surface. */ }
+  try { settings.refreshIntervalSeconds = normalizeRefreshInterval(input.refreshIntervalSeconds); } catch { /* Preserve the default polling interval for old or invalid preferences. */ }
+  if (typeof input.backgroundBlur === 'boolean') settings.backgroundBlur = input.backgroundBlur;
   if (typeof input.alwaysOnTop === 'boolean') settings.alwaysOnTop = input.alwaysOnTop;
   if (typeof input.launchAtLogin === 'boolean') settings.launchAtLogin = input.launchAtLogin;
   return settings;
@@ -71,11 +82,15 @@ function validateSettingsUpdate(input) {
     if (typeof input.launchAtLogin !== 'boolean') throw new Error('开机启动设置无效。');
     settings.launchAtLogin = input.launchAtLogin;
   }
+  if (Object.hasOwn(input, 'refreshIntervalSeconds')) {
+    settings.refreshIntervalSeconds = normalizeRefreshInterval(input.refreshIntervalSeconds);
+  }
   return settings;
 }
 
 function miniUrl(settings) {
-  return `${normalizeServerUrl(settings.serverUrl)}/p/${encodeURIComponent(normalizeProfile(settings.profile))}/mini?sticker=1`;
+  const refresh = normalizeRefreshInterval(settings.refreshIntervalSeconds ?? 60);
+  return `${normalizeServerUrl(settings.serverUrl)}/p/${encodeURIComponent(normalizeProfile(settings.profile))}/mini?sticker=1&toolbar=expanded&refresh=${refresh}`;
 }
 
 /** Only the configured mini route may supply layout metadata. */
@@ -172,6 +187,6 @@ function restoreBounds(saved, workAreas, primaryIndex = 0) {
 
 module.exports = {
   DEFAULT_SETTINGS, TOOLBAR_HEIGHT, CONTROLS_WIDTH, MIN_WINDOW, normalizeServerUrl, normalizeProfile,
-  normalizeOpacity, normalizeSettings, validateSettingsUpdate, miniUrl, isIntegratedMiniUrl, contentMetrics, contentHeight, browserUrl,
+  normalizeOpacity, normalizeRefreshInterval, normalizeSettings, validateSettingsUpdate, miniUrl, isIntegratedMiniUrl, contentMetrics, contentHeight, browserUrl,
   isAllowedRemoteUrl, sessionPartition, isTrustedSender, validBounds, restoreBounds,
 };

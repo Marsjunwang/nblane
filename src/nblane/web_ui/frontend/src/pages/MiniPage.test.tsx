@@ -1,6 +1,6 @@
 import { notifications } from '@mantine/notifications';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { Route, Routes } from 'react-router-dom';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { Route, Routes, useSearchParams } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { jsonResponse, renderWithProviders } from '../test/render';
@@ -107,17 +107,40 @@ function mockFetch(calls: Call[], server: Server) {
   });
 }
 
-function renderMini(calls: Call[], server: Server, desktop = false) {
+function renderMini(calls: Call[], server: Server, desktop = false, expandedToolbar = false) {
   vi.stubGlobal('fetch', mockFetch(calls, server));
   return renderWithProviders(
     <Routes>
       <Route path="/p/:name/mini" element={<MiniPage />} />
     </Routes>,
-    `/p/alice/mini${desktop ? '?sticker=1' : ''}`,
+    `/p/alice/mini${desktop ? `?sticker=1${expandedToolbar ? '&toolbar=expanded' : ''}` : ''}`,
   );
 }
 
 const patches = (calls: Call[]) => calls.filter((call) => call.method === 'PATCH');
+const contentReads = (calls: Call[]) => calls.filter((call) => call.method === 'GET'
+  && (call.url.endsWith('/kanban') || call.url.includes('/projects-board') || call.url.includes('/habit-plans')));
+
+function RefreshPreferenceControls() {
+  const [, setSearchParams] = useSearchParams();
+  return <button onClick={() => setSearchParams({ sticker: '1', refresh: '300' })}>刷新间隔300秒</button>;
+}
+
+function renderRefreshMini(calls: Call[], refresh?: string) {
+  vi.stubGlobal('fetch', mockFetch(calls, { todos: [] }));
+  const query = new URLSearchParams({ sticker: '1' });
+  if (refresh !== undefined) query.set('refresh', refresh);
+  return renderWithProviders(
+    <Routes>
+      <Route path="/p/:name/mini" element={<><RefreshPreferenceControls /><MiniPage /></>} />
+    </Routes>,
+    `/p/alice/mini?${query}`,
+  );
+}
+
+const advanceRefreshTime = async (milliseconds: number) => {
+  await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds); });
+};
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -132,6 +155,95 @@ afterEach(() => {
 });
 
 describe('MiniPage', () => {
+  it.each([
+    ['15', 15_000], ['30', 30_000], ['60', 60_000], ['120', 120_000], ['300', 300_000],
+    [undefined, 60_000], ['0', 60_000], ['15.5', 60_000], ['invalid', 60_000],
+  ] as const)('refreshes content at the selected interval, falling back for invalid values (%s)', async (refresh, intervalMs) => {
+    // Query delivery still uses real timeouts; only recurring polls use the
+    // controlled clock so the test observes real API requests.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const calls: Call[] = [];
+    const view = renderRefreshMini(calls, refresh);
+    try {
+      await screen.findByText('写 VLA 复现');
+      calls.length = 0;
+      await advanceRefreshTime(intervalMs - 1);
+      expect(contentReads(calls)).toHaveLength(0);
+      await advanceRefreshTime(1);
+      expect(contentReads(calls)).toHaveLength(3);
+      expect(contentReads(calls).map((call) => call.url)).toEqual(expect.arrayContaining([
+        expect.stringContaining('/kanban'), expect.stringContaining('/projects-board'), expect.stringContaining('/habit-plans'),
+      ]));
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('replaces the old timer when the refresh query changes and stops polling after unmount', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const calls: Call[] = [];
+    const view = renderRefreshMini(calls, '15');
+    try {
+      await screen.findByText('写 VLA 复现');
+      calls.length = 0;
+      await advanceRefreshTime(10_000);
+      fireEvent.click(screen.getByRole('button', { name: '刷新间隔300秒' }));
+      await advanceRefreshTime(299_999);
+      expect(contentReads(calls)).toHaveLength(0);
+      await advanceRefreshTime(1);
+      expect(contentReads(calls)).toHaveLength(3);
+      view.unmount();
+      calls.length = 0;
+      await advanceRefreshTime(600_000);
+      expect(calls).toHaveLength(0);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps focus and visibility refresh immediate and the AI badge on its separate two-minute poll', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const calls: Call[] = [];
+    const view = renderRefreshMini(calls, '300');
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    try {
+      await screen.findByText('写 VLA 复现');
+      calls.length = 0;
+      await advanceRefreshTime(119_999);
+      expect(calls).toHaveLength(0);
+      await advanceRefreshTime(1);
+      expect(contentReads(calls)).toHaveLength(0);
+      expect(calls.filter((call) => call.url.includes('/ai-exceptions'))).toHaveLength(1);
+
+      calls.length = 0;
+      await act(async () => { window.dispatchEvent(new Event('focus')); });
+      expect(contentReads(calls)).toHaveLength(3);
+
+      calls.length = 0;
+      visibility.mockReturnValue('hidden');
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      expect(contentReads(calls)).toHaveLength(0);
+      visibility.mockReturnValue('visible');
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      expect(contentReads(calls).map((call) => call.url)).toEqual(expect.arrayContaining([
+        expect.stringContaining('/kanban'), expect.stringContaining('/projects-board'), expect.stringContaining('/habit-plans'),
+      ]));
+    } finally {
+      view.unmount();
+      visibility.mockRestore();
+      document.dispatchEvent(new Event('visibilitychange'));
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([[false, '88px'], [true, '180px']] as const)('reserves native controls without breaking older clients (expanded=%s)', async (expanded, width) => {
+    renderMini([], { todos: [] }, true, expanded);
+    await screen.findByText('写 VLA 复现');
+    expect(screen.getByTestId('mini-page').style.getPropertyValue('--mini-controls-width')).toBe(width);
+  });
+
   it('uses one desktop header, retaining habits and omitting duplicate native controls', async () => {
     const calls: Call[] = [];
     const view = renderMini(calls, { todos: [{ text: '跑基线', done: false }] }, true);

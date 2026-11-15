@@ -17,6 +17,15 @@
           <span id="toolbar-message" aria-live="polite">nblane</span>
         </div>
         <div class="toolbar-actions">
+          <button id="refresh-button" class="icon-button" type="button" aria-label="刷新任务" title="刷新任务" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17" /></svg>
+          </button>
+          <button id="opacity-button" class="icon-button" type="button" aria-label="调整背景不透明度" aria-expanded="false" aria-controls="opacity-popover" title="调整背景不透明度">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path class="icon-half" d="M12 4a8 8 0 0 1 0 16Z" /></svg>
+          </button>
+          <button id="settings-button" class="icon-button" type="button" aria-label="贴纸设置" title="贴纸设置">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9m4 0h3M4 17h3m4 0h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></svg>
+          </button>
           <button id="pin-button" class="icon-button pin-button" type="button" aria-label="始终置顶" aria-pressed="true" title="已置顶 · 点击取消">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 5 5-4 1-4 4-1 5-3-3-5 5 5-5-3-3 5-1 4-4z" /></svg>
           </button>
@@ -28,6 +37,15 @@
       </div>
 
     </header>
+
+    <section id="opacity-popover" class="opacity-popover" aria-label="背景不透明度" hidden>
+      <div class="field-label-row">
+        <label for="toolbar-opacity-range">背景不透明度</label>
+        <output id="toolbar-opacity-value" for="toolbar-opacity-range">100%</output>
+      </div>
+      <input id="toolbar-opacity-range" class="opacity-range" type="range" min="10" max="100" step="1" value="100" aria-describedby="toolbar-opacity-description" />
+      <p id="toolbar-opacity-description" class="hint">文字保持清晰</p>
+    </section>
 
     <main id="settings-screen" class="settings-screen" hidden>
       <h1 id="settings-heading">连接你的档案</h1>
@@ -42,14 +60,32 @@
             <label for="profile">档案名称</label>
             <input id="profile" name="profile" type="text" placeholder="与网页中的档案名称一致" maxlength="128" required autocomplete="off" />
           </div>
+          <div class="field">
+            <label for="refresh-interval">内容自动刷新</label>
+            <select id="refresh-interval" name="refreshIntervalSeconds" aria-describedby="refresh-description">
+              <option value="15">每 15 秒</option>
+              <option value="30">每 30 秒</option>
+              <option value="60" selected>每 1 分钟</option>
+              <option value="120">每 2 分钟</option>
+              <option value="300">每 5 分钟</option>
+            </select>
+            <p id="refresh-description" class="hint">切回贴纸或点击刷新仍会立即更新。</p>
+          </div>
           <div id="settings-opacity-field" class="field opacity-field">
             <div class="field-label-row">
               <label for="settings-opacity-range">背景不透明度</label>
               <output id="settings-opacity-value" for="settings-opacity-range">100%</output>
             </div>
-            <input id="settings-opacity-range" class="opacity-range" type="range" min="40" max="100" step="1" value="100" aria-describedby="opacity-description" />
+            <input id="settings-opacity-range" class="opacity-range" type="range" min="10" max="100" step="1" value="100" aria-describedby="opacity-description" />
             <p id="opacity-description" class="hint">只调整靛蓝背景，文字和图标始终清晰。</p>
             <p id="transparency-unavailable" class="hint" hidden></p>
+          </div>
+          <div class="field">
+            <label class="checkbox-field" for="background-blur">
+              <input id="background-blur" type="checkbox" aria-describedby="blur-description" />
+              <span>背景模糊</span>
+            </label>
+            <p id="blur-description" class="hint">关闭后可清楚看到后方窗口，立即生效。</p>
           </div>
           <div class="pin-setting">
             <label class="checkbox-field" for="always-on-top">

@@ -28,6 +28,7 @@ let integratedContent = false;
 let remoteOverlay = false;
 let nativeShadowVisible = true;
 let menuOpen = false;
+let opacityEditor = false;
 let requestRemoteMetrics = () => {};
 let tray = null;
 let preferences;
@@ -44,8 +45,9 @@ const REMOTE_LOAD_TIMEOUT_MS = 20_000;
 const canLaunchAtLogin = () => process.platform === 'darwin' && app.isPackaged;
 const configured = () => Boolean(preferences?.settings.profile);
 const reducedTransparency = () => Boolean(nativeTheme.prefersReducedTransparency || nativeTheme.shouldUseHighContrastColors);
-const nativeBlur = () => process.platform === 'darwin' && !reducedTransparency();
-const effectiveOpacity = () => nativeBlur() ? preferences.settings.opacity : 1;
+const nativeTransparency = () => process.platform === 'darwin' && !reducedTransparency();
+const nativeBlur = () => nativeTransparency() && preferences.settings.backgroundBlur;
+const effectiveOpacity = () => nativeTransparency() ? preferences.settings.opacity : 1;
 const contentVisible = () => screenMode === 'content' && !error && !loading;
 
 function applyMaterial() {
@@ -69,7 +71,9 @@ function state() {
     effectiveOpacity: effectiveOpacity(),
     reducedTransparency: reducedTransparency(),
     nativeBlur: nativeBlur(),
+    nativeTransparency: nativeTransparency(),
     menuOpen,
+    opacityEditor,
     remoteOverlay,
   };
 }
@@ -112,14 +116,17 @@ function layoutRemote() {
     remote.setVisible(contentVisible());
   }
   if (controls) {
-    controls.setBounds({ x: Math.max(0, width - CONTROLS_WIDTH), y: 0, width: CONTROLS_WIDTH, height: TOOLBAR_HEIGHT });
-    controls.setVisible(integratedContent && contentVisible() && !remoteOverlay);
+    const controlWidth = opacityEditor ? Math.min(260, width) : CONTROLS_WIDTH;
+    controls.setBounds({ x: Math.max(0, width - controlWidth), y: 0, width: controlWidth,
+      height: opacityEditor ? Math.min(136, height) : TOOLBAR_HEIGHT });
+    controls.setVisible(opacityEditor || (integratedContent && contentVisible() && !remoteOverlay));
   }
 }
 
 function setRemoteOverlay(enabled) {
   if (remoteOverlay === enabled) return;
   remoteOverlay = enabled;
+  if (enabled) opacityEditor = false;
   // Web drawers and habit menus own their entire surface, including the
   // top-right close button. Native child views must not intercept it.
   layoutRemote();
@@ -145,6 +152,7 @@ function showWindow() {
 function hideWindow() {
   if (!window || window.isDestroyed()) return;
   // A failed tray must not leave an invisible process with no recovery entry.
+  setOpacityEditor(false);
   if (tray) window.hide();
   else window.minimize();
   refreshTray();
@@ -155,6 +163,22 @@ function setOpacity(value) {
   preferences.settings.opacity = opacity;
   persistSoon();
   publish();
+}
+
+function setBackgroundBlur(enabled) {
+  if (typeof enabled !== 'boolean') throw new Error('背景模糊设置无效。');
+  preferences.settings.backgroundBlur = enabled;
+  applyMaterial();
+  persistSoon();
+  publish();
+}
+
+function setOpacityEditor(enabled) {
+  if (opacityEditor === enabled) return;
+  opacityEditor = enabled;
+  layoutRemote();
+  publish();
+  if (enabled) controls?.webContents.focus();
 }
 
 function setPin(enabled) {
@@ -170,6 +194,7 @@ function togglePin() {
 }
 
 function showSettings() {
+  opacityEditor = false;
   if (window && !window.isDestroyed() && screenMode === 'content') preferences.bounds = window.getBounds();
   screenMode = 'settings';
   if (window && !window.isDestroyed()) {
@@ -205,7 +230,7 @@ async function openBrowser(url = configured() ? browserUrl(preferences.settings)
 }
 
 function opacityMenu() {
-  return [1, 0.85, 0.7, 0.55, 0.4].map((opacity) => ({
+  return [1, 0.85, 0.7, 0.55, 0.4, 0.25, 0.1].map((opacity) => ({
     label: opacity === 1 ? '100% · 不透明背景' : `${Math.round(opacity * 100)}%`,
     type: 'radio', checked: preferences.settings.opacity === opacity, click: () => setOpacity(opacity),
   })).concat([
@@ -216,11 +241,14 @@ function opacityMenu() {
 
 function showMenu() {
   if (!window || window.isDestroyed() || menuOpen) return;
+  setOpacityEditor(false);
   menuOpen = true;
   publish();
   const menu = Menu.buildFromTemplate([
     { label: '刷新任务', enabled: configured(), click: () => loadRemote() },
     { label: '背景不透明度', submenu: opacityMenu() },
+    { label: '背景模糊', type: 'checkbox', checked: preferences.settings.backgroundBlur,
+      enabled: nativeTransparency(), click: (item) => setBackgroundBlur(item.checked) },
     { label: '贴纸设置…', click: () => showSettings() },
     { label: '在浏览器打开', enabled: configured(), click: () => { void openBrowser().catch(() => {}); } },
     { label: '按内容调整高度', enabled: integratedContent, click: () => requestRemoteMetrics(true) },
@@ -240,6 +268,8 @@ function refreshTray() {
     { type: 'separator' },
     { label: '始终置顶', type: 'checkbox', checked: preferences.settings.alwaysOnTop, click: (item) => setPin(item.checked) },
     { label: '背景不透明度', submenu: opacityMenu() },
+    { label: '背景模糊', type: 'checkbox', checked: preferences.settings.backgroundBlur,
+      enabled: nativeTransparency(), click: (item) => setBackgroundBlur(item.checked) },
     { label: '开机启动', type: 'checkbox', enabled: canLaunchAtLogin(), checked: preferences.settings.launchAtLogin, click: (item) => {
       try { setLaunchAtLogin(item.checked); persistNow(); publish(); } catch { publish(); }
     } },
@@ -267,6 +297,7 @@ function createTray() {
 }
 
 function destroyRemote() {
+  opacityEditor = false;
   remoteGeneration += 1;
   clearRemoteLoad();
   clearRemoteLoad = () => {};
@@ -314,6 +345,7 @@ function loadRemote() {
     allowRunningInsecureContent: false,
   } });
   remote = view;
+  view.webContents.on('focus', () => setOpacityEditor(false));
   view.setBackgroundColor('#00000000');
   // The trusted native controls are the final child and stay above the remote
   // header; the remote view never receives a preload or desktop capability.
@@ -502,6 +534,7 @@ async function invoke(action, payload) {
         ...preferences.settings,
         serverUrl: update.serverUrl,
         profile: update.profile,
+        refreshIntervalSeconds: update.refreshIntervalSeconds ?? preferences.settings.refreshIntervalSeconds,
       };
       persistNow();
       showContent();
@@ -509,7 +542,10 @@ async function invoke(action, payload) {
       break;
     }
     case 'show-menu': showMenu(); break;
+    case 'toggle-opacity-editor': setOpacityEditor(!opacityEditor); break;
+    case 'close-opacity-editor': setOpacityEditor(false); break;
     case 'set-opacity': setOpacity(payload); break;
+    case 'set-background-blur': setBackgroundBlur(payload); break;
     case 'set-pin': setPin(payload); break;
     case 'toggle-pin': togglePin(); break;
     case 'hide': hideWindow(); break;
@@ -567,8 +603,9 @@ function createWindow() {
     show: false,
     maximizable: false,
     fullscreenable: false,
-    // Vibrancy works with a normal frameless NSWindow. transparent:true would
-    // disable macOS's own border/shadow and can interfere with native resizing.
+    // Per-pixel transparency needs a clear NSWindow background as well as CSS
+    // alpha. Vibrancy is optional: its own material can obscure other windows.
+    transparent: process.platform === 'darwin',
     backgroundColor: process.platform === 'darwin' ? '#00000000' : theme.pageBg,
     ...(process.platform === 'darwin' ? { vibrancy: nativeBlur() ? 'under-window' : undefined, visualEffectState: 'active' } : {}),
     title: 'nblane 贴纸',
@@ -588,6 +625,7 @@ function createWindow() {
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   window.webContents.on('did-finish-load', publish);
+  window.webContents.on('focus', () => setOpacityEditor(false));
   const rememberBounds = () => {
     if (!window || window.isDestroyed() || window.isMinimized() || screenMode === 'settings') return;
     preferences.bounds = window.getBounds();
@@ -597,6 +635,7 @@ function createWindow() {
   window.on('move', rememberBounds);
   window.on('show', () => { requestRemoteMetrics(); refreshTray(); });
   window.on('hide', refreshTray);
+  window.on('blur', () => setOpacityEditor(false));
   window.on('close', (event) => {
     if (!quitting && tray) {
       event.preventDefault();

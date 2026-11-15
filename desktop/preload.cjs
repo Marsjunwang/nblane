@@ -6,6 +6,7 @@ const ACTIONS = new Set([
   'get-state',
   'save-settings',
   'set-opacity',
+  'set-background-blur',
   'set-pin',
   'toggle-pin',
   'hide',
@@ -14,6 +15,8 @@ const ACTIONS = new Set([
   'quit',
   'show-settings',
   'show-menu',
+  'toggle-opacity-editor',
+  'close-opacity-editor',
   'cancel-settings',
 ]);
 

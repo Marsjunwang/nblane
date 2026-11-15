@@ -123,14 +123,14 @@ try {
   await remote.getByLabel(/^用户名/).fill(fixtureCredentials.username);
   await remote.getByLabel(/^密码/).fill(fixtureCredentials.password);
   await remote.getByRole('button', { name: '登录', exact: true }).click();
-  await expect(remote).toHaveURL(`${fixture.origin}/p/demo/mini?sticker=1`);
+  await expect(remote).toHaveURL(`${fixture.origin}/p/demo/mini?sticker=1&toolbar=expanded&refresh=60`);
   await waitForMini();
   assert.equal(fixture.state.loginCount, 1, 'The real SPA login mutation must succeed');
   controls = await findPage((url) => url.protocol === 'file:' && url.searchParams.get('controls') === '1');
 
   await expect(remote.locator('.mini-toolbar')).toHaveCount(1);
   await expect(toolbar.locator('.toolbar')).toBeHidden();
-  await expect(controls.locator('.toolbar button:visible')).toHaveCount(2);
+  await expect(controls.locator('.toolbar button:visible')).toHaveCount(5);
   await expect(remote.getByRole('button', { name: '刷新', exact: true })).toHaveCount(0);
   await expect(remote.getByRole('link', { name: '在完整页面打开' })).toHaveCount(0);
   await expect(remote.getByRole('button', { name: '打卡：阅读', exact: true })).toBeVisible();
@@ -142,7 +142,7 @@ try {
     height: element.getBoundingClientRect().height,
     reserved: innerWidth - element.getBoundingClientRect().right,
   }));
-  assert.deepEqual(header, { height: 44, reserved: 88 });
+  assert.deepEqual(header, { height: 44, reserved: 180 });
   await expect.poll(windowHeight).toBeLessThanOrEqual(200);
   const compactHeight = await windowHeight();
   assert.ok(compactHeight >= 156);
@@ -170,9 +170,9 @@ try {
     nativeInput.click(bounds.x + bounds.width - rightInset, bounds.y + 22);
   };
   const pinned = (await getState()).settings.alwaysOnTop;
-  await clickNativeControl(66);
+  await clickNativeControl(54);
   await expect.poll(async () => (await getState()).settings.alwaysOnTop).toBe(!pinned);
-  await clickNativeControl(66);
+  await clickNativeControl(54);
   await expect.poll(async () => (await getState()).settings.alwaysOnTop).toBe(pinned);
 
   await application.evaluate(({ Menu }) => {
@@ -185,13 +185,44 @@ try {
     };
   });
   for (let opening = 1; opening <= 2; opening += 1) {
-    await clickNativeControl(22);
+    await clickNativeControl(18);
     await expect.poll(async () => (await getState()).menuOpen).toBe(true);
     await expect.poll(() => application.evaluate(() => globalThis.__nativeMenuLifecycle.shown)).toBe(opening);
     nativeInput.escape();
     await expect.poll(async () => (await getState()).menuOpen).toBe(false);
     await expect.poll(() => application.evaluate(() => globalThis.__nativeMenuLifecycle.closed)).toBe(opening);
   }
+
+  await clickNativeControl(126);
+  await expect.poll(async () => (await getState()).opacityEditor).toBe(true);
+  await expect(controls.locator('#toolbar-opacity-range')).toBeVisible();
+  await controls.locator('#toolbar-opacity-range').evaluate((input) => {
+    input.value = '10';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect.poll(async () => (await getState()).settings.opacity).toBe(0.1);
+  nativeInput.escape();
+  await expect.poll(async () => (await getState()).opacityEditor).toBe(false);
+  await expect(controls.locator('#toolbar-opacity-range')).toBeHidden();
+  await clickNativeControl(90);
+  await expect(toolbar.locator('#settings-screen')).toBeVisible();
+  await expect(toolbar.locator('#settings-opacity-range')).toHaveValue('10');
+  await expect(toolbar.locator('#refresh-button')).toBeDisabled();
+  await toolbar.locator('#opacity-button').click();
+  await expect.poll(async () => (await getState()).opacityEditor).toBe(true);
+  await expect(controls.locator('#toolbar-opacity-range')).toBeVisible();
+  await expect(toolbar.locator('#toolbar-opacity-range')).toBeHidden();
+  await toolbar.locator('#profile').click();
+  await expect.poll(async () => (await getState()).opacityEditor).toBe(false);
+  await toolbar.locator('#refresh-interval').selectOption('30');
+  const beforeSettingsSave = remote;
+  await toolbar.locator('#save-settings').click();
+  await waitForMini(beforeSettingsSave);
+  assert.equal((await getState()).settings.refreshIntervalSeconds, 30);
+  assert.equal(new URL(remote.url()).searchParams.get('refresh'), '30');
+  const beforeRefresh = remote;
+  await clickNativeControl(162);
+  await waitForMini(beforeRefresh);
 
   await application.evaluate(({ Menu, shell }) => {
     // Native presentation was tested above. Inspect later actions without
@@ -212,7 +243,7 @@ try {
   await expect.poll(async () => (await getState()).settings.opacity).toBe(0.65);
   const material = await getState();
   assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getOpacity()), 1);
-  assert.equal(material.effectiveOpacity, material.nativeBlur && !material.reducedTransparency ? 0.65 : 1);
+  assert.equal(material.effectiveOpacity, material.nativeTransparency && !material.reducedTransparency ? 0.65 : 1);
   const hostAlpha = await toolbar.locator('body').evaluate(() => {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');

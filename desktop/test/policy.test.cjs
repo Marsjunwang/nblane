@@ -3,7 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  DEFAULT_SETTINGS, normalizeServerUrl, normalizeProfile, normalizeOpacity, normalizeSettings,
+  DEFAULT_SETTINGS, normalizeServerUrl, normalizeProfile, normalizeOpacity, normalizeRefreshInterval, normalizeSettings,
   validateSettingsUpdate, miniUrl, isIntegratedMiniUrl, contentMetrics, contentHeight, isAllowedRemoteUrl, sessionPartition, isTrustedSender, restoreBounds,
 } = require('../lib/policy.cjs');
 
@@ -25,7 +25,7 @@ test('server configuration accepts secure origins and explicit local development
 test('profile URLs encode display text and reject path or control characters', () => {
   assert.equal(normalizeProfile('  测试 用户  '), '测试 用户');
   assert.equal(miniUrl({ serverUrl: 'https://example.test', profile: '测试 #? 用户' }),
-    'https://example.test/p/%E6%B5%8B%E8%AF%95%20%23%3F%20%E7%94%A8%E6%88%B7/mini?sticker=1');
+    'https://example.test/p/%E6%B5%8B%E8%AF%95%20%23%3F%20%E7%94%A8%E6%88%B7/mini?sticker=1&toolbar=expanded&refresh=60');
   for (const name of ['', ' ', '.', '..', '../alice', 'alice/bob', 'alice\\bob', 'a\u0000b', 'a\u0085b']) {
     assert.throws(() => normalizeProfile(name), { name: 'Error' });
   }
@@ -68,12 +68,49 @@ test('IPC requires both the actual local WebContents and its exact main frame', 
 });
 
 test('background opacity never permits an invisible or invalid surface', () => {
-  for (const value of [0, 0.39, 1.01, NaN, Infinity, '0.5', null]) {
+  for (const value of [0, 0.09, 1.01, NaN, Infinity, '0.5', null]) {
     assert.throws(() => normalizeOpacity(value), { name: 'Error' });
   }
+  assert.equal(normalizeOpacity(0.1), 0.1);
+  assert.equal(normalizeOpacity(0.39), 0.39);
   assert.equal(normalizeOpacity(0.4), 0.4);
   assert.equal(normalizeOpacity(0.855), 0.86);
   assert.equal(normalizeOpacity(1), 1);
+});
+
+test('stored opacity preserves both legacy and low-transparency preferences', () => {
+  for (const opacity of [0.1, 0.2, 0.4, 0.65, 0.86, 1]) {
+    assert.equal(normalizeSettings({ opacity }).opacity, opacity);
+  }
+  assert.equal(normalizeSettings({ opacity: 0.09 }).opacity, DEFAULT_SETTINGS.opacity);
+});
+
+test('background blur defaults to clear and restores only explicit booleans', () => {
+  assert.equal(DEFAULT_SETTINGS.backgroundBlur, false);
+  for (const value of [undefined, null, 'true', 1, {}]) {
+    assert.equal(normalizeSettings({ backgroundBlur: value }).backgroundBlur, false);
+  }
+  assert.equal(normalizeSettings({ backgroundBlur: true }).backgroundBlur, true);
+  assert.equal(normalizeSettings({ backgroundBlur: false }).backgroundBlur, false);
+  assert.deepEqual(normalizeSettings({ opacity: 0.4, backgroundBlur: true }), {
+    ...DEFAULT_SETTINGS, opacity: 0.4, backgroundBlur: true,
+  });
+});
+
+test('refresh intervals validate supported rates and safely restore legacy preferences', () => {
+  assert.equal(DEFAULT_SETTINGS.refreshIntervalSeconds, 60);
+  const connection = { serverUrl: 'https://example.test', profile: 'demo' };
+  for (const value of [15, 30, 60, 120, 300]) {
+    assert.equal(normalizeRefreshInterval(value), value);
+    assert.equal(normalizeSettings({ refreshIntervalSeconds: value }).refreshIntervalSeconds, value);
+    assert.equal(validateSettingsUpdate({ ...connection, refreshIntervalSeconds: value }).refreshIntervalSeconds, value);
+  }
+  for (const value of [undefined, null, '30', true, 0, 10, 14.9, 301, Infinity, NaN]) {
+    assert.throws(() => normalizeRefreshInterval(value));
+    assert.equal(normalizeSettings({ refreshIntervalSeconds: value }).refreshIntervalSeconds, 60);
+    assert.throws(() => validateSettingsUpdate({ ...connection, refreshIntervalSeconds: value }));
+  }
+  assert.deepEqual(validateSettingsUpdate(connection), connection);
 });
 
 test('stored preferences recover unsafe values and discard undeclared fields', () => {

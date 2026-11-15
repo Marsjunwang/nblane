@@ -26,6 +26,7 @@ import { byDue, dueState, reapplyToggle, toggleAt, type MiniTodo } from './miniT
 
 /** How often the always-on-top window refreshes on its own. */
 export const MINI_REFRESH_MS = 60_000;
+const MINI_REFRESH_SECONDS = new Set(['15', '30', '60', '120', '300']);
 /** AI exception badge poll in the 小窗: it stays open all day, so check less often. */
 export const MINI_EXCEPTIONS_POLL_MS = 120_000;
 /** Queue items shown in the 小窗; the rest stay on the projects page. */
@@ -46,6 +47,10 @@ export function MiniPage() {
   const { name = '' } = useParams();
   const [searchParams] = useSearchParams();
   const desktop = searchParams.get('sticker') === '1';
+  const expandedToolbar = searchParams.get('toolbar') === 'expanded';
+  const requestedRefresh = searchParams.get('refresh');
+  const refreshMs = requestedRefresh && MINI_REFRESH_SECONDS.has(requestedRefresh)
+    ? Number(requestedRefresh) * 1000 : MINI_REFRESH_MS;
   const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [habitMenu, setHabitMenu] = useState<string | null>(null);
@@ -76,7 +81,7 @@ export function MiniPage() {
     void board.refetch();
     void plans.refetch();
   };
-  useAutoRefresh(refresh);
+  useAutoRefresh(refresh, refreshMs);
   useDesktopSurface(desktop, !(kanban.isPending || board.isPending), rootRef, contentRef);
 
   if (kanban.isPending || board.isPending) {
@@ -229,7 +234,7 @@ export function MiniPage() {
       data-desktop={desktop || undefined}
       data-sticker-root={desktop ? '' : undefined}
       data-sticker-overlay={desktop ? String(exceptionsOpened || habitMenu !== null) : undefined}
-      style={{ '--mini-text': chrome.text, '--mini-dim': chrome.dim, '--mini-gold': chrome.goldText, '--mini-panel': chrome.panelBg, '--mini-card': chrome.cardBg } as React.CSSProperties}
+      style={{ '--mini-controls-width': expandedToolbar ? '180px' : '88px', '--mini-text': chrome.text, '--mini-dim': chrome.dim, '--mini-gold': chrome.goldText, '--mini-panel': chrome.panelBg, '--mini-card': chrome.cardBg } as React.CSSProperties}
     >
       <Group className="mini-toolbar" justify="space-between" wrap="nowrap" gap={4} aria-label="任务工具栏">
         <Group className="mini-toolbar-leading" gap={4} wrap="nowrap" miw={0}>
@@ -574,7 +579,7 @@ function useDesktopSurface(
 }
 
 /** Refetch on a timer and whenever the window regains focus or visibility. */
-function useAutoRefresh(refresh: () => void) {
+function useAutoRefresh(refresh: () => void, intervalMs: number) {
   const latest = useRef(refresh);
   latest.current = refresh;
   useEffect(() => {
@@ -582,7 +587,7 @@ function useAutoRefresh(refresh: () => void) {
     const onVisible = () => {
       if (document.visibilityState === 'visible') run();
     };
-    const id = window.setInterval(run, MINI_REFRESH_MS);
+    const id = window.setInterval(run, intervalMs);
     window.addEventListener('focus', run);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -590,5 +595,5 @@ function useAutoRefresh(refresh: () => void) {
       window.removeEventListener('focus', run);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, []);
+  }, [intervalMs]);
 }
