@@ -1,8 +1,8 @@
 # nblane Sticker
 
 An independent macOS window for the hosted nblane mini task view, with
-always-on-top controls, whole-window opacity, a menu-bar entry, and persistent
-window settings. Remote pages run without Node.js or a preload bridge.
+a compact shared toolbar, always-on-top controls, background-only transparency,
+macOS vibrancy, content-sized height, a menu-bar entry, and persistent settings. Remote pages run without Node.js or a preload bridge.
 
 The canonical usage, packaging and validation guide is
 [中文桌面贴纸手册](../docs/zh/guides/desktop-sticker.md).

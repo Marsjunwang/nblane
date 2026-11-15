@@ -1,6 +1,0 @@
-import{aa as p,H as h,ai as y,j as b,f as x,aj as I,aq as g,ar as R,c as T}from"./index-DzqRi5AD.js";var i={root:"m_7341320d"};const f=I((e,{size:r,radius:a,variant:s,gradient:n,color:o,autoContrast:c})=>{const t=e.variantColorResolver({color:o||e.primaryColor,theme:e,gradient:n,variant:s||"filled",autoContrast:c});return{root:{"--ti-size":R(r,"ti-size"),"--ti-radius":a===void 0?void 0:g(a),"--ti-bg":o||s?t.background:void 0,"--ti-color":o||s?t.color:void 0,"--ti-bd":o||s?t.border:void 0}}}),l=p((e,r)=>{const a=h("ThemeIcon",null,e),{classNames:s,className:n,style:o,styles:c,unstyled:t,vars:d,autoContrast:C,attributes:m,...v}=a,u=y({name:"ThemeIcon",classes:i,props:a,className:n,style:o,classNames:s,styles:c,unstyled:t,attributes:m,vars:d,varsResolver:f});return b.jsx(x,{ref:r,...u("root"),...v})});l.classes=i;l.displayName="@mantine/core/ThemeIcon";/**
- * @license @tabler/icons-react v3.46.0 - MIT
- *
- * This source code is licensed under the MIT license.
- * See the LICENSE file in the root directory of this source tree.
- */const j=[["path",{d:"M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12",key:"svg-0"}],["path",{d:"M4 13h3l3 3h4l3 -3h3",key:"svg-1"}]],k=T("outline","inbox","Inbox",j);export{k as I,l as T};

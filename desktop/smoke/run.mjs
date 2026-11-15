@@ -38,7 +38,7 @@ const server = createServer((request, response) => {
     return;
   }
   response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  response.end('<!doctype html><title>Isolated sticker fixture</title><p>任务测试页面</p>'
+  response.end('<!doctype html><title>Isolated sticker fixture</title><style>html,body{background:transparent;color:#f2ede0;margin:0;font:14px system-ui}header{height:44px;padding-right:88px}</style><main data-sticker-root data-sticker-height=180><header>演示档案</header><p>任务测试页面</p></main>'
     + (request.url.startsWith('/p/slow-image/') ? '<img src="/pending-image" alt="Pending image">' : ''));
 });
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -64,14 +64,13 @@ async function launch() {
     toolbar = application.windows().find((page) => {
       try {
         const url = new URL(page.url());
-        return url.protocol === 'file:' && url.pathname.endsWith('/renderer/index.html');
+        return url.protocol === 'file:' && url.pathname.endsWith('/renderer/index.html') && !url.search;
       } catch {
         return false;
       }
     });
     return Boolean(toolbar);
   }, { message: 'The local sticker toolbar must load', timeout: 30_000 }).toBe(true);
-  await expect(toolbar.locator('#toolbar-default')).toBeVisible();
   return toolbar;
 }
 
@@ -107,37 +106,84 @@ try {
   assert.equal(remoteSecurity.preferences.contextIsolation, true);
   assert.equal(remoteSecurity.preferences.sandbox, true);
 
-  // Login is a SPA transition: it must not cover the ready page with a spinner.
-  await application.evaluate(async ({ webContents }, expectedOrigin) => {
-    const contents = webContents.getAllWebContents().find((item) => item.getURL().startsWith(expectedOrigin));
-    await contents.executeJavaScript("history.pushState({}, '', '/login');");
-  }, origin);
-  await new Promise((resolve) => setTimeout(resolve, 250));
-  assert.equal((await getState(toolbar)).loading, false, 'SPA navigation must leave the login page visible');
-  assert.equal((await getState(toolbar)).error, null);
-  assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].contentView.children[0].getVisible()), true);
+  await expect.poll(async () => (await getState(toolbar)).integratedContent).toBe(true);
+  const controls = application.windows().find((page) => new URL(page.url()).searchParams.get('controls') === '1');
+  assert.ok(controls, 'The compact trusted controls must exist');
+  await expect(controls.getByRole('button', { name: '始终置顶', exact: true })).toBeVisible();
+  await expect(controls.getByRole('button', { name: '更多操作', exact: true })).toBeVisible();
+  assert.equal(await controls.locator('.toolbar button:visible').count(), 2, 'Only pin and more stay in the compact toolbar');
+  const remotePage = application.windows().find((page) => page.url().startsWith(origin));
+  assert.ok(remotePage);
+  const height = () => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds().height);
+  await expect.poll(height).toBe(180);
+  if (process.platform === 'darwin') assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hasShadow()), false);
+  await remotePage.locator('[data-sticker-root]').evaluate((root) => root.setAttribute('data-sticker-height', '900'));
+  await expect.poll(height).toBeGreaterThan(180);
+  assert.ok(await height() <= 560, 'Long content must stop growing at its cap');
+  await remotePage.locator('[data-sticker-root]').evaluate((root) => root.setAttribute('data-sticker-height', '180'));
+  await expect.poll(height).toBe(180);
+  await remotePage.locator('[data-sticker-root]').evaluate((root) => root.setAttribute('data-sticker-overlay', 'true'));
+  await expect.poll(height).toBeGreaterThanOrEqual(420);
+  assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].contentView.children.find((view) => view.webContents?.getURL().includes('?controls=1')).getVisible()), false, 'Native controls must not cover web overlay close buttons');
+  await remotePage.locator('[data-sticker-root]').evaluate((root) => root.removeAttribute('data-sticker-overlay'));
+  await expect.poll(height).toBe(180);
 
-  await toolbar.locator('#opacity-button').click();
-  await toolbar.locator('#toolbar-opacity-range').evaluate((input) => {
+  await expect.poll(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].contentView.children.find((view) => view.webContents?.getURL().includes('?controls=1')).getVisible())).toBe(true);
+
+  // A real native menu opens from the compact view. Intercept only the OS
+  // presentation in this disposable test so its actions are deterministic.
+  await application.evaluate(({ Menu, shell }) => {
+    Menu.prototype.popup = function (options) {
+      globalThis.__stickerSmokeMenu = this;
+      options?.callback?.();
+    };
+    shell.openExternal = async (url) => { globalThis.__stickerSmokeExternal = url; };
+  });
+  await controls.getByRole('button', { name: '更多操作', exact: true }).click();
+  const menuLabels = await application.evaluate(() => globalThis.__stickerSmokeMenu.items.map((item) => item.label));
+  for (const pattern of [/刷新/, /背景不透明度/, /设置/, /在浏览器打开/]) {
+    assert.ok(menuLabels.some((label) => pattern.test(label)), `Missing menu item: ${pattern}`);
+  }
+  await application.evaluate(() => globalThis.__stickerSmokeMenu.items.find((item) => /在浏览器打开/.test(item.label)).click());
+  await expect.poll(() => application.evaluate(() => globalThis.__stickerSmokeExternal)).toBe(`${origin}/p/smoke-profile/projects`);
+
+  // Login is a SPA transition: it must remain visible, without compact
+  // controls over the form or a stale connection mask.
+  await remotePage.evaluate(() => history.pushState({}, '', '/login'));
+  await expect.poll(async () => (await getState(toolbar)).integratedContent).toBe(false);
+  assert.equal((await getState(toolbar)).loading, false);
+  assert.equal((await getState(toolbar)).error, null);
+  await expect.poll(height).toBeGreaterThanOrEqual(420);
+  await remotePage.evaluate(() => history.pushState({}, '', '/p/smoke-profile/mini?sticker=1'));
+  await expect.poll(async () => (await getState(toolbar)).integratedContent).toBe(true);
+  await expect.poll(height).toBe(180);
+
+  await controls.locator('#pin-button').click();
+  assert.equal((await getState(toolbar)).settings.alwaysOnTop, false);
+  if (process.platform === 'darwin') {
+    assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop()), false);
+  }
+  await controls.getByRole('button', { name: '更多操作', exact: true }).click();
+  await application.evaluate(() => globalThis.__stickerSmokeMenu.items.find((item) => /设置/.test(item.label)).click());
+  await expect(toolbar.getByRole('switch', { name: '始终置顶' })).not.toBeChecked();
+  if (process.platform === 'darwin') assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hasShadow()), true);
+  await toolbar.locator('#settings-opacity-range').evaluate((input) => {
     input.value = '65';
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await expect.poll(async () => (await getState(toolbar)).settings.opacity).toBe(0.65);
-  if (process.platform === 'darwin') {
-    assert.ok(Math.abs(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getOpacity()) - 0.65) < 0.01);
-  }
-  await toolbar.locator('#opacity-close').click();
-  await toolbar.locator('#pin-button').click();
-  assert.equal((await getState(toolbar)).settings.alwaysOnTop, false);
-  await expect(toolbar.locator('#pin-label')).toHaveText('置顶');
-  if (process.platform === 'darwin') {
-    assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop()), false);
-  }
-  await toolbar.locator('#settings-button').click();
-  await expect(toolbar.getByRole('switch', { name: '始终置顶' })).not.toBeChecked();
+  assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getOpacity()), 1, 'Text must never use native whole-window transparency');
+  const surface = await getState(toolbar);
+  assert.equal(surface.effectiveOpacity, surface.nativeBlur && !surface.reducedTransparency ? 0.65 : 1);
+  await expect.poll(() => toolbar.locator('h1').first().evaluate((heading) => {
+    for (let element = heading; element; element = element.parentElement) {
+      if (getComputedStyle(element).opacity !== '1') return false;
+    }
+    return true;
+  }), { message: 'Text must remain opaque after the short entry transition' }).toBe(true);
   await toolbar.locator('#profile').fill('unsaved-draft');
   await toolbar.getByRole('switch', { name: '始终置顶' }).check();
-  await expect(toolbar.locator('#pin-label')).toHaveText('已置顶');
+  await expect(toolbar.locator('#pin-button')).toHaveAttribute('aria-pressed', 'true');
   await expect(toolbar.locator('#profile')).toHaveValue('unsaved-draft');
   if (process.platform === 'darwin') {
     assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop()), true);
@@ -172,6 +218,9 @@ try {
   assert.equal((await getState(toolbar)).settings.opacity, 0.65);
   assert.equal((await getState(toolbar)).settings.alwaysOnTop, false);
   await expect(toolbar.locator('#pin-button')).toHaveAttribute('aria-pressed', 'false');
+  assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getOpacity()), 1);
+  await expect.poll(async () => (await getState(toolbar)).integratedContent).toBe(true);
+  await expect.poll(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds().height)).toBe(180);
   if (process.platform === 'darwin') {
     assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop()), false);
   }
@@ -185,7 +234,7 @@ try {
   await connectProfile('slow-image');
   await expect.poll(async () => (await getState(toolbar)).loading).toBe(false);
   assert.equal((await getState(toolbar)).error, null);
-  assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].contentView.children[0].getVisible()), true);
+  assert.equal(await application.evaluate(({ BrowserWindow }, expectedOrigin) => BrowserWindow.getAllWindows()[0].contentView.children.find((view) => view.webContents?.getURL().startsWith(expectedOrigin)).getVisible(), origin), true);
   assert.ok(pendingResponses.size > 0, 'The image request must still be pending');
 
   await connectProfile('blocked-redirect');
@@ -208,7 +257,7 @@ try {
   await expect(toolbar.locator('#status-settings-button')).toBeVisible();
   await toolbar.locator('#status-settings-button').click();
   await expect(toolbar.locator('#settings-screen')).toBeVisible();
-  console.log('Desktop smoke passed: SPA login navigation, pending resources, redirects, timeout recovery, remote isolation, opacity, always-on-top controls/persistence and reduced motion.');
+  console.log('Desktop smoke passed: merged toolbar/menu, adaptive height, background-only opacity, SPA login navigation, pending resources, redirects, timeout recovery, remote isolation, pin persistence and reduced motion.');
 } finally {
   if (application) await application.close().catch(() => {});
   for (const response of pendingResponses) response.destroy();

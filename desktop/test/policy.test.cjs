@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   DEFAULT_SETTINGS, normalizeServerUrl, normalizeProfile, normalizeOpacity, normalizeSettings,
-  validateSettingsUpdate, miniUrl, isAllowedRemoteUrl, sessionPartition, isTrustedSender, restoreBounds,
+  validateSettingsUpdate, miniUrl, isIntegratedMiniUrl, contentMetrics, contentHeight, isAllowedRemoteUrl, sessionPartition, isTrustedSender, restoreBounds,
 } = require('../lib/policy.cjs');
 
 test('server configuration accepts secure origins and explicit local development only', () => {
@@ -25,7 +25,7 @@ test('server configuration accepts secure origins and explicit local development
 test('profile URLs encode display text and reject path or control characters', () => {
   assert.equal(normalizeProfile('  测试 用户  '), '测试 用户');
   assert.equal(miniUrl({ serverUrl: 'https://example.test', profile: '测试 #? 用户' }),
-    'https://example.test/p/%E6%B5%8B%E8%AF%95%20%23%3F%20%E7%94%A8%E6%88%B7/mini');
+    'https://example.test/p/%E6%B5%8B%E8%AF%95%20%23%3F%20%E7%94%A8%E6%88%B7/mini?sticker=1');
   for (const name of ['', ' ', '.', '..', '../alice', 'alice/bob', 'alice\\bob', 'a\u0000b', 'a\u0085b']) {
     assert.throws(() => normalizeProfile(name), { name: 'Error' });
   }
@@ -67,7 +67,7 @@ test('IPC requires both the actual local WebContents and its exact main frame', 
   assert.equal(isTrustedSender({ sender: owner, senderFrame: null }, owner, entry), false);
 });
 
-test('opacity never permits an invisible or invalid window', () => {
+test('background opacity never permits an invisible or invalid surface', () => {
   for (const value of [0, 0.39, 1.01, NaN, Infinity, '0.5', null]) {
     assert.throws(() => normalizeOpacity(value), { name: 'Error' });
   }
@@ -99,6 +99,31 @@ test('window restoration recovers unplugged displays and keeps negative-coordina
     { x: 940, y: 400, width: 500, height: 500 });
   const huge = restoreBounds({ x: 0, y: 0, width: 10000, height: 10000 }, [primary]);
   assert.deepEqual(huge, primary);
-  assert.deepEqual(restoreBounds(null, [primary]), { x: 1056, y: 73, width: 360, height: 300 });
+  assert.deepEqual(restoreBounds(null, [primary]), { x: 1056, y: 73, width: 360, height: 240 });
   assert.equal(restoreBounds({ x: NaN, y: 0, width: 500, height: 500 }, [primary]).width, 360);
+});
+
+
+test('only the configured desktop mini route opts into merged layout', () => {
+  const settings = { serverUrl: 'https://example.test', profile: 'demo' };
+  assert.equal(isIntegratedMiniUrl('https://example.test/p/demo/mini?sticker=1', settings), true);
+  for (const url of ['https://example.test/p/demo/mini', 'https://example.test/login?sticker=1',
+    'https://example.test/p/other/mini?sticker=1', 'https://example.test.evil.test/p/demo/mini?sticker=1',
+    'https://someone@example.test/p/demo/mini?sticker=1']) {
+    assert.equal(isIntegratedMiniUrl(url, settings), false, url);
+  }
+});
+
+test('content fitting clamps untrusted measurements and reserves temporary overlay room', () => {
+  for (const value of [null, [], {}, { height: '200', overlay: false }, { height: NaN, overlay: false },
+    { height: 0, overlay: false }, { height: 100001, overlay: false }, { height: 200, overlay: 'true' }]) {
+    assert.equal(contentMetrics(value), null);
+    assert.throws(() => contentHeight(value));
+  }
+  assert.deepEqual(contentMetrics({ height: 190, overlay: false, opacity: 0 }), { height: 190, overlay: false });
+  assert.equal(contentHeight({ height: 100, overlay: false }), 156);
+  assert.equal(contentHeight({ height: 190, overlay: false }), 190);
+  assert.equal(contentHeight({ height: 3000, overlay: false }), 560);
+  assert.equal(contentHeight({ height: 190, overlay: true }), 420);
+  assert.equal(contentHeight({ height: 190, overlay: false }), 190);
 });

@@ -4,13 +4,16 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - 'codex/sticker-downloads'
+      - 'codex/sticker-*'
     paths:
       - 'desktop/**'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/desktop-macos.yml'
       - 'src/nblane/web_ui/frontend/src/theme.ts'
+      - 'src/nblane/web_ui/frontend/src/pages/MiniPage*'
+      - 'src/nblane/web_ui/frontend/src/pages/LoginPage*'
+      - 'src/nblane/web_ui/static/**'
   pull_request:
     paths:
       - 'desktop/**'
@@ -18,6 +21,9 @@ on:
       - 'package-lock.json'
       - '.github/workflows/desktop-macos.yml'
       - 'src/nblane/web_ui/frontend/src/theme.ts'
+      - 'src/nblane/web_ui/frontend/src/pages/MiniPage*'
+      - 'src/nblane/web_ui/frontend/src/pages/LoginPage*'
+      - 'src/nblane/web_ui/static/**'
 
 permissions:
   contents: read
@@ -66,6 +72,7 @@ jobs:
           app="$verify_dir/$product_name.app"
           /usr/bin/codesign --verify --deep --strict --verbose=4 "$app"
           npm run test:smoke --prefix desktop -- "--app=$app"
+          node desktop/smoke/mini-ui.mjs "--app=$app"
       - uses: actions/upload-artifact@v4
         with:
           name: nblane-sticker-mac-${{ matrix.arch }}

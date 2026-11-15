@@ -5,12 +5,14 @@ const { createHash } = require('node:crypto');
 const DEFAULT_SETTINGS = Object.freeze({
   serverUrl: 'https://www.nblane.cloud',
   profile: '',
-  opacity: 1,
+  opacity: 0.86,
   alwaysOnTop: true,
   launchAtLogin: false,
 });
-const TOOLBAR_HEIGHT = 42;
-const MIN_WINDOW = Object.freeze({ width: 280, height: 200 });
+const TOOLBAR_HEIGHT = 44;
+const CONTROLS_WIDTH = 88;
+const MAX_CONTENT_HEIGHT = 560;
+const MIN_WINDOW = Object.freeze({ width: 280, height: 156 });
 
 function normalizeServerUrl(value) {
   if (typeof value !== 'string' || value.length > 2048) {
@@ -73,7 +75,33 @@ function validateSettingsUpdate(input) {
 }
 
 function miniUrl(settings) {
-  return `${normalizeServerUrl(settings.serverUrl)}/p/${encodeURIComponent(normalizeProfile(settings.profile))}/mini`;
+  return `${normalizeServerUrl(settings.serverUrl)}/p/${encodeURIComponent(normalizeProfile(settings.profile))}/mini?sticker=1`;
+}
+
+/** Only the configured mini route may supply layout metadata. */
+function isIntegratedMiniUrl(value, settings) {
+  try {
+    const url = new URL(value);
+    const expected = new URL(miniUrl(settings));
+    return !url.username && !url.password && url.origin === expected.origin
+      && url.pathname === expected.pathname && url.searchParams.get('sticker') === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Renderer measurements are untrusted, even on the configured website. */
+function contentMetrics(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || !Number.isInteger(value.height) || value.height < 1 || value.height > 100_000
+      || typeof value.overlay !== 'boolean') return null;
+  return { height: value.height, overlay: value.overlay };
+}
+
+function contentHeight(metrics) {
+  const value = contentMetrics(metrics);
+  if (!value) throw new Error('Invalid sticker content measurement');
+  return Math.min(MAX_CONTENT_HEIGHT, Math.max(MIN_WINDOW.height, value.height, value.overlay ? 420 : 0));
 }
 
 function browserUrl(settings) {
@@ -131,7 +159,7 @@ function restoreBounds(saved, workAreas, primaryIndex = 0) {
     }
   }
   const width = Math.round(Math.min(area.width, Math.max(MIN_WINDOW.width, source?.width ?? 360)));
-  const height = Math.round(Math.min(area.height, Math.max(MIN_WINDOW.height, source?.height ?? 300)));
+  const height = Math.round(Math.min(area.height, Math.max(MIN_WINDOW.height, source?.height ?? 240)));
   const x = source?.x ?? area.x + area.width - width - 24;
   const y = source?.y ?? area.y + 48;
   return {
@@ -143,7 +171,7 @@ function restoreBounds(saved, workAreas, primaryIndex = 0) {
 }
 
 module.exports = {
-  DEFAULT_SETTINGS, TOOLBAR_HEIGHT, MIN_WINDOW, normalizeServerUrl, normalizeProfile,
-  normalizeOpacity, normalizeSettings, validateSettingsUpdate, miniUrl, browserUrl,
+  DEFAULT_SETTINGS, TOOLBAR_HEIGHT, CONTROLS_WIDTH, MIN_WINDOW, normalizeServerUrl, normalizeProfile,
+  normalizeOpacity, normalizeSettings, validateSettingsUpdate, miniUrl, isIntegratedMiniUrl, contentMetrics, contentHeight, browserUrl,
   isAllowedRemoteUrl, sessionPartition, isTrustedSender, validBounds, restoreBounds,
 };

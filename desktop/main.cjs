@@ -3,10 +3,10 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, WebContentsView, ipcMain, Menu, Tray, nativeImage, screen, session, shell } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, Menu, Tray, nativeImage, screen, session, shell, nativeTheme } = require('electron');
 const {
-  TOOLBAR_HEIGHT, MIN_WINDOW, normalizeOpacity, validateSettingsUpdate,
-  miniUrl, browserUrl, isAllowedRemoteUrl, sessionPartition, isTrustedSender, restoreBounds,
+  TOOLBAR_HEIGHT, CONTROLS_WIDTH, MIN_WINDOW, normalizeOpacity, validateSettingsUpdate,
+  miniUrl, isIntegratedMiniUrl, contentMetrics, contentHeight, browserUrl, isAllowedRemoteUrl, sessionPartition, isTrustedSender, restoreBounds,
 } = require('./lib/policy.cjs');
 const { readState, writeState } = require('./lib/store.cjs');
 const theme = require('./lib/theme.cjs');
@@ -20,8 +20,15 @@ if (process.env.NBLANE_STICKER_USER_DATA) {
 
 const entryPath = path.join(__dirname, 'renderer', 'index.html');
 const entryUrl = pathToFileURL(entryPath).href;
+const controlsUrl = `${entryUrl}?controls=1`;
 let window = null;
 let remote = null;
+let controls = null;
+let integratedContent = false;
+let remoteOverlay = false;
+let nativeShadowVisible = true;
+let menuOpen = false;
+let requestRemoteMetrics = () => {};
 let tray = null;
 let preferences;
 let preferencesPath;
@@ -36,6 +43,18 @@ const REMOTE_LOAD_TIMEOUT_MS = 20_000;
 
 const canLaunchAtLogin = () => process.platform === 'darwin' && app.isPackaged;
 const configured = () => Boolean(preferences?.settings.profile);
+const reducedTransparency = () => Boolean(nativeTheme.prefersReducedTransparency || nativeTheme.shouldUseHighContrastColors);
+const nativeBlur = () => process.platform === 'darwin' && !reducedTransparency();
+const effectiveOpacity = () => nativeBlur() ? preferences.settings.opacity : 1;
+const contentVisible = () => screenMode === 'content' && !error && !loading;
+
+function applyMaterial() {
+  if (!window || window.isDestroyed()) return;
+  if (process.platform === 'darwin') window.setVibrancy(nativeBlur() ? 'under-window' : null);
+  // Whole-window alpha always remains one: only the trusted background layer
+  // uses settings.opacity. Text and remote controls must stay fully readable.
+  if (process.platform === 'darwin' || process.platform === 'win32') window.setOpacity(1);
+}
 
 function state() {
   return {
@@ -46,6 +65,12 @@ function state() {
     screen: screenMode,
     canLaunchAtLogin: canLaunchAtLogin(),
     version: app.getVersion(),
+    integratedContent: integratedContent && contentVisible(),
+    effectiveOpacity: effectiveOpacity(),
+    reducedTransparency: reducedTransparency(),
+    nativeBlur: nativeBlur(),
+    menuOpen,
+    remoteOverlay,
   };
 }
 
@@ -63,17 +88,49 @@ function persistSoon() {
 }
 
 function publish() {
-  if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
-    window.webContents.send('sticker:state', state());
+  const snapshot = state();
+  const owner = window && !window.isDestroyed() ? window.webContents : null;
+  for (const contents of [owner, controls?.webContents]) {
+    if (contents && !contents.isDestroyed()) contents.send('sticker:state', snapshot);
   }
   refreshTray();
 }
 
 function layoutRemote() {
-  if (!remote || !window || window.isDestroyed()) return;
+  if (!window || window.isDestroyed()) return;
   const [width, height] = window.getContentSize();
-  remote.setBounds({ x: 0, y: TOOLBAR_HEIGHT, width, height: Math.max(0, height - TOOLBAR_HEIGHT) });
-  remote.setVisible(screenMode === 'content' && !error && !loading);
+  // The compact task surface has its own fine edge. A full macOS drop shadow
+  // makes a small desktop sticker look much heavier than its content.
+  const showNativeShadow = !(integratedContent && contentVisible());
+  if (process.platform === 'darwin' && nativeShadowVisible !== showNativeShadow) {
+    window.setHasShadow(showNativeShadow);
+    nativeShadowVisible = showNativeShadow;
+  }
+  const top = integratedContent ? 0 : TOOLBAR_HEIGHT;
+  if (remote) {
+    remote.setBounds({ x: 0, y: top, width, height: Math.max(0, height - top) });
+    remote.setVisible(contentVisible());
+  }
+  if (controls) {
+    controls.setBounds({ x: Math.max(0, width - CONTROLS_WIDTH), y: 0, width: CONTROLS_WIDTH, height: TOOLBAR_HEIGHT });
+    controls.setVisible(integratedContent && contentVisible() && !remoteOverlay);
+  }
+}
+
+function setRemoteOverlay(enabled) {
+  if (remoteOverlay === enabled) return;
+  remoteOverlay = enabled;
+  // Web drawers and habit menus own their entire surface, including the
+  // top-right close button. Native child views must not intercept it.
+  layoutRemote();
+  publish();
+}
+
+function setIntegratedContent(enabled) {
+  if (integratedContent === enabled) return;
+  integratedContent = enabled;
+  layoutRemote();
+  publish();
 }
 
 function showWindow() {
@@ -81,6 +138,7 @@ function showWindow() {
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
+  requestRemoteMetrics();
   refreshTray();
 }
 
@@ -95,7 +153,6 @@ function hideWindow() {
 function setOpacity(value) {
   const opacity = normalizeOpacity(value);
   preferences.settings.opacity = opacity;
-  if (process.platform === 'darwin' || process.platform === 'win32') window?.setOpacity(opacity);
   persistSoon();
   publish();
 }
@@ -127,12 +184,13 @@ function showContent() {
   screenMode = 'content';
   if (window && !window.isDestroyed()) {
     const currentBounds = window.getBounds();
-    window.setBounds(availableBounds(preferences.bounds ?? { ...currentBounds, height: 300 }));
+    window.setBounds(availableBounds(preferences.bounds ?? { ...currentBounds, height: 240 }));
     preferences.bounds = window.getBounds();
     persistSoon();
   }
   layoutRemote();
   publish();
+  requestRemoteMetrics(true);
 }
 
 function setLaunchAtLogin(enabled) {
@@ -146,16 +204,42 @@ async function openBrowser(url = configured() ? browserUrl(preferences.settings)
   await shell.openExternal(url);
 }
 
+function opacityMenu() {
+  return [1, 0.85, 0.7, 0.55, 0.4].map((opacity) => ({
+    label: opacity === 1 ? '100% · 不透明背景' : `${Math.round(opacity * 100)}%`,
+    type: 'radio', checked: preferences.settings.opacity === opacity, click: () => setOpacity(opacity),
+  })).concat([
+    { type: 'separator' },
+    { label: '自定义…', click: () => { showSettings(); showWindow(); } },
+  ]);
+}
+
+function showMenu() {
+  if (!window || window.isDestroyed() || menuOpen) return;
+  menuOpen = true;
+  publish();
+  const menu = Menu.buildFromTemplate([
+    { label: '刷新任务', enabled: configured(), click: () => loadRemote() },
+    { label: '背景不透明度', submenu: opacityMenu() },
+    { label: '贴纸设置…', click: () => showSettings() },
+    { label: '在浏览器打开', enabled: configured(), click: () => { void openBrowser().catch(() => {}); } },
+    { label: '按内容调整高度', enabled: integratedContent, click: () => requestRemoteMetrics(true) },
+    { type: 'separator' },
+    { label: '隐藏贴纸', click: hideWindow },
+    { label: '退出 nblane 贴纸', accelerator: 'CommandOrControl+Q', click: () => app.quit() },
+  ]);
+  menu.popup({ window, x: Math.max(0, window.getContentSize()[0] - 14), y: TOOLBAR_HEIGHT,
+    callback: () => { menuOpen = false; if (window && !window.isDestroyed()) publish(); },
+  });
+}
+
 function refreshTray() {
   if (!tray || tray.isDestroyed() || !preferences) return;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: window?.isVisible() ? '隐藏贴纸' : '显示贴纸', click: () => window?.isVisible() ? hideWindow() : showWindow() },
     { type: 'separator' },
     { label: '始终置顶', type: 'checkbox', checked: preferences.settings.alwaysOnTop, click: (item) => setPin(item.checked) },
-    { label: '不透明度', submenu: [1, 0.85, 0.7, 0.5].map((opacity) => ({
-      label: opacity === 1 ? '100% · 恢复不透明' : `${Math.round(opacity * 100)}%`,
-      type: 'radio', checked: preferences.settings.opacity === opacity, click: () => setOpacity(opacity),
-    })) },
+    { label: '背景不透明度', submenu: opacityMenu() },
     { label: '开机启动', type: 'checkbox', enabled: canLaunchAtLogin(), checked: preferences.settings.launchAtLogin, click: (item) => {
       try { setLaunchAtLogin(item.checked); persistNow(); publish(); } catch { publish(); }
     } },
@@ -186,6 +270,9 @@ function destroyRemote() {
   remoteGeneration += 1;
   clearRemoteLoad();
   clearRemoteLoad = () => {};
+  requestRemoteMetrics = () => {};
+  setIntegratedContent(false);
+  setRemoteOverlay(false);
   if (!remote) return;
   const previous = remote;
   remote = null;
@@ -227,8 +314,10 @@ function loadRemote() {
     allowRunningInsecureContent: false,
   } });
   remote = view;
-  view.setBackgroundColor(theme.pageBg);
-  window.contentView.addChildView(view);
+  view.setBackgroundColor('#00000000');
+  // The trusted native controls are the final child and stay above the remote
+  // header; the remote view never receives a preload or desktop capability.
+  window.contentView.addChildView(view, 0);
   loading = true;
   error = null;
   let failed = false;
@@ -237,12 +326,70 @@ function loadRemote() {
   let activeUrl = miniUrl(preferences.settings);
   let navigation = 0;
   let initialNavigation;
+  let metricsTimer;
+  let readingMetrics = false;
+  let lastMetricsKey = '';
   const current = () => remote === view && remoteGeneration === generation && !view.webContents.isDestroyed();
   const clearLoadTimer = () => {
     clearTimeout(loadTimer);
     loadTimer = undefined;
   };
-  clearRemoteLoad = clearLoadTimer;
+  const inspectLayout = async (force = false) => {
+    if (readingMetrics || !current() || !window || window.isDestroyed() || !window.isVisible()
+        || window.isMinimized() || !contentVisible()) return;
+    const currentUrl = view.webContents.getURL();
+    if (!isIntegratedMiniUrl(currentUrl, preferences.settings)) {
+      setIntegratedContent(false);
+      setRemoteOverlay(false);
+      // Login and forced-password screens need usable vertical room. An old
+      // server's mini page keeps the previous layout as a compatibility path.
+      if (isAllowedRemoteUrl(currentUrl, serverUrl) && new URL(currentUrl).pathname !== new URL(miniUrl(preferences.settings)).pathname) {
+        if (lastMetricsKey !== 'document' || force) {
+          window.setBounds(availableBounds({ ...window.getBounds(), height: 460 }));
+          lastMetricsKey = 'document';
+        }
+      }
+      return;
+    }
+    readingMetrics = true;
+    const inspectionNavigation = navigation;
+    try {
+      const value = await view.webContents.executeJavaScriptInIsolatedWorld(1001, [{ code: `(() => {
+        const root = document.querySelector('[data-sticker-root]');
+        if (!root) return null;
+        return { height: Number(root.getAttribute('data-sticker-height')),
+          overlay: root.getAttribute('data-sticker-overlay') === 'true' };
+      })()` }]);
+      if (!current() || !contentVisible() || navigation !== inspectionNavigation || view.webContents.getURL() !== currentUrl) return;
+      const metrics = contentMetrics(value);
+      if (!metrics) {
+        lastMetricsKey = '';
+        setIntegratedContent(false);
+        setRemoteOverlay(false);
+        return;
+      }
+      setRemoteOverlay(metrics.overlay);
+      setIntegratedContent(true);
+      const bounds = window.getBounds();
+      const key = `${metrics.height}:${metrics.overlay}:${bounds.width}`;
+      // Only content/width changes resize the window. Repeated sampling must
+      // not immediately fight a user's manual resize gesture.
+      if (force || key !== lastMetricsKey) {
+        lastMetricsKey = key;
+        const next = availableBounds({ ...bounds, height: contentHeight(metrics) });
+        if (next.height !== bounds.height || next.y !== bounds.y) window.setBounds(next);
+        layoutRemote();
+      }
+    } catch {
+      // Navigation can destroy an isolated execution context between sampling
+      // and delivery; the next visible tick will inspect the new document.
+    } finally {
+      readingMetrics = false;
+    }
+  };
+  requestRemoteMetrics = (force = false) => { void inspectLayout(force); };
+  metricsTimer = setInterval(() => { void inspectLayout(); }, 500);
+  clearRemoteLoad = () => { clearLoadTimer(); clearInterval(metricsTimer); };
   const fail = (message) => {
     if (!current() || failed) return;
     clearLoadTimer();
@@ -258,6 +405,9 @@ function loadRemote() {
     navigation += 1;
     activeUrl = url;
     documentReady = false;
+    lastMetricsKey = '';
+    setIntegratedContent(false);
+    setRemoteOverlay(false);
     failed = false;
     loading = true;
     error = null;
@@ -278,6 +428,7 @@ function loadRemote() {
     error = null;
     layoutRemote();
     publish();
+    void inspectLayout();
   };
   const denyOtherOrigin = (event, details, _isInPlace, legacyIsMainFrame) => {
     const url = navigationUrl(details) || event.url;
@@ -357,6 +508,7 @@ async function invoke(action, payload) {
       loadRemote();
       break;
     }
+    case 'show-menu': showMenu(); break;
     case 'set-opacity': setOpacity(payload); break;
     case 'set-pin': setPin(payload); break;
     case 'toggle-pin': togglePin(); break;
@@ -379,8 +531,33 @@ function availableBounds(saved) {
   return restoreBounds(saved, displays.map((display) => display.workArea), displays.findIndex((display) => display.id === primary.id));
 }
 
+function createControls() {
+  controls = new WebContentsView({ webPreferences: {
+    preload: path.join(__dirname, 'preload.cjs'), sandbox: true,
+    contextIsolation: true, nodeIntegration: false, webSecurity: true,
+  } });
+  controls.setBackgroundColor('#00000000');
+  window.contentView.addChildView(controls);
+  controls.setVisible(false);
+  controls.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  controls.webContents.on('will-navigate', (event) => event.preventDefault());
+  controls.webContents.on('will-attach-webview', (event) => event.preventDefault());
+  controls.webContents.on('did-finish-load', publish);
+  void controls.webContents.loadFile(entryPath, { query: { controls: '1' } });
+  layoutRemote();
+}
+
+function destroyControls() {
+  if (!controls) return;
+  const previous = controls;
+  controls = null;
+  if (window && !window.isDestroyed()) window.contentView.removeChildView(previous);
+  if (!previous.webContents.isDestroyed()) previous.webContents.close({ waitForBeforeUnload: false });
+}
+
 function createWindow() {
   const bounds = availableBounds(preferences.bounds);
+  nativeShadowVisible = true;
   window = new BrowserWindow({
     ...availableBounds(configured() ? bounds : { ...bounds, height: Math.max(420, bounds.height) }),
     minWidth: MIN_WINDOW.width,
@@ -390,7 +567,10 @@ function createWindow() {
     show: false,
     maximizable: false,
     fullscreenable: false,
-    backgroundColor: theme.pageBg,
+    // Vibrancy works with a normal frameless NSWindow. transparent:true would
+    // disable macOS's own border/shadow and can interfere with native resizing.
+    backgroundColor: process.platform === 'darwin' ? '#00000000' : theme.pageBg,
+    ...(process.platform === 'darwin' ? { vibrancy: nativeBlur() ? 'under-window' : undefined, visualEffectState: 'active' } : {}),
     title: 'nblane 贴纸',
     alwaysOnTop: preferences.settings.alwaysOnTop,
     webPreferences: {
@@ -402,7 +582,7 @@ function createWindow() {
     },
   });
   window.setAlwaysOnTop(preferences.settings.alwaysOnTop, 'floating');
-  if (process.platform === 'darwin' || process.platform === 'win32') window.setOpacity(preferences.settings.opacity);
+  applyMaterial();
   if (process.platform === 'darwin') window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -415,7 +595,7 @@ function createWindow() {
   };
   window.on('resize', () => { layoutRemote(); rememberBounds(); });
   window.on('move', rememberBounds);
-  window.on('show', refreshTray);
+  window.on('show', () => { requestRemoteMetrics(); refreshTray(); });
   window.on('hide', refreshTray);
   window.on('close', (event) => {
     if (!quitting && tray) {
@@ -424,8 +604,10 @@ function createWindow() {
       return;
     }
     destroyRemote();
+    destroyControls();
   });
   window.on('closed', () => { window = null; });
+  createControls();
   createTray();
   window.once('ready-to-show', () => {
     const backgroundStart = canLaunchAtLogin() && app.getLoginItemSettings().wasOpenedAtLogin;
@@ -446,6 +628,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on('window-all-closed', () => app.quit());
   void app.whenReady().then(() => {
+    nativeTheme.themeSource = 'dark';
     preferencesPath = path.join(app.getPath('userData'), 'sticker-settings.json');
     preferences = readState(preferencesPath);
     if (canLaunchAtLogin()) preferences.settings.launchAtLogin = app.getLoginItemSettings().openAtLogin;
@@ -455,18 +638,24 @@ if (!app.requestSingleInstanceLock()) {
       { role: 'editMenu' },
       { label: '贴纸', submenu: [
         { label: '显示贴纸', click: showWindow },
-        { label: '恢复不透明', click: () => setOpacity(1) },
+        { label: '贴纸设置…', accelerator: 'CommandOrControl+,', click: () => { showSettings(); showWindow(); } },
+        { label: '恢复不透明背景', click: () => setOpacity(1) },
         { label: '重新加载', accelerator: 'CommandOrControl+R', click: () => loadRemote() },
         { role: 'quit' },
       ] },
     ]));
     ipcMain.handle('sticker:invoke', (event, action, payload) => {
-      if (!isTrustedSender(event, window?.webContents, entryUrl)) throw new Error('拒绝不可信页面的操作。');
+      if (!isTrustedSender(event, window?.webContents, entryUrl)
+          && !isTrustedSender(event, controls?.webContents, controlsUrl)) throw new Error('拒绝不可信页面的操作。');
       return invoke(action, payload);
     });
     createWindow();
+    nativeTheme.on('updated', () => { applyMaterial(); publish(); });
     const recoverBounds = () => {
-      if (window && !window.isDestroyed()) window.setBounds(availableBounds(window.getBounds()));
+      if (window && !window.isDestroyed()) {
+        window.setBounds(availableBounds(window.getBounds()));
+        requestRemoteMetrics(true);
+      }
     };
     screen.on('display-removed', recoverBounds);
     screen.on('display-metrics-changed', recoverBounds);

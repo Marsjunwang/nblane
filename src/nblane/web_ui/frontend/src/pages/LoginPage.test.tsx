@@ -1,7 +1,8 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router-dom';
 
+import { RequireAuth } from '../auth/RequireAuth';
 import { jsonResponse, renderWithProviders } from '../test/render';
 import { LoginPage } from './LoginPage';
 
@@ -9,12 +10,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function MiniDestination() {
+  const { pathname, search, hash } = useLocation();
+  return <div data-testid="mini-location">{pathname}{search}{hash}</div>;
+}
+
 function renderLogin(entry: string | { pathname: string; state?: unknown }) {
   return renderWithProviders(
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<div>profiles home</div>} />
       <Route path="/p/:name/projects" element={<div>projects page</div>} />
+      <Route path="/p/:name/mini" element={<RequireAuth><MiniDestination /></RequireAuth>} />
     </Routes>,
     entry,
   );
@@ -68,16 +75,43 @@ describe('LoginPage', () => {
     expect(await screen.findByText('projects page')).toBeInTheDocument();
   });
 
-  it('falls back to / and ignores non-local redirect targets', async () => {
-    mockLoginApi();
-    renderLogin({
-      pathname: '/login',
-      state: { from: { pathname: '//evil.example/phish' } },
-    });
+  it('preserves desktop sticker mode and the fragment through the login wall', async () => {
+    const fetchMock = mockLoginApi();
+    renderLogin('/p/alice/mini?sticker=1#current-task');
 
     await submitLogin();
-    expect(await screen.findByText('profiles home')).toBeInTheDocument();
+    expect(await screen.findByTestId('mini-location')).toHaveTextContent(
+      '/p/alice/mini?sticker=1#current-task',
+    );
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/auth/login'))).toBe(true);
   });
+
+  it('preserves sticker mode when a session already exists', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, {
+      id: 'u1', display_name: 'Admin', role: 'admin', auth_enabled: true,
+    })));
+    renderLogin({
+      pathname: '/login',
+      state: { from: { pathname: '/p/alice/mini', search: '?sticker=1', hash: '#current-task' } },
+    });
+
+    expect(await screen.findByTestId('mini-location')).toHaveTextContent(
+      '/p/alice/mini?sticker=1#current-task',
+    );
+  });
+
+  it.each(['//evil.example/phish', 'https://evil.example/phish', '/\\evil.example/phish'])(
+    'falls back to / and ignores the non-local redirect target %s', async (pathname) => {
+      mockLoginApi();
+      renderLogin({
+        pathname: '/login',
+        state: { from: { pathname, search: '?sticker=1', hash: '#current-task' } },
+      });
+
+      await submitLogin();
+      expect(await screen.findByText('profiles home')).toBeInTheDocument();
+    },
+  );
 
   it.each(['用户名', '密码'])('clears an old rejection when %s changes and submits the current credentials', async (field) => {
     const submitted: Array<{ username: string; password: string }> = [];

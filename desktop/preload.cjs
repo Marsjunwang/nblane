@@ -13,6 +13,7 @@ const ACTIONS = new Set([
   'open-browser',
   'quit',
   'show-settings',
+  'show-menu',
   'cancel-settings',
 ]);
 

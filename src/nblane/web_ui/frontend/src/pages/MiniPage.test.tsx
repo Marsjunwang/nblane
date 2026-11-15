@@ -107,13 +107,13 @@ function mockFetch(calls: Call[], server: Server) {
   });
 }
 
-function renderMini(calls: Call[], server: Server) {
+function renderMini(calls: Call[], server: Server, desktop = false) {
   vi.stubGlobal('fetch', mockFetch(calls, server));
   return renderWithProviders(
     <Routes>
       <Route path="/p/:name/mini" element={<MiniPage />} />
     </Routes>,
-    '/p/alice/mini',
+    `/p/alice/mini${desktop ? '?sticker=1' : ''}`,
   );
 }
 
@@ -132,6 +132,64 @@ afterEach(() => {
 });
 
 describe('MiniPage', () => {
+  it('uses one desktop header, retaining habits and omitting duplicate native controls', async () => {
+    const calls: Call[] = [];
+    const view = renderMini(calls, { todos: [{ text: '跑基线', done: false }] }, true);
+    expect(await screen.findByText('写 VLA 复现')).toBeInTheDocument();
+    const root = screen.getByTestId('mini-page');
+    expect(root).toHaveAttribute('data-sticker-root', '');
+    expect(root).toHaveAttribute('data-sticker-overlay', 'false');
+    expect(screen.getAllByLabelText('任务工具栏')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: '刷新' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '在完整页面打开' })).toBeNull();
+    expect(screen.getByRole('button', { name: '接下来 · 4' })).toBeInTheDocument();
+    expect(document.documentElement).toHaveClass('nblane-mini-desktop');
+    fireEvent.click(screen.getByRole('button', { name: '打卡：Learning' }));
+    await waitFor(() => expect(calls.some((call) => call.url.endsWith('/checkins') && call.method === 'POST')).toBe(true));
+    view.unmount();
+    expect(document.documentElement).not.toHaveClass('nblane-mini-desktop');
+  });
+
+  it('keeps refresh and browser opening in the ordinary browser mini window', async () => {
+    renderMini([], { todos: [] });
+    expect(await screen.findByRole('button', { name: '刷新' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '在完整页面打开' })).toHaveAttribute('href', '/p/alice/projects');
+    expect(screen.getByTestId('mini-page')).not.toHaveAttribute('data-sticker-root');
+    expect(document.documentElement).not.toHaveClass('nblane-mini-desktop');
+  });
+
+  it('reports natural content height for native resizing, not the fixed viewport height', async () => {
+    let naturalHeight = 108;
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute('data-sticker-measure')) {
+        return { x: 0, y: 44, top: 44, left: 0, right: 360, bottom: 44 + naturalHeight, width: 360, height: naturalHeight, toJSON: () => ({}) };
+      }
+      return original.call(this);
+    });
+    try {
+      renderMini([], { todos: [{ text: '跑基线', done: false }] }, true);
+      const root = await screen.findByTestId('mini-page');
+      await waitFor(() => expect(root).toHaveAttribute('data-sticker-height', '152'));
+      naturalHeight = 164;
+      fireEvent.click(screen.getByRole('button', { name: '展开清单：写 VLA 复现' }));
+      expect(root).toHaveAttribute('data-sticker-height', '208');
+      naturalHeight = 62;
+      fireEvent.click(screen.getByRole('button', { name: '进行中 · 2' }));
+      expect(root).toHaveAttribute('data-sticker-height', '106');
+    } finally {
+      geometry.mockRestore();
+    }
+  });
+
+  it('asks the native host for temporary room while a habit plan menu is open', async () => {
+    renderMini([], { todos: [] }, true);
+    fireEvent.click(await screen.findByRole('button', { name: '打卡：Running' }));
+    await waitFor(() => expect(screen.getByTestId('mini-page')).toHaveAttribute('data-sticker-overlay', 'true'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '半马备赛' }));
+    await waitFor(() => expect(screen.getByTestId('mini-page')).toHaveAttribute('data-sticker-overlay', 'false'));
+  });
+
   it('lists open Doing tasks (overdue first) and today habits only', async () => {
     renderMini([], { todos: [] });
     expect(await screen.findByText('写 VLA 复现')).toBeInTheDocument();
@@ -214,7 +272,7 @@ describe('MiniPage', () => {
   it('keeps Queue collapsed, then shows the first three with 开始', async () => {
     const calls: Call[] = [];
     renderMini(calls, { todos: [] });
-    const toggle = await screen.findByRole('button', { name: /接下来 · Queue 4/ });
+    const toggle = await screen.findByRole('button', { name: /接下来 · 4/ });
     expect(screen.queryByText('排队中的任务')).toBeNull();
     fireEvent.click(toggle);
     expect(screen.getByText('排队中的任务')).toBeInTheDocument();

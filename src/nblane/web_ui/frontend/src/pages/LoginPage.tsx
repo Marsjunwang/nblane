@@ -24,9 +24,25 @@ export function LoginPage() {
   // In-app redirect target handed over by RequireAuth. Only same-site paths
   // are accepted — absolute URLs and protocol-relative "//host" fall back to
   // the profile list so the login page can't be used as an open redirector.
-  const rawFrom = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
+  const rawFrom = (location.state as {
+    from?: { pathname?: unknown; search?: unknown; hash?: unknown };
+  } | null)?.from;
+  const pathname = rawFrom?.pathname;
+  const search = rawFrom?.search;
+  const hash = rawFrom?.hash;
   const from =
-    rawFrom && rawFrom.startsWith('/') && !rawFrom.startsWith('//') ? rawFrom : undefined;
+    typeof pathname === 'string' &&
+    pathname.startsWith('/') &&
+    !pathname.startsWith('//') &&
+    !pathname.includes('\\')
+      ? {
+          pathname,
+          // Preserve page modes (including desktop sticker mode) through
+          // authentication without letting either suffix become a URL/path.
+          search: typeof search === 'string' && search.startsWith('?') ? search : '',
+          hash: typeof hash === 'string' && hash.startsWith('#') ? hash : '',
+        }
+      : undefined;
 
   // Skip the login wall when auth is off, or when a session already exists.
   if (me.data) {

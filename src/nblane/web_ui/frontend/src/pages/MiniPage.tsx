@@ -1,9 +1,9 @@
-import { ActionIcon, Anchor, Box, Button, Center, Checkbox, Group, Indicator, Loader, Menu, ScrollArea, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Anchor, Box, Button, Center, Checkbox, Group, Indicator, Loader, Menu, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { IconAlertTriangle, IconBarbell, IconBook, IconCheck, IconChevronDown, IconChevronRight, IconExternalLink, IconEye, IconEyeOff, IconPlayerPlay, IconRefresh } from '@tabler/icons-react';
-import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 
 import './MiniPage.css';
 
@@ -21,6 +21,7 @@ import {
 import type { HabitPlan } from '../api/types';
 import { AIExceptionDrawer } from '../components/AIExceptionDrawer';
 import { checkinPlansForHabit, planBadgeLabel, planHasDaily, planTodayTasks } from '../components/projects/habitPlans';
+import { chrome } from '../theme';
 import { byDue, dueState, reapplyToggle, toggleAt, type MiniTodo } from './miniTasks';
 
 /** How often the always-on-top window refreshes on its own. */
@@ -43,6 +44,11 @@ const DUE_LABEL = { overdue: '逾期', today: '今天' } as const;
  */
 export function MiniPage() {
   const { name = '' } = useParams();
+  const [searchParams] = useSearchParams();
+  const desktop = searchParams.get('sticker') === '1';
+  const rootRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [habitMenu, setHabitMenu] = useState<string | null>(null);
   const kanban = useKanbanBoard(name);
   const board = useProjectsBoard(name);
   const plans = useActiveHabitPlans(name);
@@ -71,6 +77,7 @@ export function MiniPage() {
     void plans.refetch();
   };
   useAutoRefresh(refresh);
+  useDesktopSurface(desktop, !(kanban.isPending || board.isPending), rootRef, contentRef);
 
   if (kanban.isPending || board.isPending) {
     return (
@@ -194,11 +201,11 @@ export function MiniPage() {
           data-off={off}
           variant="subtle"
           color="gray"
-          size="md"
+          size={24}
           aria-label={`${off ? '取消隐藏' : '隐藏'}：${title}`}
           onClick={() => toggleHidden(cardRef)}
         >
-          {off ? <IconEye size={14} /> : <IconEyeOff size={14} />}
+          {off ? <IconEye size={16} stroke={1.6} /> : <IconEyeOff size={16} stroke={1.6} />}
         </ActionIcon>
       </Tooltip>
     );
@@ -214,12 +221,22 @@ export function MiniPage() {
   };
 
   return (
-    <Stack gap={6} p={8} h="100vh" data-testid="mini-page">
-      <Group justify="space-between" wrap="nowrap" gap={4}>
-        <Group gap={4} wrap="nowrap" miw={0}>
-          <Text size="xs" fw={600} truncate>
+    <Stack
+      ref={rootRef}
+      gap={0}
+      className="mini-page"
+      data-testid="mini-page"
+      data-desktop={desktop || undefined}
+      data-sticker-root={desktop ? '' : undefined}
+      data-sticker-overlay={desktop ? String(exceptionsOpened || habitMenu !== null) : undefined}
+      style={{ '--mini-text': chrome.text, '--mini-dim': chrome.dim, '--mini-gold': chrome.goldText, '--mini-panel': chrome.panelBg, '--mini-card': chrome.cardBg } as React.CSSProperties}
+    >
+      <Group className="mini-toolbar" justify="space-between" wrap="nowrap" gap={4} aria-label="任务工具栏">
+        <Group className="mini-toolbar-leading" gap={4} wrap="nowrap" miw={0}>
+          <Text className="mini-profile" size="xs" fw={600} truncate title={name}>
             {name}
           </Text>
+          <Group className="mini-habits" gap={2} wrap="nowrap" miw={0}>
           {board.isError ? (
             <Tooltip label={`日课加载失败：${errorText(board.error)}`} withArrow>
               <Text size="xs" c="red">日课!</Text>
@@ -251,7 +268,7 @@ export function MiniPage() {
               if (doneToday) {
                 return (
                   <Tooltip key={habit.id} label={tip} withArrow>
-                    <ActionIcon variant="filled" color="teal" size="md" aria-label={`已打卡：${title}`} aria-disabled style={{ cursor: 'default' }}>
+                    <ActionIcon variant="subtle" color="teal" size={28} aria-label={`已打卡：${title}`} aria-disabled style={{ cursor: 'default' }}>
                       {icon}
                     </ActionIcon>
                   </Tooltip>
@@ -259,10 +276,10 @@ export function MiniPage() {
               }
               if (eligible.length > 1) {
                 return (
-                  <Menu key={habit.id} position="bottom-start" withinPortal={false}>
+                  <Menu key={habit.id} position="bottom-start" withinPortal portalProps={{ target: rootRef.current?.ownerDocument.body }} opened={habitMenu === habit.id} onChange={(opened) => setHabitMenu(opened ? habit.id : null)}>
                     <Menu.Target>
                       <Tooltip label={tip} withArrow>
-                        <ActionIcon variant="light" color="gray" size="md" loading={pending} aria-label={`打卡：${title}`}>
+                        <ActionIcon variant="subtle" color="gray" size={28} loading={pending} aria-label={`打卡：${title}`}>
                           {icon}
                         </ActionIcon>
                       </Tooltip>
@@ -282,9 +299,9 @@ export function MiniPage() {
               return (
                 <Tooltip key={habit.id} label={tip} withArrow>
                   <ActionIcon
-                    variant="light"
+                    variant="subtle"
                     color="gray"
-                    size="md"
+                    size={28}
                     loading={pending}
                     aria-label={`打卡：${title}`}
                     onClick={() => checkIn(habit.id, title, eligible[0])}
@@ -295,8 +312,9 @@ export function MiniPage() {
               );
             })
           )}
+          </Group>
         </Group>
-        <Group gap={2} wrap="nowrap">
+        <Group className="mini-toolbar-actions" gap={2} wrap="nowrap">
           {(exceptionCount > 0 || exceptions.isError) && (
             <Tooltip label="AI 异常" withArrow>
               <Indicator
@@ -309,31 +327,31 @@ export function MiniPage() {
                 <ActionIcon
                   variant="subtle"
                   color="red"
-                  size="md"
+                  size={28}
                   aria-label={exceptions.isError ? 'AI 异常列表加载失败' : `AI 异常 ${exceptionCount} 条`}
                   onClick={exceptionsDrawer.open}
                 >
-                  <IconAlertTriangle size={14} />
+                  <IconAlertTriangle size={16} stroke={1.6} />
                 </ActionIcon>
               </Indicator>
             </Tooltip>
           )}
-          <Tooltip label="刷新" withArrow>
-            <ActionIcon variant="subtle" size="md" aria-label="刷新" onClick={refresh}>
-              <IconRefresh size={15} />
+          {!desktop && <><Tooltip label="刷新" withArrow>
+            <ActionIcon variant="subtle" size={28} aria-label="刷新" onClick={refresh}>
+              <IconRefresh size={16} stroke={1.6} />
             </ActionIcon>
           </Tooltip>
           <Tooltip label="在完整页面打开（编辑任务、增删清单、拖动排序）" withArrow>
-            <ActionIcon component="a" href={fullHref} target="nblane-main" variant="subtle" size="md" aria-label="在完整页面打开">
-              <IconExternalLink size={15} />
+            <ActionIcon component="a" href={fullHref} target="nblane-main" variant="subtle" size={28} aria-label="在完整页面打开">
+              <IconExternalLink size={16} stroke={1.6} />
             </ActionIcon>
-          </Tooltip>
+          </Tooltip></>}
         </Group>
       </Group>
 
 
-      <ScrollArea style={{ flex: 1 }} type="never">
-        <Stack gap={8}>
+      <Box className="mini-scroll" data-sticker-scroll={desktop ? '' : undefined}>
+        <Stack ref={contentRef} className="mini-content" gap={8} data-sticker-measure={desktop ? '' : undefined}>
           <Box component="section" aria-labelledby="mini-doing">
             <SectionHeader id="mini-doing" open={doingOpen} onToggle={() => setDoingOpen(!doingOpen)}>
               进行中 · {shownDoing.length}
@@ -343,7 +361,7 @@ export function MiniPage() {
                 <Text size="xs" c="red">看板加载失败：{errorText(kanban.error)}</Text>
               ) : shownDoing.length === 0 ? (
                 <Text size="xs" c="dimmed" mt={2}>
-                  {doing.length ? '进行中的任务都已隐藏。' : 'Doing 里没有任务。'}
+                  {doing.length ? '进行中的任务都已隐藏。' : '暂时没有进行中的任务。'}
                 </Text>
               ) : (
                 <Stack gap={2} mt={2}>
@@ -366,39 +384,33 @@ export function MiniPage() {
                           >
                             <Group gap={4} wrap="nowrap">
                               {expandable ? (
-                                open ? <IconChevronDown size={12} style={{ flexShrink: 0 }} /> : <IconChevronRight size={12} style={{ flexShrink: 0 }} />
+                                open ? <IconChevronDown size={16} stroke={1.6} style={{ flexShrink: 0 }} /> : <IconChevronRight size={16} stroke={1.6} style={{ flexShrink: 0 }} />
                               ) : (
-                                <Box w={12} style={{ flexShrink: 0 }} />
+                                <Box w={16} style={{ flexShrink: 0 }} />
                               )}
-                              <Text size="xs" c="gray.4" truncate title={task.title} style={{ flex: 1, minWidth: 0 }}>
+                              <Text className="mini-task-title" lineClamp={2} title={task.title} style={{ flex: 1, minWidth: 0 }}>
                                 {task.title}
                               </Text>
                               {dueBadge(task.planned_end)}
-                              {todos.length > 0 && (
-                                <Text
-                                  size="xs"
-                                  c={allDone ? 'green' : 'dimmed'}
-                                  style={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}
-                                  aria-label={`清单 ${doneCount}/${todos.length}`}
-                                >
-                                  {doneCount}/{todos.length}
-                                </Text>
-                              )}
+
                             </Group>
                           </UnstyledButton>
                           {hideButton(cardRef, task.title)}
+                          <Text className="mini-progress" aria-label={todos.length ? `清单 ${doneCount}/${todos.length}` : undefined} aria-hidden={!todos.length || undefined}>
+                            {todos.length ? `${doneCount}/${todos.length}` : ''}
+                          </Text>
                           <Tooltip label={allDone ? '清单已完成，标记任务完成' : '标记完成'} withArrow>
                             <ActionIcon
-                              className="mini-quiet"
+                              className="mini-quiet mini-complete"
                               data-loud={allDone}
                               variant={allDone ? 'filled' : 'subtle'}
                               color={allDone ? 'green' : 'gray'}
-                              size="md"
+                              size={28}
                               aria-label={`标记完成：${task.title}`}
                               loading={done.isPending && done.variables?.cardRef === cardRef}
                               onClick={() => markDone(cardRef, task.title)}
                             >
-                              <IconCheck size={14} />
+                              <IconCheck size={16} stroke={1.6} />
                             </ActionIcon>
                           </Tooltip>
                         </Group>
@@ -432,12 +444,12 @@ export function MiniPage() {
 
           <Box component="section" aria-labelledby="mini-queue">
             <SectionHeader id="mini-queue" open={queueOpen} onToggle={() => setQueueOpen(!queueOpen)}>
-              接下来 · Queue {shownQueue.length}
+              接下来 · {shownQueue.length}
             </SectionHeader>
             {queueOpen &&
               (shownQueue.length === 0 ? (
                 <Text size="xs" c="dimmed" mt={2}>
-                  {queue.length ? 'Queue 里的任务都已隐藏。' : 'Queue 里没有任务。'}
+                  {queue.length ? '接下来的任务都已隐藏。' : '暂时没有接下来的任务。'}
                 </Text>
               ) : (
                 <Stack gap={2} mt={2}>
@@ -446,7 +458,7 @@ export function MiniPage() {
                     return (
                       <Group key={cardRef} gap={2} wrap="nowrap" className="mini-row" style={{ opacity: isHidden(cardRef) ? 0.5 : 1 }}>
                         <Group gap={4} wrap="nowrap" miw={0} pl={16} style={{ flex: 1 }}>
-                          <Text size="xs" c="gray.4" truncate title={task.title} style={{ flex: 1, minWidth: 0 }}>
+                          <Text className="mini-task-title" lineClamp={2} title={task.title} style={{ flex: 1, minWidth: 0 }}>
                             {task.title}
                           </Text>
                           {dueBadge(task.planned_end)}
@@ -457,7 +469,7 @@ export function MiniPage() {
                           size="compact-sm"
                           variant="subtle"
                           color="gray"
-                          leftSection={<IconPlayerPlay size={12} />}
+                          leftSection={<IconPlayerPlay size={16} stroke={1.6} />}
                           aria-label={`开始：${task.title}`}
                           loading={moveCard.isPending && moveCard.variables?.cardRef === cardRef}
                           onClick={() => startTask(cardRef, task.title)}
@@ -485,7 +497,7 @@ export function MiniPage() {
           )}
 
         </Stack>
-      </ScrollArea>
+      </Box>
 
       <AIExceptionDrawer
         profile={name}
@@ -502,8 +514,8 @@ export function MiniPage() {
 /** Small habit icon: by kind, else the habit's first character. */
 function HabitGlyph({ kind, title }: { kind?: string; title: string }) {
   const clean = (kind ?? '').toLowerCase();
-  if (['health', 'exercise', 'fitness', 'sport'].includes(clean)) return <IconBarbell size={15} />;
-  if (['study', 'learning', 'reading', 'read'].includes(clean)) return <IconBook size={15} />;
+  if (['health', 'exercise', 'fitness', 'sport'].includes(clean)) return <IconBarbell size={16} stroke={1.6} />;
+  if (['study', 'learning', 'reading', 'read'].includes(clean)) return <IconBook size={16} stroke={1.6} />;
   return (
     <Text size="xs" fw={700} lh={1}>
       {[...title][0] ?? '?'}
@@ -514,15 +526,51 @@ function HabitGlyph({ kind, title }: { kind?: string; title: string }) {
 /** Collapsible section title; the open state is remembered per profile. */
 function SectionHeader({ id, open, onToggle, children }: { id: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
   return (
-    <UnstyledButton id={id} onClick={onToggle} aria-expanded={open}>
+    <UnstyledButton className="mini-section-heading" id={id} onClick={onToggle} aria-expanded={open}>
       <Group gap={4} wrap="nowrap">
-        {open ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
-        <Text size="xs" c="dimmed" fw={600}>
+        {open ? <IconChevronDown size={16} stroke={1.6} /> : <IconChevronRight size={16} stroke={1.6} />}
+        <Text className="mini-section-label">
           {children}
         </Text>
       </Group>
     </UnstyledButton>
   );
+}
+
+/** Desktop integration is read-only DOM metadata, never a native control bridge. */
+function useDesktopSurface(
+  enabled: boolean,
+  ready: boolean,
+  root: React.RefObject<HTMLDivElement>,
+  content: React.RefObject<HTMLDivElement>,
+) {
+  const measure = () => {
+    if (!enabled || !root.current || !content.current) return;
+    // The natural content box includes its own padding. Never measure the
+    // viewport: doing so would prevent the native window from shrinking.
+    const height = Math.ceil(content.current.getBoundingClientRect().height + 44);
+    if (Number.isFinite(height) && height > 0) root.current.dataset.stickerHeight = String(height);
+  };
+  useLayoutEffect(() => {
+    if (!enabled) return undefined;
+    const html = document.documentElement;
+    const existing = html.classList.contains('nblane-mini-desktop');
+    html.classList.add('nblane-mini-desktop');
+    return () => { if (!existing) html.classList.remove('nblane-mini-desktop'); };
+  }, [enabled]);
+  useLayoutEffect(() => {
+    if (!enabled || !ready || !content.current) return undefined;
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(content.current);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [enabled, ready]);
+  // Covers immediate state transitions as well as ResizeObserver callbacks.
+  useLayoutEffect(measure);
 }
 
 /** Refetch on a timer and whenever the window regains focus or visibility. */
