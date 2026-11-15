@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
@@ -77,5 +77,56 @@ describe('LoginPage', () => {
 
     await submitLogin();
     expect(await screen.findByText('profiles home')).toBeInTheDocument();
+  });
+
+  it.each(['用户名', '密码'])('clears an old rejection when %s changes and submits the current credentials', async (field) => {
+    const submitted: Array<{ username: string; password: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).endsWith('/auth/login')) {
+        return jsonResponse(401, { detail: 'Authentication required' });
+      }
+      submitted.push(JSON.parse(String(init?.body)));
+      return submitted.length === 1
+        ? jsonResponse(401, { detail: 'Invalid username or password' })
+        : jsonResponse(200, { id: 'u1', display_name: 'Admin', role: 'admin', auth_enabled: true });
+    }));
+    renderLogin('/login');
+    await submitLogin();
+    expect(await screen.findByTestId('login-error')).toHaveTextContent('Invalid username or password');
+
+    fireEvent.change(screen.getByLabelText(new RegExp(field)), {
+      target: { value: field === '用户名' ? ' updated-admin ' : ' updated-secret ' },
+    });
+    await waitFor(() => expect(screen.queryByTestId('login-error')).not.toBeInTheDocument());
+    expect(submitted).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '登录' }));
+    expect(await screen.findByText('profiles home')).toBeInTheDocument();
+    expect(submitted[1]).toEqual(field === '用户名'
+      ? { username: 'updated-admin', password: 'secret' }
+      : { username: 'admin', password: ' updated-secret ' });
+  });
+
+  it('keeps a pending login active while editing and ignores duplicate form submissions', async () => {
+    let finishLogin!: (response: Response) => void;
+    const loginResponse = new Promise<Response>((resolve) => { finishLogin = resolve; });
+    const submitted: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).endsWith('/auth/login')) {
+        return jsonResponse(401, { detail: 'Authentication required' });
+      }
+      submitted.push(JSON.parse(String(init?.body)));
+      return loginResponse;
+    }));
+    renderLogin('/login');
+    await submitLogin();
+    const button = screen.getByRole('button', { name: '登录' });
+    await waitFor(() => expect(button).toBeDisabled());
+    fireEvent.change(screen.getByLabelText(/密码/), { target: { value: 'edited-during-request' } });
+    expect(button).toBeDisabled();
+    fireEvent.submit(button.closest('form')!);
+
+    finishLogin(jsonResponse(200, { id: 'u1', display_name: 'Admin', role: 'admin', auth_enabled: true }));
+    expect(await screen.findByText('profiles home')).toBeInTheDocument();
+    expect(submitted).toEqual([{ username: 'admin', password: 'secret' }]);
   });
 });

@@ -129,6 +129,21 @@ describe('SettingsPage', () => {
     expect(calls.some((call) => call.url === '/settings/connection' || call.url === '/settings/local-models' || call.url === '/settings/grobid')).toBe(false);
   });
 
+  it('lets members open desktop downloads without requesting admin settings', async () => {
+    const calls = mockApi('member', {
+      'GET https://www.nblane.cloud/downloads/sticker/latest.json': () => jsonResponse(200, {
+        version: '0.1.3', macosMinVersion: '13', publishedAt: '2026-11-15T03:00:00Z', signing: 'ad-hoc',
+        files: { arm64: { url: 'https://www.nblane.cloud/downloads/sticker/0.1.3/arm64.zip', sha256: 'a'.repeat(64), size: 120_000_000 } },
+      }),
+    });
+    renderAt('/settings/desktop-sticker');
+    expect(await screen.findByRole('link', { name: '下载 Mac 版 · Apple 芯片' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: '设置目录' })).toHaveTextContent('桌面贴纸');
+    expect(screen.getByRole('navigation', { name: '设置目录' })).not.toHaveTextContent('本地服务');
+    expect(screen.getByTestId('where')).toHaveTextContent('/settings/desktop-sticker');
+    expect(calls.some((call) => call.url.startsWith('/settings/'))).toBe(false);
+  });
+
   it('shows one resource bar plus local models and GROBID under 本地服务', async () => {
     const calls = mockApi();
     renderAt('/settings/local-services');

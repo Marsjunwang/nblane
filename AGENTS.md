@@ -58,6 +58,12 @@ Design principles that shape all changes:
   login, no profile ACL. Not the assistant channel; expansion is paused.
 - **Node.js**: SPA and component frontend builds, vitest, Playwright e2e
   (root `package.json` has `@playwright/test` only).
+- **macOS desktop sticker**: `desktop/` is a separate Electron shell over the
+  hosted `/p/<name>/mini` page. Local controls own window opacity and tray
+  actions; the sandboxed remote view has no preload or Node access. Use
+  `npm ci --prefix desktop`, `npm test --prefix desktop`, and
+  `npm run package:mac --prefix desktop -- --arch=arm64` on macOS. Bundles
+  under `dist/desktop/` are not committed. See `docs/zh/guides/desktop-sticker.md`.
 - **LLM features**: OpenAI-compatible API via `src/nblane/core/llm.py` and
   the AI Gateway in `src/nblane/core/ai/`, configured in `.env`
   (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`; see `.env.example`).

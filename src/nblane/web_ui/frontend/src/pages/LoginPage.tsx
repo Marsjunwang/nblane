@@ -35,14 +35,19 @@ export function LoginPage() {
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
+    if (login.isPending) return;
     login.mutate(
       { username: username.trim(), password },
       { onSuccess: () => navigate(from ?? '/', { replace: true }) },
     );
   };
 
+  const clearPreviousError = () => {
+    if (login.isError) login.reset();
+  };
+
   return (
-    <Center h="100vh">
+    <Center mih="100vh" py="md">
       <Container size="xs" w="100%">
         <Paper withBorder shadow="sm" p="xl" radius="md">
           <Title order={2} ta="center" mb="lg">
@@ -51,16 +56,24 @@ export function LoginPage() {
           <form onSubmit={onSubmit}>
             <TextInput
               label="用户名"
+              name="username"
               value={username}
-              onChange={(e) => setUsername(e.currentTarget.value)}
+              onChange={(e) => {
+                setUsername(e.currentTarget.value);
+                clearPreviousError();
+              }}
               autoComplete="username"
               required
               mb="sm"
             />
             <PasswordInput
               label="密码"
+              name="password"
               value={password}
-              onChange={(e) => setPassword(e.currentTarget.value)}
+              onChange={(e) => {
+                setPassword(e.currentTarget.value);
+                clearPreviousError();
+              }}
               autoComplete="current-password"
               required
               mb="md"

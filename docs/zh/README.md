@@ -70,6 +70,7 @@ source_of_truth: true
 | [setup.md](guides/setup.md) | 源码安装、依赖、LLM 配置 |
 | [ubuntu-package.md](guides/ubuntu-package.md) | Ubuntu 离线包：一键生成、安装、升级、代码回滚 |
 | [android-twa.md](guides/android-twa.md) | 安卓 PWA、TWA、签名与真机验收 |
+| [desktop-sticker.md](guides/desktop-sticker.md) | macOS 桌面贴纸、置顶、不透明度与打包 |
 | [deployment-tencent-cloud.md](guides/deployment-tencent-cloud.md) | 生产部署：systemd + Caddy |
 | [migration.md](guides/migration.md) | 整机迁移 runbook |
 | [mihomo-deployment.md](guides/mihomo-deployment.md) | Mihomo 代理部署与运维 |

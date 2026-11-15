@@ -1,10 +1,11 @@
 // Settings shell: 系统 (deployment-wide, admin only, changes apply at once),
 // 档案 (per profile, edited as a draft and saved via the SaveBar) and 账号
-// (the signed-in user, visible to everyone, not tied to a profile).
+// (the signed-in user, visible to everyone, not tied to a profile), plus
+// 应用 (desktop downloads, available to every signed-in user).
 // Each section has its own URL: /settings/<section>?profile=<name>.
 
 import { Alert, Box, Center, Group, Loader, NavLink, Paper, Select, Stack, Text, Title } from '@mantine/core';
-import { IconBook2, IconCpu, IconStairsUp, IconUserCircle, IconUsers, IconLanguage, IconPlugConnected, IconRobot, IconRoute, IconTerminal2 } from '@tabler/icons-react';
+import { IconBook2, IconCpu, IconDeviceDesktop, IconStairsUp, IconUserCircle, IconUsers, IconLanguage, IconPlugConnected, IconRobot, IconRoute, IconTerminal2 } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
@@ -13,6 +14,7 @@ import { BackToWorkButton } from '../components/BackToWork';
 import { AgentsAndBackupSection } from '../components/settings/AgentSetupSections';
 import { chrome } from '../theme';
 import { AccountsSection, MyAccountSection } from './settings/AccountSections';
+import { DesktopStickerSection } from './settings/DesktopStickerSection';
 import { LocalServicesSection } from './settings/LocalServicesSection';
 import { ProfileAIRoutingSection, ProfileGeneralSection, ProfileResearchSection, ProfileSkillProgressionSection } from './settings/ProfileSections';
 import { SettingsDirtyContext, ErrorAlert } from './settings/shared';
@@ -24,7 +26,7 @@ type Section = {
   label: string;
   description: string;
   icon: ReactNode;
-  scope: 'system' | 'profile' | 'user';
+  scope: 'system' | 'profile' | 'user' | 'device';
   render: (profile: string) => ReactNode;
 };
 
@@ -39,6 +41,7 @@ const SECTIONS: Section[] = [
   { key: 'ai-routing', label: 'AI 路由', description: '工作流 AI 与 Codex 参数', icon: <IconRoute size={16} />, scope: 'profile', render: (profile) => <ProfileAIRoutingSection key={profile} profile={profile} /> },
   { key: 'skill-progression', label: '技能进阶', description: '证据分值与晋升门槛', icon: <IconStairsUp size={16} />, scope: 'profile', render: (profile) => <ProfileSkillProgressionSection key={profile} profile={profile} /> },
   { key: 'account', label: '我的账号', description: '修改密码、登出所有设备', icon: <IconUserCircle size={16} />, scope: 'user', render: () => <MyAccountSection /> },
+  { key: 'desktop-sticker', label: '桌面贴纸', description: 'Mac 下载、置顶与透明度', icon: <IconDeviceDesktop size={16} />, scope: 'device', render: () => <DesktopStickerSection /> },
 ];
 
 const LEAVE_PROMPT = '有未保存的修改，确定离开吗？';
@@ -82,6 +85,7 @@ export function SettingsPage() {
     ...(isAdmin ? [{ scope: 'system' as const, title: '系统', hint: '整个部署共用，修改立即生效' }] : []),
     { scope: 'profile', title: '档案', hint: '只影响所选档案，修改后保存' },
     { scope: 'user', title: '账号', hint: '当前登录的账号' },
+    { scope: 'device', title: '应用', hint: '桌面应用下载与安装' },
   ];
 
   const profileSelect = names.length > 0 && (
@@ -132,7 +136,7 @@ export function SettingsPage() {
             <Title order={2}>设置</Title>
             <BackToWorkButton confirmLeave={() => !dirty || window.confirm(LEAVE_PROMPT)} />
           </Group>
-          <Text c="dimmed" size="sm">{section.scope === 'profile' && profile ? `档案 ${profile} · ${section.label}` : `${section.scope === 'user' ? '账号' : '系统'} · ${section.label}`}</Text>
+          <Text c="dimmed" size="sm">{section.scope === 'profile' && profile ? `档案 ${profile} · ${section.label}` : `${section.scope === 'device' ? '应用' : section.scope === 'user' ? '账号' : '系统'} · ${section.label}`}</Text>
         </div>
         <Group align="flex-start" gap="lg" wrap="nowrap">
           <Paper withBorder radius="md" p="sm" w={240} visibleFrom="sm" style={{ position: 'sticky', top: 16, flexShrink: 0 }} component="nav" aria-label="设置目录">
