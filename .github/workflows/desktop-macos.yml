@@ -74,6 +74,11 @@ jobs:
           /usr/bin/codesign --verify --deep --strict --verbose=4 "$app"
           npm run test:smoke --prefix desktop -- "--app=$app"
           node desktop/smoke/mini-ui.mjs "--app=$app"
+          # Runner images enable Reduce Transparency for performance. Keep the
+          # earlier fallback checks, then enable composition on this disposable
+          # runner for the real light/dark backdrop and native resize checks.
+          defaults write com.apple.universalaccess reduceTransparency -bool false
+          defaults write com.apple.universalaccess increaseContrast -bool false
           node desktop/smoke/material.mjs "--app=$app"
       - uses: actions/upload-artifact@v4
         with:
