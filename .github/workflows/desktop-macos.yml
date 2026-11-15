@@ -7,11 +7,15 @@ on:
       - 'codex/sticker-downloads'
     paths:
       - 'desktop/**'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/desktop-macos.yml'
       - 'src/nblane/web_ui/frontend/src/theme.ts'
   pull_request:
     paths:
       - 'desktop/**'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/desktop-macos.yml'
       - 'src/nblane/web_ui/frontend/src/theme.ts'
 
@@ -22,6 +26,7 @@ jobs:
   build:
     timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: arm64
