@@ -26,7 +26,10 @@ html.nblane-mini-desktop body { font-family: -apple-system, BlinkMacSystemFont, 
   user-select: none;
 }
 .mini-page[data-desktop] .mini-toolbar {
-  padding-right: 88px;
+  /* Electron combines drag regions across native views. The remote header
+     must end before the sibling window controls, not extend beneath them. */
+  width: calc(100% - 88px);
+  padding-right: 0;
   -webkit-app-region: drag;
 }
 .mini-toolbar-leading { flex: 1; overflow: hidden; }

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron, expect as baseExpect } from '@playwright/test';
 import { fixtureCredentials, startMiniFixture } from './mini-fixture.mjs';
+import { createNativeInput } from './native-input.mjs';
 
 const expect = baseExpect.configure({ timeout: 15_000 });
 const desktop = fileURLToPath(new URL('../', import.meta.url));
@@ -138,9 +139,10 @@ try {
   await expect(remote.getByText('接下来 · 0', { exact: true })).toBeVisible();
   assert.equal(/\b(?:Queue|Doing)\b/.test(await remote.locator('body').innerText()), false);
   const header = await remote.locator('.mini-toolbar').evaluate((element) => ({
-    height: element.getBoundingClientRect().height, paddingRight: getComputedStyle(element).paddingRight,
+    height: element.getBoundingClientRect().height,
+    reserved: innerWidth - element.getBoundingClientRect().right,
   }));
-  assert.deepEqual(header, { height: 44, paddingRight: '88px' });
+  assert.deepEqual(header, { height: 44, reserved: 88 });
   await expect.poll(windowHeight).toBeLessThanOrEqual(200);
   const compactHeight = await windowHeight();
   assert.ok(compactHeight >= 156);
@@ -155,8 +157,45 @@ try {
   await remote.getByRole('button', { name: '收起清单：探索 ai native 的工作方式', exact: true }).click();
   await expect.poll(windowHeight).toBe(compactHeight);
 
+  // CDP clicks target a renderer directly and miss sibling-view drag-region
+  // interception. Exercise the actual OS pointer and real popup first.
+  const nativeInput = createNativeInput(data);
+  const clickNativeControl = async (rightInset) => {
+    const bounds = await application.evaluate(({ app, BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      app.focus({ steal: true });
+      window.focus();
+      return window.getContentBounds();
+    });
+    nativeInput.click(bounds.x + bounds.width - rightInset, bounds.y + 22);
+  };
+  const pinned = (await getState()).settings.alwaysOnTop;
+  await clickNativeControl(66);
+  await expect.poll(async () => (await getState()).settings.alwaysOnTop).toBe(!pinned);
+  await clickNativeControl(66);
+  await expect.poll(async () => (await getState()).settings.alwaysOnTop).toBe(pinned);
+
+  await application.evaluate(({ Menu }) => {
+    const originalPopup = Menu.prototype.popup;
+    globalThis.__nativeMenuLifecycle = { shown: 0, closed: 0 };
+    Menu.prototype.popup = function (options) {
+      this.once('menu-will-show', () => { globalThis.__nativeMenuLifecycle.shown += 1; });
+      this.once('menu-will-close', () => { globalThis.__nativeMenuLifecycle.closed += 1; });
+      return originalPopup.call(this, options);
+    };
+  });
+  for (let opening = 1; opening <= 2; opening += 1) {
+    await clickNativeControl(22);
+    await expect.poll(async () => (await getState()).menuOpen).toBe(true);
+    await expect.poll(() => application.evaluate(() => globalThis.__nativeMenuLifecycle.shown)).toBe(opening);
+    nativeInput.escape();
+    await expect.poll(async () => (await getState()).menuOpen).toBe(false);
+    await expect.poll(() => application.evaluate(() => globalThis.__nativeMenuLifecycle.closed)).toBe(opening);
+  }
+
   await application.evaluate(({ Menu, shell }) => {
-    // Keep real menu construction/actions, replacing only OS presentation.
+    // Native presentation was tested above. Inspect later actions without
+    // depending on platform-specific menu row positions or fonts.
     Menu.prototype.popup = function (options) {
       globalThis.__miniSmokeMenu = this;
       options?.callback?.();
@@ -279,7 +318,7 @@ try {
   await remote.emulateMedia({ reducedMotion: 'reduce' });
   assert.equal(await remote.locator('.mini-row').first().evaluate((element) => getComputedStyle(element).transitionDuration), '0s');
   assert.deepEqual(pageErrors, []);
-  console.log('Actual SPA + Electron smoke passed: fresh login preserves sticker mode, single toolbar, adaptive height, opaque system text, background alpha, scroll, plan menu, drawer, narrow layout and remote isolation.');
+  console.log('Actual SPA + Electron smoke passed: native pointer pin/More clicks, real popup open/Escape/reopen, fresh login preserves sticker mode, single toolbar, adaptive height, opaque system text, background alpha, scroll, plan menu, drawer, narrow layout and remote isolation.');
 } catch (error) {
   console.error('Mini UI smoke diagnostic:', {
     remoteUrl: remote?.url(), pageErrors,
