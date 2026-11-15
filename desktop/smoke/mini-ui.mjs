@@ -53,7 +53,12 @@ const controlsVisible = () => application.evaluate(({ BrowserWindow }) => Browse
 async function findPage(predicate) {
   let found;
   await expect.poll(() => {
-    found = application.windows().find((page) => !page.isClosed() && predicate(new URL(page.url()), page));
+    found = application.windows().find((page) => {
+      // A newly created remote view briefly has an empty URL during refresh.
+      // Keep polling until navigation begins instead of failing the smoke.
+      const url = page.url();
+      return !page.isClosed() && URL.canParse(url) && predicate(new URL(url), page);
+    });
     return Boolean(found);
   }).toBe(true);
   found.setDefaultTimeout(15_000);
