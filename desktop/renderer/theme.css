@@ -1,0 +1,10 @@
+/* Generated from web_ui/frontend/src/theme.ts by npm run prepare:theme. */
+:root {
+  --sticker-bg: #0f1930;
+  --sticker-panel: #101d30;
+  --sticker-card: #16263d;
+  --sticker-text: #f2ede0;
+  --sticker-dim: #b0a78c;
+  --sticker-gold: #dcae55;
+  --sticker-gold-text: #eac57e;
+}

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'" />
+    <title>nblane 贴纸</title>
+    <link rel="stylesheet" href="./theme.css" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <header class="toolbar" aria-label="贴纸窗口">
+      <div id="toolbar-default" class="toolbar-layout">
+        <div class="brand" title="拖动这里移动贴纸">
+          <svg class="brand-mark" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" /><path d="M6.5 13V7l7 6V7" /></svg>
+          <span id="toolbar-message" aria-live="polite">nblane</span>
+        </div>
+        <div class="toolbar-actions">
+          <button id="pin-button" class="icon-button pin-button" type="button" aria-label="始终置顶" aria-pressed="true" title="已置顶 · 点击取消">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 5 5-4 1-4 4-1 5-3-3-5 5 5-5-3-3 5-1 4-4z" /></svg>
+            <span id="pin-label" aria-hidden="true">已置顶</span>
+          </button>
+          <button id="opacity-button" class="icon-button" type="button" aria-label="调整透明度" aria-expanded="false" aria-controls="toolbar-opacity" title="调整透明度">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 4v16M12 4a8 8 0 0 1 0 16" class="icon-half" /></svg>
+          </button>
+          <button id="settings-button" class="icon-button" type="button" aria-label="贴纸设置" title="贴纸设置">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9m4 0h3M4 17h3m4 0h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></svg>
+          </button>
+          <button id="hide-button" class="icon-button" type="button" aria-label="隐藏到菜单栏" title="隐藏到菜单栏">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
+          </button>
+        </div>
+      </div>
+      <div id="toolbar-opacity" class="opacity-toolbar" hidden>
+        <label for="toolbar-opacity-range">不透明度</label>
+        <input id="toolbar-opacity-range" class="opacity-range" type="range" min="40" max="100" step="1" value="100" aria-describedby="opacity-description" />
+        <output id="toolbar-opacity-value" for="toolbar-opacity-range">100%</output>
+        <button id="opacity-restore" class="text-button" type="button" title="恢复不透明">恢复</button>
+        <button id="opacity-close" class="icon-button" type="button" aria-label="完成透明度调整" title="完成">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
+        </button>
+      </div>
+    </header>
+
+    <main id="settings-screen" class="settings-screen" hidden>
+      <h1 id="settings-heading">连接你的档案</h1>
+      <p class="intro">把今日任务和日课留在桌面上。</p>
+      <form id="settings-form">
+        <fieldset id="settings-fields">
+          <div class="field">
+            <label for="server-url">网站地址</label>
+            <input id="server-url" name="serverUrl" type="url" value="https://www.nblane.cloud" placeholder="https://www.nblane.cloud" required spellcheck="false" autocomplete="url" autocapitalize="off" />
+          </div>
+          <div class="field">
+            <label for="profile">档案名称</label>
+            <input id="profile" name="profile" type="text" placeholder="与网页中的档案名称一致" maxlength="128" required autocomplete="off" />
+          </div>
+          <div id="settings-opacity-field" class="field opacity-field">
+            <div class="field-label-row">
+              <label for="settings-opacity-range">窗口不透明度</label>
+              <output id="settings-opacity-value" for="settings-opacity-range">100%</output>
+            </div>
+            <input id="settings-opacity-range" class="opacity-range" type="range" min="40" max="100" step="1" value="100" aria-describedby="opacity-description" />
+            <p id="opacity-description" class="hint">数值越低越透明，文字也会一起变淡。</p>
+          </div>
+          <div class="pin-setting">
+            <label class="checkbox-field" for="always-on-top">
+              <input id="always-on-top" type="checkbox" role="switch" checked aria-describedby="pin-description" />
+              <span>始终置顶</span>
+            </label>
+            <p id="pin-description" class="hint">切换应用时仍显示在普通窗口上方，立即生效。</p>
+          </div>
+          <label class="checkbox-field" for="launch-at-login">
+            <input id="launch-at-login" name="launchAtLogin" type="checkbox" />
+            <span>登录 Mac 时打开贴纸</span>
+          </label>
+          <p id="login-unavailable" class="hint" hidden>安装到 Mac 后可设置开机启动。</p>
+          <p class="hint login-hint">首次连接需要在贴纸里登录一次，之后会记住登录状态。</p>
+          <p id="settings-error" class="inline-error" role="alert" hidden></p>
+          <div class="form-actions">
+            <button id="save-settings" class="primary-button" type="submit">连接档案</button>
+            <button id="cancel-settings" class="secondary-button" type="button" hidden>返回贴纸</button>
+          </div>
+        </fieldset>
+      </form>
+      <footer class="settings-footer">
+        <button id="settings-open-browser" class="text-button" type="button" hidden>在浏览器打开</button>
+        <span id="version" class="hint"></span>
+      </footer>
+    </main>
+
+    <section id="content-status" class="content-status" aria-live="polite">
+      <div id="loading-mark" class="loading-mark" aria-hidden="true"></div>
+      <h1 id="status-heading">正在打开贴纸</h1>
+      <p id="status-description" class="hint"></p>
+      <div id="status-actions" class="status-actions" hidden>
+        <button id="retry-button" class="primary-button" type="button">重新连接</button>
+        <button id="status-settings-button" class="secondary-button" type="button">检查设置</button>
+      </div>
+    </section>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "nblane-sticker",
+  "productName": "nblane Sticker",
+  "version": "0.1.3",
+  "description": "A persistent macOS task sticker for nblane",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "prepare:theme": "node scripts/theme.mjs",
+    "start": "npm run prepare:theme && electron .",
+    "test": "node --test test/*.test.cjs",
+    "test:smoke": "node smoke/run.mjs",
+    "package:mac": "node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "45.3.2"
+  }
+}

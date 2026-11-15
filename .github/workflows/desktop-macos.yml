@@ -1,0 +1,71 @@
+name: macOS Sticker
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'codex/sticker-downloads'
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-macos.yml'
+      - 'src/nblane/web_ui/frontend/src/theme.ts'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-macos.yml'
+      - 'src/nblane/web_ui/frontend/src/theme.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Check native build architecture
+        env:
+          STICKER_ARCH: ${{ matrix.arch }}
+        run: node -e "require('node:assert/strict').equal(process.platform, 'darwin'); require('node:assert/strict').equal(process.arch, process.env.STICKER_ARCH)"
+      - run: npm ci --prefix desktop --no-audit --no-fund
+      - run: npm run prepare:theme --prefix desktop
+      - run: git diff --exit-code -- desktop/renderer/theme.css desktop/lib/theme.cjs
+      - run: npm test --prefix desktop
+      - run: npm ci --no-audit --no-fund
+      - run: npm run package:mac --prefix desktop -- --arch=${{ matrix.arch }}
+      - name: Verify and launch the archived app
+        env:
+          STICKER_ARCH: ${{ matrix.arch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node --print "require('./desktop/package.json').version")"
+          product_name="$(node --print "require('./desktop/package.json').productName")"
+          archive="$GITHUB_WORKSPACE/dist/desktop/nblane-sticker-${version}-mac-${STICKER_ARCH}.zip"
+          verify_dir="$(mktemp -d "$RUNNER_TEMP/nblane-sticker-verify.XXXXXX")"
+          trap 'rm -rf "$verify_dir"' EXIT
+          /usr/bin/ditto -x -k "$archive" "$verify_dir"
+          app="$verify_dir/$product_name.app"
+          /usr/bin/codesign --verify --deep --strict --verbose=4 "$app"
+          npm run test:smoke --prefix desktop -- "--app=$app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nblane-sticker-mac-${{ matrix.arch }}
+          path: |
+            dist/desktop/*.zip
+            dist/desktop/*.sha256
+          if-no-files-found: error
+          retention-days: 14
