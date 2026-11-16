@@ -213,7 +213,7 @@ try {
   nativeInput.escape();
   await expect.poll(async () => (await getState()).opacityEditor).toBe(false);
   await expect(controls.locator('#toolbar-opacity-range')).toBeHidden();
-  await clickNativeControl(90);
+  await clickNativeControl('#settings-button');
   await expect(toolbar.locator('#settings-screen')).toBeVisible();
   await expect(toolbar.locator('#settings-opacity-range')).toHaveValue('10');
   await expect(toolbar.locator('#refresh-button')).toBeDisabled();
@@ -230,7 +230,7 @@ try {
   assert.equal((await getState()).settings.refreshIntervalSeconds, 30);
   assert.equal(new URL(remote.url()).searchParams.get('refresh'), '30');
   const beforeRefresh = remote;
-  await clickNativeControl(162);
+  await clickNativeControl('#refresh-button');
   await waitForMini(beforeRefresh);
 
   await application.evaluate(({ Menu, shell }) => {

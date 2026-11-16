@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-11-16
+last_verified: 2026-11-17
 source_of_truth: true
 ---
 
@@ -93,7 +93,7 @@ NBLANE_STICKER_RCODESIGN=/absolute/path/to/rcodesign \
 3. 校验并生成下载清单：
 
    ```bash
-   node desktop/scripts/release-manifest.mjs --dir=/path/to/artifacts --version=0.1.5 --out=/path/to/latest.json
+   node desktop/scripts/release-manifest.mjs --dir=/path/to/artifacts --version=0.1.6 --out=/path/to/latest.json
    ```
 
    此命令检查文件名和摘要，不代替原生验签或证明产物来源。必须先核实成功的工作流及其提交。
