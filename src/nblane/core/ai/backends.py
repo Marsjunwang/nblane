@@ -731,6 +731,11 @@ def _run_crystallize_ingest(
             "model_timeout_seconds",
         ),
         model=model,
+        max_retries=_nonnegative_int_override(
+            payload,
+            "llm_max_retries",
+            "max_retries",
+        ),
     )
     backend_name = (
         "local_codex_readonly" if ai_backend == "codex" else "direct_llm"

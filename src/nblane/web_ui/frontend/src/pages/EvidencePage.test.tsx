@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
@@ -162,7 +162,7 @@ const SUGGESTIONS = {
 };
 
 function stubFetch(
-  intercept?: (url: string, init?: RequestInit) => Response | null,
+  intercept?: (url: string, init?: RequestInit) => Response | Promise<Response> | null,
 ) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -231,9 +231,37 @@ function renderPage(route = '/p/alice/evidence') {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+
+function controlledJobStream() {
+  class JobEventSource {
+    static instances: JobEventSource[] = [];
+    listeners: Record<string, ((event: Event) => void)[]> = {};
+    closed = false;
+    constructor(public url: string) { JobEventSource.instances.push(this); }
+    addEventListener(type: string, listener: (event: Event) => void) {
+      (this.listeners[type] ??= []).push(listener);
+    }
+    emit(type: string, payload: unknown) {
+      // Deliver even after close to model an already queued browser callback.
+      const event = new MessageEvent(type, { data: JSON.stringify(payload) });
+      for (const listener of this.listeners[type] ?? []) listener(event);
+    }
+    close() { this.closed = true; }
+  }
+  vi.stubGlobal('EventSource', JobEventSource);
+  return JobEventSource;
+}
+
+async function openDraftStep(ids = ['taskA']) {
+  fireEvent.click(await screen.findByTestId('open-crystallize-wizard'));
+  for (const id of ids) fireEvent.click(await screen.findByTestId(`wizard-pick-${id}`));
+  fireEvent.click(screen.getByRole('button', { name: /下一步/ }));
+  await screen.findByTestId('wizard-ai-draft');
+}
 
 describe('EvidencePage', () => {
   // Fixture evidence is unrated, so accepting asks first; default to yes.
@@ -469,6 +497,170 @@ describe('EvidencePage', () => {
     fireEvent.click(within(alert).getByTestId('wizard-degrade-rule'));
     // Rule fallback lands on the grading step with the draft visible.
     expect(await screen.findByTestId('wizard-row-0')).toBeInTheDocument();
+  });
+
+  it.each([
+    { budget: 300, finishAt: 250_000, label: 'server-advertised budget' },
+    { budget: undefined, finishAt: 142_000, label: 'legacy per-task budget' },
+  ])('keeps a multi-task AI draft alive past 130 seconds with $label', async ({ budget, finishAt }) => {
+    const Stream = controlledJobStream();
+    const fetchMock = stubFetch((url) => {
+      if (url.includes('/crystallize/candidates')) return jsonResponse(200, {
+        ...CANDIDATES,
+        items: [...CANDIDATES.items, { ...CANDIDATES.items[0], id: 'taskB', title: 'Second task' }],
+      });
+      if (url.includes('/crystallize/draft')) return jsonResponse(202, {
+        job_id: 'job-batch',
+        job: { job_id: 'job-batch', status: 'queued', timeout_seconds: budget },
+      });
+      return null;
+    });
+    renderPage();
+    await openDraftStep(['taskA', 'taskB']);
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByTestId('wizard-ai-draft'));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(Stream.instances).toHaveLength(1);
+    await act(() => vi.advanceTimersByTimeAsync(78_000));
+    act(() => Stream.instances[0].emit('progress', { event: { phase: 'drafting', message: 'AI 正在生成第 2/2 个任务' } }));
+    await act(() => vi.advanceTimersByTimeAsync(finishAt - 78_000));
+    expect(screen.getByTestId('wizard-progress')).toHaveTextContent('第 2/2');
+    expect(screen.queryByTestId('wizard-ai-error')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+    await act(async () => Stream.instances[0].emit('done', { result: { ...DRAFT, backend: 'llm' } }));
+    expect(screen.getByTestId('wizard-row-0')).toBeInTheDocument();
+    expect(screen.queryByTestId('wizard-progress')).not.toBeInTheDocument();
+  });
+
+  it('recovers a completed draft by polling when the terminal stream frame is lost', async () => {
+    const Stream = controlledJobStream();
+    const fetchMock = stubFetch((url, init) => {
+      if (url.endsWith('/jobs/job-test1') && (!init?.method || init.method === 'GET')) {
+        return jsonResponse(200, { job: { job_id: 'job-test1', status: 'done' }, result: { ...DRAFT, backend: 'llm' } });
+      }
+      return null;
+    });
+    renderPage();
+    await openDraftStep();
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByTestId('wizard-ai-draft'));
+    await act(() => vi.advanceTimersByTimeAsync(150_000));
+    expect(screen.getByTestId('wizard-row-0')).toBeInTheDocument();
+    expect(Stream.instances[0].closed).toBe(true);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+  });
+
+  it('does not revive a timed-out draft from late cancellation frames and allows retry', async () => {
+    const Stream = controlledJobStream();
+    const fetchMock = stubFetch((url, init) => {
+      if (url.endsWith('/jobs/job-test1')) return jsonResponse(200, {
+        job: { job_id: 'job-test1', status: init?.method === 'DELETE' ? 'failed' : 'running',
+          error: init?.method === 'DELETE' ? { code: 'job_cancelled', message: '已取消。' } : null },
+      });
+      return null;
+    });
+    renderPage();
+    await openDraftStep();
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByTestId('wizard-ai-draft'));
+    await act(() => vi.advanceTimersByTimeAsync(150_000));
+    expect(screen.getByTestId('wizard-ai-error')).toHaveTextContent('等待超时');
+    const oldStream = Stream.instances[0];
+    expect(oldStream.closed).toBe(true);
+    await act(async () => oldStream.emit('error', { error: { code: 'job_cancelled', message: '已取消。' } }));
+    expect(screen.queryByTestId('wizard-progress')).not.toBeInTheDocument();
+    expect(screen.getByTestId('wizard-retry-ai')).toBeEnabled();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('wizard-retry-ai'));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(Stream.instances).toHaveLength(2);
+    await act(async () => oldStream.emit('done', { result: DRAFT }));
+    expect(screen.queryByTestId('wizard-row-0')).not.toBeInTheDocument();
+    await act(async () => Stream.instances[1].emit('done', { result: { ...DRAFT, backend: 'llm' } }));
+    expect(screen.getByTestId('wizard-row-0')).toBeInTheDocument();
+  });
+
+  it('can switch to a rule draft during AI generation without late AI output replacing it', async () => {
+    const Stream = controlledJobStream();
+    const fetchMock = stubFetch((url) => url.endsWith('/jobs/job-test1')
+      ? jsonResponse(200, { job: { job_id: 'job-test1', status: 'running', cancel_requested: true } }) : null);
+    renderPage();
+    await openDraftStep();
+    fireEvent.click(screen.getByTestId('wizard-ai-draft'));
+    await waitFor(() => expect(Stream.instances).toHaveLength(1));
+    expect(screen.getByTestId('wizard-rule-draft')).toHaveTextContent('改用规则草稿');
+    fireEvent.click(screen.getByTestId('wizard-rule-draft'));
+    expect(await screen.findByTestId('wizard-row-0')).toBeInTheDocument();
+    expect(Stream.instances[0].closed).toBe(true);
+    await act(async () => Stream.instances[0].emit('done', { result: {
+      ...DRAFT, patch: { evidence_entries: [{ title: 'Obsolete AI draft' }] },
+    } }));
+    expect(screen.queryByText('Obsolete AI draft')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
+  });
+
+  it.each(['success', 'failure'])('ignores a late AI creation %s after closing and reopening the wizard', async (outcome) => {
+    const Stream = controlledJobStream();
+    let resolveCreate!: (response: Response) => void;
+    const pendingCreate = new Promise<Response>((resolve) => { resolveCreate = resolve; });
+    const fetchMock = stubFetch((url, init) => {
+      if (url.includes('/crystallize/draft') && JSON.parse(String(init?.body ?? '{}')).use_llm) return pendingCreate;
+      if (url.endsWith('/jobs/late-job')) return jsonResponse(200, { job: { status: 'failed' } });
+      return null;
+    });
+    renderPage();
+    await openDraftStep();
+    fireEvent.click(screen.getByTestId('wizard-ai-draft'));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/crystallize/draft'))).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: '关闭结晶向导' }));
+    await openDraftStep();
+    await act(async () => resolveCreate(outcome === 'success'
+      ? jsonResponse(202, { job_id: 'late-job', job: { job_id: 'late-job', status: 'queued' } })
+      : jsonResponse(500, { message: 'Obsolete creation error' })));
+    expect(Stream.instances).toHaveLength(0);
+    expect(screen.queryByTestId('wizard-progress')).not.toBeInTheDocument();
+    expect(screen.queryByText('Obsolete creation error')).not.toBeInTheDocument();
+    expect(screen.getByTestId('wizard-ai-draft')).toBeEnabled();
+    expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith('/jobs/late-job') && init?.method === 'DELETE'))
+      .toHaveLength(outcome === 'success' ? 1 : 0);
+  });
+
+  it('stops waiting without letting cancellation progress restore the spinner', async () => {
+    const Stream = controlledJobStream();
+    stubFetch((url) => url.endsWith('/jobs/job-test1')
+      ? jsonResponse(200, { job: { status: 'running', cancel_requested: true } }) : null);
+    renderPage();
+    await openDraftStep();
+    fireEvent.click(screen.getByTestId('wizard-ai-draft'));
+    await waitFor(() => expect(Stream.instances).toHaveLength(1));
+    fireEvent.click(screen.getByTestId('wizard-stop-ai'));
+    await act(async () => Stream.instances[0].emit('progress', { event: { phase: 'failed', message: '已取消。' } }));
+    expect(screen.queryByTestId('wizard-progress')).not.toBeInTheDocument();
+    expect(screen.getByText('已停止等待 AI 草稿。')).toBeInTheDocument();
+    expect(screen.getByTestId('wizard-ai-draft')).toBeEnabled();
+  });
+
+  it('requests cancellation if stream recovery gives up before a batch finishes', async () => {
+    const Stream = controlledJobStream();
+    const fetchMock = stubFetch((url, init) => {
+      if (url.includes('/crystallize/draft')) return jsonResponse(202, {
+        job_id: 'job-test1', job: { job_id: 'job-test1', status: 'queued', timeout_seconds: 300 },
+      });
+      if (url.endsWith('/jobs/job-test1')) return init?.method === 'DELETE'
+        ? jsonResponse(200, { job: { status: 'running', cancel_requested: true } })
+        : jsonResponse(503, { message: 'Temporary network failure' });
+      return null;
+    });
+    renderPage();
+    await openDraftStep();
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByTestId('wizard-ai-draft'));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    act(() => Stream.instances[0].emit('error', null));
+    await act(() => vi.advanceTimersByTimeAsync(140_000));
+    expect(screen.getByTestId('wizard-ai-error')).toHaveTextContent('连接中断');
+    expect(screen.queryByTestId('wizard-progress')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
   });
 
   it('candidate cards open an inscription card with snapshot preview', async () => {

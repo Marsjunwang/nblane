@@ -1038,24 +1038,99 @@ class TestCrystallizeJobKind(unittest.TestCase):
             )
         self.assertEqual(run.call_args.args[1]["llm_max_retries"], 0)
 
-    def test_job_records_task_count_for_timeout(self) -> None:
-        with patch.object(
-            jobs_module._KINDS[jobs_module.KIND_EVIDENCE_CRYSTALLIZE],
-            "run",
-            return_value={"ok": True},
-        ):
+    def test_job_counts_mixed_selection_and_publishes_deadline(self) -> None:
+        from nblane.web_api.schemas import JobModel
+
+        # Keep the job queued so creation, polling and the watchdog can be
+        # compared without a worker racing this synthetic clock boundary.
+        with patch("nblane.web_api.jobs.threading.Thread.start"):
             snapshot = jobs_module.create_job(
                 "alice",
                 jobs_module.KIND_EVIDENCE_CRYSTALLIZE,
-                {"task_ids": ["taskA", "taskB"], "titles": []},
+                {
+                    "task_ids": ["taskA", " taskA ", "taskB", " "],
+                    "titles": ["legacy task", " legacy task ", ""],
+                },
             )
-        job = jobs_module._JOBS[snapshot["job_id"]]
-        self.assertEqual(job["_task_count"], 2)
-        self.assertEqual(jobs_module._job_timeout(job), 180.0)
-        job["status"] = "running"
-        job["started_at"] = time.time() - 181
-        jobs_module._mark_timeout_locked(snapshot["job_id"], time.time())
-        self.assertIn("180 秒", job["_cancel_message"])
+        try:
+            job = jobs_module._JOBS[snapshot["job_id"]]
+            self.assertEqual(job["_task_count"], 3)
+            self.assertEqual(jobs_module._job_timeout(job), 300.0)
+            self.assertEqual(snapshot["timeout_seconds"], 300.0)
+            self.assertEqual(JobModel(**snapshot).timeout_seconds, 300.0)
+            polled = jobs_module.read_job(snapshot["job_id"])
+            self.assertEqual(polled["snapshot"]["timeout_seconds"], 300.0)
+            job["status"] = "running"
+            job["started_at"] = time.time() - 291
+            jobs_module._mark_timeout_locked(snapshot["job_id"], time.time())
+            self.assertFalse(job["cancel_requested"], "Batch processing has 30 seconds of headroom")
+            job["started_at"] = time.time() - 301
+            jobs_module._mark_timeout_locked(snapshot["job_id"], time.time())
+            self.assertIn("300 秒", job["_cancel_message"])
+        finally:
+            jobs_module._JOBS.pop(snapshot["job_id"], None)
+
+    def test_cancel_or_timeout_during_first_task_prevents_second_call(self) -> None:
+        import threading
+        from nblane.core.kanban_io import render_kanban
+        from nblane.core.models import KanbanTask
+
+        for stop_code in ("job_cancelled", "job_timeout"):
+            with self.subTest(stop_code=stop_code), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                profile = _write_profile(root)
+                tasks = [
+                    KanbanTask(title="Task A", id="taskA", done=True),
+                    KanbanTask(title="Task B", id="taskB", done=True),
+                ]
+                (profile / "kanban.md").write_text(
+                    render_kanban("alice", {"Done": tasks}), encoding="utf-8"
+                )
+                started = threading.Event()
+                release = threading.Event()
+
+                def draft(_profile, selected, **kwargs):
+                    started.set()
+                    if not release.wait(5):
+                        raise AssertionError("Test did not release the isolated model call")
+                    return AIActionResult(
+                        ok=True,
+                        action="evidence.crystallize",
+                        backend="direct_llm",
+                        run_id="run-test",
+                        structured={"evidence_entries": [], "node_updates": []},
+                    )
+
+                with (
+                    patch("nblane.core.profile_io.PROFILES_DIR", root),
+                    patch("nblane.core.io.PROFILES_DIR", root),
+                    patch("nblane.core.ai.gateway.crystallize_done_tasks", side_effect=draft) as run,
+                ):
+                    snapshot = jobs_module.create_job(
+                        "alice", jobs_module.KIND_EVIDENCE_CRYSTALLIZE,
+                        {"task_ids": ["taskA", "taskB"], "titles": []},
+                    )
+                    job_id = snapshot["job_id"]
+                    job = jobs_module._JOBS[job_id]
+                    try:
+                        self.assertTrue(started.wait(2))
+                        if stop_code == "job_cancelled":
+                            self.assertTrue(jobs_module.cancel_job(job_id))
+                        else:
+                            with jobs_module._LOCK:
+                                job["started_at"] = time.time() - 211
+                                jobs_module._mark_timeout_locked(job_id, time.time())
+                        release.set()
+                        self.assertTrue(job["_finished_event"].wait(2))
+                        final = jobs_module.read_job(job_id)
+                        self.assertEqual(final["snapshot"]["error"]["code"], stop_code)
+                        self.assertIsNone(final["result"])
+                        self.assertEqual(run.call_count, 1)
+                        self.assertEqual(run.call_args.args[1][0].id, "taskA")
+                    finally:
+                        release.set()
+                        job["_finished_event"].wait(5)
+                        jobs_module._JOBS.pop(job_id, None)
 
 
 if __name__ == "__main__":

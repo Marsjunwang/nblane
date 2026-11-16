@@ -91,6 +91,7 @@ class TestProfileIngestLlm(unittest.TestCase):
         self.assertEqual(patch_json, {"evidence_entries": [], "node_updates": []})
         self.assertEqual(chat.call_args.kwargs["timeout"], 222.0)
         self.assertEqual(chat.call_args.kwargs["max_tokens"], 333)
+        self.assertIsNone(chat.call_args.kwargs["max_retries"])
         max_tokens.assert_called_once_with(1)
 
     def test_kanban_done_ingest_can_use_codex_without_llm_config(self) -> None:

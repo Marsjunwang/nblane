@@ -5537,6 +5537,11 @@
       "title": "Status",
       "type": "string"
      },
+     "timeout_seconds": {
+      "default": 0.0,
+      "title": "Timeout Seconds",
+      "type": "number"
+     },
      "write_committed": {
       "default": false,
       "title": "Write Committed",

@@ -123,6 +123,40 @@ class TestAIGateway(unittest.TestCase):
         self.assertEqual(ingest.call_args.kwargs["timeout_seconds"], 12.0)
         self.assertEqual(ingest.call_args.kwargs["ai_backend"], "llm")
 
+    def test_crystallize_retry_budget_reaches_the_actual_chat_call(self) -> None:
+        """The special ingest path must not restore the SDK's default retries."""
+        from nblane.core.models import KanbanTask
+
+        spec = get_action_spec("evidence.crystallize")
+        request = AIActionRequest(
+            action="evidence.crystallize",
+            profile="alice",
+            payload={
+                "done_tasks": [KanbanTask(title="Test completion", id="task-1")],
+                "timeout_seconds": 90,
+                "llm_max_retries": 0,
+            },
+        )
+        with (
+            patch("nblane.core.profile_ingest_llm.llm_client.is_configured", return_value=True),
+            patch(
+                "nblane.core.profile_ingest_llm._load_schema_index_for_profile",
+                return_value=("test", {"skill": {"label": "Test skill"}}),
+            ),
+            patch("nblane.core.profile_ingest_llm.load_evidence_pool_raw", return_value={}),
+            patch("nblane.core.profile_ingest_llm.load_skill_tree_raw", return_value={}),
+            patch(
+                "nblane.core.profile_ingest_llm.llm_client.chat",
+                return_value='{"evidence_entries": [], "node_updates": []}',
+            ) as chat,
+        ):
+            result = DirectLLMBackend().run(request, spec)  # type: ignore[arg-type]
+
+        self.assertTrue(result.ok)
+        chat.assert_called_once()
+        self.assertEqual(chat.call_args.kwargs["max_retries"], 0)
+        self.assertEqual(chat.call_args.kwargs["timeout"], 90.0)
+
     def _crystallize(self, tasks: list[str], entries: list[dict]):
         spec = get_action_spec("evidence.crystallize")
         request = AIActionRequest(

@@ -145,7 +145,7 @@ class JobKind:
 
 _JOB_CLASSIFICATIONS: dict[str, tuple[str, str, tuple[str, ...], bool]] = {
     "project-suggest-refs": ("draft", "ai.draft", (), False),
-    "evidence-crystallize": ("draft", "ai.draft", (), False),
+    "evidence-crystallize": ("draft", "ai.draft", (), True),
     "content-rewrite": ("draft", "ai.draft", (), False),
     "content-meta": ("draft", "ai.draft", (), False),
     "content-social": ("draft", "ai.draft", (), False),
@@ -268,6 +268,8 @@ def _snapshot(job: dict[str, Any]) -> dict[str, Any]:
         for key, value in job.items()
         if not str(key).startswith("_") and key not in {"result", "events"}
     }
+    # Publish the same server budget used by the watchdog, including batches.
+    snapshot["timeout_seconds"] = _job_timeout(job)
     started = job.get("_started_monotonic")
     finished = job.get("_finished_monotonic")
     if isinstance(started, (int, float)) and float(started) > 0:
@@ -565,7 +567,7 @@ def create_job(
         "_profile_scope": _scope_key(profile_scope),
         "kind": clean_kind,
         "_task_count": (
-            max(1, len(clean_input.get("task_ids") or clean_input.get("titles") or []))
+            max(1, len(clean_input["task_ids"]) + len(clean_input["titles"]))
             if clean_kind == KIND_EVIDENCE_CRYSTALLIZE
             else 1
         ),
@@ -690,7 +692,8 @@ def _job_timeout(job: dict[str, Any]) -> float:
         task_count = max(1, int(job.get("_task_count") or 1))
         return max(
             float(spec.timeout_seconds),
-            _CRYSTALLIZE_LLM_TIMEOUT_SECONDS * task_count,
+            _CRYSTALLIZE_LLM_TIMEOUT_SECONDS * task_count
+            + _CRYSTALLIZE_PROCESSING_HEADROOM_SECONDS,
         )
     if spec and spec.timeout_seconds and spec.timeout_seconds > 0:
         return float(spec.timeout_seconds)
@@ -798,12 +801,12 @@ def _validate_crystallize_input(job_input: dict[str, Any]) -> dict[str, Any]:
     task_ids = [
         _clean(item) for item in (raw_ids if isinstance(raw_ids, list) else [])
     ]
-    task_ids = [item for item in task_ids if item]
+    task_ids = list(dict.fromkeys(item for item in task_ids if item))
     raw_titles = job_input.get("titles")
     titles = [
         _clean(item) for item in (raw_titles if isinstance(raw_titles, list) else [])
     ]
-    titles = [item for item in titles if item]
+    titles = list(dict.fromkeys(item for item in titles if item))
     if not task_ids and not titles:
         raise JobInputError(
             "empty_selection", "At least one Done task id is required."
@@ -813,6 +816,7 @@ def _validate_crystallize_input(job_input: dict[str, Any]) -> dict[str, Any]:
 
 _CRYSTALLIZE_LLM_TIMEOUT_SECONDS = 90.0
 _CRYSTALLIZE_JOB_TIMEOUT_SECONDS = 120.0
+_CRYSTALLIZE_PROCESSING_HEADROOM_SECONDS = 30.0
 
 
 def _crystallize_friendly_error(err: str) -> str:
@@ -875,6 +879,7 @@ def _run_evidence_crystallize(
     profile: str,
     job_input: dict[str, Any],
     report: Callable[..., None],
+    execution: JobExecutionContext | None = None,
 ) -> dict[str, Any]:
     """Generate and merge one AI draft per selected Done task."""
     from nblane.core import crystallize as crystallize_core
@@ -895,6 +900,8 @@ def _run_evidence_crystallize(
     patches = []
     backends = []
     for index, task in enumerate(tasks, start=1):
+        if execution is not None:
+            execution.checkpoint()
         title = str(getattr(task, "title", "") or getattr(task, "id", "") or f"第 {index} 个任务")
         report(
             phase="drafting",
@@ -906,6 +913,8 @@ def _run_evidence_crystallize(
             timeout_seconds=_CRYSTALLIZE_LLM_TIMEOUT_SECONDS,
             max_retries=0,
         )
+        if execution is not None:
+            execution.checkpoint()
         if not ai_result.ok or not isinstance(ai_result.structured, dict):
             raise JobFailedError(
                 "crystallize_draft_failed",

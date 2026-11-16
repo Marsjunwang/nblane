@@ -49,7 +49,9 @@ import {
   useSetEvidenceSkillLinks,
   useSkillTreeFlat,
 } from '../api/hooks';
-import { followJob } from '../components/content/contentJobs';
+import { ContentJobError, followJob } from '../components/content/contentJobs';
+import type { FollowedJob } from '../components/content/contentJobs';
+import { apiDelete, apiGet } from '../api/client';
 import { MutationErrorAlert } from '../components/ConflictAlert';
 import { InscriptionCard, InscriptionRow } from '../components/InscriptionCard';
 import { inscription, chrome } from '../theme';
@@ -60,6 +62,7 @@ import type {
   EvidenceReviewItem,
   EvidenceStageRisk,
   JobCreateResponse,
+  JobStatusResponse,
 } from '../api/types';
 
 type Stage = 'crystallize' | 'review' | 'unlinked' | 'seated' | 'strengthen' | 'deprecated';
@@ -890,15 +893,29 @@ function CrystallizeWizard({
   const [draftRows, setDraftRows] = useState<DraftRowState[]>([]);
   const [jobPhase, setJobPhase] = useState('');
   const [jobError, setJobError] = useState('');
-  const stopStreamRef = useRef<(() => void) | null>(null);
+  const [draftError, setDraftError] = useState('');
+  const [generationMode, setGenerationMode] = useState<'ai' | 'rule' | null>(null);
+  const generationRef = useRef(0);
+  const activeJobRef = useRef<{
+    path: string;
+    followed: FollowedJob<CrystallizeDraftResponse | null>;
+  } | null>(null);
   const watchdogRef = useRef<number | null>(null);
+  const previousProfileRef = useRef(profile);
 
-  const clearPending = useCallback(() => {
-    stopStreamRef.current?.();
-    stopStreamRef.current = null;
+  const clearPending = useCallback((cancel = true) => {
+    // Invalidate callbacks before asking the server to stop. Cancellation can
+    // itself produce progress frames, which must not revive a closed wizard.
+    generationRef.current += 1;
+    const active = activeJobRef.current;
+    activeJobRef.current = null;
     if (watchdogRef.current !== null) {
       window.clearTimeout(watchdogRef.current);
       watchdogRef.current = null;
+    }
+    active?.followed.detach();
+    if (cancel && active) {
+      void apiDelete(active.path).catch(() => undefined);
     }
   }, []);
 
@@ -910,6 +927,8 @@ function CrystallizeWizard({
     setDraftRows([]);
     setJobPhase('');
     setJobError('');
+    setDraftError('');
+    setGenerationMode(null);
     draftMutation.reset();
     applyMutation.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -925,10 +944,16 @@ function CrystallizeWizard({
   // Never leak a running stream/timer when the modal closes or unmounts.
   useEffect(() => {
     if (!opened) {
-      clearPending();
+      reset();
     }
-  }, [opened, clearPending]);
-  useEffect(() => clearPending, [clearPending]);
+  }, [opened, reset]);
+  useEffect(() => {
+    if (previousProfileRef.current !== profile) {
+      previousProfileRef.current = profile;
+      reset();
+    }
+    return () => clearPending();
+  }, [clearPending, profile, reset]);
 
   const items = useMemo(() => candidates.data?.items ?? [], [candidates.data]);
 
@@ -945,6 +970,9 @@ function CrystallizeWizard({
   };
 
   const adoptDraft = useCallback((payload: CrystallizeDraftResponse) => {
+    clearPending(false);
+    setGenerationMode(null);
+    setJobPhase('');
     setDraft(payload);
     const rows = (payload.patch?.evidence_entries ?? []) as Record<string, unknown>[];
     setDraftRows(
@@ -954,11 +982,12 @@ function CrystallizeWizard({
       })),
     );
     setStep(2);
-  }, []);
+  }, [clearPending]);
 
   const failJob = useCallback(
-    (message: string) => {
-      clearPending();
+    (message: string, cancel = false) => {
+      clearPending(cancel);
+      setGenerationMode(null);
       setJobPhase('');
       setJobError(message);
     },
@@ -966,7 +995,13 @@ function CrystallizeWizard({
   );
 
   const generate = (useLlm: boolean) => {
+    clearPending();
+    const generation = generationRef.current;
+    const isCurrent = () => generationRef.current === generation;
     setJobError('');
+    setDraftError('');
+    setGenerationMode(useLlm ? 'ai' : 'rule');
+    setJobPhase(useLlm ? '排队中…' : '');
     const ids = items
       .filter((task) => picked.has(task.id || task.title))
       .map((task) => task.id)
@@ -974,61 +1009,78 @@ function CrystallizeWizard({
     const titles = items
       .filter((task) => picked.has(task.id || task.title) && !task.id)
       .map((task) => task.title);
-    if (!useLlm) {
-      draftMutation.mutate(
-        { task_ids: ids, titles, use_llm: false },
-        {
-          onSuccess: (payload) => {
-            adoptDraft(payload as CrystallizeDraftResponse);
+    // mutateAsync keeps cleanup attached even if the modal closes or another
+    // mutation replaces this request before the creation response arrives.
+    void draftMutation.mutateAsync({ task_ids: ids, titles, use_llm: useLlm })
+      .then((payload) => {
+        const created = payload as JobCreateResponse;
+        const jobPath = `/profiles/${encodeURIComponent(profile)}/jobs/${encodeURIComponent(created.job_id || '')}`;
+        if (!isCurrent()) {
+          if (useLlm && created.job_id) void apiDelete(jobPath).catch(() => undefined);
+          return;
+        }
+        if (!useLlm) {
+          adoptDraft(payload as CrystallizeDraftResponse);
+          return;
+        }
+        if (!created.job_id) {
+          failJob('AI 草稿任务创建失败；可改用规则草稿。');
+          return;
+        }
+        const acceptResult = (result: CrystallizeDraftResponse | null | undefined) => {
+          if (!isCurrent()) return;
+          if (result && Object.keys(result).length > 0) adoptDraft(result);
+          else failJob('AI 草稿没有返回结果；可改用规则草稿。');
+        };
+        const followed = followJob<CrystallizeDraftResponse | null>(profile, created.job_id, {
+          onProgress: (message, phase) => {
+            if (isCurrent()) setJobPhase(message || phase || '生成中…');
           },
-        },
-      );
-      return;
-    }
-    setJobPhase('排队中…');
-    draftMutation.mutate(
-      { task_ids: ids, titles, use_llm: true },
-      {
-        onSuccess: (payload) => {
-          const job = (payload as JobCreateResponse).job_id;
-          if (!job) {
-            failJob('AI 草稿任务创建失败;可改用规则草稿。');
-            return;
-          }
-          const followed = followJob<CrystallizeDraftResponse | null>(profile, job, {
-            onProgress: (message, phase) => setJobPhase(message || phase || '生成中…'),
-          });
-          // The draft is not persisted: closing the wizard cancels the job.
-          stopStreamRef.current = followed.cancel;
-          // Last-resort watchdog: the backend caps the job at 120s and
-          // followJob re-attaches after a dropped stream, so only a stream
-          // that stays silent past 130s lands here.
-          watchdogRef.current = window.setTimeout(() => {
-            failJob('AI 草稿等待超时;请重试,或改用规则草稿(立等可取)。');
-          }, 130_000);
-          followed.result
-            .then((result) => {
-              if (stopStreamRef.current !== followed.cancel) return;
-              stopStreamRef.current = null;
-              clearPending();
-              if (result && Object.keys(result).length > 0) {
-                adoptDraft(result);
-              } else {
-                failJob('AI 草稿没有返回结果;可改用规则草稿。');
-              }
-            })
-            .catch((error: unknown) => {
-              if (stopStreamRef.current !== followed.cancel) return;
-              stopStreamRef.current = null;
-              const message = error instanceof Error ? error.message : String(error);
-              failJob(`AI 草稿失败:${message};可改用规则草稿。`);
-            });
-        },
-        onError: (error) => {
-          failJob(`AI 草稿任务创建失败:${error.message};可改用规则草稿。`);
-        },
-      },
-    );
+        });
+        activeJobRef.current = { path: jobPath, followed };
+        // The server budgets each selected task separately. Older servers do
+        // not advertise their budget; allow the same per-task work plus cleanup.
+        const serverBudget = created.job?.timeout_seconds ?? 0;
+        const timeoutSeconds = Number.isFinite(serverBudget) && serverBudget > 0
+          ? serverBudget
+          : Math.max(120, 90 * (ids.length + titles.length) + 30);
+        watchdogRef.current = window.setTimeout(() => {
+          if (!isCurrent()) return;
+          setJobPhase('正在确认后台结果…');
+          // A delayed/lost terminal SSE frame must not discard a finished
+          // draft. Reconcile once with the server before timing out locally.
+          const timeout = () => {
+            if (isCurrent()) failJob('AI 草稿等待超时；请重试，或改用规则草稿。', true);
+          };
+          watchdogRef.current = window.setTimeout(timeout, 10_000);
+          void apiGet<JobStatusResponse>(jobPath).then((status) => {
+            if (!isCurrent()) return;
+            if (status.job.status === 'done') {
+              acceptResult(status.result as CrystallizeDraftResponse | null);
+            } else if (status.job.status === 'failed') {
+              failJob(`AI 草稿失败：${status.job.error?.message || '任务未完成'}；可改用规则草稿。`);
+            } else {
+              timeout();
+            }
+          }).catch(timeout);
+        }, (timeoutSeconds + 30) * 1000);
+        void followed.result.then(acceptResult).catch((error: unknown) => {
+          if (!isCurrent()) return;
+          const message = error instanceof Error ? error.message : String(error);
+          failJob(`AI 草稿失败：${message}；可改用规则草稿。`,
+            error instanceof ContentJobError && error.code === 'job_stream_error');
+        });
+      })
+      .catch((error: unknown) => {
+        if (!isCurrent()) return;
+        if (useLlm) {
+          const message = error instanceof Error ? error.message : String(error);
+          failJob(`AI 草稿任务创建失败：${message}；可改用规则草稿。`);
+        } else {
+          setGenerationMode(null);
+          setDraftError(error instanceof Error ? error.message : String(error));
+        }
+      });
   };
 
   const apply = () => {
@@ -1072,7 +1124,8 @@ function CrystallizeWizard({
     );
   };
 
-  const generating = jobPhase !== '';
+  const generating = generationMode === 'ai';
+  const generationPending = generationMode !== null;
 
   return (
     <Modal
@@ -1082,10 +1135,11 @@ function CrystallizeWizard({
         onClose();
       }}
       title="从已完成任务结晶"
+      closeButtonProps={{ 'aria-label': '关闭结晶向导' }}
       size="lg"
       data-testid="crystallize-wizard"
     >
-      <Stepper active={step} onStepClick={setStep} size="sm" mb="md">
+      <Stepper active={step} onStepClick={generationPending ? undefined : setStep} size="sm" mb="md">
         <Stepper.Step label="选 Done 任务" />
         <Stepper.Step label="生成草稿" />
         <Stepper.Step label="评级入库" />
@@ -1150,14 +1204,26 @@ function CrystallizeWizard({
       {step === 1 && (
         <Stack gap="md">
           <Text size="sm" c="dimmed">
-            规则草稿立即生成毛坯(每任务一条,带原文快照);AI 草稿由 LLM 提炼并给出技能建议(最长约 90 秒)。
+            规则草稿立即生成，每个任务一条并保留原文；AI 草稿逐个提炼任务并建议技能，每个任务最多约 90 秒，多任务会依次处理。
           </Text>
           {generating && (
             <Group gap="xs" data-testid="wizard-progress">
               <Loader size="sm" />
               <Text size="sm">{jobPhase}</Text>
+              <Button
+                variant="subtle"
+                onClick={() => {
+                  clearPending();
+                  setGenerationMode(null);
+                  setJobPhase('已停止等待 AI 草稿。');
+                }}
+                data-testid="wizard-stop-ai"
+              >
+                停止等待
+              </Button>
             </Group>
           )}
+          {!generating && jobPhase && <Text size="sm" c="dimmed">{jobPhase}</Text>}
           {jobError && (
             <Alert color="red" title="AI 草稿失败" data-testid="wizard-ai-error">
               <Stack gap="xs">
@@ -1167,6 +1233,7 @@ function CrystallizeWizard({
                     size="compact-sm"
                     variant="default"
                     onClick={() => generate(false)}
+                    disabled={generationPending}
                     data-testid="wizard-degrade-rule"
                   >
                     改用规则草稿
@@ -1175,6 +1242,7 @@ function CrystallizeWizard({
                     size="compact-sm"
                     variant="subtle"
                     onClick={() => generate(true)}
+                    disabled={generationPending}
                     data-testid="wizard-retry-ai"
                   >
                     重试 AI 草稿
@@ -1183,25 +1251,24 @@ function CrystallizeWizard({
               </Stack>
             </Alert>
           )}
-          {draftMutation.isError && !jobError && (
+          {draftError && !jobError && (
             <Alert color="red" title="草稿生成失败">
-              {draftMutation.error.message}
+              {draftError}
             </Alert>
           )}
           <Group>
             <Button
               variant="default"
               onClick={() => generate(false)}
-              loading={draftMutation.isPending && !generating}
-              disabled={generating}
+              loading={generationMode === 'rule'}
               data-testid="wizard-rule-draft"
             >
-              规则草稿
+              {generating ? '改用规则草稿' : '规则草稿'}
             </Button>
             <Button
               leftSection={<IconSparkles size={14} />}
               onClick={() => generate(true)}
-              disabled={generating || draftMutation.isPending}
+              disabled={generationPending}
               data-testid="wizard-ai-draft"
             >
               AI 草稿

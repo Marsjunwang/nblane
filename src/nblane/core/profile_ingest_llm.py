@@ -687,11 +687,14 @@ def ingest_kanban_done_json(
     ai_backend: str = "llm",
     timeout_seconds: float | None = None,
     model: str = "",
+    max_retries: int | None = None,
 ) -> tuple[dict | None, str | None]:
     """Produce ingest JSON from Done tasks.
 
     *timeout_seconds* overrides the default LLM timeout (used by the
     crystallize job, where a wizard is blocking on the reply).
+    *max_retries* is forwarded to the SDK so interactive jobs can disable
+    retries that would otherwise exceed their advertised timeout budget.
     """
     if not done_tasks:
         return None, "no Done tasks selected"
@@ -742,6 +745,7 @@ def ingest_kanban_done_json(
         model=model or None,
         timeout=timeout_seconds or _kanban_done_llm_timeout_seconds(),
         max_tokens=_kanban_done_llm_max_tokens(len(done_tasks)),
+        max_retries=max_retries,
     )
     if reply.startswith("LLM error:") or reply.startswith(
         "AI features not configured"

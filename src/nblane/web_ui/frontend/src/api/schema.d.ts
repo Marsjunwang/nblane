@@ -7693,6 +7693,11 @@ export interface components {
             /** Status */
             status: string;
             /**
+             * Timeout Seconds
+             * @default 0
+             */
+            timeout_seconds: number;
+            /**
              * Write Committed
              * @default false
              */
