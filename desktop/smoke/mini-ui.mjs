@@ -165,19 +165,23 @@ try {
   // CDP clicks target a renderer directly and miss sibling-view drag-region
   // interception. Exercise the actual OS pointer and real popup first.
   const nativeInput = createNativeInput(data);
-  const clickNativeControl = async (rightInset) => {
+  const clickNativeControl = async (selector) => {
+    const button = await controls.locator(selector).boundingBox();
+    assert.ok(button);
     const bounds = await application.evaluate(({ app, BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows()[0];
       app.focus({ steal: true });
       window.focus();
-      return window.getContentBounds();
+      const view = window.contentView.children.find((child) => child.webContents?.getURL().includes("?controls=1"));
+      return { window: window.getContentBounds(), view: view.getBounds() };
     });
-    nativeInput.click(bounds.x + bounds.width - rightInset, bounds.y + 22);
+    nativeInput.click(bounds.window.x + bounds.view.x + button.x + button.width / 2,
+      bounds.window.y + bounds.view.y + button.y + button.height / 2);
   };
   const pinned = (await getState()).settings.alwaysOnTop;
-  await clickNativeControl(54);
+  await clickNativeControl('#pin-button');
   await expect.poll(async () => (await getState()).settings.alwaysOnTop).toBe(!pinned);
-  await clickNativeControl(54);
+  await clickNativeControl('#pin-button');
   await expect.poll(async () => (await getState()).settings.alwaysOnTop).toBe(pinned);
 
   await application.evaluate(({ Menu }) => {
@@ -190,7 +194,7 @@ try {
     };
   });
   for (let opening = 1; opening <= 2; opening += 1) {
-    await clickNativeControl(18);
+    await clickNativeControl('#more-button');
     await expect.poll(async () => (await getState()).menuOpen).toBe(true);
     await expect.poll(() => application.evaluate(() => globalThis.__nativeMenuLifecycle.shown)).toBe(opening);
     nativeInput.escape();
@@ -198,7 +202,7 @@ try {
     await expect.poll(() => application.evaluate(() => globalThis.__nativeMenuLifecycle.closed)).toBe(opening);
   }
 
-  await clickNativeControl(126);
+  await clickNativeControl('#opacity-button');
   await expect.poll(async () => (await getState()).opacityEditor).toBe(true);
   await expect(controls.locator('#toolbar-opacity-range')).toBeVisible();
   await controls.locator('#toolbar-opacity-range').evaluate((input) => {
