@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from nblane.core.models import KanbanTask
 from nblane.core.profile_ingest_llm import (
+    _compact_crystallize_prompts,
     _system_prompt_kanban_en,
     _system_prompt_kanban_zh,
     ingest_kanban_done_json,
@@ -38,6 +39,23 @@ class TestKanbanPromptGrading(unittest.TestCase):
             self.assertIn("skipped_tasks", prompt)
             self.assertIn("already_covered", prompt)
             self.assertIn("too_vague", prompt)
+
+    def test_compact_prompt_keeps_the_review_contract_without_source_duplication(self) -> None:
+        task = KanbanTask(title="Measured delivery", id="task-1", outcome="Latency 40 → 20 ms")
+        for language, legacy in (("zh", _system_prompt_kanban_zh()), ("en", _system_prompt_kanban_en())):
+            with self.subTest(language=language), patch(
+                "nblane.core.profile_ingest_llm.llm_client.reply_language", return_value=language,
+            ):
+                system, user = _compact_crystallize_prompts(
+                    [task], "test", {"planner": {"label": "Planning"}}, "- old: Existing result",
+                )
+                self.assertLess(len(system), len(legacy) / 2)
+                for field in ("source_task_id", "source_excerpt", "strength", "confidence", "skipped_tasks"):
+                    self.assertIn(field, system)
+                self.assertIn("Latency 40 → 20 ms", user)
+                self.assertIn("planner: Planning", user)
+                self.assertIn("old: Existing result", user)
+                self.assertNotIn("Current skill tree", user)
 
 
 class TestProfileIngestLlm(unittest.TestCase):
@@ -93,6 +111,35 @@ class TestProfileIngestLlm(unittest.TestCase):
         self.assertEqual(chat.call_args.kwargs["max_tokens"], 333)
         self.assertIsNone(chat.call_args.kwargs["max_retries"])
         max_tokens.assert_called_once_with(1)
+
+    def test_compact_draft_bounds_output_but_keeps_full_task_input(self) -> None:
+        long_note = "Original measured detail. " * 300
+        with (
+            patch("nblane.core.profile_ingest_llm.llm_client.is_configured", return_value=True),
+            patch("nblane.core.profile_ingest_llm._load_schema_index_for_profile",
+                  return_value=("robotics", {"planner": {"label": "Planning"}})),
+            patch("nblane.core.profile_ingest_llm.load_evidence_pool_raw", return_value={
+                "evidence_entries": [{"id": "old", "title": "Existing outcome"}],
+            }),
+            patch("nblane.core.profile_ingest_llm.load_skill_tree_raw") as tree,
+            patch("nblane.core.profile_ingest_llm.llm_client.chat",
+                  return_value='{"evidence_entries": [], "node_updates": [], "skipped_tasks": []}') as chat,
+        ):
+            result, error = ingest_kanban_done_json(
+                "alice", [KanbanTask(title="Measured delivery", id="task-1", details=[long_note])],
+                compact_draft=True, timeout_seconds=180, max_retries=0,
+            )
+        self.assertIsNone(error)
+        self.assertEqual(result["evidence_entries"], [])
+        tree.assert_not_called()
+        self.assertIn(long_note, chat.call_args.args[1])
+        self.assertIn("old: Existing outcome", chat.call_args.args[1])
+        self.assertIn("planner: Planning", chat.call_args.args[1])
+        self.assertNotIn("Current skill tree", chat.call_args.args[1])
+        self.assertEqual(chat.call_args.kwargs["max_tokens"], 2048)
+        self.assertEqual(chat.call_args.kwargs["max_retries"], 0)
+        self.assertEqual(chat.call_args.kwargs["timeout"], 180)
+        self.assertNotIn("enable_thinking", chat.call_args.kwargs)
 
     def test_kanban_done_ingest_can_use_codex_without_llm_config(self) -> None:
         """Codex backend bypasses LLM config and returns parsed JSON."""

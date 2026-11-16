@@ -771,9 +771,9 @@ class TestCrystallizeJobKind(unittest.TestCase):
 
     def test_kind_timeout_overrides_global(self) -> None:
         spec = jobs_module._KINDS[jobs_module.KIND_EVIDENCE_CRYSTALLIZE]
-        self.assertEqual(spec.timeout_seconds, 120.0)
+        self.assertEqual(spec.timeout_seconds, 210.0)
         job = {"kind": jobs_module.KIND_EVIDENCE_CRYSTALLIZE}
-        self.assertEqual(jobs_module._job_timeout(job), 120.0)
+        self.assertEqual(jobs_module._job_timeout(job), 210.0)
         # Unknown / unset kinds keep the global default.
         self.assertEqual(
             jobs_module._job_timeout({"kind": "nope"}),
@@ -787,7 +787,7 @@ class TestCrystallizeJobKind(unittest.TestCase):
         self.assertIn("超时", friendly("LLM error: request timed out"))
         self.assertIn("无法解析", friendly("Could not parse ingest JSON from LLM."))
         self.assertIn("boom", friendly("LLM error: boom"))
-        self.assertIn("规则草稿", friendly("LLM error: boom"))
+        self.assertNotIn("规则草稿", friendly("LLM error: boom"))
 
     def test_friendly_error_distinguishes_provider_and_schema_failures(self) -> None:
         friendly = jobs_module._crystallize_friendly_error
@@ -804,7 +804,7 @@ class TestCrystallizeJobKind(unittest.TestCase):
         text = friendly("crystallize_schema_error: $.evidence_entries[2].source_task_id is required")
         self.assertIn("第 3 条证据", text)
         self.assertIn("来自哪个任务", text)
-        self.assertIn("规则草稿", text)
+        self.assertNotIn("规则草稿", text)
 
     def test_runner_fails_when_selected_ai_backend_is_unavailable(self) -> None:
         """A missing selected backend fails; no implicit rule fallback occurs."""
@@ -843,7 +843,8 @@ class TestCrystallizeJobKind(unittest.TestCase):
                         self.fail("expected JobFailedError")
                     except jobs_module.JobFailedError as exc:
                         self.assertEqual(exc.code, "crystallize_draft_failed")
-                        self.assertIn("规则草稿", exc.message)
+                        self.assertIn("未配置 LLM", exc.message)
+                        self.assertNotIn("规则草稿", exc.message)
 
     def test_runner_uses_codex_backend_selected_in_profile_settings(self) -> None:
         """The returned backend reflects the configured Codex action."""
@@ -884,8 +885,8 @@ class TestCrystallizeJobKind(unittest.TestCase):
                 )
             self.assertEqual(result["backend"], "codex")
 
-    def test_runner_passes_90s_timeout_to_gateway(self) -> None:
-        """The wizard caps its action call at 90s, below job timeout."""
+    def test_runner_passes_180s_timeout_to_gateway(self) -> None:
+        """The wizard caps its action call at 180s, below job timeout."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             profile = _write_profile(root)
@@ -921,7 +922,7 @@ class TestCrystallizeJobKind(unittest.TestCase):
                 jobs_module._run_evidence_crystallize(
                     "alice", {"task_ids": ["taskA"], "titles": []}, lambda **kw: None
                 )
-            self.assertEqual(run.call_args.kwargs["timeout_seconds"], 90.0)
+            self.assertEqual(run.call_args.kwargs["timeout_seconds"], 180.0)
 
 
     def test_runner_generates_each_selected_task_independently(self) -> None:
@@ -971,7 +972,7 @@ class TestCrystallizeJobKind(unittest.TestCase):
             self.assertEqual([call[0] for call in calls], ["taskA", "taskB"])
             self.assertEqual(run.call_count, 2)
             for _task_id, kwargs in calls:
-                self.assertEqual(kwargs["timeout_seconds"], 90.0)
+                self.assertEqual(kwargs["timeout_seconds"], 180.0)
                 self.assertEqual(kwargs["max_retries"], 0)
             rows = result["patch"]["evidence_entries"]
             self.assertEqual(len(rows), 2)
@@ -986,7 +987,7 @@ class TestCrystallizeJobKind(unittest.TestCase):
             self.assertTrue(any("第 1/2" in message for message in messages))
             self.assertTrue(any("第 2/2" in message for message in messages))
 
-    def test_runner_stops_before_another_task_has_wrong_source(self) -> None:
+    def test_runner_retains_later_task_after_wrong_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             profile = _write_profile(root)
@@ -1017,13 +1018,227 @@ class TestCrystallizeJobKind(unittest.TestCase):
                     },
                 ),
             ) as run:
+                result = jobs_module._run_evidence_crystallize(
+                    "alice", {"task_ids": ["taskA", "taskB"], "titles": []}, lambda **kw: None
+                )
+            self.assertEqual(result["failed_tasks"][0]["task_id"], "taskA")
+            self.assertEqual(result["failed_tasks"][0]["title"], "task-a")
+            self.assertIn("任务来源不正确", result["failed_tasks"][0]["message"])
+            self.assertEqual(len(result["patch"]["evidence_entries"]), 1)
+            self.assertEqual(result["patch"]["evidence_entries"][0]["kanban_refs"], ["kanban:taskB"])
+            self.assertEqual(run.call_count, 2)
+
+    def test_runner_retains_successes_before_and_after_a_failed_task(self) -> None:
+        from nblane.core.kanban_io import render_kanban
+        from nblane.core.models import KanbanTask
+        from nblane.web_api.schemas import CrystallizeDraftResponse
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _write_profile(root)
+            tasks = [
+                KanbanTask(title=f"Task {letter}", id=f"task{letter}", done=True)
+                for letter in ("A", "B", "C")
+            ]
+            (profile / "kanban.md").write_text(
+                render_kanban("alice", {"Done": tasks}), encoding="utf-8"
+            )
+            pool_before = (profile / "evidence-pool.yaml").read_bytes()
+
+            def draft(_profile, selected, **kwargs):
+                task = selected[0]
+                return AIActionResult(
+                    ok=task.id != "taskB",
+                    action="evidence.crystallize",
+                    backend="direct_llm",
+                    run_id=f"run-{task.id}",
+                    error="provider_error: request timed out" if task.id == "taskB" else None,
+                    structured={
+                        "evidence_entries": [{"title": task.title, "source_task_id": task.id}],
+                        "node_updates": [],
+                    } if task.id != "taskB" else None,
+                )
+
+            with patch("nblane.core.profile_io.PROFILES_DIR", root), patch(
+                "nblane.core.io.PROFILES_DIR", root
+            ), patch("nblane.core.ai.gateway.crystallize_done_tasks", side_effect=draft) as run:
+                result = jobs_module._run_evidence_crystallize(
+                    "alice", {"task_ids": [task.id for task in tasks], "titles": []}, lambda **kw: None
+                )
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual([row["title"] for row in result["patch"]["evidence_entries"]], ["Task A", "Task C"])
+            self.assertEqual([task["id"] for task in result["tasks"]], ["taskA", "taskB", "taskC"])
+            self.assertEqual(result["failed_tasks"], [{
+                "task_id": "taskB", "title": "Task B", "message": "AI 生成超时（180 秒）。",
+            }])
+            self.assertEqual(CrystallizeDraftResponse(**result).failed_tasks[0].task_id, "taskB")
+            self.assertEqual((profile / "evidence-pool.yaml").read_bytes(), pool_before)
+
+    def test_runner_retains_other_drafts_when_source_alias_array_is_null(self) -> None:
+        from nblane.core.ai.actions import AIActionRequest
+        from nblane.core.ai.backends import DirectLLMBackend
+        from nblane.core.ai.router import get_action_spec
+        from nblane.core.kanban_io import render_kanban
+        from nblane.core.models import KanbanTask
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _write_profile(root)
+            tasks = [
+                KanbanTask(title=f"Task {letter}", id=f"task{letter}", done=True)
+                for letter in ("A", "B", "C")
+            ]
+            (profile / "kanban.md").write_text(
+                render_kanban("alice", {"Done": tasks}), encoding="utf-8"
+            )
+
+            def draft(_profile, selected, **kwargs):
+                task = selected[0]
+                row = {"title": task.title, "source_task_id": task.id}
+                if task.id == "taskB":
+                    row["source_task_ids"] = None
+                request = AIActionRequest(
+                    action="evidence.crystallize", profile="alice", payload={"done_tasks": selected},
+                )
+                with patch(
+                    "nblane.core.profile_ingest_llm.ingest_kanban_done_json",
+                    return_value=({"evidence_entries": [row], "node_updates": []}, None),
+                ):
+                    result = DirectLLMBackend().run(request, get_action_spec("evidence.crystallize"))
+                self.assertTrue(result.ok, "Optional source aliases pass the current action schema")
+                return result
+
+            with patch("nblane.core.profile_io.PROFILES_DIR", root), patch(
+                "nblane.core.io.PROFILES_DIR", root
+            ), patch("nblane.core.ai.gateway.crystallize_done_tasks", side_effect=draft) as run:
+                result = jobs_module._run_evidence_crystallize(
+                    "alice", {"task_ids": [task.id for task in tasks], "titles": []}, lambda **kw: None
+                )
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual([row["title"] for row in result["patch"]["evidence_entries"]], ["Task A", "Task C"])
+            self.assertEqual([task["task_id"] for task in result["failed_tasks"]], ["taskB"])
+            self.assertIn("草稿格式或任务来源不正确", result["failed_tasks"][0]["message"])
+            self.assertEqual([task["id"] for task in result["tasks"]], ["taskA", "taskB", "taskC"])
+
+    def test_runner_reports_all_failed_tasks_without_a_rule_fallback(self) -> None:
+        from nblane.core.kanban_io import render_kanban
+        from nblane.core.models import KanbanTask
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _write_profile(root)
+            tasks = [
+                KanbanTask(title="Task A", id="taskA", done=True),
+                KanbanTask(title="Task B", id="taskB", done=True),
+            ]
+            (profile / "kanban.md").write_text(
+                render_kanban("alice", {"Done": tasks}), encoding="utf-8"
+            )
+            with patch("nblane.core.profile_io.PROFILES_DIR", root), patch(
+                "nblane.core.io.PROFILES_DIR", root
+            ), patch(
+                "nblane.core.ai.gateway.crystallize_done_tasks",
+                return_value=AIActionResult(
+                    ok=False, action="evidence.crystallize", backend="direct_llm",
+                    run_id="run-failed", error="provider_error: HTTP 503",
+                ),
+            ) as run:
                 with self.assertRaises(jobs_module.JobFailedError) as caught:
                     jobs_module._run_evidence_crystallize(
                         "alice", {"task_ids": ["taskA", "taskB"], "titles": []}, lambda **kw: None
                     )
+            self.assertEqual(run.call_count, 2)
             self.assertEqual(caught.exception.code, "crystallize_draft_failed")
-            self.assertIn("task-a", caught.exception.message)
-            self.assertEqual(run.call_count, 1)
+            self.assertIn("Task A", caught.exception.message)
+            self.assertIn("Task B", caught.exception.message)
+            self.assertIn("HTTP 503", caught.exception.message)
+            self.assertNotIn("规则草稿", caught.exception.message)
+
+    def test_runner_keeps_explicit_ai_skip_when_another_task_fails(self) -> None:
+        from nblane.core.kanban_io import render_kanban
+        from nblane.core.models import KanbanTask
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _write_profile(root)
+            tasks = [
+                KanbanTask(title="Task A", id="taskA", done=True),
+                KanbanTask(title="Task B", id="taskB", done=True),
+            ]
+            (profile / "kanban.md").write_text(
+                render_kanban("alice", {"Done": tasks}), encoding="utf-8"
+            )
+            skipped = {"task_id": "taskA", "reason": "No verifiable outcome yet"}
+            with patch("nblane.core.profile_io.PROFILES_DIR", root), patch(
+                "nblane.core.io.PROFILES_DIR", root
+            ), patch(
+                "nblane.core.ai.gateway.crystallize_done_tasks",
+                side_effect=[
+                    AIActionResult(
+                        ok=True, action="evidence.crystallize", backend="direct_llm", run_id="run-a",
+                        structured={"evidence_entries": [], "node_updates": [], "skipped_tasks": [skipped]},
+                    ),
+                    AIActionResult(
+                        ok=False, action="evidence.crystallize", backend="direct_llm", run_id="run-b",
+                        error="provider_error: request timed out",
+                    ),
+                ],
+            ):
+                result = jobs_module._run_evidence_crystallize(
+                    "alice", {"task_ids": ["taskA", "taskB"], "titles": []}, lambda **kw: None
+                )
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["patch"]["evidence_entries"], [])
+            self.assertEqual(result["patch"]["skipped_tasks"], [skipped])
+            self.assertEqual([task["task_id"] for task in result["failed_tasks"]], ["taskB"])
+
+    def test_merge_rebases_local_refs_and_preserves_selection_and_pool_links(self) -> None:
+        from nblane.core.ingest_merge import merge_ingest_patch
+        from nblane.core.ingest_parse import filter_ingest_patch
+
+        patches = [
+            {
+                "evidence_entries": [{"id": "local", "title": "Task A", "kanban_refs": ["kanban:taskA"]}],
+                "node_updates": [{"id": "manipulation", "evidence_refs": ["local", "first_1", "ev_one"]}],
+            },
+            {
+                "evidence_entries": [{"id": "local", "title": "Task B", "kanban_refs": ["kanban:taskB"]}],
+                "node_updates": [{"id": "navigation", "evidence_refs": ["local", "EV_1", "ev_one", "first_9"]}],
+            },
+        ]
+        original = json.dumps(patches, sort_keys=True)
+        merged = jobs_module._merge_crystallize_patches(patches)
+        self.assertEqual(json.dumps(patches, sort_keys=True), original, "Do not mutate gateway results")
+        self.assertEqual(merged["node_updates"][0]["evidence_refs"], ["first_1", "ev_one"])
+        self.assertEqual(merged["node_updates"][1]["evidence_refs"], ["first_2", "ev_one"])
+        self.assertTrue(all("id" not in row for row in merged["evidence_entries"]))
+
+        selected, warnings = filter_ingest_patch(merged, include_evidence=[False, True], include_nodes=None)
+        self.assertEqual(selected.node_updates[0]["evidence_refs"], ["ev_one"])
+        self.assertEqual(selected.node_updates[1]["evidence_refs"], ["first_1", "ev_one"])
+        self.assertTrue(any("not selected" in warning for warning in warnings))
+        # Source matching may reuse an existing row. Ordinals must resolve to
+        # that retained pool ID, while stable unrelated pool refs stay intact.
+        pool = {"profile": "alice", "evidence_entries": [
+            {"id": "ev_one", "title": "Existing unrelated evidence", "type": "project"},
+            {"id": "ev_b", "title": "Previous Task B", "type": "project", "kanban_refs": ["kanban:taskB"]},
+        ]}
+        with patch("nblane.core.ingest_merge.load_schema_raw", return_value=SCHEMA):
+            outcome = merge_ingest_patch("alice", pool, SKILL_TREE, selected, match_task_sources=True)
+        self.assertTrue(outcome.ok, outcome.errors)
+        navigation = next(node for node in outcome.merged_tree["nodes"] if node["id"] == "navigation")
+        self.assertEqual(navigation["evidence_refs"], ["ev_b", "ev_one"])
+        self.assertEqual(len(outcome.merged_pool["evidence_entries"]), 2)
+
+    def test_merge_prefers_explicit_row_ids_over_ordinal_looking_aliases(self) -> None:
+        merged = jobs_module._merge_crystallize_patches([
+            {"evidence_entries": [{"title": "Earlier task"}], "node_updates": []},
+            {
+                "evidence_entries": [{"id": "first_2", "title": "Named row"}, {"title": "Ordinal row"}],
+                "node_updates": [{"id": "navigation", "evidence_refs": ["first_2", "ev_2"]}],
+            },
+        ])
+        self.assertEqual(merged["node_updates"][0]["evidence_refs"], ["first_2", "first_3"])
 
     def test_gateway_forwards_zero_retries_to_llm(self) -> None:
         from nblane.core.ai.gateway import crystallize_done_tasks
@@ -1055,18 +1270,18 @@ class TestCrystallizeJobKind(unittest.TestCase):
         try:
             job = jobs_module._JOBS[snapshot["job_id"]]
             self.assertEqual(job["_task_count"], 3)
-            self.assertEqual(jobs_module._job_timeout(job), 300.0)
-            self.assertEqual(snapshot["timeout_seconds"], 300.0)
-            self.assertEqual(JobModel(**snapshot).timeout_seconds, 300.0)
+            self.assertEqual(jobs_module._job_timeout(job), 570.0)
+            self.assertEqual(snapshot["timeout_seconds"], 570.0)
+            self.assertEqual(JobModel(**snapshot).timeout_seconds, 570.0)
             polled = jobs_module.read_job(snapshot["job_id"])
-            self.assertEqual(polled["snapshot"]["timeout_seconds"], 300.0)
+            self.assertEqual(polled["snapshot"]["timeout_seconds"], 570.0)
             job["status"] = "running"
-            job["started_at"] = time.time() - 291
+            job["started_at"] = time.time() - 561
             jobs_module._mark_timeout_locked(snapshot["job_id"], time.time())
             self.assertFalse(job["cancel_requested"], "Batch processing has 30 seconds of headroom")
-            job["started_at"] = time.time() - 301
+            job["started_at"] = time.time() - 571
             jobs_module._mark_timeout_locked(snapshot["job_id"], time.time())
-            self.assertIn("300 秒", job["_cancel_message"])
+            self.assertIn("570 秒", job["_cancel_message"])
         finally:
             jobs_module._JOBS.pop(snapshot["job_id"], None)
 
@@ -1118,7 +1333,7 @@ class TestCrystallizeJobKind(unittest.TestCase):
                             self.assertTrue(jobs_module.cancel_job(job_id))
                         else:
                             with jobs_module._LOCK:
-                                job["started_at"] = time.time() - 211
+                                job["started_at"] = time.time() - 391
                                 jobs_module._mark_timeout_locked(job_id, time.time())
                         release.set()
                         self.assertTrue(job["_finished_event"].wait(2))

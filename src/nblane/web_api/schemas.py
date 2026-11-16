@@ -1087,6 +1087,14 @@ class CrystallizeTaskModel(BaseModel):
     completed_on: str = ""
 
 
+class CrystallizeFailedTaskModel(BaseModel):
+    """One selected task whose AI draft failed; no evidence is added for it."""
+
+    task_id: str = ""
+    title: str = ""
+    message: str = ""
+
+
 class CrystallizeDraftResponse(BaseModel):
     """Crystallize draft: an ingest patch plus the resolved source tasks.
 
@@ -1101,6 +1109,7 @@ class CrystallizeDraftResponse(BaseModel):
     patch: dict[str, Any] = Field(default_factory=dict)
     tasks: list[CrystallizeTaskModel] = Field(default_factory=list)
     missing: list[str] = Field(default_factory=list)
+    failed_tasks: list[CrystallizeFailedTaskModel] = Field(default_factory=list)
 
 
 class CrystallizeApplyRequest(BaseModel):

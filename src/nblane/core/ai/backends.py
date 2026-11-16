@@ -696,7 +696,7 @@ def _run_crystallize_ingest(
     *,
     ai_backend: str,
 ) -> AIActionResult:
-    """Run the mature Kanban ingest prompt behind the AI Action contract."""
+    """Generate a compact review draft; the host preserves task provenance."""
 
     run_id = new_run_id(request.action)
     payload = request.payload if isinstance(request.payload, dict) else {}
@@ -736,6 +736,7 @@ def _run_crystallize_ingest(
             "llm_max_retries",
             "max_retries",
         ),
+        compact_draft=True,
     )
     backend_name = (
         "local_codex_readonly" if ai_backend == "codex" else "direct_llm"
@@ -749,6 +750,12 @@ def _run_crystallize_ingest(
             error=error or "crystallize_draft_failed",
         )
     _backfill_source_task_ids(patch, done_tasks)
+    # The wizard attaches authoritative source snapshots after this call. A
+    # model must not supply a shortened or invented replacement for the source.
+    for row in patch.get("evidence_entries") or []:
+        if isinstance(row, dict):
+            for key in ("original_content", "original_content_hash", "original_language"):
+                row.pop(key, None)
     schema_error = validate_schema(patch, spec.schema or {})
     if schema_error:
         return AIActionResult(

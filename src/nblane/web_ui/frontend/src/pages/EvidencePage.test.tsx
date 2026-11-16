@@ -492,11 +492,77 @@ describe('EvidencePage', () => {
     // The spinner must resolve into a visible error with a degrade action.
     const alert = await screen.findByTestId('wizard-ai-error');
     expect(alert).toHaveTextContent('规则草稿');
+    expect(within(alert).getByText('模型超时', { exact: true })).toBeInTheDocument();
+    expect(alert.textContent?.match(/AI 草稿失败/g)).toHaveLength(1);
     expect(screen.queryByTestId('wizard-progress')).not.toBeInTheDocument();
 
     fireEvent.click(within(alert).getByTestId('wizard-degrade-rule'));
     // Rule fallback lands on the grading step with the draft visible.
     expect(await screen.findByTestId('wizard-row-0')).toBeInTheDocument();
+  });
+
+  it('keeps successful AI entries reviewable and identifies failed tasks without marking them as evidence', async () => {
+    const Stream = controlledJobStream();
+    const failedTask = { ...DRAFT.tasks[0], id: 'taskB', title: 'Controller verification' };
+    const fetchMock = stubFetch((url) => {
+      if (url.includes('/crystallize/candidates')) return jsonResponse(200, {
+        ...CANDIDATES,
+        items: [...CANDIDATES.items, { ...CANDIDATES.items[0], ...failedTask }],
+      });
+      if (url.includes('/crystallize/apply')) return jsonResponse(200, {
+        ok: true,
+        items: [{ task_id: 'taskA', evidence_ids: ['ev_new'] }],
+        errors: [], warnings: [], new_evidence_ids: ['ev_new'], crystallized_count: 1,
+      });
+      return null;
+    });
+    renderPage();
+    await openDraftStep(['taskA', 'taskB']);
+    fireEvent.click(screen.getByTestId('wizard-ai-draft'));
+    await waitFor(() => expect(Stream.instances).toHaveLength(1));
+    await act(async () => Stream.instances[0].emit('done', { result: {
+      ...DRAFT,
+      backend: 'llm',
+      tasks: [...DRAFT.tasks, failedTask],
+      failed_tasks: [{ task_id: 'taskB', title: failedTask.title, message: 'AI 生成超时（180 秒）' }],
+    } }));
+
+    const warning = screen.getByTestId('wizard-partial-draft');
+    expect(warning).toHaveTextContent('部分任务未生成');
+    expect(warning).toHaveTextContent('Controller verification：AI 生成超时（180 秒）');
+    expect(warning).toHaveTextContent('未生成的任务会继续留在「待结晶」');
+    expect(screen.getByTestId('wizard-row-0')).toHaveTextContent('Tuned latency');
+    expect(screen.queryByTestId('wizard-row-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('wizard-ai-error')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('wizard-progress')).not.toBeInTheDocument();
+    expect(screen.getByTestId('wizard-apply')).toBeEnabled();
+
+    fireEvent.click(screen.getByTestId('wizard-apply'));
+    await waitFor(() => {
+      const applied = fetchMock.mock.calls.find(([url]) => String(url).includes('/crystallize/apply'));
+      expect(applied).toBeTruthy();
+      const body = JSON.parse(String(applied![1]?.body));
+      expect(body.task_ids).toEqual(['taskA', 'taskB']);
+      expect(body.patch.evidence_entries).toHaveLength(1);
+      expect(body.patch.evidence_entries[0].kanban_refs).toEqual(['kanban:taskA']);
+      expect(body.include_evidence).toEqual([true]);
+    });
+  });
+
+  it('shows a polled server failure once without wrapping its retry advice', async () => {
+    controlledJobStream();
+    stubFetch((url) => url.endsWith('/jobs/job-test1') ? jsonResponse(200, {
+      job: { status: 'failed', error: { code: 'crystallize_draft_failed', message: '任务 Controller：AI 生成超时（180 秒）' } },
+    }) : null);
+    renderPage();
+    await openDraftStep();
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByTestId('wizard-ai-draft'));
+    await act(() => vi.advanceTimersByTimeAsync(150_000));
+    const alert = screen.getByTestId('wizard-ai-error');
+    expect(within(alert).getByText('任务 Controller：AI 生成超时（180 秒）', { exact: true })).toBeInTheDocument();
+    expect(alert.textContent?.match(/AI 草稿失败/g)).toHaveLength(1);
+    expect(screen.queryByTestId('wizard-progress')).not.toBeInTheDocument();
   });
 
   it.each([

@@ -98,7 +98,7 @@ class TestAIGateway(unittest.TestCase):
         self.assertIn("ai_not_configured", result.error)
 
     def test_crystallize_action_uses_ingest_prompt_and_model(self) -> None:
-        """The mature Kanban ingest protocol stays behind the new action."""
+        """The review action selects compact drafting without changing CLI ingest."""
 
         spec = get_action_spec("evidence.crystallize")
         self.assertIsNotNone(spec)
@@ -122,6 +122,48 @@ class TestAIGateway(unittest.TestCase):
         self.assertEqual(ingest.call_args.kwargs["model"], "qwen-plus")
         self.assertEqual(ingest.call_args.kwargs["timeout_seconds"], 12.0)
         self.assertEqual(ingest.call_args.kwargs["ai_backend"], "llm")
+        self.assertTrue(ingest.call_args.kwargs["compact_draft"])
+
+    def test_crystallize_uses_host_source_instead_of_model_snapshot(self) -> None:
+        from nblane.core.crystallize import attach_task_snapshots, task_snapshot
+        from nblane.core.models import KanbanTask
+
+        task = KanbanTask(title="Actual task", id="task-1", outcome="Measured 40 → 20 ms")
+        request = AIActionRequest(
+            action="evidence.crystallize", profile="alice", payload={"done_tasks": [task]},
+        )
+        model_patch = {"evidence_entries": [{
+            "title": "Draft title", "source_task_id": task.id,
+            "original_content": "Invented original", "original_content_hash": "invented",
+            "original_language": "invented",
+        }], "node_updates": []}
+        with patch("nblane.core.profile_ingest_llm.ingest_kanban_done_json", return_value=(model_patch, None)):
+            result = DirectLLMBackend().run(request, get_action_spec("evidence.crystallize"))
+        self.assertTrue(result.ok)
+        snapshot = task_snapshot(task)
+        hydrated = attach_task_snapshots(result.structured, [snapshot])
+        row = hydrated["evidence_entries"][0]
+        self.assertEqual(row["original_content"], snapshot["original_content"])
+        self.assertEqual(row["original_content_hash"], snapshot["original_content_hash"])
+        self.assertEqual(row["original_language"], snapshot["original_language"])
+        self.assertEqual(row["kanban_refs"], ["kanban:task-1"])
+
+    def test_crystallize_retains_conflicting_source_alias_for_validation(self) -> None:
+        from nblane.core.crystallize import attach_task_snapshots, task_snapshot
+        from nblane.core.models import KanbanTask
+
+        task = KanbanTask(title="Actual task", id="task-1")
+        request = AIActionRequest(
+            action="evidence.crystallize", profile="alice", payload={"done_tasks": [task]},
+        )
+        model_patch = {"evidence_entries": [{
+            "title": "Wrong source", "source_task_id": task.id, "origin_ref": "kanban:outside",
+        }], "node_updates": []}
+        with patch("nblane.core.profile_ingest_llm.ingest_kanban_done_json", return_value=(model_patch, None)):
+            result = DirectLLMBackend().run(request, get_action_spec("evidence.crystallize"))
+        self.assertTrue(result.ok)
+        with self.assertRaisesRegex(ValueError, "outside the selection"):
+            attach_task_snapshots(result.structured, [task_snapshot(task)])
 
     def test_crystallize_retry_budget_reaches_the_actual_chat_call(self) -> None:
         """The special ingest path must not restore the SDK's default retries."""

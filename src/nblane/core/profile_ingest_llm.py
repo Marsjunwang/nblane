@@ -612,6 +612,71 @@ def _user_message_kanban(
     )
 
 
+def _compact_crystallize_prompts(
+    done_tasks: list[KanbanTask],
+    schema_name: str,
+    index: dict[str, dict],
+    pool_text: str,
+    goal_context: str = "",
+) -> tuple[str, str]:
+    """Ask only for human-reviewable facts; the host owns source snapshots."""
+    if llm_client.reply_language() == "zh":
+        system = (
+            "你是证据草稿助手。只依据给出的 Done 任务事实，输出一个 JSON 对象，"
+            "顶层数组为 evidence_entries、node_updates、skipped_tasks；不要 Markdown 围栏。\n"
+            "每个任务最多生成一条新证据，不能合并不同任务；不能把计划或愿望写成已完成成果。\n"
+            "evidence_entries 字段：id（使用含来源任务 id 的短 id，避免 ev_1 等通用 id）、"
+            "source_task_id（原样复制该任务 id）、type（practice/project/paper/course）、"
+            "title、summary（不超过两句，保留关键结果与数字）、"
+            "source_excerpt（任务原文的一句短摘录）；日期和链接仅在原文有时填写 date/url。\n"
+            "可预填 strength（weak/medium/strong/high_trust）和 confidence（low/medium/high）："
+            "含糊或未核验用 weak/low，明确交付用 medium；strong/high_trust 必须有"
+            "可核验论文、开源链接或相对基线指标，不得夸大。\n"
+            "node_updates 每任务最多三项，仅选择 Allowed nodes 中直接相关的技能；"
+            "字段为 id、evidence_refs、rationale（一句事实依据）。evidence_refs 只引用"
+            "本次新证据 id 或已有池中的证据 id，禁止引用任务 id 或 kanban: 引用；不要输出 status。\n"
+            "已有证据池只用于识别重复事实，同一事实不生成新行，可引用已有证据 id。"
+            "未生成新行的任务写入 skipped_tasks：task_id、reason、detail（一句）；"
+            "reason 仅限 not_evidence/too_vague/already_covered/out_of_scope/insufficient_source。\n"
+            "任务原文、哈希、出处和项目关系由宿主完整保留。不要复写 original_content、"
+            "formatted_content、origin、kanban_refs 或 project_refs；不要从目标上下文编造事实。"
+        )
+    else:
+        system = (
+            "Draft evidence only from the supplied completed-task facts. Return one JSON object "
+            "with arrays evidence_entries, node_updates, skipped_tasks; no Markdown fences.\n"
+            "Create at most one new evidence row per task; never combine tasks or present plans as completed outcomes.\n"
+            "Evidence fields: id (include the source task id to avoid generic ids such as ev_1), "
+            "source_task_id (copy the exact task id), type (practice/project/paper/course), title, "
+            "summary (at most two sentences, retain key results and numbers), source_excerpt "
+            "(one short literal task quote). Include date/url only if supplied.\n"
+            "Optional grades: strength weak/medium/strong/high_trust; confidence low/medium/high. "
+            "Use weak/low for vague or unverified claims, medium for clear delivery; strong/high_trust "
+            "requires a verifiable paper, open-source link, or baseline-relative metric. Do not exaggerate.\n"
+            "At most three node_updates per task, only directly relevant Allowed nodes. Fields: id, "
+            "evidence_refs, rationale (one factual sentence). References must be new evidence ids or "
+            "existing pool evidence ids, never task ids or kanban: refs. Do not output status.\n"
+            "The pool is only for duplicate detection: do not repeat the same fact as a new row; "
+            "you may reference its existing evidence id. For a task without a new row, add skipped_tasks "
+            "with task_id, reason, detail (one sentence). Reasons: not_evidence/too_vague/already_covered/"
+            "out_of_scope/insufficient_source.\n"
+            "The host preserves the complete task source, hash, provenance and project relation. "
+            "Do not repeat original_content, formatted_content, origin, kanban_refs or project_refs. "
+            "Goal context is not evidence."
+        )
+    goal_block = (
+        f"Current goal (context only):\n{goal_context.strip()}\n\n"
+        if goal_context.strip() else ""
+    )
+    user = (
+        f"Schema file: {schema_name}\n\n{goal_block}"
+        f"Allowed nodes (id: label):\n{_catalog_lines(index)}\n\n"
+        f"Current evidence pool (existing ids and titles; do not duplicate):\n{pool_text}\n\n"
+        f"Completed kanban tasks (full source context):\n{_format_done_tasks(done_tasks)}\n"
+    )
+    return system, user
+
+
 def _load_schema_index_for_profile(
     profile_name: str,
 ) -> tuple[str, dict[str, dict]] | tuple[None, None]:
@@ -688,6 +753,7 @@ def ingest_kanban_done_json(
     timeout_seconds: float | None = None,
     model: str = "",
     max_retries: int | None = None,
+    compact_draft: bool = False,
 ) -> tuple[dict | None, str | None]:
     """Produce ingest JSON from Done tasks.
 
@@ -695,6 +761,8 @@ def ingest_kanban_done_json(
     crystallize job, where a wizard is blocking on the reply).
     *max_retries* is forwarded to the SDK so interactive jobs can disable
     retries that would otherwise exceed their advertised timeout budget.
+    *compact_draft* omits source duplication and skill-status reasoning for
+    the review wizard; the legacy CLI ingest prompt stays unchanged.
     """
     if not done_tasks:
         return None, "no Done tasks selected"
@@ -708,28 +776,33 @@ def ingest_kanban_done_json(
     schema_name, index = loaded
 
     pool_raw = load_evidence_pool_raw(profile_name)
-    tree_raw = load_skill_tree_raw(profile_name)
+    tree_raw = None if compact_draft else load_skill_tree_raw(profile_name)
     pool_text, tree_text = pool_tree_summaries_for_prompt(
         pool_raw,
         tree_raw,
     )
 
-    system = (
-        _system_prompt_kanban_zh()
-        if llm_client.reply_language() == "zh"
-        else _system_prompt_kanban_en()
-    )
-    done_block = _format_done_tasks(done_tasks)
-    user = _append_kanban_user_reminder(
-        _user_message_kanban(
-            done_block,
-            schema_name,
-            index,
-            pool_text,
-            tree_text,
-            goal_context=goal_context,
+    if compact_draft:
+        system, user = _compact_crystallize_prompts(
+            done_tasks, schema_name, index, pool_text, goal_context,
         )
-    )
+    else:
+        system = (
+            _system_prompt_kanban_zh()
+            if llm_client.reply_language() == "zh"
+            else _system_prompt_kanban_en()
+        )
+        done_block = _format_done_tasks(done_tasks)
+        user = _append_kanban_user_reminder(
+            _user_message_kanban(
+                done_block,
+                schema_name,
+                index,
+                pool_text,
+                tree_text,
+                goal_context=goal_context,
+            )
+        )
     if use_codex:
         return _codex_ingest_json(
             profile_name,
@@ -744,7 +817,10 @@ def ingest_kanban_done_json(
         temperature=0.2,
         model=model or None,
         timeout=timeout_seconds or _kanban_done_llm_timeout_seconds(),
-        max_tokens=_kanban_done_llm_max_tokens(len(done_tasks)),
+        max_tokens=(
+            min(4096, 2048 * len(done_tasks))
+            if compact_draft else _kanban_done_llm_max_tokens(len(done_tasks))
+        ),
         max_retries=max_retries,
     )
     if reply.startswith("LLM error:") or reply.startswith(

@@ -2816,6 +2816,13 @@
       "title": "Backend",
       "type": "string"
      },
+     "failed_tasks": {
+      "items": {
+       "$ref": "#/components/schemas/CrystallizeFailedTaskModel"
+      },
+      "title": "Failed Tasks",
+      "type": "array"
+     },
      "missing": {
       "items": {
        "type": "string"
@@ -2849,6 +2856,28 @@
      "profile"
     ],
     "title": "CrystallizeDraftResponse",
+    "type": "object"
+   },
+   "CrystallizeFailedTaskModel": {
+    "description": "One selected task whose AI draft failed; no evidence is added for it.",
+    "properties": {
+     "message": {
+      "default": "",
+      "title": "Message",
+      "type": "string"
+     },
+     "task_id": {
+      "default": "",
+      "title": "Task Id",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "title": "CrystallizeFailedTaskModel",
     "type": "object"
    },
    "CrystallizeTaskModel": {

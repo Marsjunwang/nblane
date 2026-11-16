@@ -5666,6 +5666,8 @@ export interface components {
              * @default rule
              */
             backend: string;
+            /** Failed Tasks */
+            failed_tasks?: components["schemas"]["CrystallizeFailedTaskModel"][];
             /** Missing */
             missing?: string[];
             /**
@@ -5681,6 +5683,27 @@ export interface components {
             profile: string;
             /** Tasks */
             tasks?: components["schemas"]["CrystallizeTaskModel"][];
+        };
+        /**
+         * CrystallizeFailedTaskModel
+         * @description One selected task whose AI draft failed; no evidence is added for it.
+         */
+        CrystallizeFailedTaskModel: {
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Task Id
+             * @default
+             */
+            task_id: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
         };
         /**
          * CrystallizeTaskModel

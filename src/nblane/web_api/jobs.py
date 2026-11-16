@@ -29,6 +29,7 @@ are pruned after ``_JOB_TTL_SECONDS``.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -814,31 +815,28 @@ def _validate_crystallize_input(job_input: dict[str, Any]) -> dict[str, Any]:
     return {"task_ids": task_ids, "titles": titles}
 
 
-_CRYSTALLIZE_LLM_TIMEOUT_SECONDS = 90.0
-_CRYSTALLIZE_JOB_TIMEOUT_SECONDS = 120.0
+_CRYSTALLIZE_LLM_TIMEOUT_SECONDS = 180.0
+_CRYSTALLIZE_JOB_TIMEOUT_SECONDS = 210.0
 _CRYSTALLIZE_PROCESSING_HEADROOM_SECONDS = 30.0
 
 
 def _crystallize_friendly_error(err: str) -> str:
-    """Map raw LLM failure strings to actionable Chinese copy."""
+    """Map raw LLM failures to concise causes; the UI owns recovery actions."""
     text = _clean(err)
     lowered = text.lower()
     if "timed out" in lowered or "timeout" in lowered:
-        return "AI 生成超时(90 秒);可重试,或改用规则草稿。"
+        return f"AI 生成超时（{int(_CRYSTALLIZE_LLM_TIMEOUT_SECONDS)} 秒）。"
     if (
         "ai_not_configured" in lowered
         or "not configured" in lowered
         or "ai features" in lowered
         or "llm not configured" in lowered
     ):
-        return "未配置 LLM/AI 后端(请在设置页配置兼容 API 或 Codex);可改用规则草稿。"
+        return "未配置 LLM/AI 后端，请在设置页配置兼容 API 或 Codex。"
     missing_source = re.search(r"evidence_entries\[(\d+)\]\.source_task_id is required", text)
     if missing_source:
         index = int(missing_source.group(1)) + 1
-        return (
-            f"AI 草稿第 {index} 条证据没标明来自哪个任务;"
-            "选了多个任务时容易出现,可重试,或少选几个任务,或改用规则草稿。"
-        )
+        return f"第 {index} 条证据没标明来自哪个任务。"
     if any(
         marker in lowered
         for marker in (
@@ -849,26 +847,59 @@ def _crystallize_friendly_error(err: str) -> str:
             "response did not contain",
         )
     ):
-        return "AI 返回格式不符合结晶协议，无法解析;可重试,或改用规则草稿。"
+        return "AI 返回格式不符合结晶协议，无法解析。"
     if any(marker in lowered for marker in ("provider_error", "backend_error")):
         detail = text.split(":", 1)[1].strip() if ":" in text else text
-        return f"AI 后端调用失败:{detail};可重试,或改用规则草稿。"
+        return f"AI 后端调用失败：{detail}"
     if text.startswith("LLM error:"):
-        return f"AI 后端调用失败:{text.removeprefix('LLM error:').strip()};可重试,或改用规则草稿。"
-    return f"AI 草稿失败:{text or '未知原因'};可改用规则草稿。"
+        return f"AI 后端调用失败：{text.removeprefix('LLM error:').strip()}"
+    return text or "AI 没有返回有效草稿。"
 
 
 def _merge_crystallize_patches(patches: list[dict[str, Any]]) -> dict[str, Any]:
-    """Merge independent per-task drafts without losing their provenance."""
+    """Merge drafts and scope new-evidence references to each task's rows."""
+    from nblane.core.ingest_parse import _ORD_REF_RE, _ordinal_placeholder_to_id
+
     merged: dict[str, Any] = {}
-    for patch in patches:
+    for original in patches:
+        patch = copy.deepcopy(original)
+        for key in ("evidence_entries", "node_updates", "skipped_tasks"):
+            value = patch.get(key)
+            if value is not None and not isinstance(value, list):
+                raise ValueError(f"{key} must be a list in the AI draft.")
+        rows = patch.get("evidence_entries") or []
+        offset = len(merged.get("evidence_entries", []))
+        ordinals = {index: f"first_{offset + index}" for index in range(1, len(rows) + 1)}
+        local_ids: dict[str, str] = {}
+        for index, row in enumerate(rows, start=1):
+            if not isinstance(row, dict):
+                continue
+            local_id = _clean(row.pop("id", ""))
+            if local_id:
+                # Existing merge semantics prefer a new row's explicit ID to
+                # an ordinal alias. Host-assigned IDs avoid pool collisions.
+                local_ids.setdefault(local_id, ordinals[index])
+        for node in patch.get("node_updates") or []:
+            if not isinstance(node, dict) or not isinstance(node.get("evidence_refs"), list):
+                continue
+            refs = []
+            for ref in node["evidence_refs"]:
+                if not isinstance(ref, str) or not ref.strip():
+                    continue
+                key = ref.strip()
+                mapped = local_ids.get(key) or _ordinal_placeholder_to_id(key, ordinals)
+                if mapped is not None:
+                    refs.append(mapped)
+                elif not _ORD_REF_RE.match(key):
+                    # Stable IDs outside this draft may reference the pool.
+                    # Invalid local ordinals must not link a different task.
+                    refs.append(key)
+            node["evidence_refs"] = list(dict.fromkeys(refs))
         for key, value in patch.items():
             if key in {"evidence_entries", "node_updates", "skipped_tasks"}:
                 if value is None:
                     merged.setdefault(key, [])
                     continue
-                if not isinstance(value, list):
-                    raise ValueError(f"{key} must be a list in the AI draft.")
                 merged.setdefault(key, []).extend(value)
             else:
                 merged.setdefault(key, value)
@@ -881,7 +912,7 @@ def _run_evidence_crystallize(
     report: Callable[..., None],
     execution: JobExecutionContext | None = None,
 ) -> dict[str, Any]:
-    """Generate and merge one AI draft per selected Done task."""
+    """Generate per-task drafts, retaining valid results when another fails."""
     from nblane.core import crystallize as crystallize_core
     from nblane.core.ai.gateway import crystallize_done_tasks
     from nblane.core.kanban_io import materialize_kanban_task_ids
@@ -899,13 +930,14 @@ def _run_evidence_crystallize(
         )
     patches = []
     backends = []
+    failed_tasks: list[dict[str, str]] = []
     for index, task in enumerate(tasks, start=1):
         if execution is not None:
             execution.checkpoint()
         title = str(getattr(task, "title", "") or getattr(task, "id", "") or f"第 {index} 个任务")
         report(
             phase="drafting",
-            message=f"AI 正在生成第 {index}/{len(tasks)} 个任务：{title}（单任务最多 90 秒）",
+            message=f"AI 正在生成第 {index}/{len(tasks)} 个任务：{title}（单任务最多 {int(_CRYSTALLIZE_LLM_TIMEOUT_SECONDS)} 秒）",
         )
         ai_result = crystallize_done_tasks(
             profile,
@@ -916,28 +948,44 @@ def _run_evidence_crystallize(
         if execution is not None:
             execution.checkpoint()
         if not ai_result.ok or not isinstance(ai_result.structured, dict):
-            raise JobFailedError(
-                "crystallize_draft_failed",
-                f"任务 {title}：{_crystallize_friendly_error(ai_result.error or '')}",
-            )
+            failed_tasks.append({
+                "task_id": str(getattr(task, "id", "") or ""),
+                "title": title,
+                "message": _crystallize_friendly_error(ai_result.error or ""),
+            })
+            report(phase="drafting", message=f"第 {index}/{len(tasks)} 个任务未生成草稿，失败原因已记录。")
+            continue
         try:
+            for key in ("evidence_entries", "node_updates", "skipped_tasks"):
+                value = ai_result.structured.get(key)
+                if value is not None and not isinstance(value, list):
+                    raise ValueError(f"{key} must be a list in the AI draft.")
             patch = crystallize_core.attach_task_snapshots(
                 ai_result.structured,
                 [crystallize_core.task_snapshot(task)],
             )
-        except ValueError as exc:
-            raise JobFailedError(
-                "crystallize_draft_failed",
-                f"任务 {title}：{exc}；已停止，避免证据误关联。",
-            ) from exc
+        except (TypeError, ValueError) as exc:
+            failed_tasks.append({
+                "task_id": str(getattr(task, "id", "") or ""),
+                "title": title,
+                "message": f"草稿格式或任务来源不正确：{exc}",
+            })
+            continue
         patches.append(patch)
         backends.append(ai_result.backend)
+    if not patches:
+        reasons = "；".join(
+            f"任务 {item['title']}：{item['message']}" for item in failed_tasks[:3]
+        )
+        if len(failed_tasks) > 3:
+            reasons += f"；另有 {len(failed_tasks) - 3} 个任务未生成草稿。"
+        raise JobFailedError("crystallize_draft_failed", reasons or "没有生成有效草稿。")
     try:
         patch = _merge_crystallize_patches(patches)
     except ValueError as exc:
         raise JobFailedError(
             "crystallize_draft_failed",
-            f"AI 草稿格式不符合结晶协议：{exc}；可改用规则草稿。",
+            f"AI 草稿格式不符合结晶协议：{exc}",
         ) from exc
     snapshots = [crystallize_core.task_snapshot(task) for task in tasks]
     return {
@@ -956,6 +1004,7 @@ def _run_evidence_crystallize(
             for snap in snapshots
         ],
         "missing": list(missing),
+        "failed_tasks": failed_tasks,
     }
 
 
@@ -966,7 +1015,7 @@ _KINDS[KIND_EVIDENCE_CRYSTALLIZE] = JobKind(
     queued_message="Queued evidence crystallize draft.",
     timeout_seconds=_CRYSTALLIZE_JOB_TIMEOUT_SECONDS,
     timeout_message=(
-        "AI 草稿超时({timeout} 秒未完成);请重试,或改用规则草稿(立等可取)。"
+        "整批 AI 草稿超过 {timeout} 秒仍未完成。"
     ),
 )
 

@@ -1058,7 +1058,7 @@ function CrystallizeWizard({
             if (status.job.status === 'done') {
               acceptResult(status.result as CrystallizeDraftResponse | null);
             } else if (status.job.status === 'failed') {
-              failJob(`AI 草稿失败：${status.job.error?.message || '任务未完成'}；可改用规则草稿。`);
+              failJob(status.job.error?.message || '任务未完成，请重试。');
             } else {
               timeout();
             }
@@ -1067,7 +1067,7 @@ function CrystallizeWizard({
         void followed.result.then(acceptResult).catch((error: unknown) => {
           if (!isCurrent()) return;
           const message = error instanceof Error ? error.message : String(error);
-          failJob(`AI 草稿失败：${message}；可改用规则草稿。`,
+          failJob(message,
             error instanceof ContentJobError && error.code === 'job_stream_error');
         });
       })
@@ -1204,7 +1204,7 @@ function CrystallizeWizard({
       {step === 1 && (
         <Stack gap="md">
           <Text size="sm" c="dimmed">
-            规则草稿立即生成，每个任务一条并保留原文；AI 草稿逐个提炼任务并建议技能，每个任务最多约 90 秒，多任务会依次处理。
+            规则草稿立即生成，每个任务一条并保留原文；AI 草稿逐个提炼任务并建议技能，每个任务最多约 3 分钟，多任务会依次处理。部分任务失败时，会保留已生成的草稿，失败的任务可稍后重试。
           </Text>
           {generating && (
             <Group gap="xs" data-testid="wizard-progress">
@@ -1282,6 +1282,21 @@ function CrystallizeWizard({
           <Text size="sm" c="dimmed">
             草稿来源:{({ llm: 'AI', codex: 'Codex', rule: '规则' } as Record<string, string>)[draft.backend] ?? '规则'} · 勾选入库条目并定分量(置信度按来源自动推导)
           </Text>
+          {(draft.failed_tasks ?? []).length > 0 && (
+            <Alert color="yellow" title="部分任务未生成" data-testid="wizard-partial-draft">
+              <Stack gap="xs">
+                <Text size="sm">
+                  {((draft.patch?.evidence_entries ?? []) as Record<string, unknown>[]).length > 0 && '可以先确认已生成的草稿。'}
+                  未生成的任务会继续留在「待结晶」，可稍后单独重试。
+                </Text>
+                {draft.failed_tasks?.map((task, index) => (
+                  <Text size="sm" key={`${task.task_id}-${index}`}>
+                    {task.title || task.task_id}：{task.message}
+                  </Text>
+                ))}
+              </Stack>
+            </Alert>
+          )}
           {((draft.patch?.evidence_entries ?? []) as Record<string, unknown>[]).length === 0 ? (
             <Alert color="yellow" title="草稿为空" data-testid="wizard-empty-draft">
               <Stack gap="xs">
