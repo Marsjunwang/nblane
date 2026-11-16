@@ -2,6 +2,11 @@ name: macOS Sticker
 
 on:
   workflow_dispatch:
+    inputs:
+      self_test:
+        description: Build signed packages on Intel Mac for manual testing; skip app launch tests
+        type: boolean
+        default: false
   push:
     branches:
       - 'codex/sticker-*'
@@ -39,7 +44,7 @@ jobs:
             runner: macos-15
           - arch: x64
             runner: macos-15-intel
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ inputs.self_test && 'macos-15-intel' || matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,6 +53,7 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
       - name: Check native build architecture
+        if: ${{ !inputs.self_test }}
         env:
           STICKER_ARCH: ${{ matrix.arch }}
         run: node -e "require('node:assert/strict').equal(process.platform, 'darwin'); require('node:assert/strict').equal(process.arch, process.env.STICKER_ARCH)"
@@ -57,9 +63,10 @@ jobs:
       - run: npm test --prefix desktop
       - run: npm ci --no-audit --no-fund
       - run: npm run package:mac --prefix desktop -- --arch=${{ matrix.arch }}
-      - name: Verify and launch the archived app
+      - name: Verify archived app and run optional launch checks
         env:
           STICKER_ARCH: ${{ matrix.arch }}
+          STICKER_SELF_TEST: ${{ inputs.self_test }}
           NBLANE_STICKER_SCREENSHOT_DIR: ${{ runner.temp }}/sticker-visual-check
         shell: bash
         run: |
@@ -72,6 +79,10 @@ jobs:
           /usr/bin/ditto -x -k "$archive" "$verify_dir"
           app="$verify_dir/$product_name.app"
           /usr/bin/codesign --verify --deep --strict --verbose=4 "$app"
+          if [[ "$STICKER_SELF_TEST" == "true" ]]; then
+            echo "Signed archive verified; runtime testing delegated to the user."
+            exit 0
+          fi
           npm run test:smoke --prefix desktop -- "--app=$app"
           node desktop/smoke/mini-ui.mjs "--app=$app"
           # Runner images enable Reduce Transparency for performance. Keep the

@@ -71,7 +71,7 @@ npm run package:mac --prefix desktop -- --arch=x64
 
 输出位于 `dist/desktop/`，包含 `.app`、ZIP 和 SHA256。打包脚本在 macOS 上做本地 ad-hoc 签名并校验；该签名不等于 Apple Developer ID 签名或公证。对外正式分发前需要在 macOS 上接入开发者签名、公证并完成真机验收，不要关闭系统的 Gatekeeper。
 
-仓库的 `macOS Sticker` GitHub Actions 工作流使用对应架构的 Mac runner。打包后会重新解压 ZIP，对解压出的 `.app` 严格验签并执行冒烟测试，全部通过后才上传产物，保留 14 天。它不自动发布到网站或 GitHub Release。直接启动可执行文件的测试并不等于 Gatekeeper 已接受互联网下载的应用；顺畅对外分发仍需 Developer ID 签名、公证与分发验收。
+仓库的 `macOS Sticker` GitHub Actions 工作流默认使用对应架构的 Mac runner。手动运行时可勾选 `self_test`，在 Intel Mac 上生成两个架构的签名包并校验解压后的签名，跳过运行测试，交由用户实机验收。打包后会重新解压 ZIP，对解压出的 `.app` 严格验签并执行冒烟测试，全部通过后才上传产物，保留 14 天。它不自动发布到网站或 GitHub Release。直接启动可执行文件的测试并不等于 Gatekeeper 已接受互联网下载的应用；顺畅对外分发仍需 Developer ID 签名、公证与分发验收。
 
 Linux 上可加 `--unsigned` 生成仅供检查的包，存放在 `dist/desktop/inspection/`。该模式未进行应用级签名，不等于产物内部所有可执行文件都没有上游自带的签名。
 
