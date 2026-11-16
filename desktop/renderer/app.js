@@ -11,6 +11,7 @@
     message: byId('toolbar-message'),
     pin: byId('pin-button'),
     refresh: byId('refresh-button'),
+    openBrowser: byId('open-browser-button'),
     more: byId('more-button'),
     opacityButton: byId('opacity-button'),
     opacityPopover: byId('opacity-popover'),
@@ -118,6 +119,7 @@
     elements.opacityButton.setAttribute('aria-expanded', String(Boolean(state.opacityEditor)));
     if (!opacityWorker && desiredOpacity === null) displayOpacity(state.settings.opacity);
     elements.refresh.disabled = showingSettings || !state.configured;
+    elements.openBrowser.disabled = !state.configured;
     if (enteringOpacity && showOpacity) elements.toolbarRange.focus({ preventScroll: true });
     if (controlsOnly) return;
     elements.toolbar.hidden = integrated;
@@ -253,6 +255,7 @@
   bindAction('refresh-button', 'retry');
   bindAction('opacity-button', 'toggle-opacity-editor');
   bindAction('settings-button', 'show-settings');
+  bindAction('open-browser-button', 'open-browser');
   bindAction('pin-button', 'toggle-pin');
   bindAction('more-button', 'show-menu');
   bindAction('status-settings-button', 'show-settings');

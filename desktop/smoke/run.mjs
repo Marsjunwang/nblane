@@ -112,7 +112,16 @@ try {
   assert.ok(controls, 'The compact trusted controls must exist');
   await expect(controls.getByRole('button', { name: '始终置顶', exact: true })).toBeVisible();
   await expect(controls.getByRole('button', { name: '更多操作', exact: true })).toBeVisible();
-  assert.equal(await controls.locator('.toolbar button:visible').count(), 5, 'Refresh, opacity, settings, pin and more share the compact toolbar');
+  assert.equal(await controls.locator('.toolbar button:visible').count(), 6, 'Refresh, opacity, settings, browser, pin and more share the compact toolbar');
+  // Capture the OS handoff without launching an external browser in CI.
+  await application.evaluate(({ shell }) => {
+    globalThis.originalOpenExternal = shell.openExternal;
+    globalThis.stickerOpenedUrl = null;
+    shell.openExternal = async (url) => { globalThis.stickerOpenedUrl = url; };
+  });
+  await controls.getByRole('button', { name: '在浏览器打开', exact: true }).click();
+  await expect.poll(() => application.evaluate(() => globalThis.stickerOpenedUrl)).toBe(`${origin}/p/smoke-profile/projects`);
+  await application.evaluate(({ shell }) => { shell.openExternal = globalThis.originalOpenExternal; });
   const remotePage = application.windows().find((page) => page.url().startsWith(origin));
   assert.ok(remotePage);
   const height = () => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds().height);

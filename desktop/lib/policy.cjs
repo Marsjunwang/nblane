@@ -12,7 +12,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   launchAtLogin: false,
 });
 const TOOLBAR_HEIGHT = 44;
-const CONTROLS_WIDTH = 180;
+const CONTROLS_WIDTH = 216;
 const MAX_CONTENT_HEIGHT = 560;
 const MIN_WINDOW = Object.freeze({ width: 280, height: 156 });
 
@@ -90,7 +90,7 @@ function validateSettingsUpdate(input) {
 
 function miniUrl(settings) {
   const refresh = normalizeRefreshInterval(settings.refreshIntervalSeconds ?? 60);
-  return `${normalizeServerUrl(settings.serverUrl)}/p/${encodeURIComponent(normalizeProfile(settings.profile))}/mini?sticker=1&toolbar=expanded&refresh=${refresh}`;
+  return `${normalizeServerUrl(settings.serverUrl)}/p/${encodeURIComponent(normalizeProfile(settings.profile))}/mini?sticker=1&toolbar=full&refresh=${refresh}`;
 }
 
 /** Only the configured mini route may supply layout metadata. */

@@ -107,13 +107,13 @@ function mockFetch(calls: Call[], server: Server) {
   });
 }
 
-function renderMini(calls: Call[], server: Server, desktop = false, expandedToolbar = false) {
+function renderMini(calls: Call[], server: Server, desktop = false, expandedToolbar: boolean | 'full' = false) {
   vi.stubGlobal('fetch', mockFetch(calls, server));
   return renderWithProviders(
     <Routes>
       <Route path="/p/:name/mini" element={<MiniPage />} />
     </Routes>,
-    `/p/alice/mini${desktop ? `?sticker=1${expandedToolbar ? '&toolbar=expanded' : ''}` : ''}`,
+    `/p/alice/mini${desktop ? `?sticker=1${expandedToolbar === 'full' ? '&toolbar=full' : expandedToolbar ? '&toolbar=expanded' : ''}` : ''}`,
   );
 }
 
@@ -238,7 +238,7 @@ describe('MiniPage', () => {
     }
   });
 
-  it.each([[false, '88px'], [true, '180px']] as const)('reserves native controls without breaking older clients (expanded=%s)', async (expanded, width) => {
+  it.each([[false, '88px'], [true, '180px'], ['full', '216px']] as const)('reserves native controls without breaking older clients (expanded=%s)', async (expanded, width) => {
     renderMini([], { todos: [] }, true, expanded);
     await screen.findByText('写 VLA 复现');
     expect(screen.getByTestId('mini-page').style.getPropertyValue('--mini-controls-width')).toBe(width);

@@ -25,7 +25,7 @@ test('server configuration accepts secure origins and explicit local development
 test('profile URLs encode display text and reject path or control characters', () => {
   assert.equal(normalizeProfile('  测试 用户  '), '测试 用户');
   assert.equal(miniUrl({ serverUrl: 'https://example.test', profile: '测试 #? 用户' }),
-    'https://example.test/p/%E6%B5%8B%E8%AF%95%20%23%3F%20%E7%94%A8%E6%88%B7/mini?sticker=1&toolbar=expanded&refresh=60');
+    'https://example.test/p/%E6%B5%8B%E8%AF%95%20%23%3F%20%E7%94%A8%E6%88%B7/mini?sticker=1&toolbar=full&refresh=60');
   for (const name of ['', ' ', '.', '..', '../alice', 'alice/bob', 'alice\\bob', 'a\u0000b', 'a\u0085b']) {
     assert.throws(() => normalizeProfile(name), { name: 'Error' });
   }

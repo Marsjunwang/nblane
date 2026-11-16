@@ -128,14 +128,14 @@ try {
   await remote.getByLabel(/^用户名/).fill(fixtureCredentials.username);
   await remote.getByLabel(/^密码/).fill(fixtureCredentials.password);
   await remote.getByRole('button', { name: '登录', exact: true }).click();
-  await expect(remote).toHaveURL(`${fixture.origin}/p/demo/mini?sticker=1&toolbar=expanded&refresh=60`);
+  await expect(remote).toHaveURL(`${fixture.origin}/p/demo/mini?sticker=1&toolbar=full&refresh=60`);
   await waitForMini();
   assert.equal(fixture.state.loginCount, 1, 'The real SPA login mutation must succeed');
   controls = await findPage((url) => url.protocol === 'file:' && url.searchParams.get('controls') === '1');
 
   await expect(remote.locator('.mini-toolbar')).toHaveCount(1);
   await expect(toolbar.locator('.toolbar')).toBeHidden();
-  await expect(controls.locator('.toolbar button:visible')).toHaveCount(5);
+  await expect(controls.locator('.toolbar button:visible')).toHaveCount(6);
   await expect(remote.getByRole('button', { name: '刷新', exact: true })).toHaveCount(0);
   await expect(remote.getByRole('link', { name: '在完整页面打开' })).toHaveCount(0);
   await expect(remote.getByRole('button', { name: '打卡：阅读', exact: true })).toBeVisible();
@@ -147,7 +147,7 @@ try {
     height: element.getBoundingClientRect().height,
     reserved: innerWidth - element.getBoundingClientRect().right,
   }));
-  assert.deepEqual(header, { height: 44, reserved: 180 });
+  assert.deepEqual(header, { height: 44, reserved: 216 });
   await expect.poll(windowHeight).toBeLessThanOrEqual(200);
   const compactHeight = await windowHeight();
   assert.ok(compactHeight >= 156);

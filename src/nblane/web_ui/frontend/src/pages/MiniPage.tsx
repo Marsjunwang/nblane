@@ -47,7 +47,8 @@ export function MiniPage() {
   const { name = '' } = useParams();
   const [searchParams] = useSearchParams();
   const desktop = searchParams.get('sticker') === '1';
-  const expandedToolbar = searchParams.get('toolbar') === 'expanded';
+  const toolbarWidth = searchParams.get('toolbar') === 'full' ? '216px'
+    : searchParams.get('toolbar') === 'expanded' ? '180px' : '88px';
   const requestedRefresh = searchParams.get('refresh');
   const refreshMs = requestedRefresh && MINI_REFRESH_SECONDS.has(requestedRefresh)
     ? Number(requestedRefresh) * 1000 : MINI_REFRESH_MS;
@@ -234,7 +235,7 @@ export function MiniPage() {
       data-desktop={desktop || undefined}
       data-sticker-root={desktop ? '' : undefined}
       data-sticker-overlay={desktop ? String(exceptionsOpened || habitMenu !== null) : undefined}
-      style={{ '--mini-controls-width': expandedToolbar ? '180px' : '88px', '--mini-text': chrome.text, '--mini-dim': chrome.dim, '--mini-gold': chrome.goldText, '--mini-panel': chrome.panelBg, '--mini-card': chrome.cardBg } as React.CSSProperties}
+      style={{ '--mini-controls-width': toolbarWidth, '--mini-text': chrome.text, '--mini-dim': chrome.dim, '--mini-gold': chrome.goldText, '--mini-panel': chrome.panelBg, '--mini-card': chrome.cardBg } as React.CSSProperties}
     >
       <Group className="mini-toolbar" justify="space-between" wrap="nowrap" gap={4} aria-label="任务工具栏">
         <Group className="mini-toolbar-leading" gap={4} wrap="nowrap" miw={0}>
