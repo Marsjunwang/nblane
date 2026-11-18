@@ -305,13 +305,65 @@ describe('EvidencePage', () => {
     fireEvent.click(await screen.findByTestId('evidence-row-ev_2'));
     const detail = await screen.findByTestId('evidence-detail');
     expect(within(detail).getByText('Workshop recap')).toBeInTheDocument();
-    // Live ref renders title; dead ref renders an 已归档 tombstone.
+    // Missing refs retain a snapshot without falsely promising a task link.
     expect(within(detail).getByText(/Tuned latency/)).toBeInTheDocument();
-    expect(within(detail).getByTestId('tombstone-taskGone')).toHaveTextContent('已归档');
-    // Rule-tier skill suggestion chip is offered.
+    expect(within(detail).getByTestId('tombstone-taskGone')).toHaveTextContent('原任务已不可用');
+    expect(within(detail).queryByTestId('skill-suggestions')).not.toBeInTheDocument();
+    fireEvent.click(within(detail).getByRole('button', { name: '添加关联' }));
+    // Rule-tier skill suggestions are offered on demand.
     expect(
       await within(detail).findByTestId('suggest-skill-ros2_basics'),
     ).toBeInTheDocument();
+  });
+
+  it.each(['live', 'archived', 'missing'])('opens the source task including %s records', async (location) => {
+    const task = { id: 'taskA', title: 'Latest task title', done: true, context: 'Current context',
+      outcome: 'Updated outcome', todos: [{ text: 'Verify output', done: true }],
+      details: ['Additional detail'], project_id: 'project:perf' };
+    const fetchMock = stubFetch((url) => url.endsWith('/kanban') ? jsonResponse(200, {
+      profile: 'alice', sections: [{ name: 'Done', tasks: location === 'live' ? [task] : [] }],
+      archive: location === 'archived' ? [task] : [],
+    }) : null);
+    renderPage();
+    fireEvent.click(await screen.findByTestId('evidence-row-ev_2'));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/kanban'))).toBe(false);
+    fireEvent.click(await screen.findByRole('button', { name: '打开原任务' }));
+    if (location === 'missing') {
+      expect(await screen.findByText('原任务已不可用，请返回查看保存的原文快照。')).toBeVisible();
+    } else {
+      const preview = await screen.findByTestId('source-task-preview');
+      expect(preview).toHaveTextContent('Updated outcome');
+      expect(preview).toHaveTextContent('Verify output');
+      expect(preview).toHaveTextContent(location === 'archived' ? '已归档任务记录' : '当前任务记录');
+    }
+    expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+  });
+
+  it('keeps the original snapshot separate from the refined evidence', async () => {
+    stubFetch((url) => url.endsWith('/evidence/ev_2') ? jsonResponse(200, {
+      ...DETAIL, formatted_content: 'Refined achievement',
+    }) : null);
+    renderPage();
+    fireEvent.click(await screen.findByTestId('evidence-row-ev_2'));
+    const detail = await screen.findByTestId('evidence-detail');
+    expect(within(detail).getByText('Refined achievement')).toBeVisible();
+    expect(within(detail).queryByText(/id: taskA/)).not.toBeInTheDocument();
+    expect(within(detail).queryByTestId('skill-suggestions')).not.toBeInTheDocument();
+    fireEvent.click(within(detail).getByRole('button', { name: '查看结晶时原文' }));
+    const original = await screen.findByTestId('evidence-original-snapshot');
+    expect(original).toHaveTextContent('id: taskA');
+    expect(original).not.toHaveTextContent('Refined achievement');
+  });
+
+  it('does not promise a snapshot when legacy evidence has none', async () => {
+    stubFetch((url) => url.endsWith('/evidence/ev_2') ? jsonResponse(200, {
+      ...DETAIL, original_content: '', kanban_ref_details: [],
+    }) : null);
+    renderPage();
+    fireEvent.click(await screen.findByTestId('evidence-row-ev_2'));
+    const detail = await screen.findByTestId('evidence-detail');
+    expect(within(detail).getByText('此证据未保存原文快照。')).toBeVisible();
+    expect(within(detail).queryByRole('button', { name: '查看结晶时原文' })).not.toBeInTheDocument();
   });
 
   it('accept action posts to the single-entry review endpoint', async () => {
@@ -943,6 +995,7 @@ describe('EvidencePage', () => {
     renderPage();
 
     fireEvent.click(await screen.findByTestId('evidence-row-ev_2'));
+    fireEvent.click(await screen.findByRole('button', { name: '添加关联' }));
     const first = await screen.findByTestId('suggest-skill-ros2_basics');
     fireEvent.click(first);
     await waitFor(() => expect(posts).toHaveLength(1));

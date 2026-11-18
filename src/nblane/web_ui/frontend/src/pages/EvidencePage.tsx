@@ -22,7 +22,6 @@ import {
 import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
-  IconArchive,
   IconCheck,
   IconKeyboard,
   IconLink,
@@ -46,6 +45,7 @@ import {
   useEvidenceReviewList,
   useEvidenceSkillSuggestions,
   useEvidenceStages,
+  useKanbanBoard,
   useReviewEvidenceEntry,
   useSetEvidenceSkillLinks,
   useSkillTreeFlat,
@@ -368,53 +368,76 @@ function EvidenceRow({
 
 // --- Right column: inscription detail card -----------------------------------
 
-function ProvenanceSection({ detail }: { detail: EvidenceEntryDetail }) {
+function SourceTaskPreview({ profile, taskId, onClose }: {
+  profile: string; taskId: string; onClose: () => void;
+}) {
+  const query = useKanbanBoard(profile);
+  const board = query.data?.board;
+  const live = board?.sections?.flatMap((section) => section.tasks ?? []).find((task) => task.id === taskId);
+  const archived = board?.archive?.find((task) => task.id === taskId);
+  const task = live ?? archived;
+  return (
+    <Modal opened onClose={onClose} title={task?.title || '原任务'} size="lg">
+      {query.isPending ? <Loader size="sm" /> : query.isError ? (
+        <Stack><Alert color="red">原任务加载失败，请重试。</Alert><Button onClick={() => void query.refetch()}>重试</Button></Stack>
+      ) : !task ? <Text>原任务已不可用，请返回查看保存的原文快照。</Text> : (
+        <Stack gap="sm" data-testid="source-task-preview">
+          <Text size="sm" c="dimmed">{live ? '当前任务记录' : '已归档任务记录'}，可能与结晶时的内容不同。</Text>
+          <Group gap="xs"><Badge>{task.done ? '已完成' : '未完成'}</Badge>{!live && <Badge variant="outline">已归档</Badge>}</Group>
+          {task.project_id && <InscriptionRow label="项目">{task.project_id.replace(/^project:/, '')}</InscriptionRow>}
+          {task.started_on && <InscriptionRow label="开始">{task.started_on}</InscriptionRow>}
+          {task.completed_on && <InscriptionRow label="完成">{task.completed_on}</InscriptionRow>}
+          {([['背景', task.context], ['目的', task.why], ['结果', task.outcome], ['阻碍', task.blocked_by]] as const).map(([label, value]) => value && (
+            <Stack gap={2} key={label}><Text fw={500}>{label}</Text><Text style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{value}</Text></Stack>
+          ))}
+          {(task.todos ?? []).map((todo, index) => <Text key={`todo-${index}`}>{todo.done ? '☑' : '☐'} {todo.text}</Text>)}
+          {(task.subtasks ?? []).map((subtask, index) => <Text key={`subtask-${index}`}>{subtask.done ? '☑' : '☐'} {subtask.title}</Text>)}
+          {(task.details ?? []).map((line, index) => <Text key={index} style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{line}</Text>)}
+        </Stack>
+      )}
+    </Modal>
+  );
+}
+
+function ProvenanceSection({ profile, detail }: { profile: string; detail: EvidenceEntryDetail }) {
+  const [taskId, setTaskId] = useState('');
+  const [snapshotOpen, setSnapshotOpen] = useState(false);
   const kanbanRefs = detail.kanban_ref_details ?? [];
   const projectRefs = detail.project_refs ?? [];
-  const hasOrigin = Boolean(detail.origin);
-  if (!kanbanRefs.length && !projectRefs.length && !hasOrigin) {
-    return null;
-  }
+  const sourceLabel = detail.origin === 'kanban_task' ? '看板任务'
+    : detail.origin === 'output' ? (detail.origin_ref?.startsWith('blog:') ? '文章' : '项目产出')
+    : detail.origin === 'research' ? '研究资料' : '原始记录';
+  const snapshotLabel = detail.origin === 'kanban_task' ? '查看结晶时原文' : '查看原文快照';
+  if (!kanbanRefs.length && !projectRefs.length && !detail.origin && !detail.original_content && !detail.url) return null;
   return (
-    <Stack gap={2} mt="xs">
-      <Text size="sm" style={{ color: inscription.titleColor }}>
-        出处
-      </Text>
+    <Stack gap="xs" mt="sm" data-testid="evidence-provenance">
+      <Text size="sm" style={{ color: inscription.titleColor }}>来源 · {sourceLabel}</Text>
       {kanbanRefs.map((ref) => (
-        <InscriptionRow key={ref.ref} label="看板">
-          {ref.status === 'linked' ? (
-            <span>
-              {ref.title || ref.task_id}{' '}
-              <Text span size="xs" style={{ color: inscription.dimColor }}>
-                ({ref.task_id})
-              </Text>
-            </span>
+        <Stack key={ref.ref} gap={4}>
+          <Text size="sm" style={{ overflowWrap: 'anywhere' }}>{ref.title || '来源任务'}</Text>
+          {ref.status === 'linked' && ref.task_id ? (
+            <Button size="compact-sm" variant="light" color="brand" onClick={() => setTaskId(ref.task_id!)} style={{ alignSelf: 'flex-start', minHeight: 44 }}>
+              打开原任务
+            </Button>
           ) : (
-            <Tooltip label="任务已归档或删除;原文已快照在下方" withinPortal>
-              <Badge
-                size="sm"
-                variant="outline"
-                color="gray"
-                leftSection={<IconArchive size={12} />}
-                data-testid={`tombstone-${ref.task_id}`}
-              >
-                已归档 · {ref.task_id || ref.ref}
-              </Badge>
-            </Tooltip>
+            <Text size="xs" c="dimmed" data-testid={`tombstone-${ref.task_id}`}>原任务已不可用{detail.original_content ? '，仍可查看原文快照。' : '，此证据未保存原文快照。'}</Text>
           )}
-        </InscriptionRow>
+        </Stack>
       ))}
-      {projectRefs.length > 0 && (
-        <InscriptionRow label="项目">
-          {projectRefs.join('、')}
-        </InscriptionRow>
+      {projectRefs.length > 0 && <InscriptionRow label="所属项目">{projectRefs.map((ref) => ref.replace(/^project:/, '')).join('、')}</InscriptionRow>}
+      {detail.url && /^https?:\/\//i.test(detail.url) && <Button component="a" href={detail.url} target="_blank" rel="noopener noreferrer" variant="subtle" size="compact-sm" style={{ alignSelf: 'flex-start', minHeight: 44 }}>打开来源链接</Button>}
+      {detail.original_content ? (
+        <Button size="compact-sm" variant="outline" color="brand" onClick={() => setSnapshotOpen(true)} style={{ alignSelf: 'flex-start', minHeight: 44 }}>{snapshotLabel}</Button>
+      ) : <Text size="xs" c="dimmed">此证据未保存原文快照。</Text>}
+      {snapshotOpen && (
+        <Modal opened onClose={() => setSnapshotOpen(false)} title={detail.origin === 'kanban_task' ? '结晶时原文' : '原文快照'} size="lg">
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">这是生成证据时保存的原始记录，不随来源后续修改而更新。</Text>
+            <Text data-testid="evidence-original-snapshot" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{detail.original_content}</Text>
+          </Stack>
+        </Modal>
       )}
-      {hasOrigin && (
-        <InscriptionRow label="来源">
-          {detail.origin}
-          {detail.origin_ref ? ` · ${detail.origin_ref}` : ''}
-        </InscriptionRow>
-      )}
+      {taskId && <SourceTaskPreview profile={profile} taskId={taskId} onClose={() => setTaskId('')} />}
     </Stack>
   );
 }
@@ -428,6 +451,7 @@ function SkillLinkEditor({
   entryId: string;
   linked: string[];
 }) {
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const tree = useSkillTreeFlat(profile);
   const suggestions = useEvidenceSkillSuggestions(profile, entryId);
   const setLinks = useSetEvidenceSkillLinks(profile);
@@ -451,7 +475,10 @@ function SkillLinkEditor({
         <Text size="sm" style={{ color: inscription.titleColor }}>
           技能关联
         </Text>
-        {suggestions.data && suggestions.data.backend !== 'none' && (
+        <Button size="compact-xs" mih={44} variant="subtle" onClick={() => setShowSuggestions((value) => !value)} aria-expanded={showSuggestions}>
+          {showSuggestions ? '收起建议' : '添加关联'}
+        </Button>
+        {showSuggestions && suggestions.data && suggestions.data.backend !== 'none' && (
           <Badge size="xs" variant="outline" color="gray">
             建议:{({ rule: '规则', embedding: '嵌入', llm: 'AI' } as Record<string, string>)[
               suggestions.data.backend ?? ''
@@ -479,9 +506,12 @@ function SkillLinkEditor({
           </Text>
         )}
       </Group>
-      {(suggestions.data?.suggestions?.length ?? 0) > 0 && (
+      {showSuggestions && suggestions.isPending && <Loader size="xs" />}
+      {showSuggestions && suggestions.isError && <Text size="xs" c="red">技能建议加载失败，请稍后重试。</Text>}
+      {showSuggestions && suggestions.data && !(suggestions.data.suggestions ?? []).some((item) => !linked.includes(item.id)) && <Text size="xs" c="dimmed">暂无新的技能建议。</Text>}
+      {showSuggestions && (suggestions.data?.suggestions?.length ?? 0) > 0 && (
         <Group gap={4} wrap="wrap" data-testid="skill-suggestions">
-          {(suggestions.data?.suggestions ?? []).map((item) => (
+          {(suggestions.data?.suggestions ?? []).filter((item) => !linked.includes(item.id)).map((item) => (
             <Button
               key={item.id}
               size="compact-xs"
@@ -667,23 +697,14 @@ function EvidenceDetailCard({
           </Tooltip>
         </Group>
 
-        <ProvenanceSection detail={detail} />
-        <SkillLinkEditor
-          profile={profile}
-          entryId={entryId}
-          linked={detail.skill_refs ?? []}
-        />
-
-        {(detail.formatted_content || detail.original_content) && (
-          <Stack gap={2} mt="xs">
-            <Text size="sm" style={{ color: inscription.titleColor }}>
-              正文
-            </Text>
-            <Text size="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {detail.formatted_content || detail.original_content}
-            </Text>
+        {detail.formatted_content && detail.formatted_content !== detail.original_content && (
+          <Stack gap={2} mt="sm">
+            <Text size="sm" style={{ color: inscription.titleColor }}>成果正文</Text>
+            <Text size="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{detail.formatted_content}</Text>
           </Stack>
         )}
+        <ProvenanceSection key={entryId} profile={profile} detail={detail} />
+        <SkillLinkEditor key={`skills-${entryId}`} profile={profile} entryId={entryId} linked={detail.skill_refs ?? []} />
 
         <Button
           size="compact-xs"
@@ -693,10 +714,13 @@ function EvidenceDetailCard({
           onClick={() => setShowMore((value) => !value)}
           data-testid="evidence-more-toggle"
         >
-          {showMore ? '收起 ▲' : '更多 ▼'}
+          {showMore ? '收起记录信息 ▲' : '记录信息 ▼'}
         </Button>
         <Collapse in={showMore}>
           <Stack gap={6} data-testid="evidence-more">
+            {detail.origin && <InscriptionRow label="来源类型">{detail.origin}</InscriptionRow>}
+            {detail.origin_ref && <InscriptionRow label="来源编号">{detail.origin_ref}</InscriptionRow>}
+            {(detail.kanban_refs ?? []).length > 0 && <InscriptionRow label="任务编号">{detail.kanban_refs?.join('、')}</InscriptionRow>}
             <InscriptionRow label="置信度">
               <Select
                 size="xs"
