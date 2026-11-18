@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   DEFAULT_SETTINGS, normalizeServerUrl, normalizeProfile, normalizeOpacity, normalizeRefreshInterval, normalizeSettings,
-  validateSettingsUpdate, miniUrl, isIntegratedMiniUrl, contentMetrics, contentHeight, isAllowedRemoteUrl, sessionPartition, isTrustedSender, restoreBounds,
+  validateSettingsUpdate, miniUrl, isIntegratedMiniUrl, miniRecoveryUrl, contentMetrics, contentHeight, isAllowedRemoteUrl, sessionPartition, isTrustedSender, restoreBounds,
 } = require('../lib/policy.cjs');
 
 test('server configuration accepts secure origins and explicit local development only', () => {
@@ -163,4 +163,18 @@ test('content fitting clamps untrusted measurements and reserves temporary overl
   assert.equal(contentHeight({ height: 3000, overlay: false }), 560);
   assert.equal(contentHeight({ height: 190, overlay: true }), 420);
   assert.equal(contentHeight({ height: 190, overlay: false }), 190);
+});
+
+
+test('sticker recovers full-site routes and lost mode parameters but preserves authentication', () => {
+  const settings = { ...DEFAULT_SETTINGS, serverUrl: 'https://example.test', profile: 'alice' };
+  const target = miniUrl(settings);
+  for (const route of ['/', '/profiles', '/p/alice', '/p/alice/projects', '/p/alice/mini', '/p/alice/mini?sticker=1', '/p/bob/mini?sticker=1']) {
+    assert.equal(miniRecoveryUrl(`https://example.test${route}`, settings), target);
+  }
+  for (const url of [target, 'https://example.test/login', 'https://example.test/login?next=/',
+    'https://example.test/settings/account', 'https://example.test/settings/account/',
+    'https://other.test/', 'file:///tmp/page', 'about:blank']) {
+    assert.equal(miniRecoveryUrl(url, settings), null);
+  }
 });

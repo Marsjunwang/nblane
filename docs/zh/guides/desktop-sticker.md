@@ -1,7 +1,7 @@
 ---
 status: active
 owner: engineering
-last_verified: 2026-11-17
+last_verified: 2026-11-18
 source_of_truth: true
 ---
 
@@ -24,7 +24,7 @@ source_of_truth: true
 ## 使用
 
 1. 首次填写服务地址（默认 `https://www.nblane.cloud`）和已有档案名称。
-2. 在贴纸内使用原有 nblane 账号登录。桌面客户端使用自己的持久会话，不读取浏览器的 Cookie；首次需要单独登录。
+2. 在贴纸内使用原有 nblane 账号登录。桌面客户端使用自己的持久会话，不读取浏览器的 Cookie；首次需要单独登录。 `0.1.7` 会自动纠正登录后落到完整网站、或小窗参数丢失的情况，恢复所配置档案的任务小窗；登录和必须修改密码的账号页保留可用。无需先打开外部浏览器。
 3. 使用顶部空白区域拖动、窗口边缘调整尺寸。顶部图钉、贴纸设置里的「始终置顶」和菜单栏开关同步，立即生效并在重开后保持选择。默认开启，切换普通应用时贴纸仍在其窗口上方；系统界面、全屏空间的显示受 macOS 管理。
 4. 点击顶部透明度按钮直接展开滑块，100% 为不透明背景，10% 最透明；文字和图标保持不透明。默认关闭「背景模糊」，可清楚看到后方窗口；在贴纸设置中开启后使用 Mac 系统模糊效果。开启系统「减少透明度 / 增强对比度」时改用实色背景并保留原来的透明度和模糊偏好。
 
@@ -93,7 +93,7 @@ NBLANE_STICKER_RCODESIGN=/absolute/path/to/rcodesign \
 3. 校验并生成下载清单：
 
    ```bash
-   node desktop/scripts/release-manifest.mjs --dir=/path/to/artifacts --version=0.1.6 --out=/path/to/latest.json
+   node desktop/scripts/release-manifest.mjs --dir=/path/to/artifacts --version=0.1.7 --out=/path/to/latest.json
    ```
 
    此命令检查文件名和摘要，不代替原生验签或证明产物来源。必须先核实成功的工作流及其提交。

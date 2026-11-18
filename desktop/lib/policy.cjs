@@ -105,6 +105,19 @@ function isIntegratedMiniUrl(value, settings) {
   }
 }
 
+/** Recover a lost login return path without depending on an external browser. */
+function miniRecoveryUrl(value, settings) {
+  if (!isAllowedRemoteUrl(value, settings.serverUrl)) return null;
+  const url = new URL(value);
+  const pathname = url.pathname.replace(/\/+$/, '') || '/';
+  // Authentication and mandatory password changes must remain usable.
+  if (pathname === '/login' || pathname === '/settings/account') return null;
+  const expected = new URL(miniUrl(settings));
+  if (url.pathname === expected.pathname && ['sticker', 'toolbar', 'refresh'].every(
+    (key) => url.searchParams.get(key) === expected.searchParams.get(key))) return null;
+  return expected.href;
+}
+
 /** Renderer measurements are untrusted, even on the configured website. */
 function contentMetrics(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -187,6 +200,6 @@ function restoreBounds(saved, workAreas, primaryIndex = 0) {
 
 module.exports = {
   DEFAULT_SETTINGS, TOOLBAR_HEIGHT, CONTROLS_WIDTH, MIN_WINDOW, normalizeServerUrl, normalizeProfile,
-  normalizeOpacity, normalizeRefreshInterval, normalizeSettings, validateSettingsUpdate, miniUrl, isIntegratedMiniUrl, contentMetrics, contentHeight, browserUrl,
+  normalizeOpacity, normalizeRefreshInterval, normalizeSettings, validateSettingsUpdate, miniUrl, isIntegratedMiniUrl, miniRecoveryUrl, contentMetrics, contentHeight, browserUrl,
   isAllowedRemoteUrl, sessionPartition, isTrustedSender, validBounds, restoreBounds,
 };

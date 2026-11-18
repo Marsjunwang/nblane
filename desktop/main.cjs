@@ -6,7 +6,7 @@ const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, WebContentsView, ipcMain, Menu, Tray, nativeImage, screen, session, shell, nativeTheme } = require('electron');
 const {
   TOOLBAR_HEIGHT, CONTROLS_WIDTH, MIN_WINDOW, normalizeOpacity, validateSettingsUpdate,
-  miniUrl, isIntegratedMiniUrl, contentMetrics, contentHeight, browserUrl, isAllowedRemoteUrl, sessionPartition, isTrustedSender, restoreBounds,
+  miniUrl, isIntegratedMiniUrl, miniRecoveryUrl, contentMetrics, contentHeight, browserUrl, isAllowedRemoteUrl, sessionPartition, isTrustedSender, restoreBounds,
 } = require('./lib/policy.cjs');
 const { readState, writeState } = require('./lib/store.cjs');
 const theme = require('./lib/theme.cjs');
@@ -366,9 +366,15 @@ function loadRemote() {
     clearTimeout(loadTimer);
     loadTimer = undefined;
   };
+  const recoverMini = () => {
+    if (!current() || !miniRecoveryUrl(view.webContents.getURL(), preferences.settings)) return false;
+    loadRemote();
+    return true;
+  };
   const inspectLayout = async (force = false) => {
     if (readingMetrics || !current() || !window || window.isDestroyed() || !window.isVisible()
         || window.isMinimized() || !contentVisible()) return;
+    if (recoverMini()) return;
     const currentUrl = view.webContents.getURL();
     if (!isIntegratedMiniUrl(currentUrl, preferences.settings)) {
       setIntegratedContent(false);
@@ -455,6 +461,7 @@ function loadRemote() {
   const showReadyDocument = () => {
     if (!current() || failed || !isAllowedRemoteUrl(view.webContents.getURL(), serverUrl)) return;
     clearLoadTimer();
+    if (recoverMini()) return;
     documentReady = true;
     loading = false;
     error = null;
@@ -488,6 +495,9 @@ function loadRemote() {
   });
   view.webContents.on('did-redirect-navigation', (details, url, _isInPlace, isMainFrame) => {
     if (current() && (details.isMainFrame ?? isMainFrame)) activeUrl = details.url || url;
+  });
+  view.webContents.on('did-navigate-in-page', (_event, _url, isMainFrame) => {
+    if (isMainFrame) setImmediate(() => { if (current()) recoverMini(); });
   });
   view.webContents.on('dom-ready', showReadyDocument);
   view.webContents.on('did-finish-load', showReadyDocument);

@@ -125,12 +125,25 @@ try {
   await expect.poll(async () => (await getState()).loading).toBe(false);
   assert.equal((await getState()).integratedContent, false, 'Login must not be treated as the compact task page');
   assert.equal(fixture.state.loginCount, 0, 'The fixture must begin unauthenticated');
+  // Simulate a cold login whose history return target was lost.
+  await remote.evaluate(() => history.replaceState(null, '', '/login'));
+  await remote.reload();
+  await expect(remote.getByRole('heading', { name: 'nblane 登录' })).toBeVisible();
   await remote.getByLabel(/^用户名/).fill(fixtureCredentials.username);
   await remote.getByLabel(/^密码/).fill(fixtureCredentials.password);
   await remote.getByRole('button', { name: '登录', exact: true }).click();
+  remote = await findPage((url) => url.origin === fixture.origin && url.pathname === '/p/demo/mini');
   await expect(remote).toHaveURL(`${fixture.origin}/p/demo/mini?sticker=1&toolbar=full&refresh=60`);
   await waitForMini();
   assert.equal(fixture.state.loginCount, 1, 'The real SPA login mutation must succeed');
+  for (const route of ['/p/demo/projects', '/p/demo/mini']) {
+    await remote.evaluate((route) => history.pushState({}, '', route), route);
+    remote = await findPage((url) => url.origin === fixture.origin
+      && url.pathname === '/p/demo/mini' && url.searchParams.get('toolbar') === 'full');
+    await waitForMini();
+  }
+  assert.equal(fixture.state.loginCount, 1, 'Recovery must not require another browser login');
+
   controls = await findPage((url) => url.protocol === 'file:' && url.searchParams.get('controls') === '1');
 
   await expect(remote.locator('.mini-toolbar')).toHaveCount(1);

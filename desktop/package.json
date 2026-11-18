@@ -1,7 +1,7 @@
 {
   "name": "nblane-sticker",
   "productName": "nblane Sticker",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A persistent macOS task sticker for nblane",
   "private": true,
   "main": "main.cjs",
