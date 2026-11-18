@@ -225,6 +225,57 @@ describe('TaskDetailCard TODO checklist', () => {
     expect(body.todos[2]).toEqual({ text: '写摘要', done: false });
   });
 
+  it('renames a completed item without changing completion, order or unrelated labels', async () => {
+    const fetchMock = renderCard();
+    fireEvent.click(screen.getByRole('button', { name: '编辑 扫引用列表' }));
+    const input = screen.getByRole('textbox', { name: '编辑清单内容' });
+    fireEvent.change(input, { target: { value: '  补充引用并核对出处  ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByTestId('todo-toggle-0')).toBeChecked();
+    expect(await lastPatchBody(fetchMock)).toEqual({ todos: [
+      { text: '补充引用并核对出处', done: true }, { text: '整理笔记', done: false },
+    ] });
+  });
+
+  it('Escape cancels the label draft without closing the card or saving on blur', async () => {
+    const onClose = vi.fn();
+    const fetchMock = renderCard(TASK, { onClose });
+    fireEvent.click(screen.getByRole('button', { name: '编辑 整理笔记' }));
+    const input = screen.getByRole('textbox', { name: '编辑清单内容' });
+    fireEvent.change(input, { target: { value: '不保存的文字' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    fireEvent.blur(input);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 450)));
+    expect(screen.getByTestId('todo-item-1')).toHaveTextContent('整理笔记');
+    expect(onClose).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+  });
+
+  it('rejects blank labels and saves corrected text when focus leaves', async () => {
+    const fetchMock = renderCard();
+    fireEvent.click(screen.getByRole('button', { name: '编辑 整理笔记' }));
+    const input = screen.getByRole('textbox', { name: '编辑清单内容' });
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByText('清单内容不能为空')).toBeVisible();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+    fireEvent.change(input, { target: { value: '整理实验笔记' } });
+    fireEvent.blur(input);
+    expect((await lastPatchBody(fetchMock)).todos[1]).toEqual({ text: '整理实验笔记', done: false });
+  });
+
+  it('does not submit while confirming Chinese IME composition', async () => {
+    const fetchMock = renderCard();
+    fireEvent.click(screen.getByRole('button', { name: '编辑 整理笔记' }));
+    const input = screen.getByRole('textbox', { name: '编辑清单内容' });
+    fireEvent.change(input, { target: { value: '整理中文笔记' } });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    expect(input).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '保存清单内容' }));
+    expect((await lastPatchBody(fetchMock)).todos[1].text).toBe('整理中文笔记');
+  });
+
   it('delete removes an item and PATCHes the shrunk list', async () => {
     const fetchMock = renderCard();
     fireEvent.click(screen.getByTestId('todo-delete-0'));
@@ -499,7 +550,7 @@ describe('TaskDetailCard data-loss regressions', () => {
 
   it('a same-task refetch moving planned dates keeps the open edit draft', () => {
     mountHarness();
-    fireEvent.click(screen.getByRole('button', { name: /编辑/ }));
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
     const titleInput = screen.getByDisplayValue('读 VLA 综述');
     fireEvent.change(titleInput, { target: { value: '草稿标题' } });
     act(() => setHarnessTask({ ...TASK, planned_start: '2026-10-01', planned_end: '2026-10-03' }));
@@ -508,7 +559,7 @@ describe('TaskDetailCard data-loss regressions', () => {
 
   it('opening a different task resets edit mode', () => {
     mountHarness();
-    fireEvent.click(screen.getByRole('button', { name: /编辑/ }));
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
     fireEvent.change(screen.getByDisplayValue('读 VLA 综述'), { target: { value: '草稿标题' } });
     act(() => setHarnessTask({ ...TASK, id: 'kb_2', title: '另一张卡' }));
     expect(screen.queryByDisplayValue('草稿标题')).not.toBeInTheDocument();

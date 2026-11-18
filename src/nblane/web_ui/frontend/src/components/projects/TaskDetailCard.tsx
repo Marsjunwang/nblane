@@ -24,11 +24,12 @@ import {
   Text,
   Textarea,
   TextInput,
+  UnstyledButton,
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconArrowRight, IconPencil, IconSparkles, IconTrash, IconX } from '@tabler/icons-react';
+import { IconArrowRight, IconCheck, IconPencil, IconSparkles, IconTrash, IconX } from '@tabler/icons-react';
 import 'dayjs/locale/zh-cn';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -91,7 +92,72 @@ interface TodoDraft {
   done: boolean;
 }
 
-/** Checklist section of the detail card: toggle / add / delete with an
+/** Edit only the label; completion and list ordering stay with the parent. */
+function TodoText({ todo, onSave }: { todo: TodoDraft; onSave: (text: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(todo.text);
+  const [error, setError] = useState('');
+  const finished = useRef(true);
+  const finish = (save: boolean) => {
+    if (finished.current) return;
+    const value = text.trim();
+    if (save && !value) {
+      setError('清单内容不能为空');
+      return;
+    }
+    finished.current = true;
+    setEditing(false);
+    if (save && value !== todo.text) onSave(value);
+  };
+  if (editing) return (
+    <TextInput
+      style={{ flex: 1, minWidth: 0 }}
+      size="xs"
+      autoFocus
+      aria-label="编辑清单内容"
+      data-mantine-stop-propagation="true"
+      description="Enter 保存，Esc 取消；移开焦点自动保存"
+      value={text}
+      error={error || undefined}
+      onFocus={(event) => event.currentTarget.select()}
+      onChange={(event) => { setText(event.currentTarget.value); setError(''); }}
+      onBlur={() => finish(true)}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+        if (event.key === 'Enter' || event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          finish(event.key === 'Enter');
+        }
+      }}
+      rightSectionWidth={44}
+      rightSection={(
+        <ActionIcon size={44} variant="subtle" aria-label="保存清单内容"
+          onMouseDown={(event) => event.preventDefault()} onClick={() => finish(true)}>
+          <IconCheck size={16} />
+        </ActionIcon>
+      )}
+    />
+  );
+  return (
+    <UnstyledButton
+      aria-label={`编辑 ${todo.text}`} title="编辑清单内容"
+      style={{ flex: 1, minWidth: 0, minHeight: 44 }}
+      onClick={() => { setText(todo.text); setError(''); finished.current = false; setEditing(true); }}
+    >
+      <Group gap={4} wrap="nowrap">
+        <Text size="sm" style={{ flex: 1, overflowWrap: 'anywhere',
+          textDecoration: todo.done ? 'line-through' : undefined,
+          color: todo.done ? boardPalette.dim : undefined }}>
+          {todo.text}
+        </Text>
+        <IconPencil size={12} style={{ flexShrink: 0, color: boardPalette.dim }} />
+      </Group>
+    </UnstyledButton>
+  );
+}
+
+/** Checklist section of the detail card: toggle / edit / add / delete with an
  * optimistic local list and a debounced full-replace PATCH. */
 function TodoChecklist({
   task,
@@ -174,16 +240,9 @@ function TodoChecklist({
             aria-label={`勾选 ${todo.text}`}
             data-testid={`todo-toggle-${index}`}
           />
-          <Text
-            size="sm"
-            style={{
-              flex: 1,
-              textDecoration: todo.done ? 'line-through' : undefined,
-              color: todo.done ? boardPalette.dim : undefined,
-            }}
-          >
-            {todo.text}
-          </Text>
+          <TodoText todo={todo} onSave={(text) =>
+            commit(todos.map((item, i) => i === index ? { ...item, text } : item))
+          } />
           <ActionIcon
             size="xs"
             variant="subtle"
