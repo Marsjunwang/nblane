@@ -356,11 +356,53 @@ describe('EvidencePage', () => {
     expect(within(detail).getByText(/expert requires evidence/)).toBeInTheDocument();
     expect(within(detail).getByTestId('risk-score')).toHaveTextContent('0 / 100，还差 100 分');
     expect(within(detail).getByText('精通')).toBeInTheDocument();
-    // 去挂证据 jumps to the 待关联 stage.
+    // Keep the target skill and open all reviewed evidence, including seated rows.
     fireEvent.click(within(detail).getByTestId('risk-goto-unlinked'));
-    await waitFor(() =>
-      expect(screen.getByTestId('stage-unlinked')).toHaveStyle({ background: 'rgba(220, 174, 85, 0.10)' }),
-    );
+    expect(await screen.findByRole('dialog', { name: '为「Navigation」挂证据' })).toBeVisible();
+  });
+
+  it.each([false, true])('links seated evidence while retaining fresh relations (conflict=%s)', async (conflict) => {
+    const posts: { body: unknown; etag: string }[] = [];
+    let detailGets = 0;
+    const fetchMock = stubFetch((url, init) => {
+      if (url.includes('/skill-tree')) return new Response(JSON.stringify(SKILL_TREE), {
+        headers: { 'Content-Type': 'application/json', ETag: '"tree-fresh"' },
+      });
+      if (url.includes('/evidence-review') && url.includes('status=reviewed')) return jsonResponse(200, {
+        ...REVIEW_QUEUE, status: 'reviewed', items: [
+          { ...REVIEW_QUEUE.items[0], review_status: 'reviewed', usage_count: 1, skill_refs: ['old-skill'] },
+          { ...REVIEW_QUEUE.items[0], id: 'ev_free', title: 'Unlinked', review_status: 'reviewed', usage_count: 0 },
+        ],
+      });
+      if (url.endsWith('/evidence/ev_2') && (!init?.method || init.method === 'GET')) {
+        detailGets += 1;
+        return jsonResponse(200, { ...DETAIL, review_status: 'reviewed', skill_refs: ['old-skill', 'newly-added-elsewhere'] });
+      }
+      if (url.endsWith('/skill-links') && init?.method === 'POST') {
+        posts.push({ body: JSON.parse(String(init.body)), etag: (init.headers as Record<string, string>)['If-Match'] });
+        return conflict ? jsonResponse(412, { code: 'etag_mismatch', message: '关联已变化，请重新选择' })
+          : jsonResponse(200, { ok: true, entry_id: 'ev_2', skill_ids: ['old-skill', 'newly-added-elsewhere', 'navigation'] });
+      }
+      return null;
+    });
+    renderPage('/p/alice/evidence?stage=strengthen');
+    fireEvent.click(await screen.findByTestId('risk-navigation'));
+    fireEvent.click(screen.getByTestId('risk-goto-unlinked'));
+    const row = await screen.findByTestId('risk-evidence-ev_2');
+    expect(row).toHaveTextContent('已入座');
+    expect(await screen.findByTestId('risk-evidence-ev_free')).toHaveTextContent('待关联');
+    const link = within(row).getByRole('button', { name: '挂到此技能' });
+    await waitFor(() => expect(link).toBeEnabled());
+    fireEvent.click(link);
+    if (conflict) {
+      expect(await screen.findByTestId('conflict-alert')).toHaveTextContent('数据已被他人修改');
+    } else {
+      expect(await within(row).findByRole('button', { name: '已关联此技能' })).toBeDisabled();
+    }
+    expect(posts).toEqual([{ body: { skill_ids: ['old-skill', 'newly-added-elsewhere', 'navigation'] }, etag: '"tree-fresh"' }]);
+    expect(detailGets).toBe(1);
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls.findIndex((url) => url.includes('/skill-tree'))).toBeLessThan(urls.findIndex((url) => url.endsWith('/evidence/ev_2')));
   });
 
   it('待关联 lists only reviewed rows without skill links', async () => {

@@ -37,6 +37,7 @@ import type { ReactNode } from 'react';
 import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 
 import {
+  useAddEvidenceSkillLink,
   useCrystallizeApply,
   useCrystallizeCandidates,
   useCrystallizeDraft,
@@ -814,14 +815,63 @@ const RISK_LEVEL_LABELS: Record<string, string> = {
   insufficient_score: '分数不够',
 };
 
+function RiskEvidencePicker({ profile, risk, onClose }: {
+  profile: string; risk: EvidenceStageRisk; onClose: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [debouncedQuery] = useDebouncedValue(query, 300);
+  const list = useEvidenceReviewList(profile, { status: 'reviewed', q: debouncedQuery });
+  const addLink = useAddEvidenceSkillLink(profile);
+  const [added, setAdded] = useState<string[]>([]);
+  return (
+    <Modal opened onClose={onClose} title={`为「${risk.label || risk.skill_id}」挂证据`} size="lg">
+      <Stack gap="sm">
+        <Text size="sm" c="dimmed">选择已审阅的证据；已入座的证据也可继续关联，原有技能关联会保留。</Text>
+        <TextInput aria-label="搜索可关联证据" placeholder="搜索证据标题或内容"
+          value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+        <MutationErrorAlert error={addLink.error ?? list.error} title="关联未完成"
+          onRefetch={() => { addLink.reset(); void list.refetch(); }} />
+        {list.isPending ? <Loader size="sm" /> : (
+          <Stack gap="xs" mah="50vh" style={{ overflowY: 'auto' }}>
+            {(list.data?.data.items ?? []).map((item) => {
+              const linked = (item.skill_refs ?? []).includes(risk.skill_id) || added.includes(item.id);
+              return (
+                <Card key={item.id} withBorder padding="sm" data-testid={`risk-evidence-${item.id}`}>
+                  <Group justify="space-between" wrap="nowrap">
+                    <Stack gap={2} style={{ minWidth: 0 }}>
+                      <Text size="sm" style={{ overflowWrap: 'anywhere' }}>{item.title || item.id}</Text>
+                      <Text size="xs" c="dimmed">{(item.usage_count ?? 0) > 0 ? `已入座 · 已关联 ${item.usage_count} 个技能` : '待关联'}</Text>
+                    </Stack>
+                    <Button size="compact-sm" style={{ flexShrink: 0 }}
+                      disabled={linked || addLink.isPending || list.isFetching}
+                      onClick={() => addLink.mutate({ entryId: item.id, skillId: risk.skill_id }, {
+                        onSuccess: () => setAdded((previous) => [...previous, item.id]),
+                      })}>
+                      {linked ? '已关联此技能' : '挂到此技能'}
+                    </Button>
+                  </Group>
+                </Card>
+              );
+            })}
+            {!list.isError && !list.data?.data.items?.length && <Text c="dimmed">没有符合条件的已审阅证据。</Text>}
+          </Stack>
+        )}
+      </Stack>
+    </Modal>
+  );
+}
+
 /** 待补强 card: the rung's progress gap plus the two ways to close it. */
 function RiskDetailCard({
+  profile,
   risk,
   onGoto,
 }: {
+  profile: string;
   risk: EvidenceStageRisk;
   onGoto: (stage: Stage) => void;
 }) {
+  const [linkOpen, setLinkOpen] = useState(false);
   return (
     <InscriptionCard title={risk.label || risk.skill_id} testId="risk-detail">
       <Stack gap={4}>
@@ -847,7 +897,7 @@ function RiskDetailCard({
             : '无关联证据'}
         </InscriptionRow>
         <Group gap="xs" mt="xs">
-          <Button size="compact-sm" variant="light" color="brand" onClick={() => onGoto('unlinked')} data-testid="risk-goto-unlinked">
+          <Button size="compact-sm" variant="light" color="brand" onClick={() => setLinkOpen(true)} data-testid="risk-goto-unlinked">
             去挂证据
           </Button>
           <Button size="compact-sm" variant="subtle" color="brand" onClick={() => onGoto('crystallize')} data-testid="risk-goto-crystallize">
@@ -857,6 +907,7 @@ function RiskDetailCard({
         <Text size="xs" style={{ color: inscription.dimColor }}>
           只计已审阅的证据；分值和门槛在「设置 → 技能进阶」。
         </Text>
+        {linkOpen && <RiskEvidencePicker profile={profile} risk={risk} onClose={() => setLinkOpen(false)} />}
       </Stack>
     </InscriptionCard>
   );
@@ -1607,6 +1658,11 @@ export function EvidencePage() {
     return allItems;
   }, [allItems, stage]);
   const risks = useMemo(() => stages.data?.risks ?? [], [stages.data]);
+  useEffect(() => {
+    if (!selectedRisk || !stages.data) return;
+    const current = risks.find((risk) => risk.skill_id === selectedRisk.skill_id);
+    if (current !== selectedRisk) setSelectedRisk(current ?? null);
+  }, [risks, selectedRisk, stages.data]);
   const candidateItems = useMemo(
     () => candidates.data?.items ?? [],
     [candidates.data],
@@ -1896,7 +1952,7 @@ export function EvidencePage() {
               onClose={() => setSelectedCandidate(null)}
             />
           ) : selectedRisk ? (
-            <RiskDetailCard risk={selectedRisk} onGoto={setStage} />
+            <RiskDetailCard key={selectedRisk.skill_id} profile={name} risk={selectedRisk} onGoto={setStage} />
           ) : (
             <Card
               withBorder

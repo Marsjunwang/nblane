@@ -1839,6 +1839,39 @@ export function useSetEvidenceSkillLinks(profile: string) {
   });
 }
 
+/** Append one relation using fresh membership; never retry a stale replacement. */
+export function useAddEvidenceSkillLink(profile: string) {
+  const invalidate = useInvalidateEvidenceReview(profile);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ entryId, skillId }: { entryId: string; skillId: string }) => {
+      // Read the revision BEFORE membership. Any intervening tree write is
+      // rejected by If-Match instead of dropping links added by another client.
+      const etag = await refreshTreeEtag(profile);
+      if (!etag) throw new Error('无法读取技能树版本，请重试。');
+      const entry = await apiGet<EvidenceEntryDetail>(`${evidenceBase(profile)}/${encodeURIComponent(entryId)}`);
+      if (entry.deprecated || entry.review_status !== 'reviewed') {
+        throw new Error('这条证据已不在已审阅列表，请刷新后重新选择。');
+      }
+      const skillIds = [...new Set([...(entry.skill_refs ?? []), skillId])];
+      const res = await apiPostWithHeaders<EvidenceSkillLinksResponse>(
+        `${evidenceBase(profile)}/${encodeURIComponent(entryId)}/skill-links`,
+        { skill_ids: skillIds }, { headers: ifMatch(etag) },
+      );
+      return { data: res.data, etag: res.headers.get('ETag') ?? etag };
+    },
+    onSuccess: ({ etag }) => {
+      writeTreeEtag(queryClient, profile, etag);
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'skill-tree'] });
+    },
+    onError: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['profiles', profile, 'skill-tree'] });
+    },
+  });
+}
+
 /** Tiered skill-link suggestions (embedding -> llm -> rule) for one entry. */
 export function useEvidenceSkillSuggestions(profile: string, entryId: string) {
   return useQuery({
