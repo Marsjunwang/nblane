@@ -266,6 +266,7 @@ async function openDraftStep(ids = ['taskA']) {
 describe('EvidencePage', () => {
   // Fixture evidence is unrated, so accepting asks first; default to yes.
   beforeEach(() => {
+    window.localStorage.clear();
     vi.spyOn(window, 'confirm').mockReturnValue(true);
   });
 
@@ -329,7 +330,7 @@ describe('EvidencePage', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/kanban'))).toBe(false);
     fireEvent.click(await screen.findByRole('button', { name: '打开原任务' }));
     if (location === 'missing') {
-      expect(await screen.findByText('原任务已不可用，请返回查看保存的原文快照。')).toBeVisible();
+      expect((await screen.findAllByText('原任务已不可用，可切换到保存的原文快照。'))[0]).toBeVisible();
     } else {
       const preview = await screen.findByTestId('source-task-preview');
       expect(preview).toHaveTextContent('Updated outcome');
@@ -353,6 +354,41 @@ describe('EvidencePage', () => {
     const original = await screen.findByTestId('evidence-original-snapshot');
     expect(original).toHaveTextContent('id: taskA');
     expect(original).not.toHaveTextContent('Refined achievement');
+  });
+
+  it('keeps the inline original open when switching evidence and remembers the preference', async () => {
+    stubFetch((url) => {
+      if (url.includes('/evidence-review')) return jsonResponse(200, {
+        ...REVIEW_QUEUE, items: [REVIEW_QUEUE.items[0], { ...REVIEW_QUEUE.items[0], id: 'ev_next', title: 'Next evidence' }],
+      });
+      if (url.endsWith('/evidence/ev_next')) return jsonResponse(200, {
+        ...DETAIL, id: 'ev_next', title: 'Next evidence', original_content: 'Next original\ntodos:\n- [x] next TODO',
+      });
+      return null;
+    });
+    renderPage('/p/alice/evidence?focus=ev_2');
+    fireEvent.click(await screen.findByTestId('evidence-row-ev_2'));
+    fireEvent.click(await screen.findByRole('button', { name: '查看结晶时原文' }));
+    expect(await screen.findByTestId('evidence-source-panel')).toBeVisible();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByTestId('evidence-original-snapshot')).toHaveTextContent('id: taskA');
+    fireEvent.click(screen.getByTestId('evidence-row-ev_next'));
+    await waitFor(() => expect(screen.getByTestId('evidence-original-snapshot')).toHaveTextContent('next TODO'));
+    expect(screen.getByTestId('evidence-original-snapshot')).not.toHaveTextContent('id: taskA');
+    expect(JSON.parse(localStorage.getItem('nblane-evidence-source-view:alice')!)).toBe('snapshot');
+    fireEvent.click(within(screen.getByTestId('evidence-source-panel')).getByRole('button', { name: '收起' }));
+    expect(screen.queryByTestId('evidence-source-panel')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('evidence-row-ev_2'));
+    expect(screen.queryByTestId('evidence-source-panel')).not.toBeInTheDocument();
+  });
+
+  it('restores the inline reading mode saved before mounting', async () => {
+    localStorage.setItem('nblane-evidence-source-view:alice', JSON.stringify('snapshot'));
+    stubFetch();
+    renderPage();
+    fireEvent.click(await screen.findByTestId('evidence-row-ev_2'));
+    expect(await screen.findByTestId('evidence-original-snapshot')).toHaveTextContent('id: taskA');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('does not promise a snapshot when legacy evidence has none', async () => {

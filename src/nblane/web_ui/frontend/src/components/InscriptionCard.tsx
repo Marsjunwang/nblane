@@ -14,12 +14,14 @@ export function InscriptionCard({
   aside,
   children,
   testId,
+  bodyMaxHeight = '70vh',
 }: {
   title: string;
   /** Badges/actions rendered at the right of the title row. */
   aside?: ReactNode;
   children: ReactNode;
   testId?: string;
+  bodyMaxHeight?: string;
 }) {
   return (
     <Box
@@ -51,7 +53,7 @@ export function InscriptionCard({
       {/* Vertical scroll only: autosize content defaults to min-width:
           min-content, so one long unwrapped label would widen the body past
           the card and get clipped. */}
-      <ScrollArea.Autosize mah="70vh" scrollbars="y" styles={{ content: { minWidth: 0 } }}>
+      <ScrollArea.Autosize mah={bodyMaxHeight} scrollbars="y" styles={{ content: { minWidth: 0 } }}>
         {children}
       </ScrollArea.Autosize>
     </Box>

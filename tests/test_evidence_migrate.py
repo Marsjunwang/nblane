@@ -15,7 +15,7 @@ from nblane.core.evidence_migrate import (
     refresh_from_crystallized_tasks,
     render_kanban_task_source,
 )
-from nblane.core.models import KanbanTask, KanbanSubtask
+from nblane.core.models import KanbanTask, KanbanSubtask, KanbanTodo
 
 
 class TestDetectLanguage(unittest.TestCase):
@@ -99,6 +99,7 @@ class TestRenderKanbanTaskSource(unittest.TestCase):
             completed_on="2026-01-02",
             project_id="project:perf",
             crystallized=True,
+            todos=[KanbanTodo(text="Verify labels", done=True), KanbanTodo(text="Repeat test", done=False)],
             subtasks=[KanbanSubtask(title="profile", done=True)],
             details=["note one"],
         )
@@ -108,8 +109,32 @@ class TestRenderKanbanTaskSource(unittest.TestCase):
         self.assertIn("outcome: cut to 20fps", out)
         self.assertIn("project_id: project:perf", out)
         self.assertIn("crystallized: true", out)
+        self.assertIn("todos:\n- [x] Verify labels\n- [ ] Repeat test", out)
         self.assertIn("- [x] profile", out)
         self.assertIn("- note one", out)
+
+    def test_todos_survive_snapshot_and_formatted_preview(self) -> None:
+        from nblane.core.crystallize import task_snapshot, attach_task_snapshots
+
+        task = KanbanTask(id="t1", title="Audit", todos=[
+            KanbanTodo(text="checked", done=True),
+            KanbanTodo(text="pending", done=False),
+        ])
+        snapshot = task_snapshot(task)
+        source = snapshot["original_content"]
+        self.assertIn("- [x] checked", source)
+        self.assertIn("- [ ] pending", source)
+        self.assertEqual(snapshot["original_content_hash"], content_hash(source))
+        patch = attach_task_snapshots({"evidence_entries": [{"title": "Audit", "kanban_refs": ["kanban:t1"]}]}, [snapshot], strict=True)
+        self.assertEqual(patch["evidence_entries"][0]["original_content"], source)
+        with tempfile.TemporaryDirectory() as tmp:
+            row, _, _ = backfill_row(
+                {"id": "ev", "origin": "kanban_task", "original_content": source},
+                profile=Path(tmp), target_lang="zh",
+            )
+        self.assertIn("TODO 清单", row["formatted_content"])
+        self.assertIn("✅ checked", row["formatted_content"])
+        self.assertIn("☐ pending", row["formatted_content"])
 
 
 class TestBackfillRow(unittest.TestCase):

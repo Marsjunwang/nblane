@@ -19,7 +19,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
-import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
+import { useDebouncedValue, useLocalStorage, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
   IconCheck,
@@ -368,8 +368,10 @@ function EvidenceRow({
 
 // --- Right column: inscription detail card -----------------------------------
 
-function SourceTaskPreview({ profile, taskId, onClose }: {
-  profile: string; taskId: string; onClose: () => void;
+type SourceView = 'snapshot' | 'task' | null;
+
+function SourceTaskPreview({ profile, taskId }: {
+  profile: string; taskId: string;
 }) {
   const query = useKanbanBoard(profile);
   const board = query.data?.board;
@@ -377,10 +379,11 @@ function SourceTaskPreview({ profile, taskId, onClose }: {
   const archived = board?.archive?.find((task) => task.id === taskId);
   const task = live ?? archived;
   return (
-    <Modal opened onClose={onClose} title={task?.title || '原任务'} size="lg">
+    <Stack gap="xs">
+      {task && <Text fw={600} style={{ color: inscription.titleColor }}>{task.title}</Text>}
       {query.isPending ? <Loader size="sm" /> : query.isError ? (
         <Stack><Alert color="red">原任务加载失败，请重试。</Alert><Button onClick={() => void query.refetch()}>重试</Button></Stack>
-      ) : !task ? <Text>原任务已不可用，请返回查看保存的原文快照。</Text> : (
+      ) : !task ? <Text>原任务已不可用，可切换到保存的原文快照。</Text> : (
         <Stack gap="sm" data-testid="source-task-preview">
           <Text size="sm" c="dimmed">{live ? '当前任务记录' : '已归档任务记录'}，可能与结晶时的内容不同。</Text>
           <Group gap="xs"><Badge>{task.done ? '已完成' : '未完成'}</Badge>{!live && <Badge variant="outline">已归档</Badge>}</Group>
@@ -395,13 +398,13 @@ function SourceTaskPreview({ profile, taskId, onClose }: {
           {(task.details ?? []).map((line, index) => <Text key={index} style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{line}</Text>)}
         </Stack>
       )}
-    </Modal>
+    </Stack>
   );
 }
 
-function ProvenanceSection({ profile, detail }: { profile: string; detail: EvidenceEntryDetail }) {
-  const [taskId, setTaskId] = useState('');
-  const [snapshotOpen, setSnapshotOpen] = useState(false);
+function ProvenanceSection({ detail, sourceView, onSourceView }: {
+  detail: EvidenceEntryDetail; sourceView: SourceView; onSourceView: (view: SourceView) => void;
+}) {
   const kanbanRefs = detail.kanban_ref_details ?? [];
   const projectRefs = detail.project_refs ?? [];
   const sourceLabel = detail.origin === 'kanban_task' ? '看板任务'
@@ -416,8 +419,8 @@ function ProvenanceSection({ profile, detail }: { profile: string; detail: Evide
         <Stack key={ref.ref} gap={4}>
           <Text size="sm" style={{ overflowWrap: 'anywhere' }}>{ref.title || '来源任务'}</Text>
           {ref.status === 'linked' && ref.task_id ? (
-            <Button size="compact-sm" variant="light" color="brand" onClick={() => setTaskId(ref.task_id!)} style={{ alignSelf: 'flex-start', minHeight: 44 }}>
-              打开原任务
+            <Button size="compact-sm" variant="light" color="brand" onClick={() => onSourceView(sourceView === 'task' ? null : 'task')} aria-expanded={sourceView === 'task'} style={{ alignSelf: 'flex-start', minHeight: 44 }}>
+              {sourceView === 'task' ? '收起原任务' : '打开原任务'}
             </Button>
           ) : (
             <Text size="xs" c="dimmed" data-testid={`tombstone-${ref.task_id}`}>原任务已不可用{detail.original_content ? '，仍可查看原文快照。' : '，此证据未保存原文快照。'}</Text>
@@ -427,17 +430,9 @@ function ProvenanceSection({ profile, detail }: { profile: string; detail: Evide
       {projectRefs.length > 0 && <InscriptionRow label="所属项目">{projectRefs.map((ref) => ref.replace(/^project:/, '')).join('、')}</InscriptionRow>}
       {detail.url && /^https?:\/\//i.test(detail.url) && <Button component="a" href={detail.url} target="_blank" rel="noopener noreferrer" variant="subtle" size="compact-sm" style={{ alignSelf: 'flex-start', minHeight: 44 }}>打开来源链接</Button>}
       {detail.original_content ? (
-        <Button size="compact-sm" variant="outline" color="brand" onClick={() => setSnapshotOpen(true)} style={{ alignSelf: 'flex-start', minHeight: 44 }}>{snapshotLabel}</Button>
+        <Button size="compact-sm" variant="outline" color="brand" onClick={() => onSourceView(sourceView === 'snapshot' ? null : 'snapshot')} aria-expanded={sourceView === 'snapshot'} style={{ alignSelf: 'flex-start', minHeight: 44 }}>{sourceView === 'snapshot' ? '收起原文' : snapshotLabel}</Button>
       ) : <Text size="xs" c="dimmed">此证据未保存原文快照。</Text>}
-      {snapshotOpen && (
-        <Modal opened onClose={() => setSnapshotOpen(false)} title={detail.origin === 'kanban_task' ? '结晶时原文' : '原文快照'} size="lg">
-          <Stack gap="sm">
-            <Text size="sm" c="dimmed">这是生成证据时保存的原始记录，不随来源后续修改而更新。</Text>
-            <Text data-testid="evidence-original-snapshot" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{detail.original_content}</Text>
-          </Stack>
-        </Modal>
-      )}
-      {taskId && <SourceTaskPreview profile={profile} taskId={taskId} onClose={() => setTaskId('')} />}
+
     </Stack>
   );
 }
@@ -543,10 +538,14 @@ function EvidenceDetailCard({
   entryId,
   etag,
   onClose,
+  sourceView,
+  onSourceView,
 }: {
   profile: string;
   entryId: string;
   etag: string;
+  sourceView: SourceView;
+  onSourceView: (view: SourceView) => void;
   onClose: () => void;
 }) {
   const entry = useEvidenceEntry(profile, entryId);
@@ -611,7 +610,8 @@ function EvidenceDetailCard({
   );
 
   return (
-    <InscriptionCard title={detail.title || detail.id} aside={aside} testId="evidence-detail">
+    <>
+    <InscriptionCard title={detail.title || detail.id} aside={aside} testId="evidence-detail" bodyMaxHeight={sourceView ? '42vh' : '70vh'}>
       <Stack gap={4}>
         {editing ? (
           <Stack gap="xs" data-testid="evidence-edit-form">
@@ -703,7 +703,7 @@ function EvidenceDetailCard({
             <Text size="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{detail.formatted_content}</Text>
           </Stack>
         )}
-        <ProvenanceSection key={entryId} profile={profile} detail={detail} />
+        <ProvenanceSection detail={detail} sourceView={sourceView} onSourceView={onSourceView} />
         <SkillLinkEditor key={`skills-${entryId}`} profile={profile} entryId={entryId} linked={detail.skill_refs ?? []} />
 
         <Button
@@ -830,6 +830,31 @@ function EvidenceDetailCard({
         />
       </Stack>
     </InscriptionCard>
+    {sourceView && (
+      <InscriptionCard title={sourceView === 'task' ? '原任务记录' : detail.origin === 'kanban_task' ? '结晶时原文' : '原文快照'}
+        testId="evidence-source-panel" bodyMaxHeight="38vh"
+        aside={<Button size="compact-xs" mih={44} variant="subtle" color="gray" onClick={() => onSourceView(null)}>收起</Button>}>
+        <Stack gap="sm" key={`${entryId}-${sourceView}`}>
+          <Text size="xs" style={{ color: inscription.dimColor }}>{detail.title || detail.id}</Text>
+          <Group gap="xs">
+            <Button size="compact-sm" mih={44} variant={sourceView === 'snapshot' ? 'light' : 'subtle'} onClick={() => onSourceView('snapshot')}>原文快照</Button>
+            <Button size="compact-sm" mih={44} variant={sourceView === 'task' ? 'light' : 'subtle'} onClick={() => onSourceView('task')}>当前任务（含 TODO）</Button>
+          </Group>
+          {sourceView === 'snapshot' ? <>
+            <Text size="xs" style={{ color: inscription.dimColor }}>生成证据时保存的原始记录，不随来源后续修改更新。</Text>
+            {detail.origin === 'kanban_task' && detail.original_content && !/^todos:/m.test(detail.original_content) && (
+              <Text size="xs" style={{ color: inscription.dimColor }}>这份快照未记录 TODO。可切换到当前任务查看现有清单；它不代表结晶时的状态。</Text>
+            )}
+            <Text size="sm" data-testid="evidence-original-snapshot" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+              {detail.original_content || '此证据未保存原文快照。'}
+            </Text>
+          </> : (detail.kanban_ref_details ?? []).length ? (
+            (detail.kanban_ref_details ?? []).map((ref) => <SourceTaskPreview key={ref.ref} profile={profile} taskId={ref.task_id || ''} />)
+          ) : <Text size="sm">此证据没有关联看板任务。</Text>}
+        </Stack>
+      </InscriptionCard>
+    )}
+    </>
   );
 }
 
@@ -848,7 +873,13 @@ function RiskEvidencePicker({ profile, risk, onClose }: {
   const addLink = useAddEvidenceSkillLink(profile);
   const [added, setAdded] = useState<string[]>([]);
   return (
-    <Modal opened onClose={onClose} title={`为「${risk.label || risk.skill_id}」挂证据`} size="lg">
+    <Modal opened onClose={onClose} title={`为「${risk.label || risk.skill_id}」挂证据`} size="lg"
+      styles={{
+        content: { background: inscription.background, border: `1px solid ${inscription.borderColor}` },
+        header: { background: inscription.background },
+        title: { color: inscription.titleColor, fontFamily: inscription.titleFontFamily },
+        body: { color: inscription.bodyColor, fontFamily: inscription.bodyFontFamily },
+      }}>
       <Stack gap="sm">
         <Text size="sm" c="dimmed">选择已审阅的证据；已入座的证据也可继续关联，原有技能关联会保留。</Text>
         <TextInput aria-label="搜索可关联证据" placeholder="搜索证据标题或内容"
@@ -860,13 +891,13 @@ function RiskEvidencePicker({ profile, risk, onClose }: {
             {(list.data?.data.items ?? []).map((item) => {
               const linked = (item.skill_refs ?? []).includes(risk.skill_id) || added.includes(item.id);
               return (
-                <Card key={item.id} withBorder padding="sm" data-testid={`risk-evidence-${item.id}`}>
+                <Card key={item.id} withBorder padding="sm" style={{ flexShrink: 0, overflow: 'visible', background: inscription.background, borderColor: inscription.borderColor }} data-testid={`risk-evidence-${item.id}`}>
                   <Group justify="space-between" wrap="nowrap">
                     <Stack gap={2} style={{ minWidth: 0 }}>
                       <Text size="sm" style={{ overflowWrap: 'anywhere' }}>{item.title || item.id}</Text>
                       <Text size="xs" c="dimmed">{(item.usage_count ?? 0) > 0 ? `已入座 · 已关联 ${item.usage_count} 个技能` : '待关联'}</Text>
                     </Stack>
-                    <Button size="compact-sm" style={{ flexShrink: 0 }}
+                    <Button size="compact-sm" mih={44} style={{ flexShrink: 0 }}
                       disabled={linked || addLink.isPending || list.isFetching}
                       onClick={() => addLink.mutate({ entryId: item.id, skillId: risk.skill_id }, {
                         onSuccess: () => setAdded((previous) => [...previous, item.id]),
@@ -1648,6 +1679,9 @@ export function EvidencePage() {
   const [query, setQuery] = useState('');
   const [debouncedQuery] = useDebouncedValue(query, 300);
   const [selectedId, setSelectedId] = useState('');
+  const [sourceView, setSourceView] = useLocalStorage<SourceView>({
+    key: `nblane-evidence-source-view:${name}`, defaultValue: null,
+  });
   const [selectedRisk, setSelectedRisk] = useState<EvidenceStageRisk | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<CrystallizeCandidate | null>(null);
   const [quickMode, setQuickMode] = useState(false);
@@ -1703,16 +1737,21 @@ export function EvidencePage() {
   // Deep link (?stage=<stage>&focus=<entry_id>, e.g. from the skill-tree
   // inscription card): preselect the entry once its stage list loads.
   const focusParam = searchParams.get('focus') ?? '';
+  const appliedFocus = useRef('');
   useEffect(() => {
-    if (!focusParam || selectedId === focusParam) {
+    if (!focusParam) {
+      appliedFocus.current = '';
       return;
     }
+    const focusKey = `${name}:${stage}:${focusParam}`;
+    if (appliedFocus.current === focusKey) return;
     if (items.some((item) => item.id === focusParam)) {
+      appliedFocus.current = focusKey;
       setSelectedId(focusParam);
       setSelectedRisk(null);
       setSelectedCandidate(null);
     }
-  }, [focusParam, items, selectedId]);
+  }, [focusParam, items, name, stage]);
 
   // Keyboard quick-review mode (j/k navigate, a accept, s skip, 1/2/3 grade).
   useEffect(() => {
@@ -1958,7 +1997,7 @@ export function EvidencePage() {
           data-testid="evidence-detail-pane"
           style={
             isDesktop
-              ? { position: 'sticky', top: 116, alignSelf: 'flex-start' }
+              ? { position: 'sticky', top: 116, alignSelf: 'flex-start', maxHeight: 'calc(100vh - 132px)', overflowY: 'auto' }
               : undefined
           }
         >
@@ -1967,6 +2006,8 @@ export function EvidencePage() {
               profile={name}
               entryId={selectedId}
               etag={etag}
+              sourceView={sourceView}
+              onSourceView={setSourceView}
               onClose={() => setSelectedId('')}
             />
           ) : selectedCandidate ? (
@@ -2019,7 +2060,7 @@ function Box_StageColumn({ children }: { children: ReactNode }) {
       w={{ base: '100%', md: 200 }}
       style={
         isDesktop
-          ? { position: 'sticky', top: 116, alignSelf: 'flex-start' }
+          ? { position: 'sticky', top: 116, alignSelf: 'flex-start', maxHeight: 'calc(100vh - 132px)', overflowY: 'auto' }
           : undefined
       }
     >

@@ -143,7 +143,7 @@ def render_kanban_task_source(task: Any) -> str:
     """Render a KanbanTask as a complete, readable Markdown source block.
 
     Includes every field the distillation needs to be auditable: id, title,
-    context, why, outcome, dates, tags, project/milestone ids, subtasks, notes.
+    context, why, outcome, dates, tags, project/milestone ids, TODOs, subtasks, notes.
     """
     lines: list[str] = []
     title = _clean(getattr(task, "title", ""))
@@ -167,6 +167,13 @@ def render_kanban_task_source(task: Any) -> str:
             lines.append(f"{label}: {val}")
     if getattr(task, "crystallized", False):
         lines.append("crystallized: true")
+    todos = [todo for todo in (getattr(task, "todos", []) or [])
+             if _clean(getattr(todo, "text", ""))]
+    if todos:
+        lines.append("todos:")
+        for todo in todos:
+            mark = "x" if getattr(todo, "done", False) else " "
+            lines.append(f"- [{mark}] {_clean(todo.text)}")
     subtasks = [
         st
         for st in (getattr(task, "subtasks", []) or [])
@@ -211,6 +218,7 @@ def _is_kanban_task_row(row: dict) -> bool:
 def _parse_kanban_task_source(source: str) -> dict:
     fields: dict[str, str] = {}
     subtasks: list[tuple[bool, str]] = []
+    todos: list[tuple[bool, str]] = []
     notes: list[str] = []
     title = ""
     section = ""
@@ -223,16 +231,17 @@ def _parse_kanban_task_source(source: str) -> dict:
             title = line.removeprefix("# ").strip()
             section = ""
             continue
-        if line == "subtasks:":
-            section = "subtasks"
+        if line in {"subtasks:", "todos:"}:
+            section = line.removesuffix(":")
             continue
         if line == "notes:":
             section = "notes"
             continue
-        if section == "subtasks":
+        if section in {"subtasks", "todos"}:
             match = re.match(r"- \[([ xX])\]\s*(.+)", line)
             if match:
-                subtasks.append((match.group(1).lower() == "x", match.group(2).strip()))
+                target = todos if section == "todos" else subtasks
+                target.append((match.group(1).lower() == "x", match.group(2).strip()))
                 continue
         if section == "notes" and line.startswith("- "):
             notes.append(line.removeprefix("- ").strip())
@@ -246,6 +255,7 @@ def _parse_kanban_task_source(source: str) -> dict:
         "title": title,
         "fields": fields,
         "subtasks": subtasks,
+        "todos": todos,
         "notes": notes,
     }
 
@@ -280,6 +290,11 @@ def _draft_kanban_task_preview(row: dict) -> str:
         value = _clean(fields.get(key))
         if value:
             lines.extend(["", f"{label}：{value}"])
+
+    if parsed["todos"]:
+        lines.extend(["", "TODO 清单"])
+        for done, text in parsed["todos"]:
+            lines.append(f"{'✅' if done else '☐'} {text}")
 
     if subtasks:
         lines.extend(["", "关键进展"])
